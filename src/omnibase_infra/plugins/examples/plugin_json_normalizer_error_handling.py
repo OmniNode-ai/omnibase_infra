@@ -21,6 +21,7 @@ from typing import cast
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
+from omnibase_core.types import JsonValue
 
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (
@@ -28,10 +29,6 @@ from omnibase_infra.protocols.protocol_plugin_compute import (
     PluginInputData,
     PluginOutputData,
 )
-
-# JSON-compatible type alias using forward reference for recursion
-# Note: This is the standard way to define recursive JSON types in Python
-JsonValue = dict[str, "JsonValue"] | list["JsonValue"] | str | int | float | bool | None
 
 
 class PluginJsonNormalizerErrorHandling(PluginComputeBase):
@@ -206,7 +203,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
         if json_data is not None:
             # Ensure it's a JSON-compatible type
             if not isinstance(
-                json_data, dict | list | str | int | float | bool | type(None)
+                json_data, (dict, list, str, int, float, bool, type(None))
             ):
                 raise ValueError(
                     f"Input 'json' must be JSON-compatible type "

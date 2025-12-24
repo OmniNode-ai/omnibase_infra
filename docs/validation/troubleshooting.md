@@ -223,17 +223,23 @@ Patterns: FAIL
 **Symptom**:
 ```
 Unions: FAIL
-  - Found 25 complex unions (max: 20)
+  - Found 495 unions (max: 491)
 ```
 
 **Root Cause**: Too many Union types in codebase
+
+**Context**: The current INFRA_MAX_UNIONS threshold is 491, set as a buffer above
+the baseline (~485 unions as of 2025-12-21). Most unions are legitimate `X | None`
+nullable patterns (ONEX-preferred PEP 604 syntax) which are counted but NOT flagged
+as violations. The target is to reduce to <200 through `dict[str, object]` to `JsonValue` migration.
 
 **Solution**:
 
 1. **Identify union-heavy files**:
    ```bash
-   # Search for Union usage
+   # Search for Union usage (both old and new syntax)
    grep -rn "Union\[" src/ | wc -l
+   grep -rn " | None" src/ | wc -l
    ```
 
 2. **Refactor excessive unions**:
@@ -258,13 +264,25 @@ Unions: FAIL
    # Now use ServiceHandler instead of Union
    ```
 
-3. **Adjust threshold if justified**:
+3. **Migrate dict[str, object] to JsonValue** (preferred approach):
    ```python
-   # If 20 unions is insufficient for infrastructure needs
-   INFRA_MAX_UNIONS = 25  # Document justification
+   # Before: Contributes to union count
+   metadata: dict[str, object]
+
+   # After: Strongly typed, reduces union pressure
+   from omnibase_core.types import JsonValue
+   metadata: JsonValue
    ```
 
-**Prevention**: Prefer protocols/base classes over large unions.
+4. **Adjust threshold only if absolutely necessary**:
+   ```python
+   # Current threshold is 491 (buffer above ~485 baseline as of 2025-12-21)
+   # Only increase with documented justification and ticket reference
+   INFRA_MAX_UNIONS = 491  # Document justification per OMN-983
+   ```
+
+**Prevention**: Prefer protocols/base classes over large unions. Migrate
+`dict[str, object]` patterns to `JsonValue` for stronger typing.
 
 ---
 

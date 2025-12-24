@@ -7,6 +7,7 @@ This directory contains detailed implementation guides and best practices for ON
 ### Error Handling
 - **[Error Handling Patterns](./error_handling_patterns.md)** - Error classification, context, sanitization, and hierarchy
 - **[Error Recovery Patterns](./error_recovery_patterns.md)** - Exponential backoff, circuit breakers, graceful degradation, credential refresh
+- **[Retry, Backoff, and Compensation Strategy](./retry_backoff_compensation_strategy.md)** - Formal retry policies, backoff formulas, compensation for partial failures
 - **[Circuit Breaker Implementation](./circuit_breaker_implementation.md)** - Complete production-ready circuit breaker with state machine
 
 ### Observability
@@ -30,12 +31,15 @@ This directory contains detailed implementation guides and best practices for ON
 | Timeout | [Error Recovery](./error_recovery_patterns.md#exponential-backoff-pattern) | `InfraTimeoutError` |
 | Auth failed | [Error Recovery](./error_recovery_patterns.md#credential-refresh-pattern) | `InfraAuthenticationError` |
 | Secret not found | [Error Handling](./error_handling_patterns.md#vault-secret-retrieval-error) | `SecretResolutionError` |
+| Partial failure | [Retry/Compensation](./retry_backoff_compensation_strategy.md#compensation-strategy-for-partial-failures) | Saga, Outbox Pattern |
 
 ### Common Tasks
 
 | Task | Pattern Document | Section |
 |------|-----------------|---------|
-| Add retry logic | [Error Recovery](./error_recovery_patterns.md) | Exponential Backoff |
+| Add retry logic | [Retry/Compensation](./retry_backoff_compensation_strategy.md) | Retry Policy, Backoff Strategy |
+| Configure per-effect retries | [Retry/Compensation](./retry_backoff_compensation_strategy.md#per-effect-type-configuration) | Effect-Specific Config |
+| Handle partial failures | [Retry/Compensation](./retry_backoff_compensation_strategy.md#compensation-strategy-for-partial-failures) | Compensation Patterns |
 | Prevent cascading failures | [Circuit Breaker](./circuit_breaker_implementation.md) | Complete Implementation |
 | Track requests across services | [Correlation ID](./correlation_id_tracking.md) | Correlation ID Flow |
 | Inject dependencies | [Container DI](./container_dependency_injection.md) | Constructor Injection |
@@ -67,6 +71,12 @@ Error Recovery Patterns
     ├── Implements resilience strategies
     ├── Depends on: Error Handling Patterns
     └── References: Circuit Breaker, Correlation ID
+
+Retry, Backoff, and Compensation Strategy
+    ├── Formal specification for retry behavior
+    ├── Depends on: Error Handling, Error Recovery
+    ├── References: Circuit Breaker, Per-Effect Configs
+    └── Defines: Retryable errors, backoff formulas, compensation patterns
 
 Circuit Breaker Implementation
     ├── Detailed state machine implementation

@@ -664,7 +664,8 @@ def register_handlers_from_config(
         This is a placeholder implementation. Full protocol class resolution
         will be implemented when BaseRuntimeHostProcess is available.
     """
-    registry = get_handler_registry()
+    # NOTE: Registry access (get_handler_registry()) will be needed when
+    # TODO(OMN-41) is implemented to resolve and register handler classes.
     for config in protocol_configs:
         if not config.enabled:
             continue

@@ -183,7 +183,7 @@ def validate_infra_patterns(
 ### Parameters
 
 - **directory** (`str | Path`, optional): Directory to validate. Defaults to `"src/omnibase_infra/"`.
-- **strict** (`bool`, optional): Enable strict mode. Defaults to `False`.
+- **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_PATTERNS_STRICT per OMN-983).
 
 ### Returns
 
@@ -197,10 +197,11 @@ def validate_infra_patterns(
 
 ### What It Validates
 
-**Strict Mode**:
+**Strict Mode** (default per OMN-983):
 - Model prefix naming (`Model*`)
 - snake_case file naming
 - Anti-pattern detection (no `*Manager`, `*Handler`, `*Helper`)
+- Documented exemptions in `exempted_patterns` list (KafkaEventBus, RuntimeHostProcess, etc.)
 
 **Relaxed Mode** (strict=False):
 - Model prefix naming (warnings only)
@@ -339,8 +340,8 @@ def validate_infra_union_usage(
 ### Parameters
 
 - **directory** (`str | Path`, optional): Directory to validate. Defaults to `"src/omnibase_infra/"`.
-- **max_unions** (`int`, optional): Maximum allowed complex unions. Defaults to `185`.
-- **strict** (`bool`, optional): Enable strict mode. Defaults to `False`.
+- **max_unions** (`int`, optional): Maximum allowed complex unions. Defaults to `491` (INFRA_MAX_UNIONS).
+- **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_UNIONS_STRICT per OMN-983).
 
 ### Returns
 
@@ -364,7 +365,7 @@ Infrastructure code needs typed unions for:
 - Message routing and handler dispatch
 - Service integration type safety
 
-**Why max_unions=185**: Infrastructure has many service adapters with typed handlers, protocol implementations, message routing, and registration event models. The higher threshold accommodates RuntimeHostProcess, handler wiring, strongly-typed optional model wrappers (PEP 604 `X | None` syntax), and ONEX service integration patterns while preventing excessive complexity.
+**Why max_unions=491**: Infrastructure has many service adapters with typed handlers, protocol implementations, message routing, and registration event models. The threshold is set as a buffer above the current baseline (~485 unions as of 2025-12-21). Most unions are legitimate `X | None` nullable patterns (ONEX-preferred PEP 604 syntax) which are counted but NOT flagged as violations. The target is to reduce to <200 through ongoing `dict[str, object]` to `JsonValue` migration.
 
 ### Example Usage
 
@@ -611,12 +612,12 @@ INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 
 # Validation thresholds
-INFRA_MAX_UNIONS = 185          # Maximum allowed complex union types
+INFRA_MAX_UNIONS = 491          # Maximum allowed union count (buffer above ~485 baseline)
 INFRA_MAX_VIOLATIONS = 0        # Zero tolerance for architecture violations
 
-# Strict mode flags
-INFRA_PATTERNS_STRICT = False   # Relaxed pattern enforcement for infrastructure
-INFRA_UNIONS_STRICT = False     # Allow necessary unions for infrastructure
+# Strict mode flags (OMN-983)
+INFRA_PATTERNS_STRICT = True    # Strict pattern enforcement with documented exemptions
+INFRA_UNIONS_STRICT = True      # Strict union validation (flags actual violations)
 ```
 
 ---

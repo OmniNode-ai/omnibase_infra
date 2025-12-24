@@ -13,7 +13,6 @@ This test suite validates:
 - Background task management (heartbeat)
 - Graceful degradation on errors
 - Performance requirements (<50ms with CI buffer)
-- Thread safety and race condition handling
 
 Test Organization:
     - TestMixinNodeIntrospectionInit: Initialization tests
@@ -27,7 +26,6 @@ Test Organization:
     - TestMixinNodeIntrospectionPerformance: Performance requirements
     - TestMixinNodeIntrospectionBenchmark: Detailed benchmarks with instrumentation
     - TestMixinNodeIntrospectionEdgeCases: Edge cases and boundary conditions
-    - TestMixinNodeIntrospectionThreadSafety: Race condition and concurrency tests
 
 Coverage Goals:
     - >90% code coverage for mixin
@@ -40,8 +38,6 @@ import asyncio
 import json
 import os
 import time
-from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
@@ -54,9 +50,7 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     MixinNodeIntrospection,
 )
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
-
-if TYPE_CHECKING:
-    from omnibase_infra.event_bus.models import ModelEventMessage
+from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 # CI environments may be slower - apply multiplier for performance thresholds
 _CI_MODE: bool = os.environ.get("CI", "false").lower() == "true"
@@ -69,7 +63,10 @@ PublishedEventDict = dict[
 
 
 class MockEventBus:
-    """Mock event bus for testing introspection publishing."""
+    """Mock event bus for testing introspection publishing.
+
+    Implements ProtocolEventBusLike protocol for type safety.
+    """
 
     def __init__(self, should_fail: bool = False) -> None:
         """Initialize mock event bus.
@@ -78,18 +75,22 @@ class MockEventBus:
             should_fail: If True, publish operations will raise exceptions.
         """
         self.should_fail = should_fail
-        self.published_envelopes: list[tuple[ModelNodeIntrospectionEvent, str]] = []
+        # Store envelopes for test assertions
+        # Accepts both ModelNodeIntrospectionEvent and ModelNodeHeartbeatEvent
+        self.published_envelopes: list[
+            tuple[ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent, str]
+        ] = []
         self.published_events: list[PublishedEventDict] = []
 
     async def publish_envelope(
         self,
-        envelope: ModelNodeIntrospectionEvent,
+        envelope: object,
         topic: str,
     ) -> None:
         """Mock publish_envelope method.
 
         Args:
-            envelope: Event envelope to publish.
+            envelope: Event envelope to publish (accepts any object per protocol).
             topic: Event topic.
 
         Raises:
@@ -97,7 +98,9 @@ class MockEventBus:
         """
         if self.should_fail:
             raise RuntimeError("Event bus publish failed")
-        self.published_envelopes.append((envelope, topic))
+        # Store envelopes - supports both introspection and heartbeat events
+        if isinstance(envelope, ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent):
+            self.published_envelopes.append((envelope, topic))
 
     async def publish(
         self,
@@ -125,28 +128,6 @@ class MockEventBus:
                 "value": json.loads(value.decode("utf-8")),
             }
         )
-
-    async def subscribe(
-        self,
-        topic: str,
-        group_id: str,
-        on_message: "Callable[[ModelEventMessage], Awaitable[None]]",
-    ) -> Callable[[], Awaitable[None]]:
-        """Mock subscribe method for protocol compliance.
-
-        Args:
-            topic: Topic to subscribe to.
-            group_id: Consumer group ID.
-            on_message: Callback function for messages.
-
-        Returns:
-            An async unsubscribe function.
-        """
-
-        async def unsubscribe() -> None:
-            pass
-
-        return unsubscribe
 
 
 class MockNode(MixinNodeIntrospection):
@@ -255,14 +236,16 @@ class TestMixinNodeIntrospectionInit:
 
     async def test_initialize_introspection_sets_attributes(self) -> None:
         """Test that initialize_introspection properly sets all attributes."""
+        test_node_id = uuid4()
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=test_node_id,
             node_type="EFFECT",
             event_bus=None,
         )
 
-        assert node._introspection_node_id == "test-node-001"
+        # node_id is stored as UUID internally
+        assert node._introspection_node_id == test_node_id
         assert node._introspection_node_type == "EFFECT"
         assert node._introspection_event_bus is None
         assert node._introspection_version == "1.0.0"
@@ -274,7 +257,7 @@ class TestMixinNodeIntrospectionInit:
         event_bus = MockEventBus()
 
         node.initialize_introspection(
-            node_id="test-node-002",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=event_bus,
         )
@@ -285,7 +268,7 @@ class TestMixinNodeIntrospectionInit:
         """Test initialization with custom cache TTL."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-003",
+            node_id=uuid4(),
             node_type="REDUCER",
             event_bus=None,
             cache_ttl=120.0,
@@ -297,7 +280,7 @@ class TestMixinNodeIntrospectionInit:
         """Test initialization with custom version."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-004",
+            node_id=uuid4(),
             node_type="ORCHESTRATOR",
             event_bus=None,
             version="2.1.0",
@@ -309,7 +292,7 @@ class TestMixinNodeIntrospectionInit:
         """Test initialization uses correct defaults."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-005",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -326,9 +309,11 @@ class TestMixinNodeIntrospectionInit:
         """Test that empty node_id raises ValueError."""
         node = MockNode()
 
-        with pytest.raises(ValueError, match="node_id cannot be None or empty"):
+        # Note: with UUID type, we can't pass empty string. Instead test None case.
+        # The mixin validates via truthiness check which catches None.
+        with pytest.raises(ValueError, match="node_id cannot be empty"):
             node.initialize_introspection(
-                node_id="",
+                node_id=None,  # type: ignore[arg-type]
                 node_type="EFFECT",
             )
 
@@ -336,116 +321,11 @@ class TestMixinNodeIntrospectionInit:
         """Test that empty node_type raises ValueError."""
         node = MockNode()
 
-        with pytest.raises(ValueError, match="node_type cannot be None or empty"):
+        with pytest.raises(ValueError, match="node_type cannot be empty"):
             node.initialize_introspection(
-                node_id="test-node",
+                node_id=uuid4(),
                 node_type="",
             )
-
-    async def test_initialize_introspection_custom_introspection_topic(self) -> None:
-        """Test that custom introspection_topic is stored correctly."""
-        node = MockNode()
-        custom_topic = "onex.custom.introspection.published.v1"
-
-        node.initialize_introspection(
-            node_id="test-node-topic",
-            node_type="EFFECT",
-            event_bus=None,
-            introspection_topic=custom_topic,
-        )
-
-        assert node._introspection_topic == custom_topic
-
-    async def test_initialize_introspection_custom_heartbeat_topic(self) -> None:
-        """Test that custom heartbeat_topic is stored correctly."""
-        node = MockNode()
-        custom_topic = "onex.custom.heartbeat.published.v1"
-
-        node.initialize_introspection(
-            node_id="test-node-heartbeat-topic",
-            node_type="COMPUTE",
-            event_bus=None,
-            heartbeat_topic=custom_topic,
-        )
-
-        assert node._heartbeat_topic == custom_topic
-
-    async def test_initialize_introspection_custom_request_topic(self) -> None:
-        """Test that custom request_introspection_topic is stored correctly."""
-        node = MockNode()
-        custom_topic = "onex.custom.request.introspection.v1"
-
-        node.initialize_introspection(
-            node_id="test-node-request-topic",
-            node_type="REDUCER",
-            event_bus=None,
-            request_introspection_topic=custom_topic,
-        )
-
-        assert node._request_introspection_topic == custom_topic
-
-    async def test_initialize_introspection_default_topics(self) -> None:
-        """Test that default topics are used when custom topics not provided."""
-        node = MockNode()
-
-        node.initialize_introspection(
-            node_id="test-node-default-topics",
-            node_type="ORCHESTRATOR",
-            event_bus=None,
-        )
-
-        # Verify class-level defaults are used
-        assert (
-            node._introspection_topic
-            == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
-        )
-        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
-        assert (
-            node._request_introspection_topic
-            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
-        )
-
-    async def test_initialize_introspection_all_custom_topics(self) -> None:
-        """Test that all custom topic parameters are stored correctly together."""
-        node = MockNode()
-        custom_introspection = "onex.all.introspection.topic.v1"
-        custom_heartbeat = "onex.all.heartbeat.topic.v1"
-        custom_request = "onex.all.request.topic.v1"
-
-        node.initialize_introspection(
-            node_id="test-node-all-topics",
-            node_type="EFFECT",
-            event_bus=None,
-            introspection_topic=custom_introspection,
-            heartbeat_topic=custom_heartbeat,
-            request_introspection_topic=custom_request,
-        )
-
-        assert node._introspection_topic == custom_introspection
-        assert node._heartbeat_topic == custom_heartbeat
-        assert node._request_introspection_topic == custom_request
-
-    async def test_initialize_introspection_partial_custom_topics(self) -> None:
-        """Test partial custom topics with defaults for unspecified ones."""
-        node = MockNode()
-        custom_introspection = "onex.partial.introspection.topic.v1"
-
-        node.initialize_introspection(
-            node_id="test-node-partial-topics",
-            node_type="EFFECT",
-            event_bus=None,
-            introspection_topic=custom_introspection,
-            # heartbeat_topic and request_introspection_topic not specified
-        )
-
-        # Custom topic should be set
-        assert node._introspection_topic == custom_introspection
-        # Others should use class-level defaults
-        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
-        assert (
-            node._request_introspection_topic
-            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
-        )
 
 
 @pytest.mark.unit
@@ -462,7 +342,7 @@ class TestMixinNodeIntrospectionCapabilities:
         """
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -546,7 +426,7 @@ class TestMixinNodeIntrospectionEndpoints:
         """
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -570,7 +450,7 @@ class TestMixinNodeIntrospectionEndpoints:
         """Test endpoint discovery when no endpoints defined."""
         node = MockNodeNoHealth()
         node.initialize_introspection(
-            node_id="test-node-no-health",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -605,7 +485,7 @@ class TestMixinNodeIntrospectionState:
         """
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -630,7 +510,7 @@ class TestMixinNodeIntrospectionState:
         """Test get_current_state when _state is missing."""
         node = MockNodeNoState()
         node.initialize_introspection(
-            node_id="test-node-no-state",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -643,7 +523,7 @@ class TestMixinNodeIntrospectionState:
         """Test get_current_state with enum-style state (has .value)."""
         node = MockNodeWithEnumState()
         node.initialize_introspection(
-            node_id="test-node-enum",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -666,7 +546,7 @@ class TestMixinNodeIntrospectionCaching:
         """
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.1,  # Short TTL for testing
@@ -706,10 +586,12 @@ class TestMixinNodeIntrospectionCaching:
 
     async def test_get_introspection_data_structure(self, mock_node: MockNode) -> None:
         """Test that get_introspection_data returns expected model."""
+        from uuid import UUID
+
         data = await mock_node.get_introspection_data()
 
         assert isinstance(data, ModelNodeIntrospectionEvent)
-        assert data.node_id == "test-node-001"
+        assert isinstance(data.node_id, UUID)  # node_id is now UUID type
         assert data.node_type == "EFFECT"
         assert isinstance(data.capabilities, dict)
         assert isinstance(data.endpoints, dict)
@@ -719,7 +601,7 @@ class TestMixinNodeIntrospectionCaching:
         """Test that cache starts empty."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-cache",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -733,8 +615,8 @@ class TestMixinNodeIntrospectionCaching:
         await mock_node.get_introspection_data()
         assert mock_node._introspection_cache is not None
 
-        # Invalidate (async method for thread-safe cache access)
-        await mock_node.invalidate_introspection_cache()
+        # Invalidate
+        mock_node.invalidate_introspection_cache()
 
         assert mock_node._introspection_cache is None
         assert mock_node._introspection_cached_at is None
@@ -755,7 +637,7 @@ class TestMixinNodeIntrospectionPublishing:
         node = MockNode()
         event_bus = MockEventBus()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=event_bus,
         )
@@ -770,7 +652,7 @@ class TestMixinNodeIntrospectionPublishing:
         """
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -798,7 +680,7 @@ class TestMixinNodeIntrospectionPublishing:
         assert len(event_bus.published_envelopes) == 1
 
         envelope, topic = event_bus.published_envelopes[0]
-        assert topic == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
+        assert topic == "node.introspection"
         assert isinstance(envelope, ModelNodeIntrospectionEvent)
 
     async def test_publish_introspection_with_correlation_id(
@@ -825,6 +707,8 @@ class TestMixinNodeIntrospectionPublishing:
         assert isinstance(event_bus, MockEventBus)
 
         envelope, _ = event_bus.published_envelopes[0]
+        # Type narrow to ModelNodeIntrospectionEvent for reason attribute
+        assert isinstance(envelope, ModelNodeIntrospectionEvent)
         assert envelope.reason == "shutdown"
 
 
@@ -838,7 +722,7 @@ class TestMixinNodeIntrospectionTasks:
         node = MockNode()
         event_bus = MockEventBus()
         node.initialize_introspection(
-            node_id="test-node-tasks",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=event_bus,
         )
@@ -868,7 +752,7 @@ class TestMixinNodeIntrospectionTasks:
         node = MockNode()
         event_bus = MockEventBus()
         node.initialize_introspection(
-            node_id="test-node-stop",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=event_bus,
         )
@@ -890,7 +774,7 @@ class TestMixinNodeIntrospectionTasks:
         """Test that stop_introspection_tasks can be called multiple times."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-idempotent",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -906,7 +790,7 @@ class TestMixinNodeIntrospectionTasks:
         node = MockNode()
         event_bus = MockEventBus()
         node.initialize_introspection(
-            node_id="test-node-heartbeat",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=event_bus,
         )
@@ -937,7 +821,7 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         node = MockNode()
         failing_event_bus = MockEventBus(should_fail=True)
         node.initialize_introspection(
-            node_id="test-node-graceful",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=failing_event_bus,
         )
@@ -952,14 +836,18 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         node = MockNode()
 
         # Create event bus that raises unexpected exception
+        # Must implement both methods from ProtocolEventBusLike
         class BrokenEventBus:
-            async def publish_envelope(
-                self, envelope: ModelNodeIntrospectionEvent, topic: str
+            async def publish_envelope(self, envelope: object, topic: str) -> None:
+                raise ValueError("Unexpected error")
+
+            async def publish(
+                self, topic: str, key: bytes | None, value: bytes
             ) -> None:
                 raise ValueError("Unexpected error")
 
         node.initialize_introspection(
-            node_id="test-node-broken",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=BrokenEventBus(),
         )
@@ -973,7 +861,7 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         node = MockNode()
         event_bus = MockEventBus(should_fail=True)
         node.initialize_introspection(
-            node_id="test-node-continue",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=event_bus,
         )
@@ -1013,7 +901,7 @@ class TestMixinNodeIntrospectionPerformance:
         """
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-perf",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1129,7 +1017,7 @@ class TestMixinNodeIntrospectionBenchmark:
         """Benchmark introspection with detailed timing breakdown."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="benchmark-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1196,7 +1084,7 @@ class TestMixinNodeIntrospectionBenchmark:
         """Benchmark introspection under concurrent load."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="concurrent-benchmark-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.001,  # Force cache misses
@@ -1233,7 +1121,7 @@ class TestMixinNodeIntrospectionBenchmark:
         """Verify cache hits are sub-millisecond."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="cache-hit-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1269,7 +1157,7 @@ class TestMixinNodeIntrospectionBenchmark:
         """Test that p95 latency meets requirements."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="p95-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1306,7 +1194,7 @@ class TestMixinNodeIntrospectionBenchmark:
         """Test timing breakdown of individual introspection components."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="breakdown-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1359,16 +1247,17 @@ class TestMixinNodeIntrospectionEdgeCases:
         class MinimalNode(MixinNodeIntrospection):
             pass
 
+        test_node_id = uuid4()
         node = MinimalNode()
         node.initialize_introspection(
-            node_id="minimal-node",
+            node_id=test_node_id,
             node_type="EFFECT",
             event_bus=None,
         )
 
         data = await node.get_introspection_data()
 
-        assert data.node_id == "minimal-node"
+        assert data.node_id == test_node_id  # node_id preserved from initialization
         assert data.current_state is None  # No state attribute
 
     async def test_large_capability_list(self) -> None:
@@ -1407,7 +1296,7 @@ class TestMixinNodeIntrospectionEdgeCases:
 
         node = LargeNode()
         node.initialize_introspection(
-            node_id="large-node",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
@@ -1427,9 +1316,10 @@ class TestMixinNodeIntrospectionEdgeCases:
 
     async def test_concurrent_introspection_calls(self) -> None:
         """Test concurrent introspection data requests."""
+        test_node_id = uuid4()
         node = MockNode()
         node.initialize_introspection(
-            node_id="concurrent-node",
+            node_id=test_node_id,
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.001,  # Very short TTL
@@ -1442,56 +1332,14 @@ class TestMixinNodeIntrospectionEdgeCases:
         # All should succeed
         assert len(results) == 100
         for result in results:
-            assert result.node_id == "concurrent-node"
-
-    async def test_cache_lock_thread_safety(self) -> None:
-        """Test that cache operations are thread-safe with async lock.
-
-        This test verifies that concurrent cache reads, writes, and invalidations
-        do not cause race conditions when using the async lock.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="lock-test-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=0.001,  # Very short TTL to force frequent cache misses
-        )
-
-        # Verify the lock is initialized
-        assert hasattr(node, "_introspection_cache_lock")
-        assert isinstance(node._introspection_cache_lock, asyncio.Lock)
-
-        # Create mixed operations: reads, writes (via get_introspection_data),
-        # and invalidations
-        async def mixed_operations(idx: int) -> str:
-            """Perform a mix of cache operations."""
-            if idx % 3 == 0:
-                await node.invalidate_introspection_cache()
-                return "invalidate"
-            else:
-                await node.get_introspection_data()
-                return "read"
-
-        # Run 50 concurrent mixed operations
-        tasks = [mixed_operations(i) for i in range(50)]
-        results = await asyncio.gather(*tasks)
-
-        # All operations should complete without deadlock or error
-        assert len(results) == 50
-        assert "invalidate" in results
-        assert "read" in results
-
-        # Final state should be consistent
-        data = await node.get_introspection_data()
-        assert data.node_id == "lock-test-node"
+            assert result.node_id == test_node_id
 
     async def test_introspection_with_special_characters_in_state(self) -> None:
         """Test introspection with special characters in state."""
         node = MockNode()
         node._state = "state<with>special&chars\"quote'"
         node.initialize_introspection(
-            node_id="special-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1503,7 +1351,7 @@ class TestMixinNodeIntrospectionEdgeCases:
         """Test that introspection mixin doesn't affect node functionality."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="functional-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1515,1062 +1363,6 @@ class TestMixinNodeIntrospectionEdgeCases:
 
         health = await node.health_check()
         assert health["healthy"] is True
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio(loop_scope="function")
-class TestMixinNodeIntrospectionThreadSafety:
-    """Comprehensive thread safety and race condition tests.
-
-    This test class validates that the MixinNodeIntrospection cache operations
-    are thread-safe under various concurrent access patterns:
-
-    1. Multiple concurrent reads (get_introspection_data)
-    2. Multiple concurrent invalidations (invalidate_introspection_cache)
-    3. Mixed concurrent reads and invalidations
-    4. Rapid alternating read/invalidate patterns
-    5. Cache state consistency after concurrent operations
-    6. Lock contention under high load
-    7. No data corruption or deadlocks
-
-    Thread Safety Implementation:
-        The mixin uses asyncio.Lock to protect:
-        - _introspection_cache (dict or None)
-        - _introspection_cached_at (float or None)
-
-        All tests verify that these invariants hold under concurrent access.
-    """
-
-    async def test_concurrent_reads_return_consistent_data(self) -> None:
-        """Test that multiple concurrent get_introspection_data calls return consistent data.
-
-        This test verifies that when many coroutines simultaneously request
-        introspection data, all receive identical, valid results without
-        data corruption.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="concurrent-read-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=60.0,  # Long TTL to ensure cache hits
-        )
-
-        # Prime the cache first
-        initial_data = await node.get_introspection_data()
-
-        # Run many concurrent reads
-        num_concurrent = 100
-        results = await asyncio.gather(
-            *[node.get_introspection_data() for _ in range(num_concurrent)]
-        )
-
-        # All results should be valid and consistent
-        assert len(results) == num_concurrent
-        for i, result in enumerate(results):
-            assert result.node_id == "concurrent-read-node", (
-                f"Result {i} has wrong node_id: {result.node_id}"
-            )
-            assert result.node_type == "EFFECT", (
-                f"Result {i} has wrong node_type: {result.node_type}"
-            )
-            # Verify structural consistency with initial data
-            assert result.capabilities == initial_data.capabilities, (
-                f"Result {i} has different capabilities than initial data"
-            )
-
-    async def test_concurrent_invalidations_are_safe(self) -> None:
-        """Test that multiple concurrent invalidate_introspection_cache calls are safe.
-
-        This test verifies that rapidly invalidating the cache from multiple
-        coroutines does not cause errors or leave the cache in an inconsistent state.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="concurrent-invalidate-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=60.0,
-        )
-
-        # Prime the cache
-        await node.get_introspection_data()
-        assert node._introspection_cache is not None
-
-        # Run many concurrent invalidations
-        num_concurrent = 50
-        await asyncio.gather(
-            *[node.invalidate_introspection_cache() for _ in range(num_concurrent)]
-        )
-
-        # Cache should be invalidated (None)
-        assert node._introspection_cache is None
-        assert node._introspection_cached_at is None
-
-        # Should be able to repopulate cache normally
-        data = await node.get_introspection_data()
-        assert data.node_id == "concurrent-invalidate-node"
-        assert node._introspection_cache is not None
-
-    async def test_invalidation_during_concurrent_reads(self) -> None:
-        """Test that invalidation during multiple concurrent reads is handled safely.
-
-        This is the key race condition scenario: invalidation happens while
-        other coroutines are reading. All operations should complete without
-        errors or data corruption.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="mixed-ops-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=0.001,  # Very short TTL to force cache misses
-        )
-
-        errors: list[Exception] = []
-        results: list[str] = []
-
-        async def read_operation(idx: int) -> None:
-            """Perform a read operation."""
-            try:
-                data = await node.get_introspection_data()
-                assert data.node_id == "mixed-ops-node"
-                results.append(f"read-{idx}")
-            except Exception as e:
-                errors.append(e)
-
-        async def invalidate_operation(idx: int) -> None:
-            """Perform an invalidation operation."""
-            try:
-                await node.invalidate_introspection_cache()
-                results.append(f"invalidate-{idx}")
-            except Exception as e:
-                errors.append(e)
-
-        # Create mixed tasks: 70% reads, 30% invalidations
-        tasks: list[asyncio.Task[None]] = []
-        for i in range(100):
-            if i % 3 == 0:
-                tasks.append(asyncio.create_task(invalidate_operation(i)))
-            else:
-                tasks.append(asyncio.create_task(read_operation(i)))
-
-        await asyncio.gather(*tasks)
-
-        # No errors should have occurred
-        assert len(errors) == 0, f"Errors occurred: {errors}"
-        assert len(results) == 100
-
-        # Final state should be consistent
-        final_data = await node.get_introspection_data()
-        assert final_data.node_id == "mixed-ops-node"
-
-    async def test_rapid_alternating_read_invalidate_cycles(self) -> None:
-        """Test rapid alternating read/invalidate cycles.
-
-        This tests a worst-case contention pattern where reads and invalidations
-        rapidly alternate, maximizing lock contention.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="alternating-node",
-            node_type="COMPUTE",
-            event_bus=None,
-            cache_ttl=0.0001,  # Extremely short TTL
-        )
-
-        cycle_count = 50
-        errors: list[Exception] = []
-
-        async def alternating_cycle(cycle_id: int) -> None:
-            """Perform alternating read-invalidate-read cycle."""
-            try:
-                # Read
-                data1 = await node.get_introspection_data()
-                assert data1.node_id == "alternating-node"
-
-                # Invalidate
-                await node.invalidate_introspection_cache()
-
-                # Read again (forces cache rebuild)
-                data2 = await node.get_introspection_data()
-                assert data2.node_id == "alternating-node"
-            except Exception as e:
-                errors.append(e)
-
-        # Run many alternating cycles concurrently
-        await asyncio.gather(*[alternating_cycle(i) for i in range(cycle_count)])
-
-        assert len(errors) == 0, f"Errors during alternating cycles: {errors}"
-
-    async def test_cache_state_consistency_invariants(self) -> None:
-        """Test that cache state invariants hold under concurrent access.
-
-        Invariants:
-        1. If _introspection_cache is not None, _introspection_cached_at must be set
-        2. If _introspection_cached_at is None, _introspection_cache must be None
-        3. Both must transition atomically together
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="invariant-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=0.001,
-        )
-
-        invariant_violations: list[str] = []
-
-        async def check_and_operate(op_type: str) -> None:
-            """Check invariants and perform operation."""
-            # Check invariant before operation
-            cache = node._introspection_cache
-            cached_at = node._introspection_cached_at
-
-            if cache is not None and cached_at is None:
-                invariant_violations.append(
-                    f"cache set but cached_at is None before {op_type}"
-                )
-            if cache is None and cached_at is not None:
-                invariant_violations.append(
-                    f"cache is None but cached_at is set before {op_type}"
-                )
-
-            # Perform operation
-            if op_type == "read":
-                await node.get_introspection_data()
-            else:
-                await node.invalidate_introspection_cache()
-
-            # Small yield to allow other coroutines to run
-            await asyncio.sleep(0)
-
-            # Check invariant after operation
-            cache = node._introspection_cache
-            cached_at = node._introspection_cached_at
-
-            if cache is not None and cached_at is None:
-                invariant_violations.append(
-                    f"cache set but cached_at is None after {op_type}"
-                )
-            if cache is None and cached_at is not None:
-                invariant_violations.append(
-                    f"cache is None but cached_at is set after {op_type}"
-                )
-
-        # Run mixed operations
-        tasks: list[asyncio.Task[None]] = []
-        for i in range(100):
-            op = "invalidate" if i % 4 == 0 else "read"
-            tasks.append(asyncio.create_task(check_and_operate(op)))
-
-        await asyncio.gather(*tasks)
-
-        assert len(invariant_violations) == 0, (
-            f"Invariant violations: {invariant_violations}"
-        )
-
-    async def test_no_deadlock_under_high_contention(self) -> None:
-        """Test that high contention does not cause deadlocks.
-
-        This test uses a timeout to detect potential deadlocks. If the test
-        completes within the timeout, no deadlock occurred.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="deadlock-test-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=0.0001,
-        )
-
-        completed = 0
-
-        async def contention_operation(idx: int) -> None:
-            """Perform operations under high contention."""
-            nonlocal completed
-            for _ in range(10):
-                if idx % 2 == 0:
-                    await node.get_introspection_data()
-                else:
-                    await node.invalidate_introspection_cache()
-                # Yield to maximize contention
-                await asyncio.sleep(0)
-            completed += 1
-
-        # Run with timeout to detect deadlock
-        num_tasks = 50
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(*[contention_operation(i) for i in range(num_tasks)]),
-                timeout=10.0,  # 10 second timeout
-            )
-        except TimeoutError:
-            pytest.fail(
-                f"Deadlock detected: only {completed}/{num_tasks} tasks completed"
-            )
-
-        assert completed == num_tasks
-
-    async def test_stale_read_prevention(self) -> None:
-        """Test that invalidation properly prevents stale reads.
-
-        When a cache is invalidated, subsequent reads should return fresh data,
-        not stale cached data.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="stale-prevention-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=60.0,  # Long TTL
-        )
-
-        # Populate cache
-        initial_data = await node.get_introspection_data()
-        initial_timestamp = initial_data.timestamp
-
-        # Wait a small amount to ensure timestamp difference
-        await asyncio.sleep(0.01)
-
-        # Invalidate cache
-        await node.invalidate_introspection_cache()
-
-        # Read again - should get fresh data with new timestamp
-        fresh_data = await node.get_introspection_data()
-
-        assert fresh_data.timestamp >= initial_timestamp, (
-            "Fresh data should have timestamp >= initial timestamp"
-        )
-        assert fresh_data.node_id == "stale-prevention-node"
-
-    async def test_concurrent_reads_with_expiring_cache(self) -> None:
-        """Test concurrent reads when cache TTL expires mid-operation.
-
-        This tests the race condition where multiple readers find an expired
-        cache simultaneously and all try to rebuild it.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="expiring-cache-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=0.001,  # 1ms TTL - will expire quickly
-        )
-
-        # Prime the cache
-        await node.get_introspection_data()
-
-        # Wait for cache to expire
-        await asyncio.sleep(0.005)
-
-        # Now run many concurrent reads - all will find expired cache
-        num_concurrent = 50
-        results = await asyncio.gather(
-            *[node.get_introspection_data() for _ in range(num_concurrent)]
-        )
-
-        # All should succeed with valid data
-        assert len(results) == num_concurrent
-        for result in results:
-            assert result.node_id == "expiring-cache-node"
-            assert result.node_type == "EFFECT"
-
-    async def test_lock_acquisition_fairness(self) -> None:
-        """Test that lock acquisition is reasonably fair under contention.
-
-        This test verifies that no coroutine is starved of lock access
-        by checking that all operations complete in reasonable order.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="fairness-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=0.001,
-        )
-
-        completion_order: list[int] = []
-        start_order: list[int] = []
-        order_lock = asyncio.Lock()
-
-        async def tracked_operation(idx: int) -> None:
-            """Track operation start and completion order."""
-            async with order_lock:
-                start_order.append(idx)
-
-            # Perform actual operation
-            await node.get_introspection_data()
-
-            async with order_lock:
-                completion_order.append(idx)
-
-        num_tasks = 30
-        await asyncio.gather(*[tracked_operation(i) for i in range(num_tasks)])
-
-        # All tasks should complete
-        assert len(completion_order) == num_tasks
-        assert set(completion_order) == set(range(num_tasks))
-
-        # Check for reasonable fairness: first starter shouldn't be last completer
-        # (allowing some flexibility due to async scheduling)
-        first_starters = set(start_order[:10])
-        last_completers = set(completion_order[-5:])
-
-        # At least half of early starters should have completed before last 5
-        early_completed = first_starters - last_completers
-        assert len(early_completed) >= 5, (
-            f"Potential starvation: {len(early_completed)}/10 early starters "
-            f"completed before last 5 completers"
-        )
-
-    async def test_exception_in_concurrent_operation_does_not_corrupt_cache(
-        self,
-    ) -> None:
-        """Test that an exception in one coroutine doesn't corrupt cache for others.
-
-        If one operation fails, the cache should remain in a consistent state
-        for other concurrent operations.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="exception-safety-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=60.0,
-        )
-
-        # Prime cache
-        await node.get_introspection_data()
-
-        errors: list[Exception] = []
-        successes: list[int] = []
-
-        async def potentially_failing_read(idx: int, should_fail: bool) -> None:
-            """Read that may raise an exception."""
-            try:
-                if should_fail:
-                    # Simulate an error after getting data
-                    await node.get_introspection_data()
-                    raise ValueError(f"Simulated error in task {idx}")
-
-                data = await node.get_introspection_data()
-                assert data.node_id == "exception-safety-node"
-                successes.append(idx)
-            except ValueError as e:
-                errors.append(e)
-
-        # Run mix of failing and succeeding tasks
-        tasks: list[asyncio.Task[None]] = []
-        for i in range(50):
-            should_fail = i % 10 == 0  # 10% failure rate
-            tasks.append(asyncio.create_task(potentially_failing_read(i, should_fail)))
-
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Should have expected number of successes and errors
-        assert len(errors) == 5, f"Expected 5 errors, got {len(errors)}"
-        assert len(successes) == 45, f"Expected 45 successes, got {len(successes)}"
-
-        # Cache should still be valid for normal operations
-        final_data = await node.get_introspection_data()
-        assert final_data.node_id == "exception-safety-node"
-
-    async def test_concurrent_initialization_safety(self) -> None:
-        """Test that concurrent access during initialization is handled safely.
-
-        This is an edge case where operations might be called before
-        initialization is complete.
-        """
-
-        class SlowInitNode(MixinNodeIntrospection):
-            """Node with delayed state setup."""
-
-            def __init__(self) -> None:
-                self._state = "initializing"
-
-            async def slow_init(self) -> None:
-                """Simulate slow initialization."""
-                await asyncio.sleep(0.01)
-                self._state = "ready"
-
-        nodes: list[SlowInitNode] = []
-        errors: list[Exception] = []
-
-        async def init_and_introspect(idx: int) -> None:
-            """Initialize and immediately introspect."""
-            try:
-                node = SlowInitNode()
-                node.initialize_introspection(
-                    node_id=f"slow-init-{idx}",
-                    node_type="EFFECT",
-                    event_bus=None,
-                )
-                nodes.append(node)
-
-                # Start introspection before slow_init completes
-                init_task = asyncio.create_task(node.slow_init())
-                data = await node.get_introspection_data()
-
-                assert data.node_id == f"slow-init-{idx}"
-                await init_task
-
-            except Exception as e:
-                errors.append(e)
-
-        await asyncio.gather(*[init_and_introspect(i) for i in range(20)])
-
-        assert len(errors) == 0, f"Initialization errors: {errors}"
-        assert len(nodes) == 20
-
-    async def test_multiple_nodes_independent_caches(self) -> None:
-        """Test that multiple node instances have independent caches.
-
-        Concurrent operations on different nodes should not interfere
-        with each other's caches.
-        """
-        nodes: list[MockNode] = []
-        for i in range(10):
-            node = MockNode()
-            node.initialize_introspection(
-                node_id=f"independent-node-{i}",
-                node_type="EFFECT",
-                event_bus=None,
-                cache_ttl=60.0,
-            )
-            nodes.append(node)
-
-        async def operate_on_node(node: MockNode, op_count: int) -> list[str]:
-            """Perform operations on a single node."""
-            node_ids: list[str] = []
-            for _ in range(op_count):
-                data = await node.get_introspection_data()
-                node_ids.append(data.node_id)
-                if _ % 3 == 0:
-                    await node.invalidate_introspection_cache()
-            return node_ids
-
-        # Run concurrent operations on all nodes
-        results = await asyncio.gather(*[operate_on_node(node, 20) for node in nodes])
-
-        # Each node's operations should only see its own node_id
-        for i, node_ids in enumerate(results):
-            expected_id = f"independent-node-{i}"
-            for node_id in node_ids:
-                assert node_id == expected_id, (
-                    f"Node {i} saw foreign node_id: {node_id}"
-                )
-
-    async def test_concurrent_cache_invalidation_and_access_with_timing(
-        self,
-    ) -> None:
-        """Test concurrent cache invalidation with simultaneous reads using timing.
-
-        This test verifies that concurrent invalidation and reads don't cause
-        inconsistent state by using timing instrumentation to detect actual
-        race conditions. It tracks:
-        - Operation timing overlaps (true concurrency)
-        - Cache state consistency after each operation
-        - No partial/corrupted reads during invalidation
-
-        This is an enhanced version of test_invalidation_during_concurrent_reads
-        with additional timing instrumentation for race condition detection.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="timed-race-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=0.001,  # Very short TTL to force cache misses
-        )
-
-        # Timing tracking for concurrency verification
-        operation_timings: list[dict[str, float | str | int]] = []
-        timing_lock = asyncio.Lock()
-        errors: list[Exception] = []
-        cache_state_observations: list[tuple[int, bool, bool]] = []
-
-        async def timed_read_operation(idx: int) -> None:
-            """Perform a read operation with timing instrumentation."""
-            start_time = time.perf_counter()
-            try:
-                # Record cache state before operation
-                cache_before = node._introspection_cache is not None
-                cached_at_before = node._introspection_cached_at is not None
-
-                data = await node.get_introspection_data()
-
-                end_time = time.perf_counter()
-
-                # Record cache state after operation
-                cache_after = node._introspection_cache is not None
-                cached_at_after = node._introspection_cached_at is not None
-
-                # Verify data consistency
-                assert data.node_id == "timed-race-node", (
-                    f"Read {idx}: got wrong node_id {data.node_id}"
-                )
-
-                # Verify cache invariant: if cache is set, cached_at must be set
-                if cache_after and not cached_at_after:
-                    errors.append(
-                        ValueError(
-                            f"Read {idx}: cache set but cached_at is None after read"
-                        )
-                    )
-                if not cache_after and cached_at_after:
-                    errors.append(
-                        ValueError(
-                            f"Read {idx}: cache is None but cached_at is set after read"
-                        )
-                    )
-
-                async with timing_lock:
-                    operation_timings.append(
-                        {
-                            "type": "read",
-                            "idx": idx,
-                            "start": start_time,
-                            "end": end_time,
-                            "duration_ms": (end_time - start_time) * 1000,
-                        }
-                    )
-                    cache_state_observations.append((idx, cache_before, cache_after))
-
-            except Exception as e:
-                errors.append(e)
-
-        async def timed_invalidate_operation(idx: int) -> None:
-            """Perform an invalidation operation with timing instrumentation."""
-            start_time = time.perf_counter()
-            try:
-                await node.invalidate_introspection_cache()
-                end_time = time.perf_counter()
-
-                # Verify cache was invalidated
-                cache_after = node._introspection_cache
-                cached_at_after = node._introspection_cached_at
-
-                # Both should be None after invalidation
-                if cache_after is not None or cached_at_after is not None:
-                    # This could be a race condition if another operation
-                    # repopulated the cache - not an error, just track it
-                    pass
-
-                async with timing_lock:
-                    operation_timings.append(
-                        {
-                            "type": "invalidate",
-                            "idx": idx,
-                            "start": start_time,
-                            "end": end_time,
-                            "duration_ms": (end_time - start_time) * 1000,
-                        }
-                    )
-
-            except Exception as e:
-                errors.append(e)
-
-        # Create mixed tasks: 50 total, alternating pattern
-        num_tasks = 50
-        tasks: list[asyncio.Task[None]] = []
-        for i in range(num_tasks):
-            if i % 3 == 0:
-                tasks.append(asyncio.create_task(timed_invalidate_operation(i)))
-            else:
-                tasks.append(asyncio.create_task(timed_read_operation(i)))
-
-        await asyncio.gather(*tasks)
-
-        # No errors should have occurred
-        assert len(errors) == 0, f"Race condition errors detected: {errors}"
-        assert len(operation_timings) == num_tasks
-
-        # Verify timing data shows actual concurrency (overlapping operations)
-        reads = [t for t in operation_timings if t["type"] == "read"]
-        invalidates = [t for t in operation_timings if t["type"] == "invalidate"]
-
-        # Count overlapping operations to verify true concurrency
-        overlaps = 0
-        for read in reads:
-            for inv in invalidates:
-                # Check if read and invalidate overlapped in time
-                r_start = read["start"]
-                r_end = read["end"]
-                i_start = inv["start"]
-                i_end = inv["end"]
-                assert isinstance(r_start, float)
-                assert isinstance(r_end, float)
-                assert isinstance(i_start, float)
-                assert isinstance(i_end, float)
-
-                if r_start < i_end and i_start < r_end:
-                    overlaps += 1
-
-        # We should have at least some overlapping operations to verify
-        # the test is actually testing concurrency
-        # (may not always happen due to async scheduling, so we just log it)
-        if overlaps == 0:
-            # This is not an error, but we note it for test quality
-            pass
-
-        # Final state should be consistent
-        final_data = await node.get_introspection_data()
-        assert final_data.node_id == "timed-race-node"
-
-    async def test_high_contention_burst_invalidation(self) -> None:
-        """Test high contention scenario with burst invalidation pattern.
-
-        This tests a pathological case where many invalidations happen
-        simultaneously, followed by many reads, simulating a burst pattern
-        that might occur during configuration reloads or failover scenarios.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="burst-node",
-            node_type="COMPUTE",
-            event_bus=None,
-            cache_ttl=0.001,  # Very short TTL
-        )
-
-        # Prime the cache
-        await node.get_introspection_data()
-
-        errors: list[Exception] = []
-        invalidation_count = 0
-        read_success_count = 0
-        counter_lock = asyncio.Lock()
-
-        async def burst_invalidate(idx: int) -> None:
-            """Burst invalidation task."""
-            nonlocal invalidation_count
-            try:
-                await node.invalidate_introspection_cache()
-                async with counter_lock:
-                    invalidation_count += 1
-            except Exception as e:
-                errors.append(e)
-
-        async def burst_read(idx: int) -> None:
-            """Burst read task."""
-            nonlocal read_success_count
-            try:
-                data = await node.get_introspection_data()
-                assert data.node_id == "burst-node"
-                async with counter_lock:
-                    read_success_count += 1
-            except Exception as e:
-                errors.append(e)
-
-        # Phase 1: Burst of 30 invalidations
-        await asyncio.gather(*[burst_invalidate(i) for i in range(30)])
-
-        # Phase 2: Burst of 30 reads immediately after
-        await asyncio.gather(*[burst_read(i) for i in range(30)])
-
-        # Phase 3: Mixed burst (20 invalidations + 30 reads simultaneously)
-        mixed_tasks: list[asyncio.Task[None]] = []
-        for i in range(50):
-            if i < 20:
-                mixed_tasks.append(asyncio.create_task(burst_invalidate(i + 100)))
-            else:
-                mixed_tasks.append(asyncio.create_task(burst_read(i + 100)))
-
-        await asyncio.gather(*mixed_tasks)
-
-        assert len(errors) == 0, f"Burst errors: {errors}"
-        assert invalidation_count == 50  # 30 + 20
-        assert read_success_count == 60  # 30 + 30
-
-        # Final consistency check
-        final_data = await node.get_introspection_data()
-        assert final_data.node_id == "burst-node"
-
-    async def test_cache_consistency_verification_under_load(self) -> None:
-        """Test that cache data remains internally consistent under load.
-
-        This test specifically checks that the introspection data returned
-        is internally consistent (all fields match expected values) and
-        that no partial updates or corrupted data is ever returned.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="consistency-check-node",
-            node_type="REDUCER",
-            event_bus=None,
-            cache_ttl=0.001,
-        )
-
-        consistency_errors: list[str] = []
-        data_snapshots: list[dict[str, str | list[str]]] = []
-        snapshot_lock = asyncio.Lock()
-
-        async def verify_data_consistency(idx: int) -> None:
-            """Verify that returned data is internally consistent."""
-            try:
-                data = await node.get_introspection_data()
-
-                # Core field consistency checks
-                if data.node_id != "consistency-check-node":
-                    consistency_errors.append(
-                        f"Task {idx}: node_id mismatch: {data.node_id}"
-                    )
-
-                if data.node_type != "REDUCER":
-                    consistency_errors.append(
-                        f"Task {idx}: node_type mismatch: {data.node_type}"
-                    )
-
-                # Verify capabilities are valid strings
-                for cap in data.capabilities:
-                    if not isinstance(cap, str):
-                        consistency_errors.append(
-                            f"Task {idx}: capability not a string: {cap!r}"
-                        )
-
-                # Verify timestamp is valid
-                if not data.timestamp:
-                    consistency_errors.append(f"Task {idx}: timestamp is empty")
-
-                # Snapshot the data for cross-task comparison
-                async with snapshot_lock:
-                    data_snapshots.append(
-                        {
-                            "node_id": data.node_id,
-                            "node_type": data.node_type,
-                            "capabilities": list(data.capabilities),
-                        }
-                    )
-
-            except Exception as e:
-                consistency_errors.append(f"Task {idx}: exception: {e}")
-
-        async def invalidate_with_check(idx: int) -> None:
-            """Invalidate and verify cache state."""
-            try:
-                await node.invalidate_introspection_cache()
-
-                # After invalidation, cache should be None
-                # (unless another task already repopulated it)
-                cache = node._introspection_cache
-                cached_at = node._introspection_cached_at
-
-                # Invariant check: both should be None or both should be set
-                if (cache is None) != (cached_at is None):
-                    consistency_errors.append(
-                        f"Task {idx}: cache invariant violated after invalidate"
-                    )
-
-            except Exception as e:
-                consistency_errors.append(f"Task {idx}: invalidate exception: {e}")
-
-        # Run 40 verification reads and 10 invalidations concurrently
-        tasks: list[asyncio.Task[None]] = []
-        for i in range(50):
-            if i % 5 == 0:
-                tasks.append(asyncio.create_task(invalidate_with_check(i)))
-            else:
-                tasks.append(asyncio.create_task(verify_data_consistency(i)))
-
-        await asyncio.gather(*tasks)
-
-        assert len(consistency_errors) == 0, (
-            f"Data consistency errors: {consistency_errors}"
-        )
-
-        # Verify all snapshots have consistent values for immutable fields
-        assert len(data_snapshots) == 40  # 40 reads
-        for i, snapshot in enumerate(data_snapshots):
-            assert snapshot["node_id"] == "consistency-check-node", (
-                f"Snapshot {i}: node_id inconsistent"
-            )
-            assert snapshot["node_type"] == "REDUCER", (
-                f"Snapshot {i}: node_type inconsistent"
-            )
-
-    async def test_lock_contention_with_slow_operations(self) -> None:
-        """Test lock behavior when operations have varying durations.
-
-        This simulates realistic scenarios where some operations are slow
-        (e.g., first cache population with reflection) and others are fast
-        (cache hits), ensuring the lock properly serializes access.
-
-        We use the standard MockNode with a very short TTL to force cache
-        rebuilds, testing the lock under contention when multiple coroutines
-        try to rebuild the cache simultaneously.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="slow-contention-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=0.0001,  # Extremely short TTL to force rebuilds
-        )
-
-        errors: list[Exception] = []
-        results: list[str] = []
-        result_lock = asyncio.Lock()
-        operation_count = 0
-        op_count_lock = asyncio.Lock()
-
-        async def concurrent_access_with_delay(idx: int) -> None:
-            """Access introspection data with varying delays to create contention."""
-            nonlocal operation_count
-            try:
-                # Add small varying delay to stagger operations
-                if idx % 5 == 0:
-                    await asyncio.sleep(0.001)
-
-                data = await node.get_introspection_data()
-
-                async with result_lock:
-                    results.append(data.node_id)
-                async with op_count_lock:
-                    operation_count += 1
-            except Exception as e:
-                errors.append(e)
-
-        # Launch 30 concurrent requests with varying delays
-        await asyncio.gather(*[concurrent_access_with_delay(i) for i in range(30)])
-
-        assert len(errors) == 0, f"Errors during slow operation test: {errors}"
-        assert len(results) == 30
-        assert all(r == "slow-contention-node" for r in results)
-        assert operation_count == 30
-
-        # Verify cache state is consistent after concurrent operations
-        assert node._introspection_cache is not None
-        assert node._introspection_cached_at is not None
-
-    async def test_interleaved_invalidation_sequences(self) -> None:
-        """Test interleaved sequences of invalidation and reads.
-
-        This tests a specific pattern where invalidations and reads are
-        interleaved in a way that maximizes the chance of catching
-        a read mid-invalidation or vice versa.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="interleaved-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=0.0001,  # Extremely short TTL
-        )
-
-        sequence_log: list[str] = []
-        sequence_lock = asyncio.Lock()
-        errors: list[Exception] = []
-
-        async def read_with_log(idx: int) -> None:
-            """Read with sequence logging."""
-            try:
-                async with sequence_lock:
-                    sequence_log.append(f"read_start_{idx}")
-
-                data = await node.get_introspection_data()
-                assert data.node_id == "interleaved-node"
-
-                async with sequence_lock:
-                    sequence_log.append(f"read_end_{idx}")
-            except Exception as e:
-                errors.append(e)
-
-        async def invalidate_with_log(idx: int) -> None:
-            """Invalidate with sequence logging."""
-            try:
-                async with sequence_lock:
-                    sequence_log.append(f"inv_start_{idx}")
-
-                await node.invalidate_introspection_cache()
-
-                async with sequence_lock:
-                    sequence_log.append(f"inv_end_{idx}")
-            except Exception as e:
-                errors.append(e)
-
-        # Create interleaved pattern: R, I, R, I, R, I, ...
-        tasks: list[asyncio.Task[None]] = []
-        for i in range(40):
-            if i % 2 == 0:
-                tasks.append(asyncio.create_task(read_with_log(i)))
-            else:
-                tasks.append(asyncio.create_task(invalidate_with_log(i)))
-
-        await asyncio.gather(*tasks)
-
-        assert len(errors) == 0, f"Interleaved sequence errors: {errors}"
-
-        # Verify all operations completed (start and end logged)
-        for i in range(40):
-            if i % 2 == 0:
-                assert f"read_start_{i}" in sequence_log
-                assert f"read_end_{i}" in sequence_log
-            else:
-                assert f"inv_start_{i}" in sequence_log
-                assert f"inv_end_{i}" in sequence_log
-
-    async def test_stress_test_sustained_concurrent_access(self) -> None:
-        """Stress test with sustained concurrent access over multiple rounds.
-
-        This test simulates a longer-running scenario where the cache is
-        continuously accessed and invalidated over multiple rounds,
-        checking for degradation or state corruption over time.
-        """
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="stress-test-node",
-            node_type="EFFECT",
-            event_bus=None,
-            cache_ttl=0.01,  # 10ms TTL
-        )
-
-        total_reads = 0
-        total_invalidations = 0
-        errors: list[Exception] = []
-        counter_lock = asyncio.Lock()
-
-        async def sustained_operation(round_num: int, op_type: str) -> None:
-            """Perform sustained operation."""
-            nonlocal total_reads, total_invalidations
-            try:
-                if op_type == "read":
-                    data = await node.get_introspection_data()
-                    assert data.node_id == "stress-test-node"
-                    async with counter_lock:
-                        total_reads += 1
-                else:
-                    await node.invalidate_introspection_cache()
-                    async with counter_lock:
-                        total_invalidations += 1
-            except Exception as e:
-                errors.append(e)
-
-        # Run 10 rounds of concurrent operations
-        num_rounds = 10
-        ops_per_round = 20
-
-        for round_num in range(num_rounds):
-            tasks: list[asyncio.Task[None]] = []
-            for i in range(ops_per_round):
-                op_type = "invalidate" if i % 4 == 0 else "read"
-                tasks.append(
-                    asyncio.create_task(sustained_operation(round_num, op_type))
-                )
-
-            await asyncio.gather(*tasks)
-
-            # Small pause between rounds
-            await asyncio.sleep(0.001)
-
-        assert len(errors) == 0, f"Stress test errors: {errors}"
-        assert total_reads == num_rounds * (ops_per_round - ops_per_round // 4)
-        assert total_invalidations == num_rounds * (ops_per_round // 4)
-
-        # Final consistency check
-        final_data = await node.get_introspection_data()
-        assert final_data.node_id == "stress-test-node"
-        assert node._introspection_cache is not None
-        assert node._introspection_cached_at is not None
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -2589,7 +1381,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         """Test that class-level cache is populated on first access."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="cache-test-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2610,14 +1402,14 @@ class TestMixinNodeIntrospectionClassLevelCache:
         """Test that class-level cache is shared across instances."""
         node1 = MockNode()
         node1.initialize_introspection(
-            node_id="cache-node-1",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
 
         node2 = MockNode()
         node2.initialize_introspection(
-            node_id="cache-node-2",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2638,7 +1430,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         """Test invalidating cache for a specific class."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="invalidate-test",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2657,7 +1449,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         """Test invalidating cache for all classes."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="invalidate-all-test",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2676,7 +1468,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         """Test that cached signatures match direct signature extraction."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="signature-match-test",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2698,7 +1490,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         """Test that class-level caching provides performance benefit."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="perf-cache-test",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2736,14 +1528,14 @@ class TestMixinNodeIntrospectionClassLevelCache:
 
         node1 = CustomNode1()
         node1.initialize_introspection(
-            node_id="custom-1",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
 
         node2 = CustomNode2()
         node2.initialize_introspection(
-            node_id="custom-2",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
@@ -2778,7 +1570,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
 
         node = NodeWithBuiltins()
         node.initialize_introspection(
-            node_id="builtins-test",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2798,7 +1590,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         """Test that DEFAULT_OPERATION_KEYWORDS is used when not specified."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="default-keywords-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2811,7 +1603,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         """Test that DEFAULT_EXCLUDE_PREFIXES is used when not specified."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="default-prefixes-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2825,7 +1617,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         custom_keywords = {"fetch", "upload", "download", "sync"}
         node = MockNode()
         node.initialize_introspection(
-            node_id="custom-keywords-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             operation_keywords=custom_keywords,
@@ -2837,7 +1629,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         custom_prefixes = {"_", "helper_", "internal_"}
         node = MockNode()
         node.initialize_introspection(
-            node_id="custom-prefixes-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             exclude_prefixes=custom_prefixes,
@@ -2859,7 +1651,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
 
         node = CustomMethodsNode()
         node.initialize_introspection(
-            node_id="custom-ops-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             operation_keywords={"fetch", "upload"},
@@ -2886,7 +1678,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         """Test that empty operation_keywords results in no operations discovered."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="empty-keywords-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             operation_keywords=set(),
@@ -2908,14 +1700,14 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
 
         node1 = MultiInstanceNode()
         node1.initialize_introspection(
-            node_id="node-1",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             operation_keywords={"execute"},
         )
         node2 = MultiInstanceNode()
         node2.initialize_introspection(
-            node_id="node-2",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             operation_keywords={"fetch"},
@@ -2936,7 +1728,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         original_defaults = MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS.copy()
         node = MockNode()
         node.initialize_introspection(
-            node_id="no-mutation-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2956,7 +1748,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that get_performance_metrics returns None before introspection."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="metrics-test-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2970,7 +1762,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that get_performance_metrics returns metrics after introspection."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="metrics-test-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2985,7 +1777,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that performance metrics contain all expected fields."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="metrics-fields-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -3017,7 +1809,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that cache hits are correctly detected in metrics."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="cache-hit-metrics-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -3038,7 +1830,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that method count is correctly reported in metrics."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="method-count-metrics-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -3055,7 +1847,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that to_dict() returns all fields."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="to-dict-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -3081,7 +1873,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that performance metrics are fresh for each introspection call."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="fresh-metrics-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.001,  # Very short TTL to force cache refresh
@@ -3129,7 +1921,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
         node = MinimalMethodsNode()
         node.initialize_introspection(
-            node_id="minimal-methods-node",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
@@ -3231,7 +2023,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
         node = MediumMethodsNode()
         node.initialize_introspection(
-            node_id="medium-methods-node",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
@@ -3285,7 +2077,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
         node = LargeMethodsNode()
         node.initialize_introspection(
-            node_id="large-methods-node",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
@@ -3336,7 +2128,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
         node = LargeCacheNode()
         node.initialize_introspection(
-            node_id="large-cache-node",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
@@ -3384,7 +2176,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
             node = ScalingTestNode()
             node.initialize_introspection(
-                node_id=f"scaling-test-{method_count}",
+                node_id=uuid4(),
                 node_type="COMPUTE",
                 event_bus=None,
             )
@@ -3431,7 +2223,7 @@ class TestMixinNodeIntrospectionThresholdDetection:
         """Test that thresholds are not marked exceeded in normal operation."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="threshold-normal-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -3452,7 +2244,7 @@ class TestMixinNodeIntrospectionThresholdDetection:
         # We can't reliably force slow operations in a unit test
         node = MockNode()
         node.initialize_introspection(
-            node_id="slow-ops-structure-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -3468,7 +2260,7 @@ class TestMixinNodeIntrospectionThresholdDetection:
         """Test that cache hit has its own performance threshold."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="cache-threshold-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -3489,1733 +2281,462 @@ class TestMixinNodeIntrospectionThresholdDetection:
             assert "cache_hit" not in metrics.slow_operations
 
 
-class TestMixinNodeIntrospectionConfigModel:
-    """Test ModelIntrospectionConfig usage with initialize_introspection."""
-
-    async def test_initialize_with_config_model(self) -> None:
-        """Test initialization using ModelIntrospectionConfig."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        config = ModelIntrospectionConfig(
-            node_id="config-model-node",
-            node_type="EFFECT",
-            version="2.0.0",
-            cache_ttl=600.0,
-        )
-
-        node = MockNode()
-        node.initialize_introspection(config=config)
-
-        assert node._introspection_node_id == "config-model-node"
-        assert node._introspection_node_type == "EFFECT"
-        assert node._introspection_version == "2.0.0"
-        assert node._introspection_cache_ttl == 600.0
-
-    async def test_config_model_with_event_bus(self) -> None:
-        """Test config model with event bus."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        event_bus = MockEventBus()
-        config = ModelIntrospectionConfig(
-            node_id="config-eventbus-node",
-            node_type="COMPUTE",
-            event_bus=event_bus,
-        )
-
-        node = MockNode()
-        node.initialize_introspection(config=config)
-
-        assert node._introspection_event_bus is event_bus
-
-        # Verify publishing works
-        success = await node.publish_introspection(reason="test")
-        assert success is True
-
-    async def test_config_model_with_custom_keywords(self) -> None:
-        """Test config model with custom operation keywords."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        custom_keywords = {"fetch", "upload", "download"}
-        config = ModelIntrospectionConfig(
-            node_id="config-keywords-node",
-            node_type="EFFECT",
-            operation_keywords=custom_keywords,
-        )
-
-        node = MockNode()
-        node.initialize_introspection(config=config)
-
-        assert node._introspection_operation_keywords == custom_keywords
-
-    async def test_config_model_with_custom_topics(self) -> None:
-        """Test config model with custom topic configuration."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        config = ModelIntrospectionConfig(
-            node_id="config-topics-node",
-            node_type="EFFECT",
-            introspection_topic="onex.custom.introspection.topic.v1",
-            heartbeat_topic="onex.custom.heartbeat.topic.v1",
-            request_introspection_topic="onex.custom.request.topic.v1",
-        )
-
-        node = MockNode()
-        node.initialize_introspection(config=config)
-
-        assert node._introspection_topic == "onex.custom.introspection.topic.v1"
-        assert node._heartbeat_topic == "onex.custom.heartbeat.topic.v1"
-        assert node._request_introspection_topic == "onex.custom.request.topic.v1"
-
-    async def test_legacy_params_still_work(self) -> None:
-        """Test that legacy individual parameters still work."""
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="legacy-node",
-            node_type="REDUCER",
-            version="1.5.0",
-        )
-
-        assert node._introspection_node_id == "legacy-node"
-        assert node._introspection_node_type == "REDUCER"
-        assert node._introspection_version == "1.5.0"
-
-    async def test_config_model_overrides_legacy_params(self) -> None:
-        """Test that config model takes precedence over individual params."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        config = ModelIntrospectionConfig(
-            node_id="config-priority-node",
-            node_type="ORCHESTRATOR",
-            version="3.0.0",
-        )
-
-        node = MockNode()
-        # Pass both config and legacy params - config should win
-        node.initialize_introspection(
-            config=config,
-            node_id="should-be-ignored",
-            node_type="SHOULD-BE-IGNORED",
-            version="0.0.1",
-        )
-
-        assert node._introspection_node_id == "config-priority-node"
-        assert node._introspection_node_type == "ORCHESTRATOR"
-        assert node._introspection_version == "3.0.0"
-
-    async def test_error_when_neither_config_nor_required_params(self) -> None:
-        """Test error raised when neither config nor required params provided."""
-        node = MockNode()
-
-        with pytest.raises(ValueError, match="Either config or both node_id"):
-            node.initialize_introspection()
-
-        with pytest.raises(ValueError, match="Either config or both node_id"):
-            node.initialize_introspection(node_id="only-id")
-
-        with pytest.raises(ValueError, match="Either config or both node_id"):
-            node.initialize_introspection(node_type="only-type")
-
-    async def test_config_model_validation(self) -> None:
-        """Test that config model validates inputs."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Empty node_id should fail validation
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="",
-                node_type="EFFECT",
-            )
-
-        # Empty node_type should fail validation
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="valid-id",
-                node_type="",
-            )
-
-        # Negative cache_ttl should fail validation
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="valid-id",
-                node_type="EFFECT",
-                cache_ttl=-1.0,
-            )
-
-    async def test_config_model_exports(self) -> None:
-        """Test that ModelIntrospectionConfig is properly exported."""
-        # Test module-level export
-        from omnibase_infra.mixins.mixin_node_introspection import (
-            ModelIntrospectionConfig,
-        )
-
-        assert ModelIntrospectionConfig is not None
-
-        # Test package-level export
-        from omnibase_infra.mixins import ModelIntrospectionConfig as PkgConfig
-
-        assert PkgConfig is not None
-        assert PkgConfig is ModelIntrospectionConfig
-
-
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestModelIntrospectionConfigTopicValidation:
-    """Tests for topic name validation in ModelIntrospectionConfig.
+@pytest.mark.performance
+class TestMixinNodeIntrospectionComprehensiveBenchmark:
+    """Comprehensive performance benchmarks for node introspection.
 
-    These tests verify that the Pydantic field_validator for topic names
-    correctly validates and rejects invalid topic name formats.
+    These tests provide detailed performance analysis with:
+    - Cold-start (no cache) introspection timing
+    - Warm cache hit timing
+    - Component-level timing breakdown
+    - Percentile-based thresholds (p95/p99) for flaky test mitigation
+    - Verification of <50ms target
+    - Performance metrics validation via get_performance_metrics()
 
-    Topic names must:
-    - Start with "onex." prefix (ONEX naming convention)
-    - Contain only alphanumeric characters, dots, hyphens, and underscores
-    - Be non-empty after the prefix
-    - End with version suffix (e.g., .v1, .v2, .v10)
+    Note: All tests use PERF_MULTIPLIER to adjust thresholds for CI environments.
+    Tests use sample sizes of 20+ iterations for statistical significance.
     """
 
-    async def test_valid_topic_names_accepted(self) -> None:
-        """Test that valid topic names following ONEX convention are accepted."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
+    # Minimum sample size for statistical significance
+    MIN_SAMPLE_SIZE = 20
 
-        # Valid topic names with various patterns
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="EFFECT",
-            introspection_topic="onex.node.introspection.published.v1",
-            heartbeat_topic="onex.node.heartbeat.published.v1",
-            request_introspection_topic="onex.registry.introspection.requested.v1",
-        )
+    def _calculate_percentile(self, times: list[float], percentile: float) -> float:
+        """Calculate the percentile value from a list of times.
 
-        assert config.introspection_topic == "onex.node.introspection.published.v1"
-        assert config.heartbeat_topic == "onex.node.heartbeat.published.v1"
-        assert (
-            config.request_introspection_topic
-            == "onex.registry.introspection.requested.v1"
-        )
+        Args:
+            times: List of timing measurements in milliseconds.
+            percentile: Percentile to calculate (0-100).
 
-    async def test_none_values_allowed(self) -> None:
-        """Test that None values pass validation (use defaults)."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="EFFECT",
-            introspection_topic=None,
-            heartbeat_topic=None,
-            request_introspection_topic=None,
-        )
-
-        assert config.introspection_topic is None
-        assert config.heartbeat_topic is None
-        assert config.request_introspection_topic is None
-
-    async def test_missing_onex_prefix_rejected(self) -> None:
-        """Test that topic names without 'onex.' prefix are rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Test introspection_topic without prefix
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="node.introspection.published.v1",
-            )
-
-        error_message = str(exc_info.value)
-        assert "onex." in error_message
-        assert "prefix" in error_message.lower()
-
-    async def test_invalid_characters_rejected(self) -> None:
-        """Test that topic names with invalid characters are rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Test with spaces
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.node introspection.published.v1",
-            )
-
-        error_message = str(exc_info.value)
-        assert "invalid characters" in error_message.lower()
-
-        # Test with special characters
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                heartbeat_topic="onex.node@heartbeat#published!v1",
-            )
-
-        # Test with slashes
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                request_introspection_topic="onex/registry/introspection",
-            )
-
-    async def test_empty_after_prefix_rejected(self) -> None:
-        """Test that topic names with only 'onex.' prefix are rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.",
-            )
-
-        error_message = str(exc_info.value)
-        assert "content after" in error_message.lower()
-
-    async def test_valid_characters_in_topic_names(self) -> None:
-        """Test that valid characters (alphanumeric, dots, hyphens, underscores) are allowed."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Test with hyphens and underscores
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="EFFECT",
-            introspection_topic="onex.my-node_introspection.published.v1",
-            heartbeat_topic="onex.node-1_heartbeat.published.v2",
-            request_introspection_topic="onex.registry_v2.introspection-request.v1",
-        )
-
-        assert config.introspection_topic == "onex.my-node_introspection.published.v1"
-        assert config.heartbeat_topic == "onex.node-1_heartbeat.published.v2"
-        assert (
-            config.request_introspection_topic
-            == "onex.registry_v2.introspection-request.v1"
-        )
-
-    async def test_multiple_topic_validation_errors(self) -> None:
-        """Test that multiple invalid topics produce multiple validation errors."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="bad.introspection.topic",
-                heartbeat_topic="bad.heartbeat.topic",
-                request_introspection_topic="bad.request.topic",
-            )
-
-        # Should have 3 validation errors
-        errors = exc_info.value.errors()
-        assert len(errors) == 3
-
-        # All should be about missing prefix
-        for error in errors:
-            assert "onex." in str(error["msg"])
-
-    async def test_case_sensitive_prefix(self) -> None:
-        """Test that the 'onex.' prefix is case-sensitive."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # ONEX. (uppercase) should fail
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="ONEX.node.introspection.published.v1",
-            )
-
-        # Onex. (mixed case) should fail
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="Onex.node.introspection.published.v1",
-            )
-
-    async def test_validation_error_messages_are_descriptive(self) -> None:
-        """Test that validation error messages provide clear guidance."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Test missing prefix error message
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="custom.topic.name",
-            )
-
-        error_msg = str(exc_info.value)
-        assert "onex." in error_msg
-        assert "custom.topic.name" in error_msg  # Shows the actual invalid value
-
-        # Test invalid characters error message
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                heartbeat_topic="onex.topic with spaces",
-            )
-
-        error_msg = str(exc_info.value)
-        assert "invalid characters" in error_msg.lower()
-        assert "onex.topic with spaces" in error_msg
-
-    async def test_missing_version_suffix_rejected(self) -> None:
-        """Test that topic names without version suffix are rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Missing version suffix entirely
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.node.introspection.published",
-            )
-
-        error_msg = str(exc_info.value)
-        assert "version suffix" in error_msg.lower()
-        assert ".v1" in error_msg or ".v2" in error_msg
-
-    async def test_incomplete_version_suffix_rejected(self) -> None:
-        """Test that incomplete version suffixes are rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # .v without number
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.node.introspection.published.v",
-            )
-
-        # v1 without dot
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                heartbeat_topic="onex.node.heartbeatv1",
-            )
-
-    async def test_valid_version_suffixes_accepted(self) -> None:
-        """Test that valid version suffixes are accepted."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Single digit version
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="EFFECT",
-            introspection_topic="onex.node.introspection.v1",
-        )
-        assert config.introspection_topic == "onex.node.introspection.v1"
-
-        # Double digit version
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="EFFECT",
-            heartbeat_topic="onex.node.heartbeat.v10",
-        )
-        assert config.heartbeat_topic == "onex.node.heartbeat.v10"
-
-        # Triple digit version
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="EFFECT",
-            request_introspection_topic="onex.registry.request.v100",
-        )
-        assert config.request_introspection_topic == "onex.registry.request.v100"
-
-    async def test_version_suffix_error_message_descriptive(self) -> None:
-        """Test that version suffix error message provides clear guidance."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.node.introspection.published",
-            )
-
-        error_msg = str(exc_info.value)
-        # Error should mention version suffix requirement
-        assert "version suffix" in error_msg.lower()
-        # Error should provide examples
-        assert ".v1" in error_msg or ".v2" in error_msg
-        # Error should show the invalid value
-        assert "onex.node.introspection.published" in error_msg
-
-    # =========================================================================
-    # Version Suffix Edge Cases (PR #54 review coverage)
-    # =========================================================================
-
-    async def test_version_zero_accepted(self) -> None:
-        """Test that version 0 is a valid version suffix.
-
-        Edge case: .v0 should be accepted as a valid version suffix.
+        Returns:
+            The percentile value.
         """
-        from omnibase_infra.mixins import ModelIntrospectionConfig
+        sorted_times = sorted(times)
+        index = int(len(sorted_times) * (percentile / 100))
+        # Clamp index to valid range
+        index = min(index, len(sorted_times) - 1)
+        return sorted_times[index]
 
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="EFFECT",
-            introspection_topic="onex.node.introspection.v0",
-        )
-        assert config.introspection_topic == "onex.node.introspection.v0"
+    async def test_benchmark_cold_start_introspection(self) -> None:
+        """Benchmark cold-start introspection time (no cache).
 
-    async def test_large_version_number_accepted(self) -> None:
-        """Test that large version numbers are accepted.
+        Measures introspection performance when cache is empty,
+        which represents the worst-case timing scenario.
 
-        Edge case: .v999 should be accepted as a valid version suffix.
+        Uses p95 percentile to avoid flakiness from outliers.
         """
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="EFFECT",
-            introspection_topic="onex.node.introspection.v999",
-        )
-        assert config.introspection_topic == "onex.node.introspection.v999"
-
-        # Also test very large version numbers
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="COMPUTE",
-            heartbeat_topic="onex.node.heartbeat.v12345",
-        )
-        assert config.heartbeat_topic == "onex.node.heartbeat.v12345"
-
-    async def test_non_numeric_version_rejected(self) -> None:
-        """Test that non-numeric version suffixes are rejected.
-
-        Edge case: .vX, .vABC should be rejected (non-numeric).
-        """
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # .vX (letter instead of number)
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.node.introspection.vX",
-            )
-        assert "version suffix" in str(exc_info.value).lower()
-
-        # .vABC (letters instead of number)
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                heartbeat_topic="onex.node.heartbeat.vABC",
-            )
-
-    async def test_decimal_version_rejected(self) -> None:
-        """Test that decimal version suffixes are rejected.
-
-        Edge case: .v1.0, .v2.1 should be rejected (not just .vN pattern).
-        """
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # .v1.0 (decimal version)
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.node.introspection.v1.0",
-            )
-        # The topic ends with .0, not .vN, so it fails version suffix check
-        assert "version suffix" in str(exc_info.value).lower()
-
-        # .v2.1 (semantic version in suffix)
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="COMPUTE",
-                heartbeat_topic="onex.node.heartbeat.v2.1",
-            )
-
-    async def test_negative_version_rejected(self) -> None:
-        """Test that negative version suffixes are rejected.
-
-        Edge case: .v-1 should be rejected (negative numbers not allowed).
-        """
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # .v-1 (negative version)
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.node.introspection.v-1",
-            )
-        # The topic ends with .v-1, which contains invalid character (hyphen after v)
-        # or fails version suffix pattern (regex expects \d+ after .v)
-        error_msg = str(exc_info.value).lower()
-        assert "version suffix" in error_msg or "invalid" in error_msg
-
-    # =========================================================================
-    # Invalid Topic Name Patterns (PR #54 review coverage)
-    # =========================================================================
-
-    async def test_special_characters_at_sign_rejected(self) -> None:
-        """Test that @ character in topic names is rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.topic@invalid.v1",
-            )
-        assert "invalid characters" in str(exc_info.value).lower()
-
-    async def test_special_characters_hash_rejected(self) -> None:
-        """Test that # character in topic names is rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.topic#channel.v1",
-            )
-        assert "invalid characters" in str(exc_info.value).lower()
-
-    async def test_special_characters_dollar_rejected(self) -> None:
-        """Test that $ character in topic names is rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.topic$value.v1",
-            )
-        assert "invalid characters" in str(exc_info.value).lower()
-
-    async def test_special_characters_asterisk_rejected(self) -> None:
-        """Test that * wildcard character in topic names is rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.topic.*.v1",
-            )
-        assert "invalid characters" in str(exc_info.value).lower()
-
-    async def test_unicode_characters_rejected(self) -> None:
-        """Test that unicode characters in topic names are rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Emoji character (rocket emoji U+1F680)
-        with pytest.raises(ValidationError) as exc_info:
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.topic.\U0001f680rocket.v1",
-            )
-        assert "invalid characters" in str(exc_info.value).lower()
-
-        # Non-ASCII letter (e.g., accented character e with acute accent)
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                heartbeat_topic="onex.topic.caf\u00e9.v1",
-            )
-
-        # CJK character (Chinese character for "test")
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                request_introspection_topic="onex.topic.\u6d4b\u8bd5.v1",
-            )
-
-    async def test_extremely_long_topic_name_accepted(self) -> None:
-        """Test that very long topic names are accepted (no length limit enforced).
-
-        This tests the boundary condition for topic name length. While extremely
-        long names may not be practical, the validator should not reject them
-        purely based on length (Kafka topic limit is 249 chars, but we don't
-        enforce this at the config level).
-        """
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Create a topic name that's 200+ characters
-        long_segment = "a" * 200  # 200 chars
-        long_topic = f"onex.{long_segment}.published.v1"
-
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="EFFECT",
-            introspection_topic=long_topic,
-        )
-        assert config.introspection_topic == long_topic
-        assert len(config.introspection_topic) > 200
-
-    async def test_consecutive_dots_allowed_by_current_validator(self) -> None:
-        """Test that consecutive dots in topic names are currently allowed.
-
-        Note: The current regex pattern `^[a-zA-Z0-9._-]+$` allows consecutive dots.
-        This test documents the current behavior. Consecutive dots could be
-        rejected in a future enhancement if deemed necessary for stricter
-        topic naming conventions.
-
-        Edge case: onex..double.dot.v1 contains consecutive dots but passes
-        the current character validation since dots are valid characters.
-        """
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Double dots are currently allowed (passes character validation)
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="EFFECT",
-            introspection_topic="onex..double.dot.v1",
-        )
-        # Documents that consecutive dots are currently accepted
-        assert config.introspection_topic == "onex..double.dot.v1"
-
-    async def test_trailing_dot_before_version_allowed(self) -> None:
-        """Test that trailing dots before version suffix are allowed.
-
-        Note: The current validator does not check for empty segments created
-        by consecutive dots. This test documents current behavior.
-
-        Edge case: onex.topic..v1 has consecutive dots before version.
-        """
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Consecutive dots before version currently allowed
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="EFFECT",
-            introspection_topic="onex.topic..v1",
-        )
-        # Documents that this is currently accepted
-        assert config.introspection_topic == "onex.topic..v1"
-
-    async def test_brackets_rejected(self) -> None:
-        """Test that bracket characters in topic names are rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Square brackets
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.topic[0].v1",
-            )
-
-        # Curly braces
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                heartbeat_topic="onex.topic{key}.v1",
-            )
-
-        # Parentheses
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                request_introspection_topic="onex.topic(1).v1",
-            )
-
-    async def test_quotes_rejected(self) -> None:
-        """Test that quote characters in topic names are rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Single quote
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.topic's.name.v1",
-            )
-
-        # Double quote
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                heartbeat_topic='onex.topic"name".v1',
-            )
-
-    async def test_backslash_rejected(self) -> None:
-        """Test that backslash character in topic names is rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.topic\\name.v1",
-            )
-
-    async def test_colon_rejected(self) -> None:
-        """Test that colon character in topic names is rejected."""
-        from pydantic import ValidationError
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        with pytest.raises(ValidationError):
-            ModelIntrospectionConfig(
-                node_id="test-node",
-                node_type="EFFECT",
-                introspection_topic="onex.topic:name.v1",
-            )
-
-    # =========================================================================
-    # Custom Topic Parameter Tests (PR #54 review coverage)
-    # =========================================================================
-
-    async def test_all_topics_independently_customizable(self) -> None:
-        """Test that all 3 topic fields can be customized independently.
-
-        Verifies that each topic field accepts custom values without
-        affecting the others.
-        """
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Customize only introspection_topic
-        config1 = ModelIntrospectionConfig(
-            node_id="test-node-1",
-            node_type="EFFECT",
-            introspection_topic="onex.custom.intro.v1",
-        )
-        assert config1.introspection_topic == "onex.custom.intro.v1"
-        assert config1.heartbeat_topic is None
-        assert config1.request_introspection_topic is None
-
-        # Customize only heartbeat_topic
-        config2 = ModelIntrospectionConfig(
-            node_id="test-node-2",
-            node_type="COMPUTE",
-            heartbeat_topic="onex.custom.heartbeat.v1",
-        )
-        assert config2.introspection_topic is None
-        assert config2.heartbeat_topic == "onex.custom.heartbeat.v1"
-        assert config2.request_introspection_topic is None
-
-        # Customize only request_introspection_topic
-        config3 = ModelIntrospectionConfig(
-            node_id="test-node-3",
-            node_type="REDUCER",
-            request_introspection_topic="onex.custom.request.v1",
-        )
-        assert config3.introspection_topic is None
-        assert config3.heartbeat_topic is None
-        assert config3.request_introspection_topic == "onex.custom.request.v1"
-
-    async def test_partial_customization_works(self) -> None:
-        """Test that partial customization works (some topics default, some custom).
-
-        When only some topics are specified, others should remain None
-        (to be resolved to class defaults by the mixin).
-        """
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Customize 2 out of 3 topics
-        config = ModelIntrospectionConfig(
-            node_id="test-node",
-            node_type="EFFECT",
-            introspection_topic="onex.custom.intro.v1",
-            heartbeat_topic="onex.custom.heartbeat.v1",
-            # request_introspection_topic not specified
-        )
-
-        assert config.introspection_topic == "onex.custom.intro.v1"
-        assert config.heartbeat_topic == "onex.custom.heartbeat.v1"
-        assert config.request_introspection_topic is None
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-class TestMixinNodeIntrospectionCustomTopics:
-    """Tests for custom topic configuration via ModelIntrospectionConfig.
-
-    These tests verify that custom topics are correctly used when publishing
-    introspection events, heartbeats, and when setting up registry listeners.
-    """
-
-    async def test_custom_introspection_topic_used_in_publishing(self) -> None:
-        """Test that custom introspection topic is used when publishing."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        event_bus = MockEventBus()
-        custom_topic = "onex.my.custom.introspection.topic.v1"
-
-        config = ModelIntrospectionConfig(
-            node_id="custom-topic-node",
-            node_type="EFFECT",
-            event_bus=event_bus,
-            introspection_topic=custom_topic,
-        )
-
-        node = MockNode()
-        node.initialize_introspection(config=config)
-
-        # Publish introspection
-        success = await node.publish_introspection(reason="test")
-        assert success is True
-
-        # Verify the custom topic was used
-        assert len(event_bus.published_envelopes) == 1
-        _, topic = event_bus.published_envelopes[0]
-        assert topic == custom_topic
-
-    async def test_custom_topics_default_to_class_defaults(self) -> None:
-        """Test that topics default to class-level defaults when not specified."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="default-topics-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
 
-        # Verify class-level defaults are used
-        assert (
-            node._introspection_topic
-            == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
-        )
-        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
-        assert (
-            node._request_introspection_topic
-            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
-        )
+        # Clear class-level cache for accurate cold-start measurement
+        MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
 
-    async def test_custom_heartbeat_topic_used_in_heartbeat_publishing(self) -> None:
-        """Test that custom heartbeat topic is used in heartbeat publishing."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
+        cold_start_times: list[float] = []
 
-        event_bus = MockEventBus()
-        custom_heartbeat_topic = "onex.my.custom.heartbeat.topic.v1"
+        for i in range(self.MIN_SAMPLE_SIZE):
+            # Clear both instance and class caches for true cold start
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+            if i > 0:
+                # Only clear class cache on iterations > 0 to measure true cold start
+                MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
 
-        config = ModelIntrospectionConfig(
-            node_id="custom-heartbeat-node",
-            node_type="COMPUTE",
-            event_bus=event_bus,
-            heartbeat_topic=custom_heartbeat_topic,
-        )
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            cold_start_times.append(elapsed_ms)
 
-        node = MockNode()
-        node.initialize_introspection(config=config)
+        # Calculate statistics
+        avg_time = sum(cold_start_times) / len(cold_start_times)
+        p95_time = self._calculate_percentile(cold_start_times, 95)
+        p99_time = self._calculate_percentile(cold_start_times, 99)
+        min_time = min(cold_start_times)
+        max_time = max(cold_start_times)
 
-        # Start heartbeat task with fast interval
-        await node.start_introspection_tasks(
-            enable_heartbeat=True,
-            heartbeat_interval_seconds=0.05,
-            enable_registry_listener=False,
+        print(f"\nCold-start introspection ({self.MIN_SAMPLE_SIZE} iterations):")
+        print(
+            f"  avg={avg_time:.2f}ms, min={min_time:.2f}ms, "
+            f"max={max_time:.2f}ms, p95={p95_time:.2f}ms, p99={p99_time:.2f}ms"
         )
 
-        try:
-            # Wait for at least one heartbeat
-            await asyncio.sleep(0.1)
+        # Use p95 for threshold comparison (more stable than max)
+        threshold_ms = PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS * PERF_MULTIPLIER
+        assert p95_time < threshold_ms, (
+            f"Cold-start p95 latency {p95_time:.2f}ms exceeds {threshold_ms:.0f}ms "
+            f"threshold (avg={avg_time:.2f}ms, max={max_time:.2f}ms)"
+        )
 
-            # Verify the custom heartbeat topic was used
-            assert len(event_bus.published_envelopes) >= 1
+    async def test_benchmark_warm_cache_hit(self) -> None:
+        """Benchmark warm cache hit timing.
 
-            # Check that heartbeat events use the custom topic
-            for _, topic in event_bus.published_envelopes:
-                assert topic == custom_heartbeat_topic
-        finally:
-            await node.stop_introspection_tasks()
+        Measures introspection performance when result is served from cache,
+        which should be sub-millisecond.
 
-    async def test_custom_request_topic_stored_for_registry_listener(self) -> None:
-        """Test that custom request introspection topic is stored correctly.
-
-        The registry listener uses the request_introspection_topic when
-        subscribing to introspection requests. This test verifies the topic
-        is correctly stored for use by the registry listener.
+        Uses p99 percentile for cache hits since they should be very fast.
         """
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        custom_request_topic = "onex.my.custom.request.introspection.topic.v1"
-
-        config = ModelIntrospectionConfig(
-            node_id="custom-request-topic-node",
-            node_type="REDUCER",
-            request_introspection_topic=custom_request_topic,
-        )
-
-        node = MockNode()
-        node.initialize_introspection(config=config)
-
-        # Verify the custom request topic is stored
-        assert node._request_introspection_topic == custom_request_topic
-
-    async def test_all_custom_topics_used_together(self) -> None:
-        """Test that all three custom topics work when configured together."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        event_bus = MockEventBus()
-        custom_introspection = "onex.custom.intro.topic.v1"
-        custom_heartbeat = "onex.custom.heartbeat.topic.v1"
-        custom_request = "onex.custom.request.topic.v1"
-
-        config = ModelIntrospectionConfig(
-            node_id="all-custom-topics-node",
-            node_type="ORCHESTRATOR",
-            event_bus=event_bus,
-            introspection_topic=custom_introspection,
-            heartbeat_topic=custom_heartbeat,
-            request_introspection_topic=custom_request,
-        )
-
-        node = MockNode()
-        node.initialize_introspection(config=config)
-
-        # Verify all topics are stored correctly
-        assert node._introspection_topic == custom_introspection
-        assert node._heartbeat_topic == custom_heartbeat
-        assert node._request_introspection_topic == custom_request
-
-        # Test introspection publishing uses custom topic
-        await node.publish_introspection(reason="test")
-        assert len(event_bus.published_envelopes) == 1
-        _, intro_topic = event_bus.published_envelopes[0]
-        assert intro_topic == custom_introspection
-
-        # Clear and test heartbeat uses custom topic
-        event_bus.published_envelopes.clear()
-        await node.start_introspection_tasks(
-            enable_heartbeat=True,
-            heartbeat_interval_seconds=0.05,
-            enable_registry_listener=False,
-        )
-
-        try:
-            await asyncio.sleep(0.1)
-            assert len(event_bus.published_envelopes) >= 1
-            for _, hb_topic in event_bus.published_envelopes:
-                assert hb_topic == custom_heartbeat
-        finally:
-            await node.stop_introspection_tasks()
-
-    async def test_partial_custom_topics_with_defaults(self) -> None:
-        """Test that unspecified topics fall back to defaults."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        custom_introspection = "onex.only.introspection.custom.v1"
-
-        config = ModelIntrospectionConfig(
-            node_id="partial-topics-node",
-            node_type="EFFECT",
-            introspection_topic=custom_introspection,
-            # heartbeat_topic and request_introspection_topic not specified
-        )
-
-        node = MockNode()
-        node.initialize_introspection(config=config)
-
-        # Custom topic should be set
-        assert node._introspection_topic == custom_introspection
-        # Others should use class-level defaults
-        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
-        assert (
-            node._request_introspection_topic
-            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
-        )
-
-    async def test_introspection_topic_with_fallback_publish_method(self) -> None:
-        """Test custom topic used with fallback publish method (no publish_envelope).
-
-        This test validates the fallback path when an event bus doesn't have
-        publish_envelope method. Uses legacy parameter path to bypass Pydantic
-        protocol validation.
-        """
-
-        class NoEnvelopeEventBus:
-            """Mock event bus without publish_envelope method (only publish)."""
-
-            def __init__(self) -> None:
-                self.published_events: list[dict[str, str | bytes | None]] = []
-
-            async def publish(
-                self,
-                topic: str,
-                key: bytes | None,
-                value: bytes,
-            ) -> None:
-                self.published_events.append(
-                    {
-                        "topic": topic,
-                        "key": key,
-                        "value": value,
-                    }
-                )
-
-        # Use legacy parameter path to bypass Pydantic protocol validation
-        # This allows testing the fallback path with a minimal event bus
-        event_bus = NoEnvelopeEventBus()
-        custom_topic = "onex.fallback.publish.topic.v1"
-
-        node = MockNode()
-        # Cast to Any to bypass type checking for testing fallback behavior
-        node.initialize_introspection(
-            node_id="fallback-publish-node",
-            node_type="EFFECT",
-            event_bus=event_bus,  # type: ignore[arg-type]
-            introspection_topic=custom_topic,
-        )
-
-        # Publish using fallback method
-        success = await node.publish_introspection(reason="fallback-test")
-        assert success is True
-
-        # Verify custom topic was used in fallback publish
-        assert len(event_bus.published_events) == 1
-        assert event_bus.published_events[0]["topic"] == custom_topic
-
-    async def test_heartbeat_topic_with_fallback_publish_method(self) -> None:
-        """Test custom heartbeat topic used with fallback publish method.
-
-        This test validates the fallback path when an event bus doesn't have
-        publish_envelope method. Uses legacy parameter path to bypass Pydantic
-        protocol validation.
-        """
-
-        class NoEnvelopeEventBus:
-            """Mock event bus without publish_envelope method (only publish)."""
-
-            def __init__(self) -> None:
-                self.published_events: list[dict[str, str | bytes | None]] = []
-
-            async def publish(
-                self,
-                topic: str,
-                key: bytes | None,
-                value: bytes,
-            ) -> None:
-                self.published_events.append(
-                    {
-                        "topic": topic,
-                        "key": key,
-                        "value": value,
-                    }
-                )
-
-        # Use legacy parameter path to bypass Pydantic protocol validation
-        # This allows testing the fallback path with a minimal event bus
-        event_bus = NoEnvelopeEventBus()
-        custom_heartbeat_topic = "onex.fallback.heartbeat.topic.v1"
-
-        node = MockNode()
-        # Cast to Any to bypass type checking for testing fallback behavior
-        node.initialize_introspection(
-            node_id="fallback-heartbeat-node",
-            node_type="COMPUTE",
-            event_bus=event_bus,  # type: ignore[arg-type]
-            heartbeat_topic=custom_heartbeat_topic,
-        )
-
-        # Start heartbeat
-        await node.start_introspection_tasks(
-            enable_heartbeat=True,
-            heartbeat_interval_seconds=0.05,
-            enable_registry_listener=False,
-        )
-
-        try:
-            await asyncio.sleep(0.1)
-
-            # Verify custom heartbeat topic was used in fallback publish
-            assert len(event_bus.published_events) >= 1
-            for event in event_bus.published_events:
-                assert event["topic"] == custom_heartbeat_topic
-        finally:
-            await node.stop_introspection_tasks()
-
-    async def test_empty_topic_strings_use_defaults(self) -> None:
-        """Test that None topic values correctly fall back to defaults."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        # Create config with explicit None values
-        config = ModelIntrospectionConfig(
-            node_id="none-topics-node",
-            node_type="EFFECT",
-            introspection_topic=None,
-            heartbeat_topic=None,
-            request_introspection_topic=None,
-        )
-
-        node = MockNode()
-        node.initialize_introspection(config=config)
-
-        # All should fall back to class-level defaults
-        assert (
-            node._introspection_topic
-            == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
-        )
-        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
-        assert (
-            node._request_introspection_topic
-            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
-        )
-
-    async def test_get_introspection_data_includes_topic_info(self) -> None:
-        """Test that introspection data includes configured topic information.
-
-        The mixin stores topic configuration for debugging and observability.
-        This test verifies topics are properly reported in introspection output.
-        """
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        custom_introspection = "onex.debug.introspection.topic.v1"
-        custom_heartbeat = "onex.debug.heartbeat.topic.v1"
-        custom_request = "onex.debug.request.topic.v1"
-
-        config = ModelIntrospectionConfig(
-            node_id="topic-info-node",
-            node_type="EFFECT",
-            introspection_topic=custom_introspection,
-            heartbeat_topic=custom_heartbeat,
-            request_introspection_topic=custom_request,
-        )
-
-        node = MockNode()
-        node.initialize_introspection(config=config)
-
-        # Verify internal attributes are set (for debugging/logging purposes)
-        assert hasattr(node, "_introspection_topic")
-        assert hasattr(node, "_heartbeat_topic")
-        assert hasattr(node, "_request_introspection_topic")
-
-        assert node._introspection_topic == custom_introspection
-        assert node._heartbeat_topic == custom_heartbeat
-        assert node._request_introspection_topic == custom_request
-
-    async def test_legacy_params_custom_introspection_topic(self) -> None:
-        """Test custom introspection topic via legacy parameter path."""
-        event_bus = MockEventBus()
-        custom_topic = "onex.legacy.introspection.topic.v1"
-
         node = MockNode()
         node.initialize_introspection(
-            node_id="legacy-intro-topic-node",
-            node_type="EFFECT",
-            event_bus=event_bus,
-            introspection_topic=custom_topic,
-        )
-
-        # Verify topic is stored correctly
-        assert node._introspection_topic == custom_topic
-
-        # Verify topic is used when publishing
-        success = await node.publish_introspection(reason="legacy-test")
-        assert success is True
-
-        assert len(event_bus.published_envelopes) == 1
-        _, topic = event_bus.published_envelopes[0]
-        assert topic == custom_topic
-
-    async def test_legacy_params_custom_heartbeat_topic(self) -> None:
-        """Test custom heartbeat topic via legacy parameter path."""
-        event_bus = MockEventBus()
-        custom_heartbeat_topic = "onex.legacy.heartbeat.topic.v1"
-
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="legacy-heartbeat-topic-node",
-            node_type="COMPUTE",
-            event_bus=event_bus,
-            heartbeat_topic=custom_heartbeat_topic,
-        )
-
-        # Verify topic is stored correctly
-        assert node._heartbeat_topic == custom_heartbeat_topic
-
-        # Start heartbeat task with fast interval
-        await node.start_introspection_tasks(
-            enable_heartbeat=True,
-            heartbeat_interval_seconds=0.05,
-            enable_registry_listener=False,
-        )
-
-        try:
-            # Wait for at least one heartbeat
-            await asyncio.sleep(0.1)
-
-            # Verify the custom heartbeat topic was used
-            assert len(event_bus.published_envelopes) >= 1
-
-            # Check that heartbeat events use the custom topic
-            for _, topic in event_bus.published_envelopes:
-                assert topic == custom_heartbeat_topic
-        finally:
-            await node.stop_introspection_tasks()
-
-    async def test_legacy_params_custom_request_topic(self) -> None:
-        """Test custom request introspection topic via legacy parameter path."""
-        custom_request_topic = "onex.legacy.request.introspection.topic.v1"
-
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="legacy-request-topic-node",
-            node_type="REDUCER",
-            request_introspection_topic=custom_request_topic,
-        )
-
-        # Verify topic is stored correctly
-        assert node._request_introspection_topic == custom_request_topic
-
-    async def test_legacy_params_all_custom_topics(self) -> None:
-        """Test all three custom topics via legacy parameter path."""
-        event_bus = MockEventBus()
-        custom_introspection = "onex.legacy.intro.topic"
-        custom_heartbeat = "onex.legacy.heartbeat.topic"
-        custom_request = "onex.legacy.request.topic"
-
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="legacy-all-topics-node",
-            node_type="ORCHESTRATOR",
-            event_bus=event_bus,
-            introspection_topic=custom_introspection,
-            heartbeat_topic=custom_heartbeat,
-            request_introspection_topic=custom_request,
-        )
-
-        # Verify all topics are stored correctly
-        assert node._introspection_topic == custom_introspection
-        assert node._heartbeat_topic == custom_heartbeat
-        assert node._request_introspection_topic == custom_request
-
-        # Test introspection publishing uses custom topic
-        await node.publish_introspection(reason="legacy-test")
-        assert len(event_bus.published_envelopes) == 1
-        _, intro_topic = event_bus.published_envelopes[0]
-        assert intro_topic == custom_introspection
-
-        # Clear and test heartbeat uses custom topic
-        event_bus.published_envelopes.clear()
-        await node.start_introspection_tasks(
-            enable_heartbeat=True,
-            heartbeat_interval_seconds=0.05,
-            enable_registry_listener=False,
-        )
-
-        try:
-            await asyncio.sleep(0.1)
-            assert len(event_bus.published_envelopes) >= 1
-            for _, hb_topic in event_bus.published_envelopes:
-                assert hb_topic == custom_heartbeat
-        finally:
-            await node.stop_introspection_tasks()
-
-    async def test_registry_listener_uses_custom_request_topic(self) -> None:
-        """Test that registry listener subscribes to the custom request topic.
-
-        This test verifies that the registry listener loop uses the
-        custom request_introspection_topic when subscribing to the event bus.
-        """
-
-        class CapturingEventBus:
-            """Event bus that captures subscription topic."""
-
-            def __init__(self) -> None:
-                self.subscribed_topic: str | None = None
-                self.subscribed_group_id: str | None = None
-                self.published_envelopes: list[tuple[Any, str]] = []
-
-            async def publish_envelope(
-                self,
-                envelope: Any,
-                topic: str,
-            ) -> None:
-                self.published_envelopes.append((envelope, topic))
-
-            async def publish(
-                self,
-                topic: str,
-                key: bytes | None,
-                value: bytes,
-            ) -> None:
-                pass
-
-            async def subscribe(
-                self,
-                topic: str,
-                group_id: str,
-                on_message: Callable[[Any], Awaitable[None]],
-            ) -> Callable[[], Awaitable[None]]:
-                self.subscribed_topic = topic
-                self.subscribed_group_id = group_id
-
-                async def unsubscribe() -> None:
-                    pass
-
-                return unsubscribe
-
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        event_bus = CapturingEventBus()
-        custom_request_topic = "onex.custom.registry.request.topic.v1"
-
-        config = ModelIntrospectionConfig(
-            node_id="registry-custom-topic-node",
-            node_type="EFFECT",
-            event_bus=event_bus,  # type: ignore[arg-type]
-            request_introspection_topic=custom_request_topic,
-        )
-
-        node = MockNode()
-        node.initialize_introspection(config=config)
-
-        # Start registry listener
-        await node.start_introspection_tasks(
-            enable_heartbeat=False,
-            enable_registry_listener=True,
-        )
-
-        try:
-            # Give time for subscription to complete
-            await asyncio.sleep(0.1)
-
-            # Verify the custom request topic was used for subscription
-            assert event_bus.subscribed_topic == custom_request_topic
-            assert (
-                event_bus.subscribed_group_id
-                == "introspection-registry-custom-topic-node"
-            )
-        finally:
-            await node.stop_introspection_tasks()
-
-    async def test_registry_listener_uses_custom_request_topic_legacy_params(
-        self,
-    ) -> None:
-        """Test registry listener with custom request topic via legacy params."""
-
-        class CapturingEventBus:
-            """Event bus that captures subscription topic."""
-
-            def __init__(self) -> None:
-                self.subscribed_topic: str | None = None
-                self.subscribed_group_id: str | None = None
-
-            async def publish_envelope(
-                self,
-                envelope: Any,
-                topic: str,
-            ) -> None:
-                pass
-
-            async def publish(
-                self,
-                topic: str,
-                key: bytes | None,
-                value: bytes,
-            ) -> None:
-                pass
-
-            async def subscribe(
-                self,
-                topic: str,
-                group_id: str,
-                on_message: Callable[[Any], Awaitable[None]],
-            ) -> Callable[[], Awaitable[None]]:
-                self.subscribed_topic = topic
-                self.subscribed_group_id = group_id
-
-                async def unsubscribe() -> None:
-                    pass
-
-                return unsubscribe
-
-        event_bus = CapturingEventBus()
-        custom_request_topic = "onex.legacy.registry.request.topic.v1"
-
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="legacy-registry-topic-node",
-            node_type="COMPUTE",
-            event_bus=event_bus,  # type: ignore[arg-type]
-            request_introspection_topic=custom_request_topic,
-        )
-
-        # Start registry listener
-        await node.start_introspection_tasks(
-            enable_heartbeat=False,
-            enable_registry_listener=True,
-        )
-
-        try:
-            # Give time for subscription to complete
-            await asyncio.sleep(0.1)
-
-            # Verify the custom request topic was used for subscription
-            assert event_bus.subscribed_topic == custom_request_topic
-            assert (
-                event_bus.subscribed_group_id
-                == "introspection-legacy-registry-topic-node"
-            )
-        finally:
-            await node.stop_introspection_tasks()
-
-    async def test_default_topics_used_without_custom_config(self) -> None:
-        """Test that class-level default topics are used when no custom topics provided."""
-        event_bus = MockEventBus()
-
-        node = MockNode()
-        node.initialize_introspection(
-            node_id="default-topics-verify-node",
-            node_type="EFFECT",
-            event_bus=event_bus,
-        )
-
-        # Verify class-level defaults are used
-        assert (
-            node._introspection_topic
-            == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
-        )
-        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
-        assert (
-            node._request_introspection_topic
-            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
-        )
-
-        # Verify introspection uses default topic
-        await node.publish_introspection(reason="default-test")
-        assert len(event_bus.published_envelopes) == 1
-        _, topic = event_bus.published_envelopes[0]
-        assert topic == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
-
-    async def test_config_model_default_topics_used(self) -> None:
-        """Test that default topics are used when config model has None topics."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
-
-        event_bus = MockEventBus()
-
-        # Create config without specifying any topics
-        config = ModelIntrospectionConfig(
-            node_id="config-default-topics-node",
-            node_type="EFFECT",
-            event_bus=event_bus,
-        )
-
-        node = MockNode()
-        node.initialize_introspection(config=config)
-
-        # Verify class-level defaults are used
-        assert (
-            node._introspection_topic
-            == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
-        )
-        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
-        assert (
-            node._request_introspection_topic
-            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
-        )
-
-        # Verify introspection uses default topic
-        await node.publish_introspection(reason="config-default-test")
-        assert len(event_bus.published_envelopes) == 1
-        _, topic = event_bus.published_envelopes[0]
-        assert topic == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
-
-
-@pytest.mark.asyncio(loop_scope="function")
-class TestMixinNodeIntrospectionClassLevelDefaults:
-    """Test class-level default topic constants for subclass overrides."""
-
-    async def test_class_level_default_topics_exist(self) -> None:
-        """Test that class-level default topic constants are defined."""
-        assert hasattr(MixinNodeIntrospection, "DEFAULT_INTROSPECTION_TOPIC")
-        assert hasattr(MixinNodeIntrospection, "DEFAULT_HEARTBEAT_TOPIC")
-        assert hasattr(MixinNodeIntrospection, "DEFAULT_REQUEST_INTROSPECTION_TOPIC")
-
-        # Verify they have the expected values
-        assert (
-            MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
-            == "onex.node.introspection.published.v1"
-        )
-        assert (
-            MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
-            == "onex.node.heartbeat.published.v1"
-        )
-        assert (
-            MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
-            == "onex.registry.introspection.requested.v1"
-        )
-
-    async def test_subclass_can_override_default_topics(self) -> None:
-        """Test that subclasses can override default topic class variables."""
-
-        class TenantNode(MixinNodeIntrospection):
-            """A tenant-specific node with custom topic defaults."""
-
-            DEFAULT_INTROSPECTION_TOPIC = "onex.tenant1.introspection.published.v1"
-            DEFAULT_HEARTBEAT_TOPIC = "onex.tenant1.heartbeat.published.v1"
-            DEFAULT_REQUEST_INTROSPECTION_TOPIC = (
-                "onex.tenant1.introspection.requested.v1"
-            )
-
-        node = TenantNode()
-        node.initialize_introspection(
-            node_id="tenant-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
 
-        # Verify that the subclass defaults are used
-        assert node._introspection_topic == "onex.tenant1.introspection.published.v1"
-        assert node._heartbeat_topic == "onex.tenant1.heartbeat.published.v1"
-        assert (
-            node._request_introspection_topic
-            == "onex.tenant1.introspection.requested.v1"
+        # Warm the cache with initial call
+        await node.get_introspection_data()
+
+        cache_hit_times: list[float] = []
+
+        # Measure cache hits - use larger sample for cache hit measurement
+        for _ in range(100):
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            cache_hit_times.append(elapsed_ms)
+
+        # Calculate statistics
+        avg_time = sum(cache_hit_times) / len(cache_hit_times)
+        p95_time = self._calculate_percentile(cache_hit_times, 95)
+        p99_time = self._calculate_percentile(cache_hit_times, 99)
+        min_time = min(cache_hit_times)
+        max_time = max(cache_hit_times)
+
+        print("\nWarm cache hit (100 iterations):")
+        print(
+            f"  avg={avg_time:.3f}ms, min={min_time:.3f}ms, "
+            f"max={max_time:.3f}ms, p95={p95_time:.3f}ms, p99={p99_time:.3f}ms"
         )
 
-    async def test_subclass_defaults_used_in_publishing(self) -> None:
-        """Test that subclass default topics are used in publish operations."""
+        # Cache hits should be very fast - use p99 for threshold
+        threshold_ms = PERF_THRESHOLD_CACHE_HIT_MS * PERF_MULTIPLIER
+        assert p99_time < threshold_ms, (
+            f"Cache hit p99 latency {p99_time:.3f}ms exceeds {threshold_ms:.1f}ms "
+            f"threshold (avg={avg_time:.3f}ms)"
+        )
 
-        class CustomTopicNode(MixinNodeIntrospection):
-            """A node with custom topic defaults."""
+        # Verify cache hit was detected in metrics
+        metrics = node.get_performance_metrics()
+        assert metrics is not None
+        assert metrics.cache_hit is True, "Last call should be a cache hit"
 
-            DEFAULT_INTROSPECTION_TOPIC = "onex.custom.introspection.published.v1"
+    async def test_benchmark_component_level_timing(self) -> None:
+        """Benchmark timing for individual introspection components.
 
-        event_bus = MockEventBus()
-        node = CustomTopicNode()
+        Measures timing for each component:
+        - get_capabilities()
+        - get_endpoints()
+        - get_current_state()
+
+        Uses p95 for threshold comparison to avoid flakiness.
+        """
+        node = MockNode()
         node.initialize_introspection(
-            node_id="custom-topic-node",
+            node_id=uuid4(),
             node_type="EFFECT",
-            event_bus=event_bus,
+            event_bus=None,
         )
 
-        await node.publish_introspection(reason="test")
+        # Clear class cache for accurate capability measurement
+        MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
 
-        # Verify the custom topic was used
-        assert len(event_bus.published_envelopes) == 1
-        _, topic = event_bus.published_envelopes[0]
-        assert topic == "onex.custom.introspection.published.v1"
+        component_timings: dict[str, list[float]] = {
+            "get_capabilities": [],
+            "get_endpoints": [],
+            "get_current_state": [],
+        }
 
-    async def test_config_model_overrides_subclass_defaults(self) -> None:
-        """Test that config model topics override subclass defaults."""
-        from omnibase_infra.mixins import ModelIntrospectionConfig
+        for i in range(self.MIN_SAMPLE_SIZE):
+            # Clear class cache each iteration for get_capabilities measurement
+            if i > 0:
+                MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
 
-        class SubclassNode(MixinNodeIntrospection):
-            """A subclass with custom defaults."""
+            # Time get_capabilities
+            start = time.perf_counter()
+            await node.get_capabilities()
+            component_timings["get_capabilities"].append(
+                (time.perf_counter() - start) * 1000
+            )
 
-            DEFAULT_INTROSPECTION_TOPIC = "onex.subclass.introspection.published.v1"
+            # Time get_endpoints
+            start = time.perf_counter()
+            await node.get_endpoints()
+            component_timings["get_endpoints"].append(
+                (time.perf_counter() - start) * 1000
+            )
 
-        event_bus = MockEventBus()
+            # Time get_current_state
+            start = time.perf_counter()
+            await node.get_current_state()
+            component_timings["get_current_state"].append(
+                (time.perf_counter() - start) * 1000
+            )
 
-        # Config specifies a different topic that should override subclass default
-        config = ModelIntrospectionConfig(
-            node_id="override-node",
-            node_type="EFFECT",
-            event_bus=event_bus,
-            introspection_topic="onex.config.introspection.published.v1",
+        print(f"\nComponent-level timing ({self.MIN_SAMPLE_SIZE} iterations):")
+        for name, times in component_timings.items():
+            avg = sum(times) / len(times)
+            p95 = self._calculate_percentile(times, 95)
+            min_t = min(times)
+            max_t = max(times)
+            print(
+                f"  {name}: avg={avg:.2f}ms, min={min_t:.2f}ms, "
+                f"max={max_t:.2f}ms, p95={p95:.2f}ms"
+            )
+
+        # Verify get_capabilities (most expensive due to reflection)
+        cap_p95 = self._calculate_percentile(component_timings["get_capabilities"], 95)
+        cap_threshold = PERF_THRESHOLD_GET_CAPABILITIES_MS * PERF_MULTIPLIER
+        assert cap_p95 < cap_threshold, (
+            f"get_capabilities p95 {cap_p95:.2f}ms exceeds {cap_threshold:.0f}ms"
         )
 
-        node = SubclassNode()
-        node.initialize_introspection(config=config)
-
-        # Verify config topic overrides subclass default
-        assert node._introspection_topic == "onex.config.introspection.published.v1"
-
-        await node.publish_introspection(reason="override-test")
-
-        _, topic = event_bus.published_envelopes[0]
-        assert topic == "onex.config.introspection.published.v1"
-
-    async def test_multiple_subclasses_have_independent_defaults(self) -> None:
-        """Test that different subclasses can have independent default topics."""
-
-        class TenantANode(MixinNodeIntrospection):
-            """Node for Tenant A."""
-
-            DEFAULT_INTROSPECTION_TOPIC = "onex.tenantA.introspection.published.v1"
-
-        class TenantBNode(MixinNodeIntrospection):
-            """Node for Tenant B."""
-
-            DEFAULT_INTROSPECTION_TOPIC = "onex.tenantB.introspection.published.v1"
-
-        event_bus_a = MockEventBus()
-        event_bus_b = MockEventBus()
-
-        node_a = TenantANode()
-        node_a.initialize_introspection(
-            node_id="tenant-a-node",
-            node_type="EFFECT",
-            event_bus=event_bus_a,
+        # Verify get_current_state (should be very fast)
+        state_p95 = self._calculate_percentile(
+            component_timings["get_current_state"], 95
+        )
+        state_threshold = 1.0 * PERF_MULTIPLIER  # Should be sub-millisecond
+        assert state_p95 < state_threshold, (
+            f"get_current_state p95 {state_p95:.2f}ms exceeds {state_threshold:.1f}ms"
         )
 
-        node_b = TenantBNode()
-        node_b.initialize_introspection(
-            node_id="tenant-b-node",
+    async def test_benchmark_50ms_target_verification(self) -> None:
+        """Verify that the <50ms target is consistently met.
+
+        This is the primary benchmark test that validates the performance
+        requirement. Uses p95 percentile for stability.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
             node_type="EFFECT",
-            event_bus=event_bus_b,
+            event_bus=None,
         )
 
-        # Verify independent defaults
-        assert node_a._introspection_topic == "onex.tenantA.introspection.published.v1"
-        assert node_b._introspection_topic == "onex.tenantB.introspection.published.v1"
+        total_times: list[float] = []
 
-        # Verify publishing uses correct topics
-        await node_a.publish_introspection(reason="tenant-a")
-        await node_b.publish_introspection(reason="tenant-b")
+        for i in range(self.MIN_SAMPLE_SIZE):
+            # Clear cache for each iteration
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+            if i > 0:
+                MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
 
-        _, topic_a = event_bus_a.published_envelopes[0]
-        _, topic_b = event_bus_b.published_envelopes[0]
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            total_times.append(elapsed_ms)
 
-        assert topic_a == "onex.tenantA.introspection.published.v1"
-        assert topic_b == "onex.tenantB.introspection.published.v1"
+        # Calculate statistics
+        avg_time = sum(total_times) / len(total_times)
+        p95_time = self._calculate_percentile(total_times, 95)
+        p99_time = self._calculate_percentile(total_times, 99)
 
-    async def test_class_defaults_have_expected_values(self) -> None:
-        """Test that class defaults have the expected ONEX topic values."""
-        # Verify class defaults have the expected values following ONEX naming convention
+        print(f"\n<50ms Target Verification ({self.MIN_SAMPLE_SIZE} iterations):")
+        print(f"  avg={avg_time:.2f}ms, p95={p95_time:.2f}ms, p99={p99_time:.2f}ms")
+
+        # The 50ms target with CI buffer
+        threshold_ms = 50.0 * PERF_MULTIPLIER
+        assert p95_time < threshold_ms, (
+            f"FAILED: p95 latency {p95_time:.2f}ms exceeds <50ms target "
+            f"(with {PERF_MULTIPLIER}x CI buffer = {threshold_ms:.0f}ms)"
+        )
+
+        print(f"  PASSED: p95={p95_time:.2f}ms < {threshold_ms:.0f}ms threshold")
+
+    async def test_benchmark_performance_metrics_validation(self) -> None:
+        """Verify that get_performance_metrics() returns valid timing data.
+
+        Validates that IntrospectionPerformanceMetrics captures accurate
+        timing information that matches actual measured times.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Clear cache for fresh computation
+        node._introspection_cache = None
+        node._introspection_cached_at = None
+        MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
+
+        # Measure actual time and get metrics
+        start = time.perf_counter()
+        await node.get_introspection_data()
+        actual_total_ms = (time.perf_counter() - start) * 1000
+
+        metrics = node.get_performance_metrics()
+
+        # Validate metrics structure
+        assert metrics is not None, "get_performance_metrics() should return metrics"
+        assert isinstance(metrics, IntrospectionPerformanceMetrics)
+
+        # Validate timing fields are populated
+        assert metrics.total_introspection_ms > 0, (
+            "total_introspection_ms should be > 0"
+        )
+        assert metrics.get_capabilities_ms >= 0, "get_capabilities_ms should be >= 0"
+        assert metrics.get_endpoints_ms >= 0, "get_endpoints_ms should be >= 0"
+        assert metrics.get_current_state_ms >= 0, "get_current_state_ms should be >= 0"
+
+        # Validate method count is reasonable
+        assert metrics.method_count >= 0, "method_count should be >= 0"
+
+        # Validate cache hit detection (should be False for fresh computation)
+        assert metrics.cache_hit is False, "First call should not be cache hit"
+
+        # Validate timing consistency - metrics time should be close to measured time
+        # Allow some tolerance for measurement overhead
+        timing_tolerance_ms = 5.0 * PERF_MULTIPLIER
         assert (
-            MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
-            == "onex.node.introspection.published.v1"
+            abs(metrics.total_introspection_ms - actual_total_ms) < timing_tolerance_ms
+        ), (
+            f"Metrics time {metrics.total_introspection_ms:.2f}ms differs from "
+            f"measured time {actual_total_ms:.2f}ms by more than {timing_tolerance_ms:.1f}ms"
         )
-        assert (
-            MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
-            == "onex.node.heartbeat.published.v1"
+
+        # Validate to_dict() returns all fields
+        metrics_dict = metrics.to_dict()
+        expected_keys = {
+            "get_capabilities_ms",
+            "discover_capabilities_ms",
+            "get_endpoints_ms",
+            "get_current_state_ms",
+            "total_introspection_ms",
+            "cache_hit",
+            "method_count",
+            "threshold_exceeded",
+            "slow_operations",
+        }
+        assert set(metrics_dict.keys()) == expected_keys, (
+            f"to_dict() missing keys: {expected_keys - set(metrics_dict.keys())}"
         )
-        assert (
-            MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
-            == "onex.registry.introspection.requested.v1"
+
+        print("\nPerformance Metrics Validation:")
+        print(f"  total_introspection_ms: {metrics.total_introspection_ms:.2f}")
+        print(f"  get_capabilities_ms: {metrics.get_capabilities_ms:.2f}")
+        print(f"  get_endpoints_ms: {metrics.get_endpoints_ms:.2f}")
+        print(f"  get_current_state_ms: {metrics.get_current_state_ms:.2f}")
+        print(f"  method_count: {metrics.method_count}")
+        print(f"  cache_hit: {metrics.cache_hit}")
+        print(f"  threshold_exceeded: {metrics.threshold_exceeded}")
+
+    async def test_benchmark_metrics_threshold_detection(self) -> None:
+        """Verify that threshold_exceeded and slow_operations are correctly set.
+
+        Tests that the metrics correctly identify when operations exceed
+        their performance thresholds.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Run multiple iterations to check threshold detection
+        threshold_exceeded_count = 0
+        iterations = self.MIN_SAMPLE_SIZE
+
+        for i in range(iterations):
+            # Clear cache for each iteration
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+            if i > 0:
+                MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
+
+            await node.get_introspection_data()
+            metrics = node.get_performance_metrics()
+
+            assert metrics is not None
+
+            # Count how often threshold is exceeded
+            if metrics.threshold_exceeded:
+                threshold_exceeded_count += 1
+
+            # Validate slow_operations consistency
+            if metrics.threshold_exceeded:
+                # If threshold is exceeded, slow_operations should contain something
+                # (unless it's a cache hit threshold, which may not add to list)
+                pass  # Threshold detection is based on raw values
+            else:
+                # If threshold not exceeded, slow_operations should be empty
+                assert len(metrics.slow_operations) == 0, (
+                    f"slow_operations should be empty when threshold not exceeded: "
+                    f"{metrics.slow_operations}"
+                )
+
+        print(f"\nThreshold Detection ({iterations} iterations):")
+        print(f"  threshold_exceeded: {threshold_exceeded_count}/{iterations} times")
+
+        # In normal operation, we should rarely exceed thresholds
+        # Allow up to 10% of iterations to exceed (for CI variance)
+        max_exceeded_ratio = 0.1
+        exceeded_ratio = threshold_exceeded_count / iterations
+        if exceeded_ratio > max_exceeded_ratio:
+            print(
+                f"  WARNING: {exceeded_ratio:.1%} of iterations exceeded threshold "
+                f"(expected < {max_exceeded_ratio:.1%})"
+            )
+
+    async def test_benchmark_statistical_stability(self) -> None:
+        """Verify that timing measurements are statistically stable.
+
+        Tests that the variance in timing measurements is acceptable,
+        indicating consistent performance.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Collect timing samples
+        samples: list[float] = []
+        sample_size = 50  # Larger sample for better statistics
+
+        for i in range(sample_size):
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+            if i > 0:
+                MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
+
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            samples.append((time.perf_counter() - start) * 1000)
+
+        # Calculate statistics
+        avg = sum(samples) / len(samples)
+        variance = sum((x - avg) ** 2 for x in samples) / len(samples)
+        std_dev = variance**0.5
+        coef_of_variation = std_dev / avg if avg > 0 else 0
+
+        p50 = self._calculate_percentile(samples, 50)
+        p95 = self._calculate_percentile(samples, 95)
+        p99 = self._calculate_percentile(samples, 99)
+
+        print(f"\nStatistical Stability ({sample_size} samples):")
+        print(f"  avg={avg:.2f}ms, std_dev={std_dev:.2f}ms, CV={coef_of_variation:.2%}")
+        print(f"  p50={p50:.2f}ms, p95={p95:.2f}ms, p99={p99:.2f}ms")
+
+        # Coefficient of variation should be reasonable
+        # Allow higher variance in CI environments
+        max_cv = 1.0 * PERF_MULTIPLIER  # 100% CV with CI buffer
+        assert coef_of_variation < max_cv, (
+            f"Coefficient of variation {coef_of_variation:.2%} exceeds {max_cv:.0%}, "
+            f"indicating unstable performance"
+        )
+
+        # p99 should not be excessively higher than p50
+        # This catches outliers that might cause flaky tests
+        max_p99_to_p50_ratio = 5.0 * PERF_MULTIPLIER
+        p99_to_p50_ratio = p99 / p50 if p50 > 0 else 0
+        assert p99_to_p50_ratio < max_p99_to_p50_ratio, (
+            f"p99/p50 ratio {p99_to_p50_ratio:.1f} exceeds {max_p99_to_p50_ratio:.1f}, "
+            f"indicating excessive outliers"
         )

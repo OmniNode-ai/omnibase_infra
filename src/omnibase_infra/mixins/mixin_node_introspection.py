@@ -25,14 +25,41 @@ Security Considerations:
     discover node capabilities. While this enables powerful service discovery, it
     has security implications that developers must understand.
 
+    **Threat Model**:
+
+    Introspection data could be valuable to an attacker for:
+
+    - **Reconnaissance**: Learning what operations a node supports to identify
+      attack vectors (e.g., discovering ``decrypt_*``, ``admin_*`` methods).
+    - **Architecture mapping**: Understanding system topology through protocol
+      and mixin discovery (e.g., which nodes implement ``ProtocolDatabaseAdapter``).
+    - **Version fingerprinting**: Identifying outdated versions with known
+      vulnerabilities via the ``version`` field.
+    - **State inference**: Deducing system state or health from FSM state values.
+
     **What Gets Exposed via Introspection**:
 
-    - Public method names (potential operations a node can perform)
-    - Method signatures (parameter names and type annotations)
-    - Protocol and mixin implementations (discovered capabilities)
-    - FSM state information (if ``MixinFSM`` or similar state attributes are present)
-    - Endpoint URLs (health, API, metrics paths)
-    - Node metadata (name, version, type)
+    - **Public method names**: Method names that may reveal operations
+      (e.g., ``execute_query``, ``process_payment``).
+    - **Method signatures**: Full signatures including parameter names and type
+      annotations. Parameter names like ``api_key``, ``user_password``, or
+      ``decrypt_key`` reveal sensitive parameter purposes.
+    - **Protocol implementations**: Class names from inheritance hierarchy that
+      start with ``Protocol`` or ``Mixin`` (e.g., ``ProtocolDatabaseAdapter``,
+      ``MixinAsyncCircuitBreaker``).
+    - **FSM state information**: Current state value if FSM attributes exist
+      (e.g., ``connected``, ``authenticated``, ``processing``).
+    - **Endpoint URLs**: Health, API, and metrics endpoint paths.
+    - **Node metadata**: Node ID (UUID), type (EFFECT/COMPUTE/etc.), and version.
+
+    **What is NOT Exposed**:
+
+    - Private methods (prefixed with ``_``) - completely excluded from discovery.
+    - Method implementations or source code - only signatures, not logic.
+    - Internal state variables - only FSM state if present.
+    - Configuration values - secrets, connection strings, etc. are not exposed.
+    - Environment variables or runtime parameters.
+    - Request/response payloads or historical data.
 
     **Built-in Protections**:
 
@@ -47,12 +74,16 @@ Security Considerations:
       reported as capabilities in the operations list.
     - **Configurable exclusions**: The ``exclude_prefixes`` parameter in
       ``initialize_introspection()`` allows additional filtering.
+    - **Caching with TTL**: Introspection data is cached to reduce reflection
+      frequency, with configurable TTL for freshness.
 
     **Best Practices for Node Developers**:
 
     - Prefix internal/sensitive methods with ``_`` to exclude them from introspection.
     - Avoid exposing sensitive business logic in public method names (e.g., use
       ``process_request`` instead of ``decrypt_and_forward_to_payment_gateway``).
+    - Use generic parameter names for public methods (e.g., ``data`` instead of
+      ``user_credentials``, ``payload`` instead of ``encrypted_secret``).
     - Review exposed capabilities before deploying to production environments.
     - Consider network segmentation for introspection event topics in multi-tenant
       environments.
@@ -61,28 +92,37 @@ Security Considerations:
 
     **Network Security Considerations**:
 
-    - Introspection data is published to Kafka topics (``onex.node.introspection.published.v1``).
+    - Introspection data is published to Kafka topics (``node.introspection``,
+      ``node.heartbeat``, ``node.request_introspection``).
     - In multi-tenant environments, ensure proper topic ACLs are configured.
     - Consider whether introspection topics should be accessible outside the cluster.
     - Monitor introspection topic consumers for unauthorized access.
+    - The registry listener responds to ANY request on the request topic without
+      authentication - secure the topic with Kafka ACLs.
+
+    **Production Deployment Checklist**:
+
+    1. Review ``get_capabilities()`` output for each node before deployment.
+    2. Verify no sensitive method names or parameter names are exposed.
+    3. Configure Kafka topic ACLs to restrict introspection topic access.
+    4. Consider disabling ``enable_registry_listener`` if not needed.
+    5. Monitor introspection topic consumer groups for unexpected consumers.
+    6. Use network segmentation to isolate introspection traffic if required.
 
     For more details, see the "Node Introspection Security Considerations" section
     in ``CLAUDE.md``.
 
 Usage:
     ```python
-    from omnibase_infra.mixins import MixinNodeIntrospection, ModelIntrospectionConfig
+    from omnibase_infra.mixins import MixinNodeIntrospection
 
-    # Recommended: Using config model
     class MyNode(MixinNodeIntrospection):
         def __init__(self, config, event_bus=None):
-            introspection_config = ModelIntrospectionConfig(
+            self.initialize_introspection(
                 node_id=config.node_id,
                 node_type="EFFECT",
                 event_bus=event_bus,
-                version="1.0.0",
             )
-            self.initialize_introspection(config=introspection_config)
 
         async def startup(self):
             # Publish initial introspection on startup
@@ -101,15 +141,6 @@ Usage:
 
             # Stop background tasks
             await self.stop_introspection_tasks()
-
-    # Legacy: Using individual parameters (backwards compatible)
-    class MyLegacyNode(MixinNodeIntrospection):
-        def __init__(self, config, event_bus=None):
-            self.initialize_introspection(
-                node_id=config.node_id,
-                node_type="EFFECT",
-                event_bus=event_bus,
-            )
     ```
 
 Integration Requirements:
@@ -132,16 +163,18 @@ import asyncio
 import inspect
 import json
 import logging
-import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, Protocol, TypedDict, cast, runtime_checkable
-from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
+from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
+from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
-
+from omnibase_infra.mixins.model_introspection_config import ModelIntrospectionConfig
+from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
+from omnibase_infra.models.discovery.model_node_introspection_event import (
+    CapabilitiesTypedDict,
+)
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 if TYPE_CHECKING:
@@ -149,331 +182,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Event topic constants
+INTROSPECTION_TOPIC = "node.introspection"
+HEARTBEAT_TOPIC = "node.heartbeat"
+REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
 
-@runtime_checkable
-class ProtocolIntrospectionEventBus(Protocol):
-    """Minimal protocol for event bus used by MixinNodeIntrospection.
-
-    This protocol defines only the subset of event bus methods actually used by
-    the introspection mixin, enabling duck-typed compatibility with any event bus
-    implementation without requiring the full ProtocolEventBus interface.
-
-    The introspection mixin uses:
-        - ``publish_envelope()``: For publishing typed introspection and heartbeat events
-        - ``publish()``: Fallback for raw byte publishing when publish_envelope unavailable
-        - ``subscribe()``: For listening to introspection request events
-
-    This minimal interface allows flexibility in event bus implementations while
-    maintaining proper type checking. Any object implementing these three methods
-    can be used as the introspection event bus.
-
-    Note:
-        The ``on_message`` callback type uses ``ModelEventMessage`` from
-        ``omnibase_infra.event_bus.models``, imported under TYPE_CHECKING to avoid
-        circular imports at runtime.
-
-    See Also:
-        - ``ProtocolEventBus`` in ``omnibase_infra.nodes.node_registry_effect`` for
-          the full event bus protocol
-        - ``KafkaEventBus`` and ``InMemoryEventBus`` for concrete implementations
-    """
-
-    async def publish_envelope(
-        self,
-        envelope: object,
-        topic: str,
-    ) -> None:
-        """Publish a typed envelope to a topic.
-
-        Args:
-            envelope: Event model (e.g., ModelNodeIntrospectionEvent) with model_dump()
-            topic: Target topic name
-
-        Note:
-            The envelope parameter uses ``object`` type to accept any Pydantic model
-            with a ``model_dump()`` method. This matches the actual implementations
-            in KafkaEventBus and InMemoryEventBus.
-        """
-        ...
-
-    async def publish(
-        self,
-        topic: str,
-        key: bytes | None,
-        value: bytes,
-    ) -> None:
-        """Publish raw bytes to a topic.
-
-        Args:
-            topic: Target topic name
-            key: Optional message key for partitioning
-            value: Message payload as bytes (typically JSON-encoded)
-        """
-        ...
-
-    async def subscribe(
-        self,
-        topic: str,
-        group_id: str,
-        on_message: Callable[[ModelEventMessage], Awaitable[None]],
-    ) -> Callable[[], Awaitable[None]]:
-        """Subscribe to a topic with a message callback.
-
-        Args:
-            topic: Topic to subscribe to
-            group_id: Consumer group ID for offset management
-            on_message: Async callback invoked for each message
-
-        Returns:
-            Async unsubscribe function to cancel the subscription
-        """
-        ...
-
-
-# Type alias for capabilities dictionary structure
-# operations: list of method names, protocols: list of protocol names
-# has_fsm: boolean, method_signatures: dict of method name to signature string
-CapabilitiesDict = dict[str, list[str] | bool | dict[str, str]]
+# Backward-compatible alias for CapabilitiesTypedDict
+# The canonical definition is in model_node_introspection_event.py
+# This provides a shorter name for internal use and maintains backward compatibility
+CapabilitiesDict = CapabilitiesTypedDict
 
 # Performance threshold constants (in milliseconds)
 PERF_THRESHOLD_GET_CAPABILITIES_MS = 50.0
 PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS = 30.0
 PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS = 50.0
 PERF_THRESHOLD_CACHE_HIT_MS = 1.0
-
-
-class ModelIntrospectionConfig(BaseModel):
-    """Configuration model for node introspection initialization.
-
-    This model groups all configuration parameters for ``initialize_introspection()``,
-    reducing the method's parameter count and improving maintainability. The model
-    supports both required and optional parameters with sensible defaults.
-
-    Attributes:
-        node_id: Unique identifier for this node instance. Required.
-        node_type: Type of node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR). Required.
-        event_bus: Optional event bus for publishing introspection and heartbeat events.
-            Must have ``publish_envelope()`` method if provided.
-        version: Node version string (default: "1.0.0").
-        cache_ttl: Cache time-to-live in seconds (default: 300.0).
-        operation_keywords: Optional set of keywords to identify operation methods.
-            Methods containing these keywords are reported as operations.
-            If None, uses DEFAULT_OPERATION_KEYWORDS from the mixin.
-        exclude_prefixes: Optional set of prefixes to exclude from capability discovery.
-            Methods starting with these prefixes are filtered out.
-            If None, uses DEFAULT_EXCLUDE_PREFIXES from the mixin.
-        introspection_topic: Optional topic for publishing introspection events.
-            If None, uses ``MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC`` class
-            variable, which defaults to ``"onex.node.introspection.published.v1"``.
-            Subclasses can override the class variable for different defaults.
-        heartbeat_topic: Optional topic for publishing heartbeat events.
-            If None, uses ``MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC`` class
-            variable, which defaults to ``"onex.node.heartbeat.published.v1"``.
-            Subclasses can override the class variable for different defaults.
-        request_introspection_topic: Optional topic for listening to introspection requests.
-            If None, uses ``MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC``
-            class variable, which defaults to ``"onex.registry.introspection.requested.v1"``.
-            Subclasses can override the class variable for different defaults.
-
-    Example:
-        ```python
-        from omnibase_infra.mixins import MixinNodeIntrospection, ModelIntrospectionConfig
-
-        class MyNode(MixinNodeIntrospection):
-            def __init__(self, config, event_bus=None):
-                introspection_config = ModelIntrospectionConfig(
-                    node_id=config.node_id,
-                    node_type="EFFECT",
-                    event_bus=event_bus,
-                    version="1.2.0",
-                    cache_ttl=600.0,
-                )
-                self.initialize_introspection(config=introspection_config)
-
-        # With custom operation keywords
-        config = ModelIntrospectionConfig(
-            node_id="my-effect-node",
-            node_type="EFFECT",
-            operation_keywords={"fetch", "upload", "download"},
-        )
-
-        # With contract-driven topic configuration
-        config = ModelIntrospectionConfig(
-            node_id="contract-node",
-            node_type="COMPUTE",
-            introspection_topic="onex.custom.introspection.published.v1",
-            heartbeat_topic="onex.custom.heartbeat.published.v1",
-        )
-
-        # Subclass with different default topics
-        class MyTenantNode(MixinNodeIntrospection):
-            # Override class-level defaults for this tenant
-            DEFAULT_INTROSPECTION_TOPIC = "onex.tenant1.introspection.published.v1"
-            DEFAULT_HEARTBEAT_TOPIC = "onex.tenant1.heartbeat.published.v1"
-        ```
-
-    See Also:
-        - ``MixinNodeIntrospection.initialize_introspection()`` for usage patterns
-        - ``MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC`` for default topic values
-        - ``MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC`` for default topic values
-        - ``MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC`` for default topic values
-    """
-
-    node_id: str = Field(
-        ...,
-        description="Unique identifier for this node instance",
-        min_length=1,
-    )
-    node_type: str = Field(
-        ...,
-        description="Type of node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)",
-        min_length=1,
-    )
-    # Using ProtocolIntrospectionEventBus for type-safe duck typing.
-    # This minimal protocol requires only the 3 methods actually used by this mixin:
-    # publish_envelope(), publish(), and subscribe(). This provides meaningful type
-    # checking while allowing any compatible event bus implementation.
-    event_bus: ProtocolIntrospectionEventBus | None = Field(
-        default=None,
-        description="Event bus for publishing introspection and heartbeat events",
-    )
-    version: str = Field(
-        default="1.0.0",
-        description="Node version string",
-    )
-    cache_ttl: float = Field(
-        default=300.0,
-        description="Cache time-to-live in seconds",
-        ge=0.0,
-    )
-    operation_keywords: set[str] | None = Field(
-        default=None,
-        description="Keywords to identify operation methods",
-    )
-    exclude_prefixes: set[str] | None = Field(
-        default=None,
-        description="Prefixes to exclude from capability discovery",
-    )
-    introspection_topic: str | None = Field(
-        default=None,
-        description="Topic for publishing introspection events",
-    )
-    heartbeat_topic: str | None = Field(
-        default=None,
-        description="Topic for publishing heartbeat events",
-    )
-    request_introspection_topic: str | None = Field(
-        default=None,
-        description="Topic for introspection requests",
-    )
-
-    # Regex pattern for valid topic name characters (alphanumeric, dots, hyphens, underscores)
-    _TOPIC_NAME_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9._-]+$")
-
-    @field_validator("node_id", "node_type", mode="before")
-    @classmethod
-    def validate_non_empty_string(cls, v: str | None, info: ValidationInfo) -> str:
-        """Validate that required string fields are non-empty and not whitespace-only.
-
-        This validator provides explicit, user-friendly error messages for empty
-        string cases, which is clearer than the default Pydantic min_length error.
-
-        Args:
-            v: The field value (expected to be a string)
-            info: Pydantic validation context with field name
-
-        Returns:
-            The validated string value
-
-        Raises:
-            ValueError: If the value is None, empty, or whitespace-only
-
-        Example:
-            Valid: "my-node-id", "EFFECT"
-            Invalid: None, "", "   "
-        """
-        if v is None:
-            raise ValueError(f"{info.field_name} is required and cannot be None")
-        if not isinstance(v, str):
-            raise ValueError(
-                f"{info.field_name} must be a string, got {type(v).__name__}"
-            )
-        if v.strip() == "":
-            raise ValueError(f"{info.field_name} cannot be empty or whitespace-only")
-        return v
-
-    _TOPIC_PREFIX: ClassVar[str] = "onex."
-    # Regex pattern for version suffix (e.g., .v1, .v2, .v10)
-    _VERSION_SUFFIX_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"\.v\d+$")
-
-    @field_validator(
-        "introspection_topic",
-        "heartbeat_topic",
-        "request_introspection_topic",
-        mode="after",
-    )
-    @classmethod
-    def validate_topic_name(cls, v: str | None) -> str | None:
-        """Validate topic name format for ONEX naming convention.
-
-        Topic names must:
-        - Start with "onex." prefix (ONEX naming convention)
-        - Contain only alphanumeric characters, dots, hyphens, and underscores
-        - Be non-empty after the prefix
-        - End with a version suffix (e.g., .v1, .v2, .v10)
-
-        Args:
-            v: Topic name string or None
-
-        Returns:
-            The validated topic name, or None if input was None or empty
-
-        Raises:
-            ValueError: If topic name format is invalid
-
-        Example:
-            Valid: "onex.node.introspection.published.v1"
-            Invalid: "onex.node.introspection.published" (missing version suffix)
-            Invalid: "onex.node.introspection.published.v" (incomplete version)
-        """
-        # Handle None and empty string - both treated as "not provided"
-        if v is None or v == "":
-            return None
-
-        # Check for ONEX prefix
-        if not v.startswith(cls._TOPIC_PREFIX):
-            raise ValueError(
-                f"Topic name must start with '{cls._TOPIC_PREFIX}' prefix. Got: '{v}'"
-            )
-
-        # Check for valid characters
-        if not cls._TOPIC_NAME_PATTERN.match(v):
-            raise ValueError(
-                f"Topic name contains invalid characters. "
-                f"Only alphanumeric, dots, hyphens, and underscores are allowed. "
-                f"Got: '{v}'"
-            )
-
-        # Check non-empty after prefix
-        suffix = v[len(cls._TOPIC_PREFIX) :]
-        if not suffix:
-            raise ValueError(
-                f"Topic name must have content after '{cls._TOPIC_PREFIX}' prefix. "
-                f"Got: '{v}'"
-            )
-
-        # Check for version suffix (e.g., .v1, .v2, .v10)
-        if not cls._VERSION_SUFFIX_PATTERN.search(v):
-            raise ValueError(
-                f"Topic name must end with version suffix (e.g., .v1, .v2). Got: '{v}'"
-            )
-
-        return v
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        frozen=False,
-    )
 
 
 @dataclass
@@ -483,13 +206,6 @@ class IntrospectionPerformanceMetrics:
     This dataclass captures timing information for introspection operations,
     enabling performance monitoring and alerting when operations exceed
     the <50ms target threshold.
-
-    Note:
-        These metrics are currently **local-only** and are NOT included in
-        published ``ModelNodeIntrospectionEvent`` events. This is because the
-        event model uses ``extra="forbid"`` and has no extension point for
-        performance metrics. See OMN-926 for tracking the addition of
-        distributed performance observability.
 
     Attributes:
         get_capabilities_ms: Time taken by get_capabilities() in milliseconds.
@@ -514,10 +230,6 @@ class IntrospectionPerformanceMetrics:
                 }
             )
         ```
-
-    See Also:
-        - OMN-926: Add performance metrics to introspection events
-        - ``get_performance_metrics()``: Method to retrieve these metrics
     """
 
     get_capabilities_ms: float = 0.0
@@ -556,17 +268,17 @@ class IntrospectionCacheDict(TypedDict):
     enabling proper type checking for cache operations without requiring type: ignore comments.
 
     Note:
-        The capabilities field uses a permissive type to accommodate all possible
-        values from model_dump(), including nested structures and dynamic values.
-        The actual structure is: operations (list[str]), protocols (list[str]),
+        The capabilities field uses CapabilitiesTypedDict for type safety.
+        When serialized to JSON, the structure is:
+        operations (list[str]), protocols (list[str]),
         has_fsm (bool), method_signatures (dict[str, str]).
     """
 
     node_id: str
     node_type: str
-    # Permissive type for capabilities to handle all model_dump() output variations
-    # Actual structure: {"operations": list, "protocols": list, "has_fsm": bool, "method_signatures": dict}
-    capabilities: dict[str, list[str] | bool | dict[str, str] | int | float | None]
+    # Uses CapabilitiesTypedDict for type safety
+    # JSON serialization preserves the structure from model_dump()
+    capabilities: CapabilitiesTypedDict
     endpoints: dict[str, str]
     current_state: str | None
     version: str
@@ -581,66 +293,10 @@ class MixinNodeIntrospection:
     Provides automatic capability discovery using reflection, endpoint
     reporting, and periodic heartbeat broadcasting for ONEX nodes.
 
-    Thread Safety:
-        This mixin uses ``asyncio.Lock`` for thread-safe cache operations in
-        concurrent async environments. The lock protects the introspection cache
-        from race conditions when multiple coroutines access or update cached data.
-
-        **Lock Type**: ``asyncio.Lock`` (Async Lock)
-
-        **Why asyncio.Lock?**
-
-        - Native async/await compatibility for async infrastructure components
-        - No thread pool overhead (unlike threading.RLock)
-        - Proper integration with asyncio event loop
-        - Prevents async race conditions in concurrent cache operations
-
-        **Protected State Variables**:
-
-        1. ``_introspection_cache`` - Cached introspection data (dict or None)
-        2. ``_introspection_cached_at`` - Timestamp when cache was populated (float or None)
-
-        **Lock Usage Pattern**:
-
-        The lock is used internally by the mixin methods. Callers do not need to
-        manage the lock directly - it is acquired automatically when accessing
-        or modifying cache state.
-
-        ```python
-        # Internal usage in get_introspection_data()
-        async with self._introspection_cache_lock:
-            if self._introspection_cache is not None:
-                # Check cache validity and return cached data
-                ...
-
-        # Internal usage in invalidate_introspection_cache()
-        async with self._introspection_cache_lock:
-            self._introspection_cache = None
-            self._introspection_cached_at = None
-        ```
-
-        **Thread Safety Guarantees**:
-
-        - ``get_introspection_data()`` - Cache read/write is atomic under lock
-        - ``invalidate_introspection_cache()`` - Cache invalidation is atomic under lock
-        - Cache TTL checks and updates are protected from race conditions
-        - Multiple concurrent calls to ``get_introspection_data()`` will not corrupt cache state
-
-        **Performance Impact**:
-
-        - Lock acquisition overhead: ~1-5us (microseconds)
-        - Negligible compared to capability discovery via reflection
-        - Cache hits return immediately after lock acquisition
-
-        See Also:
-            - ``docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`` for similar thread
-              safety patterns used in ``MixinAsyncCircuitBreaker``
-
     State Variables:
         _introspection_cache: Cached introspection data
         _introspection_cache_ttl: Cache time-to-live in seconds
         _introspection_cached_at: Timestamp when cache was populated
-        _introspection_cache_lock: asyncio.Lock protecting cache state
 
     Background Task Variables:
         _heartbeat_task: Background heartbeat task
@@ -659,6 +315,13 @@ class MixinNodeIntrospection:
         automatically discover node capabilities. While this enables powerful
         service discovery, it has security implications:
 
+        **Threat Model**:
+
+        - **Reconnaissance**: Method names may reveal attack vectors
+        - **Architecture mapping**: Protocol discovery exposes topology
+        - **Version fingerprinting**: Version field enables vulnerability scanning
+        - **State inference**: FSM state reveals system status
+
         **Exposed Information**:
 
         - Public method names (potential operations a node can perform)
@@ -668,6 +331,14 @@ class MixinNodeIntrospection:
         - Endpoint URLs (health, API, metrics paths)
         - Node metadata (name, version, type)
 
+        **What is NOT Exposed**:
+
+        - Private methods (``_`` prefix) - excluded from discovery
+        - Method implementations or source code
+        - Configuration values, secrets, or connection strings
+        - Environment variables or runtime parameters
+        - Request/response payloads or historical data
+
         **Built-in Protections**:
 
         - Private methods (prefixed with ``_``) are excluded by default
@@ -675,21 +346,23 @@ class MixinNodeIntrospection:
         - Only methods containing operation keywords are reported as operations
         - Configure ``exclude_prefixes`` in ``initialize_introspection()`` for
           additional filtering
+        - Caching with TTL reduces reflection frequency
 
         **Recommendations for Production**:
 
         - Prefix internal/sensitive methods with ``_`` to exclude them
         - Use generic operation names that don't reveal implementation details
+        - Use generic parameter names (``data`` instead of ``user_credentials``)
         - Review ``get_capabilities()`` output before production deployment
         - In multi-tenant environments, configure Kafka topic ACLs for
-          introspection events (``onex.node.introspection.published.v1``,
-          ``onex.node.heartbeat.published.v1``,
-          ``onex.registry.introspection.requested.v1``)
+          introspection events (``node.introspection``, ``node.heartbeat``,
+          ``node.request_introspection``)
         - Monitor introspection topic consumers for unauthorized access
         - Consider network segmentation for introspection event topics
+        - Consider disabling ``enable_registry_listener`` if not needed
 
     See Also:
-        - Module docstring for detailed security documentation
+        - Module docstring for detailed security documentation and threat model
         - CLAUDE.md "Node Introspection Security Considerations" section
         - ``get_capabilities()`` for filtering logic details
 
@@ -736,21 +409,15 @@ class MixinNodeIntrospection:
     _registry_unsubscribe: Callable[[], None] | Callable[[], Awaitable[None]] | None
 
     # Configuration attributes
-    _introspection_node_id: str | None
+    _introspection_node_id: UUID | None
     _introspection_node_type: str | None
-    _introspection_event_bus: ProtocolIntrospectionEventBus | None
+    _introspection_event_bus: ProtocolEventBusLike | None
     _introspection_version: str
     _introspection_start_time: float | None
 
     # Capability discovery configuration
     _introspection_operation_keywords: set[str]
     _introspection_exclude_prefixes: set[str]
-
-    # Contract-driven topic configuration (instance-level)
-    # These allow per-node topic customization while defaulting to module constants
-    _introspection_topic: str
-    _heartbeat_topic: str
-    _request_introspection_topic: str
 
     # Registry listener callback error tracking (instance-level)
     # Used for rate-limiting error logging to prevent log spam during
@@ -762,11 +429,6 @@ class MixinNodeIntrospection:
     # Performance metrics tracking (instance-level)
     # Stores the most recent performance metrics from introspection operations
     _introspection_last_metrics: IntrospectionPerformanceMetrics | None
-
-    # Thread-safe cache lock (instance-level)
-    # Protects _introspection_cache and _introspection_cached_at from race conditions
-    # in concurrent environments. Must be held when reading or writing cache state.
-    _introspection_cache_lock: asyncio.Lock
 
     # Default operation keywords for capability discovery
     DEFAULT_OPERATION_KEYWORDS: ClassVar[set[str]] = {
@@ -836,187 +498,72 @@ class MixinNodeIntrospection:
         },
     }
 
-    # Default topic names for introspection events (can be overridden in subclasses)
-    # These class-level defaults enable:
-    #   1. Subclass overrides for multi-tenant or domain-specific deployments
-    #   2. Better testability (tests can mock class variables)
-    #   3. Consistent defaults without relying on module-level constants
-    #
-    # Usage:
-    #   - Override in subclass: class MyNode(MixinNodeIntrospection):
-    #                               DEFAULT_INTROSPECTION_TOPIC = "custom.topic.v1"
-    #   - Override via config: ModelIntrospectionConfig(introspection_topic="...")
-    DEFAULT_INTROSPECTION_TOPIC: ClassVar[str] = "onex.node.introspection.published.v1"
-    DEFAULT_HEARTBEAT_TOPIC: ClassVar[str] = "onex.node.heartbeat.published.v1"
-    DEFAULT_REQUEST_INTROSPECTION_TOPIC: ClassVar[str] = (
-        "onex.registry.introspection.requested.v1"
-    )
-
-    def initialize_introspection(
+    def initialize_introspection_from_config(
         self,
-        config: ModelIntrospectionConfig | None = None,
-        *,
-        # Legacy parameters for backwards compatibility
-        node_id: str | None = None,
-        node_type: str | None = None,
-        event_bus: ProtocolIntrospectionEventBus | None = None,
-        version: str = "1.0.0",
-        cache_ttl: float = 300.0,
-        operation_keywords: set[str] | None = None,
-        exclude_prefixes: set[str] | None = None,
-        introspection_topic: str | None = None,
-        heartbeat_topic: str | None = None,
-        request_introspection_topic: str | None = None,
+        config: ModelIntrospectionConfig,
     ) -> None:
-        """Initialize introspection configuration.
+        """Initialize introspection from a configuration model.
+
+        This is the preferred initialization method that accepts a typed
+        configuration model for all introspection settings.
 
         Must be called during class initialization before any introspection
         operations are performed.
 
-        This method supports two usage patterns:
-
-        1. **Config model (recommended)**: Pass a ``ModelIntrospectionConfig`` instance
-           as the ``config`` parameter. This groups all configuration in a single
-           validated object.
-
-        2. **Individual parameters (legacy)**: Pass parameters directly as keyword
-           arguments. This maintains backwards compatibility with existing code.
-
-        When ``config`` is provided, all individual parameters are ignored.
-
         Args:
-            config: Configuration model containing all introspection settings.
-                When provided, all other parameters are ignored. Recommended
-                for new code.
-            node_id: Unique identifier for this node instance. Required if
-                ``config`` is not provided.
-            node_type: Node type classification (EFFECT, COMPUTE, REDUCER,
-                ORCHESTRATOR). Required if ``config`` is not provided.
-            event_bus: Optional event bus for publishing introspection events.
-                Must have ``publish_envelope()`` method if provided.
-            version: Node version string (default: "1.0.0").
-            cache_ttl: Cache time-to-live in seconds (default: 300.0).
-            operation_keywords: Optional set of keywords to identify operation methods.
-                Methods containing these keywords are reported as operations.
-                If None, uses DEFAULT_OPERATION_KEYWORDS.
-            exclude_prefixes: Optional set of prefixes to exclude from capability
-                discovery. Methods starting with these prefixes are filtered out.
-                If None, uses DEFAULT_EXCLUDE_PREFIXES.
-            introspection_topic: Optional topic for publishing introspection events.
-                If None, uses ``DEFAULT_INTROSPECTION_TOPIC`` class variable.
-                Allows contract-driven topic configuration per node.
-                Subclasses can override the class variable for different defaults.
-            heartbeat_topic: Optional topic for publishing heartbeat events.
-                If None, uses ``DEFAULT_HEARTBEAT_TOPIC`` class variable.
-                Allows contract-driven topic configuration per node.
-                Subclasses can override the class variable for different defaults.
-            request_introspection_topic: Optional topic for listening to introspection
-                requests. If None, uses ``DEFAULT_REQUEST_INTROSPECTION_TOPIC`` class
-                variable. Allows contract-driven topic configuration per node.
-                Subclasses can override the class variable for different defaults.
+            config: Introspection configuration model containing all settings.
 
         Raises:
-            ValueError: If neither ``config`` nor (``node_id`` and ``node_type``)
-                are provided, or if node_id/node_type are empty strings.
+            ValueError: If node_id or node_type is empty (validated by model).
 
         Example:
             ```python
-            # Using config model (recommended)
+            from uuid import uuid4
+
+            from omnibase_infra.mixins import (
+                MixinNodeIntrospection,
+                ModelIntrospectionConfig,
+            )
+
             class MyNode(MixinNodeIntrospection):
-                def __init__(self, app_config, event_bus=None):
+                def __init__(self, node_config, event_bus=None):
                     introspection_config = ModelIntrospectionConfig(
-                        node_id=app_config.node_id,
+                        node_id=uuid4(),
                         node_type="EFFECT",
                         event_bus=event_bus,
                         version="1.2.0",
                     )
-                    self.initialize_introspection(config=introspection_config)
+                    self.initialize_introspection_from_config(introspection_config)
 
-            # Using individual parameters (legacy, backwards compatible)
-            class MyLegacyNode(MixinNodeIntrospection):
-                def __init__(self, config):
-                    self.initialize_introspection(
-                        node_id=config.node_id,
+            # With custom operation keywords
+            class MyEffectNode(MixinNodeIntrospection):
+                def __init__(self, node_config, event_bus=None):
+                    introspection_config = ModelIntrospectionConfig(
+                        node_id=uuid4(),
                         node_type="EFFECT",
-                        event_bus=config.event_bus,
-                        version="1.2.0",
+                        event_bus=event_bus,
+                        operation_keywords={"fetch", "upload", "download"},
                     )
-
-            # With custom operation keywords (config model)
-            config = ModelIntrospectionConfig(
-                node_id="my-effect-node",
-                node_type="EFFECT",
-                operation_keywords={"fetch", "upload", "download"},
-            )
-            node.initialize_introspection(config=config)
-
-            # With contract-driven topic configuration (config model)
-            config = ModelIntrospectionConfig(
-                node_id="contract-node",
-                node_type="EFFECT",
-                introspection_topic=contract.topics.introspection_published,
-                heartbeat_topic=contract.topics.heartbeat_published,
-            )
-            node.initialize_introspection(config=config)
+                    self.initialize_introspection_from_config(introspection_config)
             ```
-
-        See Also:
-            - ``ModelIntrospectionConfig`` for configuration model details
-            - Module docstring for usage examples
         """
-        # Resolve configuration - either from config model or individual params
-        if config is not None:
-            # Use config model - extract all values
-            node_id = config.node_id
-            node_type = config.node_type
-            event_bus = config.event_bus
-            version = config.version
-            cache_ttl = config.cache_ttl
-            operation_keywords = config.operation_keywords
-            exclude_prefixes = config.exclude_prefixes
-            introspection_topic = config.introspection_topic
-            heartbeat_topic = config.heartbeat_topic
-            request_introspection_topic = config.request_introspection_topic
-        elif node_id is None or node_type is None:
-            raise ValueError(
-                "Either config or both node_id and node_type must be provided"
-            )
-
-        # Validate required fields - explicit handling of None and empty string
-        # Note: When using ModelIntrospectionConfig, Pydantic's min_length=1 validator
-        # already prevents empty strings. This validation handles the legacy parameter path.
-        if node_id is None or node_id == "":
-            raise ValueError("node_id cannot be None or empty")
-        if node_type is None or node_type == "":
-            raise ValueError("node_type cannot be None or empty")
-
-        # Configuration
-        self._introspection_node_id = node_id
-        self._introspection_node_type = node_type
-        self._introspection_event_bus = event_bus
-        self._introspection_version = version
-        self._introspection_cache_ttl = cache_ttl
+        # Configuration from model
+        self._introspection_node_id = config.node_id
+        self._introspection_node_type = config.node_type
+        self._introspection_event_bus = config.event_bus
+        self._introspection_version = config.version
+        self._introspection_cache_ttl = config.cache_ttl
 
         # Capability discovery configuration - use copies to avoid mutation
         self._introspection_operation_keywords = (
-            operation_keywords
-            if operation_keywords is not None
+            config.operation_keywords.copy()
+            if config.operation_keywords is not None
             else self.DEFAULT_OPERATION_KEYWORDS.copy()
         )
         self._introspection_exclude_prefixes = (
-            exclude_prefixes
-            if exclude_prefixes is not None
+            config.exclude_prefixes.copy()
+            if config.exclude_prefixes is not None
             else self.DEFAULT_EXCLUDE_PREFIXES.copy()
-        )
-
-        # Contract-driven topic configuration - use provided values or class defaults
-        # Class defaults allow subclasses to override default topics without config changes
-        self._introspection_topic = (
-            introspection_topic or self.DEFAULT_INTROSPECTION_TOPIC
-        )
-        self._heartbeat_topic = heartbeat_topic or self.DEFAULT_HEARTBEAT_TOPIC
-        self._request_introspection_topic = (
-            request_introspection_topic or self.DEFAULT_REQUEST_INTROSPECTION_TOPIC
         )
 
         # State
@@ -1040,33 +587,108 @@ class MixinNodeIntrospection:
         # Performance metrics tracking
         self._introspection_last_metrics = None
 
-        # Thread-safe cache lock for concurrent access protection
-        self._introspection_cache_lock = asyncio.Lock()
-
-        if event_bus is None:
+        if config.event_bus is None:
             logger.warning(
-                f"Introspection initialized without event bus for {node_id}",
+                f"Introspection initialized without event bus for {config.node_id}",
                 extra={
-                    "node_id": node_id,
-                    "node_type": node_type,
+                    "node_id": str(config.node_id),
+                    "node_type": config.node_type,
                 },
             )
 
         logger.debug(
-            f"Introspection initialized for {node_id}",
+            f"Introspection initialized for {config.node_id}",
             extra={
-                "node_id": node_id,
-                "node_type": node_type,
-                "version": version,
-                "cache_ttl": cache_ttl,
-                "has_event_bus": event_bus is not None,
+                "node_id": str(config.node_id),
+                "node_type": config.node_type,
+                "version": config.version,
+                "cache_ttl": config.cache_ttl,
+                "has_event_bus": config.event_bus is not None,
                 "operation_keywords_count": len(self._introspection_operation_keywords),
                 "exclude_prefixes_count": len(self._introspection_exclude_prefixes),
-                "introspection_topic": self._introspection_topic,
-                "heartbeat_topic": self._heartbeat_topic,
-                "request_introspection_topic": self._request_introspection_topic,
             },
         )
+
+    def initialize_introspection(
+        self,
+        node_id: UUID,
+        node_type: str,
+        event_bus: ProtocolEventBusLike | None = None,
+        version: str = "1.0.0",
+        cache_ttl: float = 300.0,
+        operation_keywords: set[str] | None = None,
+        exclude_prefixes: set[str] | None = None,
+    ) -> None:
+        """Initialize introspection configuration (legacy interface).
+
+        This method provides backward compatibility. For new code, prefer using
+        :meth:`initialize_introspection_from_config` with a
+        :class:`ModelIntrospectionConfig` instance.
+
+        Must be called during class initialization before any introspection
+        operations are performed.
+
+        Args:
+            node_id: Unique identifier for this node instance (UUID)
+            node_type: Node type classification (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
+            event_bus: Optional event bus for publishing introspection events.
+                Must have ``publish_envelope()`` method if provided.
+            version: Node version string (default: "1.0.0")
+            cache_ttl: Cache time-to-live in seconds (default: 300.0)
+            operation_keywords: Optional set of keywords to identify operation methods.
+                Methods containing these keywords are reported as operations.
+                If None, uses DEFAULT_OPERATION_KEYWORDS.
+            exclude_prefixes: Optional set of prefixes to exclude from capability
+                discovery. Methods starting with these prefixes are filtered out.
+                If None, uses DEFAULT_EXCLUDE_PREFIXES.
+
+        Raises:
+            ValueError: If node_id or node_type is empty
+
+        Example:
+            ```python
+            from uuid import uuid4
+
+            class MyNode(MixinNodeIntrospection):
+                def __init__(self, config):
+                    self.initialize_introspection(
+                        node_id=uuid4(),
+                        node_type="EFFECT",
+                        event_bus=config.event_bus,
+                        version="1.2.0",
+                    )
+
+            # With custom operation keywords
+            class MyEffectNode(MixinNodeIntrospection):
+                def __init__(self, config):
+                    self.initialize_introspection(
+                        node_id=uuid4(),
+                        node_type="EFFECT",
+                        event_bus=config.event_bus,
+                        operation_keywords={"fetch", "upload", "download"},
+                    )
+            ```
+
+        See Also:
+            :meth:`initialize_introspection_from_config`: Preferred config-based initialization.
+        """
+        # Validate required fields (matching model validation)
+        if not node_id:
+            raise ValueError("node_id cannot be empty")
+        if not node_type:
+            raise ValueError("node_type cannot be empty")
+
+        # Create config model and delegate to config-based initialization
+        config = ModelIntrospectionConfig(
+            node_id=node_id,
+            node_type=node_type,
+            event_bus=event_bus,
+            version=version,
+            cache_ttl=cache_ttl,
+            operation_keywords=operation_keywords,
+            exclude_prefixes=exclude_prefixes,
+        )
+        self.initialize_introspection_from_config(config)
 
     def _ensure_initialized(self) -> None:
         """Ensure introspection has been initialized.
@@ -1085,7 +707,11 @@ class MixinNodeIntrospection:
                 # ... rest of method
             ```
         """
-        if self._introspection_node_id is None:
+        # Use getattr with sentinel to avoid AttributeError if initialize_introspection()
+        # was never called. This ensures we always raise RuntimeError, not AttributeError.
+        _not_set = object()
+        node_id = getattr(self, "_introspection_node_id", _not_set)
+        if node_id is _not_set or node_id is None:
             raise RuntimeError(
                 "MixinNodeIntrospection not initialized. "
                 "Call initialize_introspection() before using introspection methods."
@@ -1498,17 +1124,6 @@ class MixinNodeIntrospection:
         ``_introspection_last_metrics``. Use ``get_performance_metrics()``
         to retrieve the most recent metrics.
 
-        Thread Safety:
-            This method uses ``_introspection_cache_lock`` internally to ensure
-            thread-safe cache operations. The lock is acquired automatically when:
-
-            1. Checking cache validity and returning cached data
-            2. Updating the cache with fresh introspection data
-
-            Multiple concurrent calls are safe - the lock prevents race conditions
-            where one coroutine might read stale cache state while another is
-            updating it. Cache TTL checks and updates are atomic under the lock.
-
         Returns:
             ModelNodeIntrospectionEvent containing full introspection data.
 
@@ -1528,29 +1143,28 @@ class MixinNodeIntrospection:
         # Initialize metrics for this call
         metrics = IntrospectionPerformanceMetrics()
 
-        # Check cache validity under lock to prevent race conditions
-        async with self._introspection_cache_lock:
-            if (
-                self._introspection_cache is not None
-                and self._introspection_cached_at is not None
-                and current_time - self._introspection_cached_at
-                < self._introspection_cache_ttl
-            ):
-                # Return cached data with updated timestamp
-                cached_event = ModelNodeIntrospectionEvent(**self._introspection_cache)
+        # Check cache validity
+        if (
+            self._introspection_cache is not None
+            and self._introspection_cached_at is not None
+            and current_time - self._introspection_cached_at
+            < self._introspection_cache_ttl
+        ):
+            # Return cached data with updated timestamp
+            cached_event = ModelNodeIntrospectionEvent(**self._introspection_cache)
 
-                # Record cache hit metrics
-                elapsed_ms = (time.perf_counter() - total_start) * 1000
-                metrics.total_introspection_ms = elapsed_ms
-                metrics.cache_hit = True
+            # Record cache hit metrics
+            elapsed_ms = (time.perf_counter() - total_start) * 1000
+            metrics.total_introspection_ms = elapsed_ms
+            metrics.cache_hit = True
 
-                # Check cache hit threshold
-                if elapsed_ms > PERF_THRESHOLD_CACHE_HIT_MS:
-                    metrics.threshold_exceeded = True
-                    metrics.slow_operations.append("cache_hit")
+            # Check cache hit threshold
+            if elapsed_ms > PERF_THRESHOLD_CACHE_HIT_MS:
+                metrics.threshold_exceeded = True
+                metrics.slow_operations.append("cache_hit")
 
-                self._introspection_last_metrics = metrics
-                return cached_event
+            self._introspection_last_metrics = metrics
+            return cached_event
 
         # Build fresh introspection data with timing for each component
         cap_start = time.perf_counter()
@@ -1570,15 +1184,16 @@ class MixinNodeIntrospection:
         metrics.get_current_state_ms = (time.perf_counter() - state_start) * 1000
 
         # Get node_id and node_type with fallback logging
-        # The "unknown" fallback indicates a potential initialization issue
+        # The nil UUID fallback indicates a potential initialization issue
         node_id = self._introspection_node_id
         if node_id is None:
             logger.warning(
-                "Node ID not initialized, using 'unknown' - "
+                "Node ID not initialized, using nil UUID - "
                 "ensure initialize_introspection() was called correctly",
                 extra={"operation": "get_introspection_data"},
             )
-            node_id = "unknown"
+            # Use nil UUID (all zeros) as sentinel for uninitialized node
+            node_id = UUID("00000000-0000-0000-0000-000000000000")
 
         node_type = self._introspection_node_type
         if node_type is None:
@@ -1600,13 +1215,12 @@ class MixinNodeIntrospection:
             correlation_id=uuid4(),
         )
 
-        # Update cache under lock - cast the model_dump output to our typed dict since we know
+        # Update cache - cast the model_dump output to our typed dict since we know
         # the structure matches (model_dump returns dict[str, Any] by default)
-        async with self._introspection_cache_lock:
-            self._introspection_cache = cast(
-                IntrospectionCacheDict, event.model_dump(mode="json")
-            )
-            self._introspection_cached_at = current_time
+        self._introspection_cache = cast(
+            IntrospectionCacheDict, event.model_dump(mode="json")
+        )
+        self._introspection_cached_at = current_time
 
         # Extract operations list with proper type narrowing
         operations_value = capabilities.get("operations", [])
@@ -1714,19 +1328,19 @@ class MixinNodeIntrospection:
                 }
             )
 
-            # Publish to event bus using instance-configured topic
+            # Publish to event bus
             if hasattr(self._introspection_event_bus, "publish_envelope"):
                 await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
                     envelope=publish_event,
-                    topic=self._introspection_topic,
+                    topic=INTROSPECTION_TOPIC,
                 )
             else:
                 # Fallback to publish method with raw bytes
                 event_data = publish_event.model_dump(mode="json")
                 value = json.dumps(event_data).encode("utf-8")
                 await self._introspection_event_bus.publish(
-                    topic=self._introspection_topic,
-                    key=self._introspection_node_id.encode("utf-8")
+                    topic=INTROSPECTION_TOPIC,
+                    key=str(self._introspection_node_id).encode("utf-8")
                     if self._introspection_node_id
                     else None,
                     value=value,
@@ -1776,39 +1390,33 @@ class MixinNodeIntrospection:
                 uptime_seconds = time.time() - self._introspection_start_time
 
             # Get node_id and node_type with fallback logging
-            # The "unknown" fallback indicates a potential initialization issue
-            node_id_str = self._introspection_node_id
-            if node_id_str is None:
+            # The nil UUID fallback indicates a potential initialization issue
+            node_id = self._introspection_node_id
+            if node_id is None:
                 logger.warning(
-                    "Node ID not initialized, using 'unknown' in heartbeat - "
+                    "Node ID not initialized, using nil UUID in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
                     extra={"operation": "_publish_heartbeat"},
                 )
-                node_id_str = "unknown"
+                # Use nil UUID (all zeros) as sentinel for uninitialized node
+                node_id = UUID("00000000-0000-0000-0000-000000000000")
 
             node_type = self._introspection_node_type
             if node_type is None:
                 logger.warning(
                     "Node type not initialized, using 'unknown' in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
-                    extra={"node_id": node_id_str, "operation": "_publish_heartbeat"},
+                    extra={"node_id": str(node_id), "operation": "_publish_heartbeat"},
                 )
                 node_type = "unknown"
 
-            # Convert node_id to UUID for heartbeat model compatibility
-            # Try to parse as UUID first, otherwise generate deterministic UUID from string
-            try:
-                node_id_uuid = UUID(node_id_str)
-            except ValueError:
-                # Generate deterministic UUID from string using uuid5 with DNS namespace
-                node_id_uuid = uuid5(NAMESPACE_DNS, node_id_str)
-
             # Create heartbeat event
             heartbeat = ModelNodeHeartbeatEvent(
-                node_id=node_id_uuid,
+                node_id=node_id,
                 node_type=node_type,
                 uptime_seconds=uptime_seconds,
-                # TODO(OMN-925): Implement active operation tracking
+                # TODO(ACTIVE-OP-TRACKING): Implement active operation tracking
+                # Ticket: Create Linear ticket for active operation tracking implementation
                 # Currently hardcoded to 0. Full implementation requires:
                 # - Operation counter increment/decrement around async operations
                 # - Thread-safe counter for concurrent operations
@@ -1819,17 +1427,17 @@ class MixinNodeIntrospection:
                 correlation_id=uuid4(),
             )
 
-            # Publish to event bus using instance-configured topic
+            # Publish to event bus
             if hasattr(self._introspection_event_bus, "publish_envelope"):
                 await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
                     envelope=heartbeat,
-                    topic=self._heartbeat_topic,
+                    topic=HEARTBEAT_TOPIC,
                 )
             else:
                 value = json.dumps(heartbeat.model_dump(mode="json")).encode("utf-8")
                 await self._introspection_event_bus.publish(
-                    topic=self._heartbeat_topic,
-                    key=self._introspection_node_id.encode("utf-8")
+                    topic=HEARTBEAT_TOPIC,
+                    key=str(self._introspection_node_id).encode("utf-8")
                     if self._introspection_node_id
                     else None,
                     value=value,
@@ -1930,14 +1538,14 @@ class MixinNodeIntrospection:
         retry logic with exponential backoff for subscription failures.
 
         Security Note:
-            This method subscribes to the ``onex.registry.introspection.requested.v1``
-            Kafka topic and responds with full introspection data to any request.
+            This method subscribes to the ``node.request_introspection`` Kafka
+            topic and responds with full introspection data to any request.
             This creates a network-accessible endpoint for capability discovery.
 
             **Network Exposure**:
 
             - Any consumer on the Kafka cluster can request introspection data
-            - Responses are published to ``onex.node.introspection.published.v1`` topic
+            - Responses are published to ``node.introspection`` topic
             - No authentication is performed on incoming requests
 
             **Multi-tenant Considerations**:
@@ -2035,21 +1643,11 @@ class MixinNodeIntrospection:
             try:
                 # Early exit if message has no parseable value
                 if not hasattr(message, "value") or not message.value:
-                    # DO NOT reset failure counter here - empty messages may indicate
-                    # a systematic issue (e.g., producer sending malformed messages).
-                    # Counter resets only after successful message parsing below.
-                    logger.debug(
-                        "Received introspection request with no message value for "
-                        f"{self._introspection_node_id}",
-                        extra={
-                            "node_id": self._introspection_node_id,
-                            "has_value_attr": hasattr(message, "value"),
-                        },
-                    )
                     await self.publish_introspection(
                         reason="request",
                         correlation_id=None,
                     )
+                    self._registry_callback_consecutive_failures = 0
                     return
 
                 # Parse request data
@@ -2140,10 +1738,10 @@ class MixinNodeIntrospection:
         retry_count = 0
         while not self._introspection_stop_event.is_set():
             try:
-                # Subscribe to request topic using instance-configured topic
+                # Subscribe to request topic
                 if hasattr(self._introspection_event_bus, "subscribe"):
                     unsubscribe = await self._introspection_event_bus.subscribe(
-                        topic=self._request_introspection_topic,
+                        topic=REQUEST_INTROSPECTION_TOPIC,
                         group_id=f"introspection-{self._introspection_node_id}",
                         on_message=on_request,
                     )
@@ -2156,7 +1754,7 @@ class MixinNodeIntrospection:
                         f"Registry listener subscribed for {self._introspection_node_id}",
                         extra={
                             "node_id": self._introspection_node_id,
-                            "topic": self._request_introspection_topic,
+                            "topic": REQUEST_INTROSPECTION_TOPIC,
                         },
                     )
 
@@ -2348,37 +1946,20 @@ class MixinNodeIntrospection:
             extra={"node_id": self._introspection_node_id},
         )
 
-    async def invalidate_introspection_cache(self) -> None:
+    def invalidate_introspection_cache(self) -> None:
         """Invalidate the introspection cache.
 
         Call this when node capabilities change to ensure fresh
         data is reported on next introspection request.
 
-        Thread Safety:
-            This method is async to ensure thread-safe cache invalidation
-            using ``_introspection_cache_lock``. The lock protects the atomic
-            clearing of both ``_introspection_cache`` and ``_introspection_cached_at``
-            to prevent race conditions with concurrent ``get_introspection_data()``
-            calls.
-
-            Without the lock, a concurrent call to ``get_introspection_data()`` might:
-
-            1. Read ``_introspection_cache`` (not None)
-            2. This method clears ``_introspection_cached_at``
-            3. The other call reads stale ``_introspection_cached_at`` (now None)
-            4. Inconsistent state leads to unexpected behavior
-
-            The lock ensures both cache variables are always in a consistent state.
-
         Example:
             ```python
             node.register_new_handler(handler)
-            await node.invalidate_introspection_cache()
+            node.invalidate_introspection_cache()
             ```
         """
-        async with self._introspection_cache_lock:
-            self._introspection_cache = None
-            self._introspection_cached_at = None
+        self._introspection_cache = None
+        self._introspection_cached_at = None
         logger.debug(
             f"Introspection cache invalidated for {self._introspection_node_id}",
             extra={"node_id": self._introspection_node_id},
@@ -2390,17 +1971,6 @@ class MixinNodeIntrospection:
         Returns the performance metrics captured during the last call to
         ``get_introspection_data()``. Use this to monitor introspection
         performance and detect when operations exceed the <50ms threshold.
-
-        Note:
-            These metrics are currently local-only and are NOT included in
-            published introspection events. The ``ModelNodeIntrospectionEvent``
-            model (from ``omnibase_infra.models.discovery``) uses ``extra="forbid"``
-            and has no extension point for performance metrics.
-
-            TODO(OMN-926): Add performance metrics to introspection events for
-            distributed observability. Options include adding an optional
-            ``performance_metrics`` field to ``ModelNodeIntrospectionEvent`` or
-            creating a separate ``ModelNodePerformanceEvent`` type.
 
         Returns:
             IntrospectionPerformanceMetrics if introspection has been called,
@@ -2434,9 +2004,11 @@ class MixinNodeIntrospection:
 
 __all__ = [
     "MixinNodeIntrospection",
-    "ModelIntrospectionConfig",
-    "ProtocolIntrospectionEventBus",
-    "CapabilitiesDict",
+    "INTROSPECTION_TOPIC",
+    "HEARTBEAT_TOPIC",
+    "REQUEST_INTROSPECTION_TOPIC",
+    "CapabilitiesDict",  # Backward-compatible alias for CapabilitiesTypedDict
+    "CapabilitiesTypedDict",  # Re-export from model for convenience
     "IntrospectionCacheDict",
     "IntrospectionPerformanceMetrics",
     "PERF_THRESHOLD_GET_CAPABILITIES_MS",

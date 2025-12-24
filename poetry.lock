@@ -1969,6 +1969,39 @@ requests = ">=2.27.1,<3.0.0"
 parser = ["pyhcl (>=0.4.4,<0.5.0)"]
 
 [[package]]
+name = "hypothesis"
+version = "6.148.7"
+description = "The property-based testing library for Python"
+optional = false
+python-versions = ">=3.10"
+groups = ["dev"]
+files = [
+    {file = "hypothesis-6.148.7-py3-none-any.whl", hash = "sha256:94dbd58ebf259afa3bafb1d3bf5761ac1bde6f1477de494798cbf7960aabbdee"},
+    {file = "hypothesis-6.148.7.tar.gz", hash = "sha256:b96e817e715c5b1a278411e3b9baf6d599d5b12207ba25e41a8f066929f6c2a6"},
+]
+
+[package.dependencies]
+sortedcontainers = ">=2.1.0,<3.0.0"
+
+[package.extras]
+all = ["black (>=20.8b0)", "click (>=7.0)", "crosshair-tool (>=0.0.99)", "django (>=4.2)", "dpcontracts (>=0.4)", "hypothesis-crosshair (>=0.0.26)", "lark (>=0.10.1)", "libcst (>=0.3.16)", "numpy (>=1.21.6)", "pandas (>=1.1)", "pytest (>=4.6)", "python-dateutil (>=1.4)", "pytz (>=2014.1)", "redis (>=3.0.0)", "rich (>=9.0.0)", "tzdata (>=2025.2) ; sys_platform == \"win32\" or sys_platform == \"emscripten\"", "watchdog (>=4.0.0)"]
+cli = ["black (>=20.8b0)", "click (>=7.0)", "rich (>=9.0.0)"]
+codemods = ["libcst (>=0.3.16)"]
+crosshair = ["crosshair-tool (>=0.0.99)", "hypothesis-crosshair (>=0.0.26)"]
+dateutil = ["python-dateutil (>=1.4)"]
+django = ["django (>=4.2)"]
+dpcontracts = ["dpcontracts (>=0.4)"]
+ghostwriter = ["black (>=20.8b0)"]
+lark = ["lark (>=0.10.1)"]
+numpy = ["numpy (>=1.21.6)"]
+pandas = ["pandas (>=1.1)"]
+pytest = ["pytest (>=4.6)"]
+pytz = ["pytz (>=2014.1)"]
+redis = ["redis (>=3.0.0)"]
+watchdog = ["watchdog (>=4.0.0)"]
+zoneinfo = ["tzdata (>=2025.2) ; sys_platform == \"win32\" or sys_platform == \"emscripten\""]
+
+[[package]]
 name = "identify"
 version = "2.6.15"
 description = "File identification library for Python"
@@ -3283,15 +3316,13 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.5.1"
+version = "0.5.6"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
-python-versions = ">=3.12"
+python-versions = "^3.12"
 groups = ["main"]
-files = [
-    {file = "omnibase_core-0.5.1-py3-none-any.whl", hash = "sha256:28f167a3c87a82e3a753d98d5a820296fdf55b45ba28c7987d1a15ee1c520f13"},
-    {file = "omnibase_core-0.5.1.tar.gz", hash = "sha256:a6e32b1c82dd5bac5e6955a02bf12ef54fe20692dfdfa7bcf9c1dfc6f52b45ba"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 aiohttp = ">=3.9.0,<4.0.0"
@@ -3314,16 +3345,22 @@ uvicorn = ">=0.32.0,<0.33.0"
 cli = ["psutil"]
 full = ["psutil"]
 
+[package.source]
+type = "git"
+url = "https://github.com/OmniNode-ai/omnibase_core.git"
+reference = "v0.5.6"
+resolved_reference = "b07bba672876e377ef3c026ab1b0faf03020ce94"
+
 [[package]]
 name = "omnibase-spi"
-version = "0.4.0"
+version = "0.4.1"
 description = "ONEX Service Provider Interface - Protocol definitions"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_spi-0.4.0-py3-none-any.whl", hash = "sha256:06c06c37b6a4612c9b47e6cdd9573e7f16616dc0a5dbbd80fe72f2b6ed272a78"},
-    {file = "omnibase_spi-0.4.0.tar.gz", hash = "sha256:2422c21cfae6cd2c4f7a026d7886877ccf940c4ea70739a17411928096ec3768"},
+    {file = "omnibase_spi-0.4.1-py3-none-any.whl", hash = "sha256:609e702d76e6d53307d981e352d4ed3c6439f2e6ed5be13753c96a0c476534cb"},
+    {file = "omnibase_spi-0.4.1.tar.gz", hash = "sha256:6a40db84223d6ed87acd51726153b59717d945ab1d272c9580d2866c1234f2c0"},
 ]
 
 [package.dependencies]
@@ -5304,6 +5341,18 @@ files = [
 ]
 
 [[package]]
+name = "sortedcontainers"
+version = "2.4.0"
+description = "Sorted Containers -- Sorted List, Sorted Dict, Sorted Set"
+optional = false
+python-versions = "*"
+groups = ["dev"]
+files = [
+    {file = "sortedcontainers-2.4.0-py2.py3-none-any.whl", hash = "sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0"},
+    {file = "sortedcontainers-2.4.0.tar.gz", hash = "sha256:25caa5a06cc30b6b83d11423433f65d1f9d76c4c6a0c90e3379eaa43b9bfdb88"},
+]
+
+[[package]]
 name = "soupsieve"
 version = "2.8"
 description = "A modern CSS selector implementation for Beautiful Soup."
@@ -6161,4 +6210,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "c83a0543354ab85d1e2a425eeaffee7de6bb7179869e4b590c0cbfd9d9ea386f"
+content-hash = "c086bb991478613bd386093329d65ae156e654e37610850a9cf0cc5617f9af8e"

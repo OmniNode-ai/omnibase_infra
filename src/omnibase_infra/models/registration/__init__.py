@@ -15,6 +15,9 @@ from omnibase_infra.models.registration.model_node_metadata import ModelNodeMeta
 from omnibase_infra.models.registration.model_node_registration import (
     ModelNodeRegistration,
 )
+from omnibase_infra.models.registration.model_node_registration_record import (
+    ModelNodeRegistrationRecord,
+)
 
 __all__ = [
     "ModelNodeCapabilities",
@@ -22,4 +25,5 @@ __all__ = [
     "ModelNodeIntrospectionEvent",
     "ModelNodeMetadata",
     "ModelNodeRegistration",
+    "ModelNodeRegistrationRecord",
 ]

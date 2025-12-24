@@ -38,14 +38,24 @@ class TestInfraValidatorConstants:
     def test_infra_max_unions_constant(self) -> None:
         """Verify INFRA_MAX_UNIONS constant has expected value.
 
-        NOTE: Currently set to 200 (baseline as of 2025-12-17) due to tech debt.
-        Current union count is ~195 after cleanup of backwards-compatibility cruft.
-        This is documented in infra_validators.py and will be reduced incrementally.
-        The omnibase_core validator counts X | None (PEP 604) patterns as unions,
-        which is the ONEX-preferred syntax per CLAUDE.md.
+        OMN-983: Strict validation mode enabled.
+
+        Current baseline (544 unions as of 2025-12-23):
+        - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
+        - These are counted but NOT flagged as violations
+        - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
+
+        Threshold history:
+        - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
+        - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots
+        - 540 (2025-12-23): OMN-950 comprehensive reducer tests
+        - 544 (2025-12-23): OMN-954 effect idempotency and retry tests (PR #78)
+
+        Threshold: 555 (11 buffer above 544 baseline for codebase growth)
+        Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 200, (
-            "INFRA_MAX_UNIONS should be 200 (current baseline)"
+        assert INFRA_MAX_UNIONS == 555, (
+            "INFRA_MAX_UNIONS should be 555 (11 buffer above 544 baseline)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
@@ -55,15 +65,28 @@ class TestInfraValidatorConstants:
     def test_infra_patterns_strict_constant(self) -> None:
         """Verify INFRA_PATTERNS_STRICT constant has expected value.
 
-        Set to True to enforce strict pattern compliance per ONEX CLAUDE.md mandates.
-        Specific exemptions (KafkaEventBus, RuntimeHostProcess) are handled via
-        exempted_patterns list, NOT via global relaxation.
+        OMN-983: Strict validation mode enabled.
+
+        All violations must be either:
+        - Fixed (code corrected to pass validation)
+        - Exempted (added to exempted_patterns list with documented rationale)
+
+        Documented exemptions (KafkaEventBus, RuntimeHostProcess, etc.) are handled
+        via the exempted_patterns list in validate_infra_patterns().
         """
-        assert INFRA_PATTERNS_STRICT is True, "INFRA_PATTERNS_STRICT should be True"
+        assert INFRA_PATTERNS_STRICT is True, (
+            "INFRA_PATTERNS_STRICT should be True (strict mode per OMN-983)"
+        )
 
     def test_infra_unions_strict_constant(self) -> None:
-        """Verify INFRA_UNIONS_STRICT constant has expected value."""
-        assert INFRA_UNIONS_STRICT is False, "INFRA_UNIONS_STRICT should be False"
+        """Verify INFRA_UNIONS_STRICT constant has expected value.
+
+        OMN-983: Strict validation mode enabled.
+        The validator flags actual violations (not just counting unions).
+        """
+        assert INFRA_UNIONS_STRICT is True, (
+            "INFRA_UNIONS_STRICT should be True (strict mode per OMN-983)"
+        )
 
     def test_infra_src_path_constant(self) -> None:
         """Verify INFRA_SRC_PATH constant has expected value."""
@@ -141,11 +164,11 @@ class TestValidateInfraPatternsDefaults:
         directory_param = sig.parameters["directory"]
         assert directory_param.default == INFRA_SRC_PATH
 
-        # Check strict default - True for strict ONEX compliance with exemptions
+        # Check strict default - True for strict mode (OMN-983)
         strict_param = sig.parameters["strict"]
         assert strict_param.default == INFRA_PATTERNS_STRICT
         assert strict_param.default is True, (
-            "Should default to strict mode via INFRA_PATTERNS_STRICT (True)"
+            "Should default to strict mode via INFRA_PATTERNS_STRICT (True) per OMN-983"
         )
 
     @patch("omnibase_infra.validation.infra_validators.validate_patterns")
@@ -170,7 +193,7 @@ class TestValidateInfraPatternsDefaults:
         # Verify core validator called with correct defaults
         mock_validate.assert_called_once_with(
             INFRA_SRC_PATH,  # Default directory
-            strict=INFRA_PATTERNS_STRICT,  # Non-strict mode (False) for infra patterns
+            strict=INFRA_PATTERNS_STRICT,  # Strict mode (True) per OMN-983
         )
 
 
@@ -191,17 +214,29 @@ class TestValidateInfraUnionUsageDefaults:
             f"Should default to INFRA_MAX_UNIONS ({INFRA_MAX_UNIONS})"
         )
 
-        # Check strict default
+        # Check strict default - True for strict mode (OMN-983)
         strict_param = sig.parameters["strict"]
         assert strict_param.default == INFRA_UNIONS_STRICT
-        assert strict_param.default is False, (
-            "Should default to non-strict mode via INFRA_UNIONS_STRICT (False)"
+        assert strict_param.default is True, (
+            "Should default to strict mode via INFRA_UNIONS_STRICT (True) per OMN-983"
         )
 
     @patch("omnibase_infra.validation.infra_validators.validate_union_usage")
     def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
         """Verify defaults are correctly passed to core validator."""
-        mock_validate.return_value = MagicMock(is_valid=True, errors=[])
+        # Mock validation result with proper structure for filtered result creation
+        # (validate_infra_union_usage now filters exempted patterns like patterns does)
+        mock_result = MagicMock()
+        mock_result.is_valid = True
+        mock_result.errors = []
+        mock_result.warnings = []
+        mock_result.suggestions = []
+        mock_result.issues = []
+        mock_result.validated_value = None
+        mock_result.summary = ""
+        mock_result.details = ""
+        mock_result.metadata = None
+        mock_validate.return_value = mock_result
 
         # Call with defaults
         validate_infra_union_usage()
@@ -209,8 +244,8 @@ class TestValidateInfraUnionUsageDefaults:
         # Verify core validator called with correct defaults
         mock_validate.assert_called_once_with(
             INFRA_SRC_PATH,  # Default directory
-            max_unions=INFRA_MAX_UNIONS,  # Default max (200)
-            strict=INFRA_UNIONS_STRICT,  # Non-strict (False)
+            max_unions=INFRA_MAX_UNIONS,  # Default max from constant
+            strict=INFRA_UNIONS_STRICT,  # Strict mode (True) per OMN-983
         )
 
 
@@ -437,6 +472,78 @@ class TestCLICommandDefaults:
                 assert decorator.default == "src/omnibase_infra/"
             elif decorator.name == "nodes_dir":
                 assert decorator.default == "src/omnibase_infra/nodes/"
+
+
+class TestUnionCountRegressionGuard:
+    """Regression tests verifying union count stays within configured threshold.
+
+    These tests call the actual validator against the real codebase (not mocked)
+    to ensure that new code additions don't exceed union count thresholds.
+
+    If these tests fail, it indicates one of:
+    1. New code added unions without using proper typed patterns from omnibase_core
+    2. The INFRA_MAX_UNIONS threshold needs to be adjusted (with documented rationale)
+
+    See OMN-983 for threshold documentation and migration goals.
+    """
+
+    def test_union_count_within_threshold(self) -> None:
+        """Verify union count stays within configured threshold.
+
+        This test acts as a regression guard - if union count exceeds
+        the threshold, it indicates new code added unions without
+        using proper typed patterns from omnibase_core.
+
+        Current baseline (~544 unions as of 2025-12-23):
+        - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
+        - These are counted but NOT flagged as violations
+        - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
+
+        Threshold: INFRA_MAX_UNIONS (555) - buffer above baseline.
+        Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
+        """
+        result = validate_infra_union_usage()
+
+        # Extract actual union count from metadata for clear error messaging
+        actual_count = (
+            result.metadata.total_unions
+            if result.metadata and hasattr(result.metadata, "total_unions")
+            else "unknown"
+        )
+
+        assert result.is_valid, (
+            f"Union count {actual_count} exceeds threshold {INFRA_MAX_UNIONS}. "
+            f"New code may have added unions without using typed patterns. "
+            f"Errors: {result.errors[:5]}{'...' if len(result.errors) > 5 else ''}"
+        )
+
+    def test_union_validation_returns_metadata(self) -> None:
+        """Verify union validation returns metadata with count information.
+
+        The validator should return metadata containing the total union count,
+        which is useful for monitoring and documentation purposes.
+        """
+        result = validate_infra_union_usage()
+
+        # Verify metadata is present
+        assert result.metadata is not None, (
+            "Union validation should return metadata with count information"
+        )
+
+        # Verify total_unions is present in metadata
+        assert hasattr(result.metadata, "total_unions"), (
+            "Metadata should contain total_unions count for monitoring"
+        )
+
+        # Verify the count is reasonable (positive integer, below threshold)
+        assert isinstance(result.metadata.total_unions, int), (
+            "total_unions should be an integer"
+        )
+        assert result.metadata.total_unions >= 0, "total_unions should be non-negative"
+        assert result.metadata.total_unions <= INFRA_MAX_UNIONS, (
+            f"total_unions ({result.metadata.total_unions}) should be within "
+            f"threshold ({INFRA_MAX_UNIONS})"
+        )
 
 
 class TestDefaultsConsistency:

@@ -3,9 +3,55 @@
 """Node introspection event model for capability discovery and reporting."""
 
 from datetime import UTC, datetime
+from typing import TypedDict
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class CapabilitiesTypedDict(TypedDict, total=False):
+    """Type-safe structure for node capabilities discovered via reflection.
+
+    This TypedDict provides explicit typing for capability fields, eliminating
+    the need for permissive `dict[str, object]` or `Any` types.
+
+    Attributes:
+        operations: List of public method names that may be operations.
+            These are methods matching configured operation keywords
+            (e.g., execute, handle, process).
+        protocols: List of protocol/interface names implemented by the node.
+            Discovered from class hierarchy (e.g., ProtocolDatabaseAdapter).
+        has_fsm: Boolean indicating if node has FSM state management.
+            True if state attributes like _state or current_state are found.
+        method_signatures: Dict mapping public method names to their signature
+            strings (e.g., {"execute": "(query: str) -> list[dict]"}).
+
+    Example:
+        >>> capabilities: CapabilitiesTypedDict = {
+        ...     "operations": ["execute", "query", "batch_execute"],
+        ...     "protocols": ["ProtocolDatabaseAdapter", "MixinNodeIntrospection"],
+        ...     "has_fsm": True,
+        ...     "method_signatures": {
+        ...         "execute": "(query: str) -> list[dict]",
+        ...         "query": "(sql: str, params: dict) -> list[dict]",
+        ...     },
+        ... }
+    """
+
+    operations: list[str]
+    protocols: list[str]
+    has_fsm: bool
+    method_signatures: dict[str, str]
+
+
+def _empty_capabilities() -> CapabilitiesTypedDict:
+    """Factory function for creating an empty CapabilitiesTypedDict.
+
+    Returns:
+        An empty CapabilitiesTypedDict with default empty values.
+    """
+    # TypedDict with total=False allows empty dict
+    return {}
 
 
 class ModelNodeIntrospectionEvent(BaseModel):
@@ -24,13 +70,15 @@ class ModelNodeIntrospectionEvent(BaseModel):
         current_state: Current FSM state if the node has state management.
         version: Node version string.
         reason: Reason for the introspection event (startup, shutdown, request).
-        correlation_id: Optional correlation ID for tracing.
+        correlation_id: Required correlation ID for distributed tracing and idempotency.
         timestamp: UTC timestamp when the introspection was generated.
 
     Example:
         ```python
+        from uuid import uuid4
+
         event = ModelNodeIntrospectionEvent(
-            node_id="node-postgres-adapter-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             capabilities={
                 "operations": ["execute", "query", "batch_execute"],
@@ -44,17 +92,21 @@ class ModelNodeIntrospectionEvent(BaseModel):
             current_state="connected",
             version="1.0.0",
             reason="startup",
+            correlation_id=uuid4(),
         )
         ```
     """
 
-    node_id: str = Field(..., description="Unique node identifier")
+    node_id: UUID = Field(..., description="Unique node identifier")
     node_type: str = Field(..., description="Node type classification")
 
     # Capabilities discovered via reflection
-    capabilities: dict[str, list[str] | bool | dict[str, str]] = Field(
-        default_factory=dict,
-        description="Node capabilities discovered via reflection",
+    # Uses CapabilitiesTypedDict for type safety while maintaining Pydantic compatibility
+    capabilities: CapabilitiesTypedDict = Field(
+        default_factory=_empty_capabilities,
+        description="Node capabilities discovered via reflection. "
+        "Contains: operations (list[str]), protocols (list[str]), "
+        "has_fsm (bool), method_signatures (dict[str, str])",
     )
 
     # Endpoint URLs
@@ -100,9 +152,9 @@ class ModelNodeIntrospectionEvent(BaseModel):
     )
 
     # Tracing
-    correlation_id: UUID | None = Field(
-        default=None,
-        description="Correlation ID for distributed tracing",
+    correlation_id: UUID = Field(
+        ...,
+        description="Correlation ID for distributed tracing (required for idempotency)",
     )
 
     timestamp: datetime = Field(
@@ -110,13 +162,18 @@ class ModelNodeIntrospectionEvent(BaseModel):
         description="UTC timestamp of introspection generation",
     )
 
+    # Design Decision: This model is immutable (frozen=True) because:
+    # 1. Introspection events are snapshots of node state at a point in time
+    # 2. Any "updates" should create new events via model_copy(update={...})
+    # 3. Immutability prevents accidental state corruption in event handlers
+    # 4. Frozen models are hashable, enabling use in sets/dict keys if needed
     model_config = ConfigDict(
-        frozen=False,
+        frozen=True,
         extra="forbid",
         json_schema_extra={
             "examples": [
                 {
-                    "node_id": "node-postgres-adapter-001",
+                    "node_id": "550e8400-e29b-41d4-a716-446655440001",
                     "node_type": "EFFECT",
                     "capabilities": {
                         "operations": ["execute", "query", "batch_execute"],
@@ -138,4 +195,4 @@ class ModelNodeIntrospectionEvent(BaseModel):
     )
 
 
-__all__ = ["ModelNodeIntrospectionEvent"]
+__all__ = ["CapabilitiesTypedDict", "ModelNodeIntrospectionEvent"]
