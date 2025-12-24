@@ -208,9 +208,20 @@ def event_types_map(published_events: list[dict]) -> dict[str, dict]:
 
     Returns:
         Dictionary mapping event_type names to their full definitions.
+        Events missing the 'event_type' field are silently skipped.
+
+    Note:
+        Malformed events (those without an 'event_type' field) are filtered
+        out rather than raising a KeyError. This ensures test robustness
+        when contract files may have incomplete event definitions during
+        development or migration.
 
     """
-    return {event["event_type"]: event for event in published_events}
+    return {
+        event_type: event
+        for event in published_events
+        if (event_type := event.get("event_type")) is not None
+    }
 
 
 @pytest.fixture(scope="module")

@@ -84,6 +84,47 @@ ALL_PUBLISHED_EVENT_TYPES = DECISION_PATH_EVENT_TYPES + [RESULT_EVENT_TYPE]
 # The placeholders {env} and {namespace} are variable, followed by literal pattern
 TOPIC_PATTERN_REGEX = re.compile(r"^\{env\}\.\{namespace\}\.onex\.evt\.[a-z0-9-]+\.v1$")
 
+# Event type to expected topic mapping for parametrized tests
+# Each tuple: (event_type, expected_topic, description)
+# Description is used for test documentation and error messages
+DECISION_EVENT_TOPIC_MAPPING = [
+    (
+        "NodeRegistrationInitiated",
+        "{env}.{namespace}.onex.evt.node-registration-initiated.v1",
+        "Emitted when a registration workflow starts (introspection event received)",
+    ),
+    (
+        "NodeRegistrationAccepted",
+        "{env}.{namespace}.onex.evt.node-registration-accepted.v1",
+        "Emitted when registration is successfully accepted (Consul + PostgreSQL success)",
+    ),
+    (
+        "NodeRegistrationRejected",
+        "{env}.{namespace}.onex.evt.node-registration-rejected.v1",
+        "Emitted when registration is rejected (validation/policy failures)",
+    ),
+    (
+        "NodeRegistrationAckTimedOut",
+        "{env}.{namespace}.onex.evt.node-registration-ack-timed-out.v1",
+        "Emitted when acknowledgment times out (node unresponsive)",
+    ),
+    (
+        "NodeRegistrationAckReceived",
+        "{env}.{namespace}.onex.evt.node-registration-ack-received.v1",
+        "Emitted when acknowledgment is received (node confirmed registration)",
+    ),
+    (
+        "NodeBecameActive",
+        "{env}.{namespace}.onex.evt.node-became-active.v1",
+        "Emitted when node transitions to active state (ready to participate)",
+    ),
+    (
+        "NodeLivenessExpired",
+        "{env}.{namespace}.onex.evt.node-liveness-expired.v1",
+        "Emitted when liveness check fails (heartbeat/health timeout)",
+    ),
+]
+
 
 # =============================================================================
 # TestDecisionPathEvents
@@ -124,158 +165,51 @@ class TestDecisionPathEvents:
             f"Found: {list(event_types_map.keys())}"
         )
 
-    def test_node_registration_initiated_event_exists(
-        self, event_types_map: dict[str, dict]
+    @pytest.mark.parametrize(
+        ("event_type", "expected_topic", "description"),
+        DECISION_EVENT_TOPIC_MAPPING,
+        ids=[event[0] for event in DECISION_EVENT_TOPIC_MAPPING],
+    )
+    def test_decision_event_exists_with_correct_topic(
+        self,
+        event_types_map: dict[str, dict],
+        event_type: str,
+        expected_topic: str,
+        description: str,
     ) -> None:
-        """Test that NodeRegistrationInitiated event is properly defined.
+        """Test that each decision path event is properly defined with correct topic.
 
-        NodeRegistrationInitiated is emitted when a registration workflow starts.
-        This event is triggered when the orchestrator receives an introspection
-        event for a node that needs registration.
+        This parametrized test validates each of the 7 decision path event types:
+        - NodeRegistrationInitiated: Workflow start
+        - NodeRegistrationAccepted: Registration success
+        - NodeRegistrationRejected: Registration rejection
+        - NodeRegistrationAckTimedOut: Acknowledgment timeout
+        - NodeRegistrationAckReceived: Acknowledgment received
+        - NodeBecameActive: Node activation
+        - NodeLivenessExpired: Liveness failure
 
-        Topic pattern: {env}.{namespace}.onex.evt.node-registration-initiated.v1
+        Each event must:
+        1. Be defined in published_events
+        2. Have a topic matching the ONEX pattern: {env}.{namespace}.onex.evt.<slug>.v1
+
+        Args:
+            event_types_map: Mapping of event_type -> event definition from contract.
+            event_type: The event type name to test.
+            expected_topic: The expected topic pattern for this event.
+            description: Human-readable description of when this event is emitted.
         """
-        event_type = "NodeRegistrationInitiated"
+        # Verify event exists in published_events
         assert event_type in event_types_map, (
-            f"{event_type} must be defined in published_events"
+            f"{event_type} must be defined in published_events.\n"
+            f"Description: {description}"
         )
 
+        # Verify topic matches expected pattern
         event = event_types_map[event_type]
-        expected_topic = "{env}.{namespace}.onex.evt.node-registration-initiated.v1"
         assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
-        )
-
-    def test_node_registration_accepted_event_exists(
-        self, event_types_map: dict[str, dict]
-    ) -> None:
-        """Test that NodeRegistrationAccepted event is properly defined.
-
-        NodeRegistrationAccepted is emitted when a node's registration is
-        successfully accepted. This occurs after both Consul and PostgreSQL
-        registrations complete successfully.
-
-        Topic pattern: {env}.{namespace}.onex.evt.node-registration-accepted.v1
-        """
-        event_type = "NodeRegistrationAccepted"
-        assert event_type in event_types_map, (
-            f"{event_type} must be defined in published_events"
-        )
-
-        event = event_types_map[event_type]
-        expected_topic = "{env}.{namespace}.onex.evt.node-registration-accepted.v1"
-        assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
-        )
-
-    def test_node_registration_rejected_event_exists(
-        self, event_types_map: dict[str, dict]
-    ) -> None:
-        """Test that NodeRegistrationRejected event is properly defined.
-
-        NodeRegistrationRejected is emitted when a node's registration is
-        rejected. This can occur due to validation failures, policy violations,
-        or when the node is not eligible for registration.
-
-        Topic pattern: {env}.{namespace}.onex.evt.node-registration-rejected.v1
-        """
-        event_type = "NodeRegistrationRejected"
-        assert event_type in event_types_map, (
-            f"{event_type} must be defined in published_events"
-        )
-
-        event = event_types_map[event_type]
-        expected_topic = "{env}.{namespace}.onex.evt.node-registration-rejected.v1"
-        assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
-        )
-
-    def test_node_registration_ack_timed_out_event_exists(
-        self, event_types_map: dict[str, dict]
-    ) -> None:
-        """Test that NodeRegistrationAckTimedOut event is properly defined.
-
-        NodeRegistrationAckTimedOut is emitted when a node fails to acknowledge
-        its registration within the configured timeout period. This indicates
-        the node may be unresponsive or the acknowledgment message was lost.
-
-        Topic pattern: {env}.{namespace}.onex.evt.node-registration-ack-timed-out.v1
-        """
-        event_type = "NodeRegistrationAckTimedOut"
-        assert event_type in event_types_map, (
-            f"{event_type} must be defined in published_events"
-        )
-
-        event = event_types_map[event_type]
-        expected_topic = "{env}.{namespace}.onex.evt.node-registration-ack-timed-out.v1"
-        assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
-        )
-
-    def test_node_registration_ack_received_event_exists(
-        self, event_types_map: dict[str, dict]
-    ) -> None:
-        """Test that NodeRegistrationAckReceived event is properly defined.
-
-        NodeRegistrationAckReceived is emitted when the orchestrator receives
-        a successful acknowledgment from a registered node. This confirms the
-        node has received and processed its registration information.
-
-        Topic pattern: {env}.{namespace}.onex.evt.node-registration-ack-received.v1
-        """
-        event_type = "NodeRegistrationAckReceived"
-        assert event_type in event_types_map, (
-            f"{event_type} must be defined in published_events"
-        )
-
-        event = event_types_map[event_type]
-        expected_topic = "{env}.{namespace}.onex.evt.node-registration-ack-received.v1"
-        assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
-        )
-
-    def test_node_became_active_event_exists(
-        self, event_types_map: dict[str, dict]
-    ) -> None:
-        """Test that NodeBecameActive event is properly defined.
-
-        NodeBecameActive is emitted when a node transitions to the active state.
-        This typically occurs after successful registration and acknowledgment,
-        indicating the node is ready to participate in the system.
-
-        Topic pattern: {env}.{namespace}.onex.evt.node-became-active.v1
-        """
-        event_type = "NodeBecameActive"
-        assert event_type in event_types_map, (
-            f"{event_type} must be defined in published_events"
-        )
-
-        event = event_types_map[event_type]
-        expected_topic = "{env}.{namespace}.onex.evt.node-became-active.v1"
-        assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
-        )
-
-    def test_node_liveness_expired_event_exists(
-        self, event_types_map: dict[str, dict]
-    ) -> None:
-        """Test that NodeLivenessExpired event is properly defined.
-
-        NodeLivenessExpired is emitted when a node's liveness check fails.
-        This occurs when the node fails to send heartbeats or health checks
-        within the configured timeout period, indicating potential failure.
-
-        Topic pattern: {env}.{namespace}.onex.evt.node-liveness-expired.v1
-        """
-        event_type = "NodeLivenessExpired"
-        assert event_type in event_types_map, (
-            f"{event_type} must be defined in published_events"
-        )
-
-        event = event_types_map[event_type]
-        expected_topic = "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
-        assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
+            f"{event_type} topic should be '{expected_topic}', "
+            f"got '{event['topic']}'.\n"
+            f"Description: {description}"
         )
 
     def test_all_decision_events_follow_topic_convention(

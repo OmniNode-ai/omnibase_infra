@@ -392,7 +392,7 @@ class TestOrchestratorIsPureCoordinator:
     """Tests verifying orchestrator is a pure workflow coordinator."""
 
     def test_orchestrator_is_pure_coordinator(
-        self, node_source_code: str, mock_container: MagicMock
+        self, node_ast: ast.Module, mock_container: MagicMock
     ) -> None:
         """Verify orchestrator only coordinates workflow, doesn't execute I/O.
 
@@ -401,6 +401,9 @@ class TestOrchestratorIsPureCoordinator:
         2. Has minimal code (just __init__)
         3. Relies on contract.yaml for all workflow logic
         4. Does not implement any I/O methods directly
+
+        Uses AST-based analysis for robust structural verification that won't
+        break if source formatting changes.
         """
         from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
 
@@ -411,70 +414,75 @@ class TestOrchestratorIsPureCoordinator:
         orchestrator = NodeRegistrationOrchestrator(mock_container)
 
         # Verify inheritance
-        assert isinstance(orchestrator, NodeOrchestrator), (
-            "Orchestrator must inherit from NodeOrchestrator for contract-driven workflow"
-        )
+        assert isinstance(
+            orchestrator, NodeOrchestrator
+        ), "Orchestrator must inherit from NodeOrchestrator for contract-driven workflow"
 
-        # Verify minimal implementation (source code check)
-        # Count non-comment, non-docstring, non-blank lines in class body
-        class_lines = []
-        in_class = False
-        in_docstring = False
-        docstring_delimiter = None
+        # Find the orchestrator class definition using AST
+        orchestrator_class: ast.ClassDef | None = None
+        for node in ast.walk(node_ast):
+            if (
+                isinstance(node, ast.ClassDef)
+                and node.name == "NodeRegistrationOrchestrator"
+            ):
+                orchestrator_class = node
+                break
 
-        for line in node_source_code.split("\n"):
-            stripped = line.strip()
+        assert (
+            orchestrator_class is not None
+        ), "Could not find NodeRegistrationOrchestrator class in AST"
 
-            if "class NodeRegistrationOrchestrator" in line:
-                in_class = True
-                continue
+        # Analyze class body using AST - count meaningful statements
+        # Exclude docstrings (first Expr with Constant) from statement count
+        def is_docstring(stmt: ast.stmt) -> bool:
+            """Check if statement is a docstring (Expr containing a Constant string)."""
+            return (
+                isinstance(stmt, ast.Expr)
+                and isinstance(stmt.value, ast.Constant)
+                and isinstance(stmt.value.value, str)
+            )
 
-            if in_class:
-                # End of class (next top-level definition)
-                if (
-                    stripped
-                    and not stripped.startswith(" ")
-                    and not stripped.startswith("#")
-                ):
-                    if not stripped.startswith('"""') and not stripped.startswith(
-                        "'''"
-                    ):
-                        break
-
-                # Skip empty lines and comments
-                if not stripped or stripped.startswith("#"):
-                    continue
-
-                # Handle docstrings
-                if '"""' in stripped or "'''" in stripped:
-                    if stripped.count('"""') == 2 or stripped.count("'''") == 2:
-                        continue  # Single-line docstring
-                    if not in_docstring:
-                        in_docstring = True
-                        docstring_delimiter = '"""' if '"""' in stripped else "'''"
-                        continue
-                    if docstring_delimiter in stripped:
-                        in_docstring = False
-                        continue
-
-                if in_docstring:
-                    continue
-
-                class_lines.append(stripped)
-
-        # Pure coordinator should have very few lines (mainly __init__ and super call)
-        # Allow for: def __init__, super().__init__, any type hints
-        effective_lines = [
-            line for line in class_lines if line and not line.startswith("def __init__")
+        # Filter out docstrings from class body
+        meaningful_statements = [
+            stmt for stmt in orchestrator_class.body if not is_docstring(stmt)
         ]
 
-        # The only real line should be the super().__init__ call
-        assert len(effective_lines) <= 2, (
-            f"Pure coordinator should have minimal code.\n"
-            f"Found {len(effective_lines)} code lines: {effective_lines}\n"
+        # A pure coordinator should only have __init__ method
+        # Count method definitions (FunctionDef/AsyncFunctionDef)
+        methods = [
+            stmt
+            for stmt in meaningful_statements
+            if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
+        ]
+
+        # Get method names for reporting
+        method_names = [m.name for m in methods]
+
+        # Pure coordinator should have only __init__
+        non_init_methods = [name for name in method_names if name != "__init__"]
+
+        assert not non_init_methods, (
+            f"Pure coordinator should only have __init__ method.\n"
+            f"Found additional methods: {non_init_methods}\n"
             f"Orchestrator should only call super().__init__(container) and rely on "
             f"base class + contract.yaml for all behavior."
         )
+
+        # Verify __init__ is minimal (just super().__init__ call)
+        init_method = next((m for m in methods if m.name == "__init__"), None)
+        if init_method:
+            # Count statements in __init__ body (excluding docstring)
+            init_statements = [
+                stmt for stmt in init_method.body if not is_docstring(stmt)
+            ]
+
+            # Allow up to 2 statements: super().__init__() call and possibly one assignment
+            assert len(init_statements) <= 2, (
+                f"__init__ should be minimal (1-2 statements).\n"
+                f"Found {len(init_statements)} statements in __init__ body.\n"
+                f"Orchestrator should only call super().__init__(container) and rely on "
+                f"base class + contract.yaml for all behavior."
+            )
 
     def test_orchestrator_docstring_documents_delegation_pattern(
         self, mock_container: MagicMock
@@ -642,9 +650,9 @@ class TestContractIOOperationsAreEffectNodes:
             "The orchestrator delegates all I/O to this effect node."
         )
 
-        assert effect_dep.get("type") == "node", (
-            f"effect_node dependency should be type 'node', got: {effect_dep.get('type')}"
-        )
+        assert (
+            effect_dep.get("type") == "node"
+        ), f"effect_node dependency should be type 'node', got: {effect_dep.get('type')}"
 
 
 # =============================================================================
@@ -692,9 +700,9 @@ class TestOrchestratorModuleStructure:
                                 if isinstance(elt, ast.Constant)
                             ]
 
-        assert all_value is not None, (
-            "Module should define __all__ for explicit exports"
-        )
+        assert (
+            all_value is not None
+        ), "Module should define __all__ for explicit exports"
         assert all_value == ["NodeRegistrationOrchestrator"], (
             f"Module should only export NodeRegistrationOrchestrator.\n"
             f"Found exports: {all_value}"

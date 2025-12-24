@@ -34,6 +34,7 @@ See Also:
 from __future__ import annotations
 
 import ast
+import re
 
 import pytest
 
@@ -41,6 +42,100 @@ __all__ = [
     "TestOrchestratorNoSystemClockCalls",
     "TestContractTimeInjectionConfiguration",
 ]
+
+# =============================================================================
+# Time-Dependency Detection
+# =============================================================================
+# This module uses keyword-based heuristics to identify workflow steps that
+# likely perform time-dependent operations. These steps should declare
+# `time_injection: true` in their step_config.
+#
+# Detection Strategy:
+#   1. Pattern matching with word boundaries to avoid substring false positives
+#   2. Partial word stems (e.g., "expir", "schedul") to catch variations
+#   3. Exclusion list for known false positives (async patterns, etc.)
+#   4. Check step_config for time-related keys as secondary indicator
+#
+# Known Limitations:
+#   - May miss custom time-related operations with non-standard naming
+#   - Domain-specific time concepts may require additions to patterns
+#   - Heuristic approach cannot guarantee 100% accuracy
+#
+# To add new patterns: Add regex to TIME_KEYWORD_PATTERNS
+# To exclude false positives: Add node_id to TIME_KEYWORD_EXCEPTIONS
+
+# Regex patterns that suggest time-dependent operations.
+# Uses word boundaries (\b) where appropriate to avoid substring matches.
+# Partial stems (e.g., "expir", "schedul") intentionally lack trailing \b
+# to match variations like "expire", "expired", "expiration", etc.
+TIME_KEYWORD_PATTERNS: tuple[str, ...] = (
+    r"\btimeout\b",  # timeout handling
+    r"\bdeadline\b",  # deadline enforcement
+    r"\bschedul",  # schedule, scheduled, scheduling
+    r"\bexpir",  # expire, expired, expiration, expiry
+    r"\bduration\b",  # duration calculations
+    r"\bdelay\b",  # delay operations
+    r"\bttl\b",  # time-to-live
+    r"\bwait\b",  # wait operations (not "await" due to \b)
+    r"\bretry.*interval\b",  # retry intervals
+    r"\brate.?limit",  # rate limiting
+    r"\bcooldown\b",  # cooldown periods
+    r"\bthrottle\b",  # throttling
+)
+
+# Known exceptions: node_ids that match keywords but are NOT time-dependent.
+# These are typically async programming patterns or domain terms that
+# coincidentally contain time-related substrings.
+TIME_KEYWORD_EXCEPTIONS: frozenset[str] = frozenset(
+    {
+        # Add known false positives here as they are discovered.
+        # Example: "await_response" would match "wait" but is async pattern
+    }
+)
+
+# Step config keys that indicate time-dependency when present.
+# If a step declares these keys, it likely performs time-dependent operations.
+TIME_CONFIG_KEYS: frozenset[str] = frozenset(
+    {
+        "timeout_seconds",
+        "timeout_ms",
+        "deadline",
+        "ttl",
+        "max_duration",
+        "retry_delay",
+        "cooldown_period",
+    }
+)
+
+
+def _is_time_dependent(node_id: str, description: str, step_config: dict) -> bool:
+    """Check if a workflow node appears to be time-dependent.
+
+    Uses multiple signals to determine time-dependency:
+    1. Node ID matches time-related keyword patterns
+    2. Description contains time-related keyword patterns
+    3. Step config contains time-related configuration keys
+
+    Args:
+        node_id: The workflow node identifier.
+        description: The node's description text.
+        step_config: The node's step_config dictionary.
+
+    Returns:
+        True if the node appears to be time-dependent.
+    """
+    # Check exclusion list first
+    if node_id in TIME_KEYWORD_EXCEPTIONS:
+        return False
+
+    # Check for time-related config keys
+    if step_config and any(key in step_config for key in TIME_CONFIG_KEYS):
+        return True
+
+    # Check keyword patterns in combined text
+    combined_text = f"{node_id} {description}".lower()
+    return any(re.search(pattern, combined_text) for pattern in TIME_KEYWORD_PATTERNS)
+
 
 # =============================================================================
 # Fixtures
@@ -316,9 +411,9 @@ class TestContractTimeInjectionConfiguration:
 
         # Verify required fields exist
         assert "enabled" in time_injection, "time_injection must have 'enabled' field"
-        assert time_injection["enabled"] is True, (
-            "time_injection.enabled must be true for orchestrators that need time"
-        )
+        assert (
+            time_injection["enabled"] is True
+        ), "time_injection.enabled must be true for orchestrators that need time"
 
         assert "source" in time_injection, "time_injection must have 'source' field"
         assert "field" in time_injection, "time_injection must have 'field' field"
@@ -335,9 +430,9 @@ class TestContractTimeInjectionConfiguration:
         - Enables time-based decisions without system clock access
         - Supports testing with fixed/mocked time values
         """
-        assert "time_injection" in contract_data, (
-            "Contract is missing 'time_injection' configuration"
-        )
+        assert (
+            "time_injection" in contract_data
+        ), "Contract is missing 'time_injection' configuration"
 
         time_injection = contract_data["time_injection"]
 
@@ -355,9 +450,9 @@ class TestContractTimeInjectionConfiguration:
         The 'now' field is the standard field name for injected time in
         dispatch contexts and RuntimeTick events.
         """
-        assert "time_injection" in contract_data, (
-            "Contract is missing 'time_injection' configuration"
-        )
+        assert (
+            "time_injection" in contract_data
+        ), "Contract is missing 'time_injection' configuration"
 
         time_injection = contract_data["time_injection"]
 
@@ -386,19 +481,19 @@ class TestContractTimeInjectionConfiguration:
                     time_injection: true
                     timeout_evaluation: true
         """
-        assert "workflow_coordination" in contract_data, (
-            "Contract is missing 'workflow_coordination'"
-        )
+        assert (
+            "workflow_coordination" in contract_data
+        ), "Contract is missing 'workflow_coordination'"
 
         workflow = contract_data["workflow_coordination"]
-        assert "workflow_definition" in workflow, (
-            "workflow_coordination is missing 'workflow_definition'"
-        )
+        assert (
+            "workflow_definition" in workflow
+        ), "workflow_coordination is missing 'workflow_definition'"
 
         workflow_def = workflow["workflow_definition"]
-        assert "execution_graph" in workflow_def, (
-            "workflow_definition is missing 'execution_graph'"
-        )
+        assert (
+            "execution_graph" in workflow_def
+        ), "workflow_definition is missing 'execution_graph'"
 
         execution_graph = workflow_def["execution_graph"]
         assert "nodes" in execution_graph, "execution_graph is missing 'nodes'"
@@ -418,9 +513,9 @@ class TestContractTimeInjectionConfiguration:
         )
 
         # Verify step_config exists and has time_injection: true
-        assert "step_config" in evaluate_timeout_node, (
-            "evaluate_timeout node is missing 'step_config'"
-        )
+        assert (
+            "step_config" in evaluate_timeout_node
+        ), "evaluate_timeout node is missing 'step_config'"
 
         step_config = evaluate_timeout_node["step_config"]
 
@@ -447,9 +542,9 @@ class TestContractTimeInjectionConfiguration:
               event_type: "RuntimeTick"
               internal: true
         """
-        assert "consumed_events" in contract_data, (
-            "Contract is missing 'consumed_events'"
-        )
+        assert (
+            "consumed_events" in contract_data
+        ), "Contract is missing 'consumed_events'"
 
         consumed_events = contract_data["consumed_events"]
 
@@ -480,9 +575,9 @@ class TestContractTimeInjectionConfiguration:
 
         # Verify topic pattern includes 'runtime-tick'
         topic = runtime_tick_event.get("topic", "")
-        assert "runtime-tick" in topic.lower(), (
-            f"RuntimeTick topic pattern should contain 'runtime-tick', got: {topic}"
-        )
+        assert (
+            "runtime-tick" in topic.lower()
+        ), f"RuntimeTick topic pattern should contain 'runtime-tick', got: {topic}"
 
 
 # =============================================================================
@@ -530,9 +625,13 @@ class TestOrchestratorTimeInjectionIntegration:
         time_injection: true in their step_config. This test identifies
         potentially time-dependent steps and verifies they're configured.
 
-        Time-dependent step indicators:
-        - Step names containing 'timeout', 'deadline', 'schedule', 'expire'
-        - Step descriptions mentioning time-related concepts
+        Detection uses the module-level _is_time_dependent() function which:
+        - Matches time-related keywords with word boundaries (regex-based)
+        - Checks step_config for time-related configuration keys
+        - Respects an exclusion list for known false positives
+
+        See TIME_KEYWORD_PATTERNS, TIME_KEYWORD_EXCEPTIONS, and TIME_CONFIG_KEYS
+        at module level for configuration.
         """
         assert "workflow_coordination" in contract_data
         workflow = contract_data["workflow_coordination"]
@@ -541,28 +640,15 @@ class TestOrchestratorTimeInjectionIntegration:
         assert "execution_graph" in workflow_def
         nodes = workflow_def["execution_graph"]["nodes"]
 
-        # Keywords that suggest time-dependent operations
-        time_keywords = {
-            "timeout",
-            "deadline",
-            "schedule",
-            "expire",
-            "duration",
-            "wait",
-        }
-
         time_dependent_steps_without_config: list[str] = []
 
         for node in nodes:
             node_id = node.get("node_id", "")
             description = node.get("description", "")
+            step_config = node.get("step_config", {})
 
-            # Check if node name or description suggests time dependency
-            combined_text = f"{node_id} {description}".lower()
-            is_time_dependent = any(kw in combined_text for kw in time_keywords)
-
-            if is_time_dependent:
-                step_config = node.get("step_config", {})
+            # Use helper function for robust time-dependency detection
+            if _is_time_dependent(node_id, description, step_config):
                 if not step_config.get("time_injection"):
                     time_dependent_steps_without_config.append(
                         f"{node_id}: {description}"
@@ -571,5 +657,6 @@ class TestOrchestratorTimeInjectionIntegration:
         assert len(time_dependent_steps_without_config) == 0, (
             "Time-dependent workflow steps missing time_injection config:\n"
             "  - " + "\n  - ".join(time_dependent_steps_without_config) + "\n\n"
-            "Add 'time_injection: true' to step_config for these steps."
+            "Add 'time_injection: true' to step_config for these steps.\n"
+            "If this is a false positive, add node_id to TIME_KEYWORD_EXCEPTIONS."
         )
