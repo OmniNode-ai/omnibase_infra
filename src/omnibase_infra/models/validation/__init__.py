@@ -4,17 +4,22 @@
 
 Provides models for ONEX execution shape validation and chain validation,
 including rules defining handler constraints, violation results for CI gate
-integration, message category to node kind routing validation, and
-correlation/causation chain violation tracking.
+integration, message category to node kind routing validation, coverage metrics
+for routing validation, and correlation/causation chain violation tracking.
 
 Exports:
     ModelChainViolation: Result of chain violation detection
+    ModelCoverageMetrics: Coverage metrics for routing validation
     ModelExecutionShapeRule: Rule defining handler type constraints
     ModelExecutionShapeValidation: Validates message category to node kind routing
     ModelExecutionShapeViolationResult: Result of violation detection
+    ModelValidationOutcome: Generic validation result model
 """
 
 from omnibase_infra.models.validation.model_chain_violation import ModelChainViolation
+from omnibase_infra.models.validation.model_coverage_metrics import (
+    ModelCoverageMetrics,
+)
 from omnibase_infra.models.validation.model_execution_shape_rule import (
     ModelExecutionShapeRule,
 )
@@ -24,10 +29,15 @@ from omnibase_infra.models.validation.model_execution_shape_validation import (
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
+from omnibase_infra.models.validation.model_validation_outcome import (
+    ModelValidationOutcome,
+)
 
 __all__ = [
     "ModelChainViolation",
+    "ModelCoverageMetrics",
     "ModelExecutionShapeRule",
     "ModelExecutionShapeValidation",
     "ModelExecutionShapeViolationResult",
+    "ModelValidationOutcome",
 ]

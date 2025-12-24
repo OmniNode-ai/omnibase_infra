@@ -92,7 +92,13 @@ See Also:
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
+from omnibase_infra.models.dispatch.model_dispatch_log_context import (
+    ModelDispatchLogContext,
+)
+from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
+from omnibase_infra.models.dispatch.model_dispatch_outcome import ModelDispatchOutcome
+from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
@@ -115,11 +121,15 @@ __all__ = [
     "EnumTopicStandard",
     # Models
     "ModelDispatchContext",
+    "ModelDispatchMetadata",
     "ModelDispatchMetrics",
+    "ModelDispatchOutputs",
     "ModelDispatchResult",
     "ModelDispatchRoute",
     "ModelDispatcherMetrics",
     "ModelDispatcherRegistration",
+    "ModelDispatchLogContext",
+    "ModelDispatchOutcome",
     "ModelParsedTopic",
     "ModelTopicParser",
     # Cache utilities

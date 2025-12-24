@@ -58,9 +58,9 @@ class TestModelDomainConstraint:
     def test_validate_consumption_success(self) -> None:
         """Test successful consumption validation."""
         constraint = ModelDomainConstraint(owning_domain="user")
-        is_valid, error = constraint.validate_consumption("user", "UserCreated")
-        assert is_valid is True
-        assert error is None
+        outcome = constraint.validate_consumption("user", "UserCreated")
+        assert outcome.is_valid is True
+        assert not outcome.has_error
 
     def test_validate_consumption_failure_with_explicit_opt_in(self) -> None:
         """Test consumption validation failure with explicit opt-in required."""
@@ -68,14 +68,14 @@ class TestModelDomainConstraint:
             owning_domain="registration",
             require_explicit_opt_in=True,
         )
-        is_valid, error = constraint.validate_consumption("user", "UserCreated")
-        assert is_valid is False
-        assert error is not None
-        assert "Domain mismatch" in error
-        assert "registration" in error
-        assert "user" in error
-        assert "UserCreated" in error
-        assert "allowed_cross_domains" in error
+        outcome = constraint.validate_consumption("user", "UserCreated")
+        assert outcome.is_valid is False
+        assert outcome.has_error
+        assert "Domain mismatch" in outcome.error_message
+        assert "registration" in outcome.error_message
+        assert "user" in outcome.error_message
+        assert "UserCreated" in outcome.error_message
+        assert "allowed_cross_domains" in outcome.error_message
 
     def test_validate_consumption_failure_without_explicit_opt_in(self) -> None:
         """Test consumption validation failure without explicit opt-in requirement."""
@@ -83,12 +83,12 @@ class TestModelDomainConstraint:
             owning_domain="registration",
             require_explicit_opt_in=False,
         )
-        is_valid, error = constraint.validate_consumption("user", "UserCreated")
-        assert is_valid is False
-        assert error is not None
-        assert "Domain mismatch" in error
+        outcome = constraint.validate_consumption("user", "UserCreated")
+        assert outcome.is_valid is False
+        assert outcome.has_error
+        assert "Domain mismatch" in outcome.error_message
         # Should not mention opt-in instructions when require_explicit_opt_in=False
-        assert "allowed_cross_domains" not in error
+        assert "allowed_cross_domains" not in outcome.error_message
 
     def test_validate_consumption_with_cross_domain_allowed(self) -> None:
         """Test consumption validation with cross-domain allowed."""
@@ -96,9 +96,9 @@ class TestModelDomainConstraint:
             owning_domain="notification",
             allowed_cross_domains=frozenset({"user"}),
         )
-        is_valid, error = constraint.validate_consumption("user", "UserCreated")
-        assert is_valid is True
-        assert error is None
+        outcome = constraint.validate_consumption("user", "UserCreated")
+        assert outcome.is_valid is True
+        assert not outcome.has_error
 
     def test_immutable(self) -> None:
         """Test that ModelDomainConstraint is immutable."""

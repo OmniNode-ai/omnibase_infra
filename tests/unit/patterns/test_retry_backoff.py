@@ -22,11 +22,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeVar
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.handlers.model_consul_retry_config import ModelConsulRetryConfig
 from omnibase_infra.handlers.model_vault_retry_config import ModelVaultRetryConfig

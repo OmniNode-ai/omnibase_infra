@@ -52,6 +52,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 
 
 class ModelDispatchRoute(BaseModel):
@@ -158,7 +159,7 @@ class ModelDispatchRoute(BaseModel):
         default=None,
         description="Optional correlation ID for tracing route creation.",
     )
-    metadata: dict[str, str] | None = Field(
+    metadata: ModelDispatchMetadata | None = Field(
         default=None,
         description="Optional additional metadata for the route.",
     )

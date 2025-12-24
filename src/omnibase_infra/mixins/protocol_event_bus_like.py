@@ -4,6 +4,27 @@
 
 This module provides the minimal protocol interface for event bus compatibility
 with the MixinNodeIntrospection mixin.
+
+Thread Safety:
+    Implementations of ProtocolEventBusLike MUST be thread-safe for concurrent
+    async calls. Multiple coroutines may invoke publish methods simultaneously.
+
+    Design Requirements:
+        - **Connection Pooling**: Use connection pools for underlying transports
+        - **Async-Safe Clients**: Ensure underlying clients (aiokafka, etc.) are async-safe
+        - **No Shared Mutable State**: Avoid instance-level caches that could race
+
+    Recommended Patterns:
+        - Use asyncio.Lock for any shared mutable state (e.g., circuit breakers)
+        - Use MixinAsyncCircuitBreaker for fault tolerance
+        - Keep publish operations stateless where possible
+
+Related:
+    - docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md: Circuit breaker patterns
+    - KafkaEventBus: Production implementation with circuit breaker integration
+    - InMemoryEventBus: Simple implementation for testing
+
+.. versionadded:: 0.4.0
 """
 
 from __future__ import annotations
@@ -21,6 +42,33 @@ class ProtocolEventBusLike(Protocol):
 
     The mixin prefers ``publish_envelope`` when available, falling back
     to ``publish`` for raw bytes publishing.
+
+    Thread Safety:
+        Implementations MUST be thread-safe for concurrent async calls.
+
+        **Guarantees implementers MUST provide:**
+            - Concurrent calls to publish methods are safe
+            - Internal state (if any) is protected by appropriate locks
+            - Underlying transport clients are async-safe
+
+        **Locking recommendations:**
+            - Use asyncio.Lock for shared mutable state
+            - Use MixinAsyncCircuitBreaker for fault tolerance (optional)
+            - Connection state management should use async-safe patterns
+
+        **What callers can assume:**
+            - Multiple coroutines can call publish methods concurrently
+            - Order of message delivery may not match call order (Kafka partitioning)
+            - Each publish is an independent operation
+
+    Note:
+        Method bodies in this Protocol use ``...`` (Ellipsis) rather than
+        ``raise NotImplementedError()``. This is the standard Python convention
+        for ``typing.Protocol`` classes per PEP 544.
+
+    See Also:
+        - docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md: Thread safety patterns
+        - MixinAsyncCircuitBreaker: Recommended for production implementations
     """
 
     async def publish_envelope(
@@ -29,6 +77,10 @@ class ProtocolEventBusLike(Protocol):
         topic: str,
     ) -> None:
         """Publish an event envelope to a topic.
+
+        Thread Safety:
+            This method MUST be safe for concurrent calls from multiple
+            coroutines. Implementations should not rely on call ordering.
 
         Args:
             envelope: The event envelope/model to publish.
@@ -43,6 +95,10 @@ class ProtocolEventBusLike(Protocol):
         value: bytes,
     ) -> None:
         """Publish raw bytes to a topic (fallback method).
+
+        Thread Safety:
+            This method MUST be safe for concurrent calls from multiple
+            coroutines. Implementations should not rely on call ordering.
 
         Args:
             topic: The topic to publish to.

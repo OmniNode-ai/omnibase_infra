@@ -42,7 +42,7 @@ import sys
 import time
 from statistics import mean, quantiles, stdev
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest

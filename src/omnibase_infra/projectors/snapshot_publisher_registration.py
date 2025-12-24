@@ -95,7 +95,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -638,7 +638,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             )
             return True
 
-        except Exception as e:
+        except Exception:
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("delete_snapshot", correlation_id)
 

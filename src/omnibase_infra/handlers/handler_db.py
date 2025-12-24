@@ -11,6 +11,7 @@ All queries MUST use parameterized statements for SQL injection protection.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -304,8 +305,6 @@ class DbAdapter(MixinEnvelopeExtraction):
             It exists as a utility for development/debugging only. See class
             docstring "Security Policy - DSN Handling" for full policy.
         """
-        import re
-
         # Match password in DSN formats: user:password@ or :password@
         return re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", dsn)
 

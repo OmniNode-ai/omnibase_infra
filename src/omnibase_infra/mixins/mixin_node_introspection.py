@@ -248,11 +248,13 @@ class IntrospectionPerformanceMetrics:
     threshold_exceeded: bool = False
     slow_operations: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, float | bool | int | list[str]]:
+    def to_dict(self) -> dict[str, object]:
         """Convert metrics to dictionary for logging/serialization.
 
         Returns:
-            Dictionary with all metric fields.
+            Dictionary with all metric fields. Uses ``object`` as the value type
+            to avoid union complexity while maintaining type safety. Callers
+            should use :class:`ModelIntrospectionMetrics` for strongly-typed access.
         """
         return {
             "get_capabilities_ms": self.get_capabilities_ms,
@@ -263,7 +265,7 @@ class IntrospectionPerformanceMetrics:
             "cache_hit": self.cache_hit,
             "method_count": self.method_count,
             "threshold_exceeded": self.threshold_exceeded,
-            "slow_operations": self.slow_operations,
+            "slow_operations": list(self.slow_operations),
         }
 
 

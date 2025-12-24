@@ -137,19 +137,19 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast, overload
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast, overload
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from pydantic import ValidationError
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 
 if TYPE_CHECKING:
     from omnibase_core.enums.enum_node_kind import EnumNodeKind
-    from omnibase_core.types import JsonValue
 
 # Patterns that may indicate sensitive data in error messages
 # These patterns are checked case-insensitively
@@ -227,14 +227,50 @@ def _sanitize_error_message(exception: Exception, max_length: int = 500) -> str:
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
+from omnibase_infra.models.dispatch.model_dispatch_log_context import (
+    ModelDispatchLogContext,
+)
 from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
+from omnibase_infra.models.dispatch.model_dispatch_outcome import ModelDispatchOutcome
+from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
     ModelDispatcherMetrics,
 )
 
-# Type alias for dispatcher output topics
+
+class ModelLogContextKwargs(TypedDict, total=False):
+    """TypedDict for _build_log_context kwargs to ensure type safety.
+
+    All fields are optional (total=False) since callers pass only the
+    relevant subset. ModelDispatchLogContext validators handle None-to-sentinel
+    conversion for backwards compatibility.
+
+    .. versionadded:: 0.6.3
+        Created as part of Union Reduction Phase 2 (OMN-1002) to eliminate
+        type: ignore comment in _build_log_context.
+    """
+
+    topic: str | None
+    category: EnumMessageCategory | None
+    message_type: str | None
+    dispatcher_id: str | None
+    dispatcher_count: int | None
+    duration_ms: float | None
+    correlation_id: UUID | None
+    trace_id: UUID | None
+    error_code: EnumCoreErrorCode | None
+
+
+# Type alias for dispatcher output topics (LEGACY - for backwards compatibility)
+#
+# .. deprecated:: 0.6.0
+#     External dispatchers should continue using this type for their return values,
+#     but new internal code should prefer ModelDispatchOutcome which eliminates
+#     the 3-way union pattern. The dispatch engine normalizes legacy outputs to
+#     ModelDispatchOutcome internally.
+#
 # Dispatchers can return:
 # - str: A single output topic
 # - list[str]: Multiple output topics
@@ -815,79 +851,48 @@ class MessageDispatchEngine:
         return self._frozen
 
     def _build_log_context(
-        self,
-        topic: str | None = None,
-        category: EnumMessageCategory | None = None,
-        message_type: str | None = None,
-        dispatcher_id: str | None = None,
-        dispatcher_count: int | None = None,
-        duration_ms: float | None = None,
-        correlation_id: UUID | None = None,
-        trace_id: UUID | None = None,
-        error_code: EnumCoreErrorCode | None = None,
-    ) -> dict[str, JsonValue]:
+        self, **kwargs: Unpack[ModelLogContextKwargs]
+    ) -> dict[str, str | int | float]:
         """
         Build structured log context dictionary.
 
-        Design Note (PR Review - Dict vs Pydantic Model):
-            This method returns a plain dict rather than a Pydantic model because:
+        .. versionchanged:: 0.6.0
+            Now delegates to ModelDispatchLogContext.to_dict() for type-safe
+            context construction.
 
-            1. **Ephemeral Data**: Log context is created, passed to logger.info/debug/error,
-               and immediately discarded. No persistence or validation benefit.
+        .. versionchanged:: 0.6.2
+            Refactored to use ``**kwargs`` forwarding to eliminate 9 union
+            parameters from method signature (OMN-1002 Union Reduction Phase 2).
+            ModelDispatchLogContext validators handle None-to-sentinel conversion.
 
-            2. **Logger API Compatibility**: Python's logging.Logger.info(..., extra={})
-               expects dict[str, Any]. A Pydantic model would need .model_dump() on every
-               log call, adding overhead without benefit.
+        .. versionchanged:: 0.6.3
+            Updated to use ``Unpack[ModelLogContextKwargs]`` TypedDict for type-safe
+            kwargs (OMN-1002). Eliminates need for ``type: ignore`` comment.
 
-            3. **No Validation Needed**: All fields are computed from already-validated
-               sources (enums, UUIDs, timestamps). Double-validating adds latency.
-
-            4. **Performance**: This method is called on every dispatch operation and
-               every log statement. Pydantic model creation overhead (~5-10 microseconds)
-               would accumulate across high-throughput dispatch scenarios.
-
-            5. **Convention**: Using dict for logger extra context is standard Python
-               practice followed by logging frameworks.
-
-            If a structured log context model becomes valuable (e.g., for log aggregation
-            with strict schema enforcement), consider creating ModelLogContext in the
-            models/dispatch/ directory.
+        Design Note (Union Reduction - OMN-1002):
+            This private method uses typed ``**kwargs`` via ``ModelLogContextKwargs``
+            TypedDict to forward parameters to ModelDispatchLogContext. The
+            TypedDict provides compile-time type checking while the model's
+            field validators handle None-to-sentinel conversion at runtime.
 
         Args:
-            topic: The topic being dispatched to.
-            category: The message category.
-            message_type: The message type.
-            dispatcher_id: Dispatcher ID (or comma-separated list).
-            dispatcher_count: Number of dispatchers matched.
-            duration_ms: Dispatch duration in milliseconds.
-            correlation_id: Correlation ID from envelope (UUID).
-            trace_id: Trace ID from envelope (UUID).
-            error_code: Error code if dispatch failed.
+            **kwargs: Keyword arguments forwarded to ModelDispatchLogContext.
+                Typed via ``ModelLogContextKwargs`` TypedDict with supported keys:
+                topic, category, message_type, dispatcher_id, dispatcher_count,
+                duration_ms, correlation_id, trace_id, error_code.
+                None values are automatically converted to sentinel values by
+                the model's field validators.
 
         Returns:
-            Dictionary with non-None values for structured logging.
+            Dictionary with non-sentinel values for structured logging.
             UUID values are converted to strings at serialization time.
         """
-        context: dict[str, JsonValue] = {}
-        if topic is not None:
-            context["topic"] = topic
-        if category is not None:
-            context["category"] = category.value
-        if message_type is not None:
-            context["message_type"] = message_type
-        if dispatcher_id is not None:
-            context["dispatcher_id"] = dispatcher_id
-        if dispatcher_count is not None:
-            context["dispatcher_count"] = dispatcher_count
-        if duration_ms is not None:
-            context["duration_ms"] = round(duration_ms, 3)
-        if correlation_id is not None:
-            context["correlation_id"] = str(correlation_id)
-        if trace_id is not None:
-            context["trace_id"] = str(trace_id)
-        if error_code is not None:
-            context["error_code"] = error_code.name
-        return context
+        # Forward all kwargs to ModelDispatchLogContext which handles
+        # None-to-sentinel conversion via field validators.
+        # Use model_validate() to properly invoke "before" validators that
+        # accept None via object type annotation.
+        ctx = ModelDispatchLogContext.model_validate(kwargs)
+        return ctx.to_dict()
 
     async def dispatch(
         self,
@@ -1197,11 +1202,11 @@ class MessageDispatchEngine:
                     ),
                 )
 
-                # If dispatcher returns a topic string or list of topics, add to outputs
-                if isinstance(result, str) and result:
-                    outputs.append(result)
-                elif isinstance(result, list):
-                    outputs.extend(str(r) for r in result if r)
+                # Normalize dispatcher output using ModelDispatchOutcome to avoid
+                # manual isinstance checks on the 3-way union (str | list[str] | None).
+                # This centralizes the union handling in the model's from_legacy_output().
+                outcome = ModelDispatchOutcome.from_legacy_output(result)
+                outputs.extend(outcome.topics)
             except (SystemExit, KeyboardInterrupt, GeneratorExit):
                 # Never catch cancellation/exit signals
                 raise
@@ -1322,15 +1327,17 @@ class MessageDispatchEngine:
             )
 
         # Find route ID that matched (first matching route for logging)
-        matched_route_id: str | None = None
+        # Use empty string sentinel internally to avoid str | None union
+        matched_route_id: str = ""
         for route in self._routes.values():
             if route.matches(topic, topic_category, message_type):
                 matched_route_id = route.route_id
                 break
 
         # Log dispatch completion at INFO level
-        dispatcher_ids_str = (
-            ", ".join(executed_dispatcher_ids) if executed_dispatcher_ids else None
+        # Use empty string sentinel to avoid str | None union in local scope
+        dispatcher_ids_str: str = (
+            ", ".join(executed_dispatcher_ids) if executed_dispatcher_ids else ""
         )
         if status == EnumDispatchStatus.SUCCESS:
             self._logger.info(
@@ -1362,27 +1369,97 @@ class MessageDispatchEngine:
                 ),
             )
 
-        return ModelDispatchResult(
-            dispatch_id=dispatch_id,
-            status=status,
-            route_id=matched_route_id,
-            dispatcher_id=dispatcher_ids_str,
-            topic=topic,
-            message_category=topic_category,
-            message_type=message_type,
-            duration_ms=duration_ms,
-            started_at=started_at,
-            completed_at=datetime.now(UTC),
-            outputs=outputs if outputs else None,
-            output_count=len(outputs),
-            error_message="; ".join(dispatcher_errors) if dispatcher_errors else None,
-            error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR
-            if dispatcher_errors
-            else None,
-            correlation_id=envelope.correlation_id,
-            trace_id=envelope.trace_id,
-            span_id=envelope.span_id,
-        )
+        # Convert list of output topics to ModelDispatchOutputs
+        # Handle Pydantic validation errors (e.g., invalid topic format)
+        dispatch_outputs: ModelDispatchOutputs | None = None
+        if outputs:
+            try:
+                dispatch_outputs = ModelDispatchOutputs(topics=outputs)
+            except (ValueError, ValidationError) as validation_error:
+                # Log validation failure with context (no secrets in topic names)
+                # Note: Using _sanitize_error_message for consistency, though topic
+                # validation errors typically don't contain sensitive data
+                sanitized_validation_error = _sanitize_error_message(validation_error)
+                # TRY400: Intentionally using error() instead of exception() for security
+                # - exception() would log stack trace which may expose internal paths
+                # - sanitized_validation_error already contains safe error details
+                self._logger.error(  # noqa: TRY400
+                    "Failed to validate dispatch outputs (%d topics): %s",
+                    len(outputs),
+                    sanitized_validation_error,
+                    extra=self._build_log_context(
+                        topic=topic,
+                        category=topic_category,
+                        message_type=message_type,
+                        correlation_id=correlation_id,
+                        trace_id=trace_id,
+                        error_code=EnumCoreErrorCode.VALIDATION_ERROR,
+                    ),
+                )
+                # Add validation error to dispatcher_errors for result
+                validation_error_msg = (
+                    f"Output validation failed: {sanitized_validation_error}"
+                )
+                dispatcher_errors.append(validation_error_msg)
+                # Update status to reflect validation error
+                status = EnumDispatchStatus.HANDLER_ERROR
+
+        # Construct final dispatch result with ValidationError protection
+        # This ensures any Pydantic validation failure in ModelDispatchResult
+        # is handled gracefully rather than propagating as an unhandled exception
+        try:
+            return ModelDispatchResult(
+                dispatch_id=dispatch_id,
+                status=status,
+                route_id=matched_route_id,
+                dispatcher_id=dispatcher_ids_str,
+                topic=topic,
+                message_category=topic_category,
+                message_type=message_type,
+                duration_ms=duration_ms,
+                started_at=started_at,
+                completed_at=datetime.now(UTC),
+                outputs=dispatch_outputs,
+                output_count=len(outputs),
+                error_message="; ".join(dispatcher_errors)
+                if dispatcher_errors
+                else None,
+                error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR
+                if dispatcher_errors
+                else None,
+                correlation_id=envelope.correlation_id,
+                trace_id=envelope.trace_id,
+                span_id=envelope.span_id,
+            )
+        except ValidationError as result_validation_error:
+            # Pydantic validation failed during result construction
+            # This is a critical internal error - log and return a minimal error result
+            sanitized_result_error = _sanitize_error_message(result_validation_error)
+            # TRY400: Intentionally using error() instead of exception() for security
+            self._logger.error(  # noqa: TRY400
+                "Failed to construct ModelDispatchResult: %s",
+                sanitized_result_error,
+                extra=self._build_log_context(
+                    topic=topic,
+                    category=topic_category,
+                    message_type=message_type,
+                    correlation_id=correlation_id,
+                    trace_id=trace_id,
+                    error_code=EnumCoreErrorCode.INTERNAL_ERROR,
+                ),
+            )
+            # Return a minimal fallback result that should always succeed
+            return ModelDispatchResult(
+                dispatch_id=dispatch_id,
+                status=EnumDispatchStatus.INTERNAL_ERROR,
+                topic=topic,
+                started_at=started_at,
+                completed_at=datetime.now(UTC),
+                duration_ms=duration_ms,
+                error_message=f"Internal error constructing dispatch result: {sanitized_result_error}",
+                error_code=EnumCoreErrorCode.INTERNAL_ERROR,
+                correlation_id=envelope.correlation_id,
+            )
 
     def _find_matching_dispatchers(
         self,

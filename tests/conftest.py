@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
@@ -12,6 +14,266 @@ if TYPE_CHECKING:
 
     from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
     from omnibase_infra.runtime.policy_registry import PolicyRegistry
+
+
+# =============================================================================
+# Duck Typing Conformance Helpers
+# =============================================================================
+
+
+def assert_has_methods(
+    obj: object,
+    required_methods: list[str],
+    *,
+    protocol_name: str | None = None,
+) -> None:
+    """Assert that an object has all required methods (duck typing conformance).
+
+    Per ONEX conventions, protocol conformance is verified via duck typing
+    by checking for required method presence and callability, rather than
+    using isinstance checks with Protocol types.
+
+    Args:
+        obj: The object to check for method presence.
+        required_methods: List of method names that must be present and callable.
+        protocol_name: Optional protocol name for clearer error messages.
+
+    Raises:
+        AssertionError: If any required method is missing or not callable.
+
+    Example:
+        >>> assert_has_methods(
+        ...     registry,
+        ...     ["register", "get", "list_keys", "is_registered"],
+        ...     protocol_name="PolicyRegistry",
+        ... )
+    """
+    name = protocol_name or obj.__class__.__name__
+    for method_name in required_methods:
+        assert hasattr(obj, method_name), f"{name} must have '{method_name}' method"
+        # __len__ and __iter__ are special - they are callable via len()/iter()
+        if not method_name.startswith("__"):
+            assert callable(getattr(obj, method_name)), (
+                f"{name}.{method_name} must be callable"
+            )
+
+
+def assert_has_async_methods(
+    obj: object,
+    required_methods: list[str],
+    *,
+    protocol_name: str | None = None,
+) -> None:
+    """Assert that an object has all required async methods.
+
+    Extended duck typing verification that also checks that methods are
+    coroutine functions (async).
+
+    Args:
+        obj: The object to check for async method presence.
+        required_methods: List of method names that must be async and callable.
+        protocol_name: Optional protocol name for clearer error messages.
+
+    Raises:
+        AssertionError: If any method is missing, not callable, or not async.
+
+    Example:
+        >>> assert_has_async_methods(
+        ...     reducer,
+        ...     ["reduce"],
+        ...     protocol_name="ProtocolReducer",
+        ... )
+    """
+    name = protocol_name or obj.__class__.__name__
+    for method_name in required_methods:
+        assert hasattr(obj, method_name), f"{name} must have '{method_name}' method"
+        method = getattr(obj, method_name)
+        assert callable(method), f"{name}.{method_name} must be callable"
+        assert asyncio.iscoroutinefunction(method), (
+            f"{name}.{method_name} must be async (coroutine function)"
+        )
+
+
+def assert_method_signature(
+    obj: object,
+    method_name: str,
+    expected_params: list[str],
+    *,
+    protocol_name: str | None = None,
+) -> None:
+    """Assert that a method has the expected parameter signature.
+
+    Verifies that a method's signature contains the expected parameters.
+    Does not check parameter types, only names.
+
+    Args:
+        obj: The object containing the method.
+        method_name: Name of the method to check.
+        expected_params: List of expected parameter names (excluding 'self').
+        protocol_name: Optional protocol name for clearer error messages.
+
+    Raises:
+        AssertionError: If method is missing or parameters don't match.
+
+    Example:
+        >>> assert_method_signature(
+        ...     reducer,
+        ...     "reduce",
+        ...     ["state", "event"],
+        ...     protocol_name="ProtocolReducer",
+        ... )
+    """
+    name = protocol_name or obj.__class__.__name__
+    assert hasattr(obj, method_name), f"{name} must have '{method_name}' method"
+
+    method = getattr(obj, method_name)
+    sig = inspect.signature(method)
+    params = list(sig.parameters.keys())
+
+    assert len(params) == len(expected_params), (
+        f"{name}.{method_name} must have {len(expected_params)} parameters "
+        f"({', '.join(expected_params)}), got {len(params)}: {params}"
+    )
+
+    for expected in expected_params:
+        assert expected in params, (
+            f"{name}.{method_name} must have '{expected}' parameter, got: {params}"
+        )
+
+
+# =============================================================================
+# Registry-Specific Conformance Helpers
+# =============================================================================
+
+
+def assert_policy_registry_interface(registry: object) -> None:
+    """Assert that an object implements the PolicyRegistry interface.
+
+    Per ONEX conventions, protocol conformance is verified via duck typing.
+    Collection-like protocols must include __len__ for complete duck typing.
+
+    Args:
+        registry: The object to verify as a PolicyRegistry implementation.
+
+    Raises:
+        AssertionError: If required methods are missing.
+
+    Example:
+        >>> registry = await get_policy_registry_from_container(container)
+        >>> assert_policy_registry_interface(registry)
+        >>> assert len(registry) == 0  # Empty initially
+    """
+    required_methods = [
+        "register",
+        "register_policy",
+        "get",
+        "list_keys",
+        "is_registered",
+        "__len__",
+    ]
+    assert_has_methods(registry, required_methods, protocol_name="PolicyRegistry")
+
+
+def assert_handler_registry_interface(registry: object) -> None:
+    """Assert that an object implements the ProtocolBindingRegistry interface.
+
+    Per ONEX conventions, protocol conformance is verified via duck typing.
+    Collection-like protocols must include __len__ for complete duck typing.
+
+    Args:
+        registry: The object to verify as a ProtocolBindingRegistry implementation.
+
+    Raises:
+        AssertionError: If required methods are missing.
+
+    Example:
+        >>> registry = await get_handler_registry_from_container(container)
+        >>> assert_handler_registry_interface(registry)
+        >>> assert len(registry) == 0
+    """
+    required_methods = [
+        "register",
+        "get",
+        "list_protocols",
+        "is_registered",
+        "__len__",
+    ]
+    assert_has_methods(
+        registry, required_methods, protocol_name="ProtocolBindingRegistry"
+    )
+
+
+def assert_reducer_protocol_interface(reducer: object) -> None:
+    """Assert that an object implements the ProtocolReducer interface.
+
+    Verifies that the reducer has the required async reduce() method with
+    the correct signature (state, event).
+
+    Args:
+        reducer: The object to verify as a ProtocolReducer implementation.
+
+    Raises:
+        AssertionError: If required methods/signatures don't match.
+
+    Example:
+        >>> assert_reducer_protocol_interface(mock_reducer)
+    """
+    assert_has_async_methods(reducer, ["reduce"], protocol_name="ProtocolReducer")
+    assert_method_signature(
+        reducer, "reduce", ["state", "event"], protocol_name="ProtocolReducer"
+    )
+
+
+def assert_effect_protocol_interface(effect: object) -> None:
+    """Assert that an object implements the ProtocolEffect interface.
+
+    Verifies that the effect has the required async execute_intent() method
+    with the correct signature (intent, correlation_id).
+
+    Args:
+        effect: The object to verify as a ProtocolEffect implementation.
+
+    Raises:
+        AssertionError: If required methods/signatures don't match.
+
+    Example:
+        >>> assert_effect_protocol_interface(mock_effect)
+    """
+    assert_has_async_methods(effect, ["execute_intent"], protocol_name="ProtocolEffect")
+    assert_method_signature(
+        effect,
+        "execute_intent",
+        ["intent", "correlation_id"],
+        protocol_name="ProtocolEffect",
+    )
+
+
+def assert_dispatcher_protocol_interface(dispatcher: object) -> None:
+    """Assert that an object implements the ProtocolMessageDispatcher interface.
+
+    Verifies that the dispatcher has all required properties and methods.
+
+    Args:
+        dispatcher: The object to verify as a ProtocolMessageDispatcher.
+
+    Raises:
+        AssertionError: If required properties/methods are missing.
+
+    Example:
+        >>> assert_dispatcher_protocol_interface(my_dispatcher)
+    """
+    required_props = ["dispatcher_id", "category", "message_types", "node_kind"]
+    for prop in required_props:
+        assert hasattr(dispatcher, prop), (
+            f"ProtocolMessageDispatcher must have '{prop}' property"
+        )
+
+    assert hasattr(dispatcher, "handle"), (
+        "ProtocolMessageDispatcher must have 'handle' method"
+    )
+    assert callable(dispatcher.handle), (
+        "ProtocolMessageDispatcher.handle must be callable"
+    )
 
 
 @pytest.fixture
@@ -31,7 +293,6 @@ def mock_container() -> MagicMock:
         ...     mock_container.service_registry.resolve_service.return_value = some_service
     """
     from unittest.mock import AsyncMock
-    from unittest.mock import MagicMock as SyncMock
 
     container = MagicMock()
 
@@ -121,9 +382,10 @@ async def container_with_registries() -> ModelONEXContainer:
         ...     policy_reg = await container_with_registries.service_registry.resolve_service(PolicyRegistry)
         ...     handler_reg = await container_with_registries.service_registry.resolve_service(ProtocolBindingRegistry)
         ...
-        ...     # Use registries
-        ...     assert isinstance(policy_reg, PolicyRegistry)
-        ...     assert isinstance(handler_reg, ProtocolBindingRegistry)
+        ...     # Verify interface via duck typing (ONEX convention)
+        ...     # Per ONEX conventions, check for required methods rather than isinstance
+        ...     assert hasattr(policy_reg, "register_policy")
+        ...     assert hasattr(handler_reg, "register")
     """
     from omnibase_core.container import ModelONEXContainer
 

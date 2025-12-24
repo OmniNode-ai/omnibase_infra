@@ -50,7 +50,6 @@ class TestRuntimeModuleImports:
         directly after the runtime module has been loaded (warming sys.modules).
         """
         # First ensure runtime is loaded (warms the cache)
-        from omnibase_infra import runtime
 
         # Now chain_aware_dispatch should import cleanly
         from omnibase_infra.runtime.chain_aware_dispatch import (

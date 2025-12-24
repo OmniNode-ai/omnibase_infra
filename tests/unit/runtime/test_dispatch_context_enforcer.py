@@ -28,6 +28,7 @@ from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
+from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.runtime.dispatcher_registry import ProtocolMessageDispatcher
@@ -426,25 +427,30 @@ class TestValidateNoTimeInjectionForReducer:
         self,
         enforcer: DispatchContextEnforcer,
     ) -> None:
-        """Reducer context with time injection should raise."""
-        # Create invalid context by bypassing factory (simulates manual construction)
-        # This is a theoretical case - the model validator should catch this
-        # but we test the enforcer's explicit validation
-        ctx = ModelDispatchContext(
-            correlation_id=uuid4(),
-            node_kind=EnumNodeKind.ORCHESTRATOR,  # Use different node kind to create
-            now=datetime.now(UTC),
-        )
-        # Manually modify to simulate a reducer with time (bypassing Pydantic validation)
-        # Since the model is frozen, we create a new context directly
-        # This tests what happens if someone constructs an invalid context
-        invalid_ctx = ModelDispatchContext(
-            correlation_id=uuid4(),
-            node_kind=EnumNodeKind.REDUCER,
-            now=None,  # Valid
-        )
-        # The valid context should pass
-        enforcer.validate_no_time_injection_for_reducer(invalid_ctx)
+        """Reducer context with time injection should raise.
+
+        This test uses MagicMock to simulate an invalid context where a REDUCER
+        has time injection, bypassing Pydantic validation. This represents a
+        hypothetical scenario where validation is bypassed (e.g., deserialization
+        from untrusted data).
+
+        The enforcer's validate_no_time_injection_for_reducer() must catch this
+        invalid state and raise ModelOnexError with VALIDATION_FAILED code.
+        """
+        # Create invalid context using MagicMock to bypass Pydantic validation
+        # This simulates a reducer with time injection (which is an architectural violation)
+        invalid_ctx = MagicMock(spec=ModelDispatchContext)
+        invalid_ctx.node_kind = EnumNodeKind.REDUCER
+        invalid_ctx.now = datetime.now(UTC)  # Invalid: reducer with time
+
+        # Should raise ModelOnexError with VALIDATION_FAILED
+        with pytest.raises(ModelOnexError) as exc_info:
+            enforcer.validate_no_time_injection_for_reducer(invalid_ctx)
+
+        # Verify the error has correct code and message
+        assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
+        assert "REDUCER" in exc_info.value.message
+        assert "time injection" in exc_info.value.message.lower()
 
     def test_non_reducer_context_passes(
         self,
@@ -554,8 +560,23 @@ class TestProtocolCompliance:
         self,
         reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
-        """MockMessageDispatcher should implement ProtocolMessageDispatcher."""
-        assert isinstance(reducer_dispatcher, ProtocolMessageDispatcher)
+        """MockMessageDispatcher should implement ProtocolMessageDispatcher.
+
+        Per ONEX conventions, protocol conformance is verified via duck typing
+        by checking for required properties and methods.
+        """
+        # Verify required properties via duck typing
+        required_props = ["dispatcher_id", "category", "message_types", "node_kind"]
+        for prop in required_props:
+            assert hasattr(reducer_dispatcher, prop), (
+                f"Dispatcher must have '{prop}' property"
+            )
+
+        # Verify handle method exists and is callable
+        assert hasattr(reducer_dispatcher, "handle"), (
+            "Dispatcher must have 'handle' method"
+        )
+        assert callable(reducer_dispatcher.handle), "'handle' must be callable"
 
     def test_enforcer_works_with_protocol_dispatcher(
         self,
@@ -945,12 +966,13 @@ class TestFactoryMethodForCompute:
 
     def test_for_compute_preserves_metadata(self) -> None:
         """for_compute() should preserve the provided metadata."""
-        metadata = {"algorithm": "sha256"}
+        metadata = ModelDispatchMetadata(algorithm="sha256")
         ctx = ModelDispatchContext.for_compute(
             correlation_id=uuid4(),
             metadata=metadata,
         )
         assert ctx.metadata == metadata
+        assert ctx.metadata.model_extra.get("algorithm") == "sha256"
 
     def test_for_compute_has_time_injection_is_false(self) -> None:
         """for_compute() context should have has_time_injection=False."""
@@ -999,13 +1021,14 @@ class TestFactoryMethodForRuntimeHost:
 
     def test_for_runtime_host_preserves_metadata(self) -> None:
         """for_runtime_host() should preserve the provided metadata."""
-        metadata = {"host": "infra-hub-1"}
+        metadata = ModelDispatchMetadata(host="infra-hub-1")
         ctx = ModelDispatchContext.for_runtime_host(
             correlation_id=uuid4(),
             now=datetime.now(UTC),
             metadata=metadata,
         )
         assert ctx.metadata == metadata
+        assert ctx.metadata.model_extra.get("host") == "infra-hub-1"
 
     def test_for_runtime_host_has_time_injection_is_true(self) -> None:
         """for_runtime_host() context should have has_time_injection=True."""

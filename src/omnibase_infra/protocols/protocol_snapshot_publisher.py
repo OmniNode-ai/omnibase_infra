@@ -76,9 +76,12 @@ Example Usage:
             )
             return True
 
-    # Protocol conformance check
-    publisher: ProtocolSnapshotPublisher = KafkaSnapshotPublisher()
-    assert isinstance(publisher, ProtocolSnapshotPublisher)
+    # Protocol conformance check via duck typing (per ONEX conventions)
+    publisher = KafkaSnapshotPublisher()
+
+    # Verify required methods exist and are callable
+    assert hasattr(publisher, 'publish_snapshot') and callable(publisher.publish_snapshot)
+    assert hasattr(publisher, 'delete_snapshot') and callable(publisher.delete_snapshot)
     ```
 
 Performance Considerations:

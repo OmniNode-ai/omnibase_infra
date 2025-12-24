@@ -1388,6 +1388,37 @@ enable_auto_commit: false
         assert bus.config.auto_offset_reset == "earliest"
         assert bus.config.enable_auto_commit is False
 
+    def test_from_yaml_file_not_found(self, tmp_path: Path) -> None:
+        """Test from_yaml() raises ProtocolConfigurationError for missing file."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        missing_file = tmp_path / "nonexistent.yaml"
+
+        with pytest.raises(
+            ProtocolConfigurationError, match="Configuration file not found"
+        ):
+            KafkaEventBus.from_yaml(missing_file)
+
+    def test_from_yaml_invalid_yaml_syntax(self, tmp_path: Path) -> None:
+        """Test from_yaml() raises ProtocolConfigurationError for invalid YAML."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        config_file = tmp_path / "invalid.yaml"
+        config_file.write_text("invalid: yaml: syntax: [")
+
+        with pytest.raises(ProtocolConfigurationError, match="Failed to parse YAML"):
+            KafkaEventBus.from_yaml(config_file)
+
+    def test_from_yaml_non_dict_content(self, tmp_path: Path) -> None:
+        """Test from_yaml() raises ProtocolConfigurationError for non-dict YAML."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        config_file = tmp_path / "list.yaml"
+        config_file.write_text("- item1\n- item2\n")
+
+        with pytest.raises(ProtocolConfigurationError, match="must be a dictionary"):
+            KafkaEventBus.from_yaml(config_file)
+
     def test_config_defaults_match_property_defaults(self) -> None:
         """Test that config defaults match the documented property defaults."""
         bus = KafkaEventBus()  # No config, uses internal default

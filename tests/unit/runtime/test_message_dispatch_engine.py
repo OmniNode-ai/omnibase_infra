@@ -31,6 +31,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
@@ -1285,7 +1286,7 @@ class TestMetrics:
         """Test metrics are updated on successful dispatch."""
 
         async def handler(envelope: ModelEventEnvelope[object]) -> str:
-            return "output"
+            return "test.output.v1"
 
         dispatch_engine.register_dispatcher(
             dispatcher_id="handler",
@@ -1391,7 +1392,7 @@ class TestMetrics:
         """Test metrics accumulate across multiple dispatches."""
 
         async def handler(envelope: ModelEventEnvelope[object]) -> str:
-            return "output"
+            return "test.output.v1"
 
         dispatch_engine.register_dispatcher(
             dispatcher_id="handler",
@@ -1787,7 +1788,7 @@ class TestDispatchResultRetryScenarios:
         result = ModelDispatchResult(
             status=EnumDispatchStatus.SUCCESS,
             topic="dev.user.events.v1",
-            outputs=["dev.notification.events.v1"],
+            outputs=ModelDispatchOutputs(topics=["dev.notification.events.v1"]),
         )
 
         assert result.requires_retry() is False
@@ -2306,7 +2307,7 @@ class TestConcurrentDispatchAdvanced:
             await asyncio.sleep(delay)
             with lock:
                 execution_order.append(f"{user_id}-delay-{delay:.3f}")
-            return f"output-{user_id}"
+            return f"output.user.{user_id}"
 
         dispatch_engine.register_dispatcher(
             dispatcher_id="variable-handler",
@@ -2731,7 +2732,7 @@ class TestConcurrentDispatchAdvanced:
                 received_correlation_ids.append(
                     (envelope.payload.user_id, envelope.correlation_id)
                 )
-            return "output"
+            return "test.output.v1"
 
         dispatch_engine.register_dispatcher(
             dispatcher_id="tracking-handler",
@@ -2807,7 +2808,7 @@ class TestConcurrentDispatchAdvanced:
             name = envelope.payload.name
             with lock:
                 received_payloads.append((user_id, name))
-            return "output"
+            return "test.output.v1"
 
         dispatch_engine.register_dispatcher(
             dispatcher_id="verifying-handler",
@@ -3641,7 +3642,7 @@ class TestContextAwareDispatch:
         ORCHESTRATOR nodes coordinate workflows and can make time-dependent
         decisions. They MUST receive time injection.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
@@ -3700,7 +3701,7 @@ class TestContextAwareDispatch:
         EFFECT nodes handle external I/O and can make time-dependent
         decisions (e.g., TTL calculations). They MUST receive time injection.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
@@ -3760,7 +3761,7 @@ class TestContextAwareDispatch:
         for operational decisions (health checks, scheduling). They MUST
         receive time injection.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from omnibase_core.enums.enum_node_kind import EnumNodeKind
 

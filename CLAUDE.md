@@ -73,7 +73,9 @@ nodes/postgres_adapter/v1_0_0/  # DO NOT CREATE
 nodes/postgres_adapter/v2/      # DO NOT CREATE
 ```
 
-**Legacy Exception**: Existing `v1_0_0/` directories (e.g., `nodes/<name>/v1_0_0/`) are legacy patterns from earlier architectural decisions. These will be migrated to the new flat structure per ticket H1 (Legacy Component Refactor Plan). See `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` for migration details.
+**Legacy Exception**: Any `v1_0_0/` directories (e.g., `nodes/<name>/v1_0_0/`) are legacy patterns from earlier architectural decisions that must be migrated to the flat structure. The omnibase_infra4 codebase has completed this migration. For migration guidance, see:
+- `docs/architecture/LEGACY_V1_MIGRATION.md` - Complete migration plan and verification steps
+- `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` - Ticket H1 (Legacy Component Refactor Plan)
 
 ## 🎯 Core ONEX Principles
 
@@ -97,7 +99,7 @@ nodes/postgres_adapter/v2/      # DO NOT CREATE
 
 **Protocol File Naming**:
 - **Single protocol**: Use `protocol_<name>.py` for standalone protocols (e.g., `protocol_event_bus.py` contains `ProtocolEventBus`)
-- **Domain-grouped protocols**: Use `protocols.py` when multiple cohesive protocols belong to a specific domain or node module (e.g., `nodes/<name>/v1_0_0/protocols.py` containing `ProtocolNodeInput`, `ProtocolNodeOutput`, `ProtocolNodeConfig`)
+- **Domain-grouped protocols**: Use `protocols.py` when multiple cohesive protocols belong to a specific domain or node module (e.g., `nodes/<name>/protocols.py` containing `ProtocolNodeInput`, `ProtocolNodeOutput`, `ProtocolNodeConfig`)
 
 Domain grouping is preferred when:
 - Protocols are tightly coupled and always used together
@@ -182,7 +184,7 @@ output_type.is_routable()  # True for EVENT, COMMAND, INTENT; False for PROJECTI
 - File: `registry_infra_<node_name>.py`
 - Class: `RegistryInfra<NodeName>`
 - Examples: `registry_infra_postgres_adapter.py` → `RegistryInfraPostgresAdapter`
-- Note: Legacy paths `nodes/<name>/v1_0_0/registry/` will be migrated (see H1 ticket)
+- Note: Versioned paths like `nodes/<name>/v1_0_0/registry/` are prohibited (see `docs/architecture/LEGACY_V1_MIGRATION.md`)
 
 **Standalone Registries** (in domain directories):
 - File: `registry_<purpose>.py`
@@ -1249,7 +1251,7 @@ Infrastructure tools follow ONEX 4-node architecture:
 
 ## 🚀 Node Structure Pattern
 
-**Canonical Structure** (NEW components):
+**Canonical Structure** (all components):
 ```
 nodes/<adapter>/
 ├── contract.yaml          # ONEX contract definition (includes version)
@@ -1258,16 +1260,13 @@ nodes/<adapter>/
 └── registry/             # registry_infra_<name>.py
 ```
 
-**Legacy Structure** (existing components, will be migrated):
+**Prohibited Structure** (versioned directories):
 ```
-nodes/<adapter>/v1_0_0/   # LEGACY - do not create new directories like this
-├── contract.yaml
-├── node.py
-├── models/
-└── registry/
+nodes/<adapter>/v1_0_0/   # PROHIBITED - never create versioned directories
+nodes/<adapter>/v2/       # PROHIBITED - version goes in contract.yaml, not path
 ```
 
-See "CRITICAL POLICY: NO VERSIONED DIRECTORIES" above for migration details.
+See "CRITICAL POLICY: NO VERSIONED DIRECTORIES" above and `docs/architecture/LEGACY_V1_MIGRATION.md` for details.
 
 **Contract Requirements**:
 - Semantic versioning in contract (`contract_version`, `node_version` fields)

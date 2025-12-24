@@ -24,7 +24,11 @@ Thread Safety:
     making it thread-safe for concurrent read access.
 
 Example:
-    >>> from omnibase_infra.models.dispatch import ModelDispatchResult, EnumDispatchStatus
+    >>> from omnibase_infra.models.dispatch import (
+    ...     ModelDispatchResult,
+    ...     ModelDispatchOutputs,
+    ...     EnumDispatchStatus,
+    ... )
     >>> from uuid import uuid4
     >>> from datetime import datetime, UTC
     >>>
@@ -37,7 +41,7 @@ Example:
     ...     topic="dev.user.events.v1",
     ...     message_type="UserCreatedEvent",
     ...     duration_ms=45.2,
-    ...     outputs=["dev.notification.commands.v1"],
+    ...     outputs=ModelDispatchOutputs(topics=["dev.notification.commands.v1"]),
     ... )
     >>>
     >>> result.is_successful()
@@ -57,6 +61,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
+from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 
 
 class ModelDispatchResult(BaseModel):
@@ -164,9 +170,9 @@ class ModelDispatchResult(BaseModel):
     )
 
     # ---- Dispatcher Outputs ----
-    outputs: list[str] | None = Field(
+    outputs: ModelDispatchOutputs | None = Field(
         default=None,
-        description="List of topics where dispatcher outputs were published.",
+        description="Validated output topics where dispatcher outputs were published.",
     )
     output_count: int = Field(
         default=0,
@@ -183,8 +189,8 @@ class ModelDispatchResult(BaseModel):
         default=None,
         description="Error code if the dispatch failed.",
     )
-    error_details: dict[str, JsonValue] | None = Field(
-        default=None,
+    error_details: dict[str, JsonValue] = Field(
+        default_factory=dict,
         description="Additional JSON-serializable error details for debugging.",
     )
 
@@ -210,7 +216,7 @@ class ModelDispatchResult(BaseModel):
     )
 
     # ---- Optional Metadata ----
-    metadata: dict[str, str] | None = Field(
+    metadata: ModelDispatchMetadata | None = Field(
         default=None,
         description="Optional additional metadata about the dispatch.",
     )
@@ -315,21 +321,21 @@ class ModelDispatchResult(BaseModel):
                 "status": status,
                 "error_message": message,
                 "error_code": code,
-                "error_details": details,
+                "error_details": details if details is not None else {},
                 "completed_at": datetime.now(UTC),
             }
         )
 
     def with_success(
         self,
-        outputs: list[str] | None = None,
+        outputs: ModelDispatchOutputs | None = None,
         output_count: int | None = None,
     ) -> "ModelDispatchResult":
         """
         Create a new result marked as successful.
 
         Args:
-            outputs: Optional list of output topics
+            outputs: Optional ModelDispatchOutputs with validated output topics
             output_count: Optional count of outputs (defaults to len(outputs))
 
         Returns:
@@ -342,19 +348,18 @@ class ModelDispatchResult(BaseModel):
             ...     topic="test.events",
             ... )
             >>> success_result = result.with_success(
-            ...     outputs=["output.topic.v1"],
+            ...     outputs=ModelDispatchOutputs(topics=["output.topic.v1"]),
             ...     output_count=1,
             ... )
         """
-        count = (
-            output_count
-            if output_count is not None
-            else (len(outputs) if outputs else 0)
+        resolved_outputs: ModelDispatchOutputs = (
+            outputs if outputs is not None else ModelDispatchOutputs()
         )
+        count = output_count if output_count is not None else len(resolved_outputs)
         return self.model_copy(
             update={
                 "status": EnumDispatchStatus.SUCCESS,
-                "outputs": outputs,
+                "outputs": resolved_outputs,
                 "output_count": count,
                 "completed_at": datetime.now(UTC),
             }

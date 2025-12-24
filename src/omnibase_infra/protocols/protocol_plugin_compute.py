@@ -81,12 +81,19 @@ Example Usage:
             ...
     ```
 
-Type Checking:
-    This protocol uses @runtime_checkable to enable isinstance() checks at runtime:
+Protocol Verification:
+    Per ONEX conventions, protocol compliance is verified via duck typing rather
+    than isinstance checks. Verify the required method exists and is callable:
 
     ```python
     plugin = JsonSchemaValidator()
-    assert isinstance(plugin, ProtocolPluginCompute)  # True
+
+    # Duck typing verification (preferred)
+    assert hasattr(plugin, 'execute') and callable(plugin.execute)
+
+    # Or use hasattr with getattr for cleaner pattern
+    execute_method = getattr(plugin, 'execute', None)
+    assert execute_method is not None and callable(execute_method)
     ```
 
 See Also:

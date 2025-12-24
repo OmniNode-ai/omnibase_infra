@@ -1102,3 +1102,455 @@ class TestContextSerialization:
             # Roundtrip
             restored = ModelInfraErrorContext.model_validate(data)
             assert restored.transport_type == transport
+
+
+class TestErrorContextSecretSanitization:
+    """Tests to verify secrets are absent from structured error context.
+
+    These tests validate the error sanitization guidelines from CLAUDE.md:
+        NEVER include in error messages or context:
+        - Passwords, API keys, tokens, secrets
+        - Full connection strings with credentials
+        - PII (names, emails, SSNs, phone numbers)
+        - Private keys or certificates
+        - Session tokens or cookies
+
+        SAFE to include:
+        - Service names
+        - Operation names
+        - Correlation IDs
+        - Error codes
+        - Sanitized hostnames
+        - Port numbers
+        - Retry counts and timeout values
+
+    Related:
+        - PR #57: Error handling security review
+        - docs/patterns/error_handling_patterns.md
+    """
+
+    # Common secret patterns that should NEVER appear in error context
+    SECRET_PATTERNS = [
+        "password",
+        "api_key",
+        "apikey",
+        "api-key",
+        "secret",
+        "token",
+        "credential",
+        "private_key",
+        "privatekey",
+        "secret_key",
+        "secretkey",
+        "access_key",
+        "accesskey",
+        "auth_token",
+        "authtoken",
+        "bearer",
+        "jwt",
+        "session_id",
+        "sessionid",
+        "cookie",
+    ]
+
+    # Example secret values that should never appear
+    SECRET_VALUES = [
+        "p@ssw0rd123",
+        "sk-1234567890abcdef",
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        "AKIAIOSFODNN7EXAMPLE",
+        "hunter2",
+        "MyS3cr3tP@ss",
+        "postgres://admin:secret@host:5432/db",
+        "-----BEGIN PRIVATE KEY-----",
+    ]
+
+    def _serialize_context(self, context: dict[str, object]) -> str:
+        """Serialize context dict to string for pattern matching."""
+        import json
+
+        # Handle non-serializable types by converting to string
+        def default_handler(obj: object) -> str:
+            return str(obj)
+
+        return json.dumps(context, default=default_handler).lower()
+
+    def _assert_no_secret_patterns_in_context(
+        self, error: RuntimeHostError, test_description: str
+    ) -> None:
+        """Assert that no secret patterns appear in error context.
+
+        Args:
+            error: The error to check
+            test_description: Description for error messages
+        """
+        serialized = self._serialize_context(error.model.context)
+
+        for pattern in self.SECRET_PATTERNS:
+            assert pattern not in serialized, (
+                f"{test_description}: Secret pattern '{pattern}' found in context: {error.model.context}"
+            )
+
+    def _assert_no_secret_values_in_context(
+        self, error: RuntimeHostError, test_description: str
+    ) -> None:
+        """Assert that no secret values appear in error context.
+
+        Args:
+            error: The error to check
+            test_description: Description for error messages
+        """
+        serialized = self._serialize_context(error.model.context)
+
+        for value in self.SECRET_VALUES:
+            assert value.lower() not in serialized, (
+                f"{test_description}: Secret value found in context: {error.model.context}"
+            )
+
+    # =========================================================================
+    # Test: Safe fields only
+    # =========================================================================
+
+    def test_safe_fields_do_not_trigger_false_positives(self) -> None:
+        """Verify that safe fields are allowed in error context."""
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="connect",
+            target_name="postgresql",
+            correlation_id=correlation_id,
+        )
+        error = InfraConnectionError(
+            "Connection failed",
+            context=context,
+            host="db.example.com",
+            port=5432,
+            retry_count=3,
+            timeout_seconds=30,
+        )
+
+        # These safe fields should be present
+        assert error.model.context["host"] == "db.example.com"
+        assert error.model.context["port"] == 5432
+        assert error.model.context["retry_count"] == 3
+        assert error.model.context["timeout_seconds"] == 30
+        assert error.model.context["target_name"] == "postgresql"
+
+        # No secret patterns should be detected
+        self._assert_no_secret_patterns_in_context(
+            error, "Safe fields with sanitized values"
+        )
+
+    # =========================================================================
+    # Test: Detection of secret patterns in context (security guardrails)
+    # =========================================================================
+
+    def test_detection_of_password_field_in_context(self) -> None:
+        """Verify detection logic catches password fields in error context.
+
+        This test validates that our secret detection logic correctly
+        identifies when a password field is present in error context.
+        Developers must not pass password fields to error constructors.
+
+        NOTE: RuntimeHostError accepts **extra_context kwargs which allows
+        arbitrary fields. This test ensures our detection catches violations.
+        """
+        # Demonstrate what NOT to do - this simulates a code review violation
+        bad_error = RuntimeHostError(
+            "Authentication failed",
+            password="secret123",  # noqa: S106 - intentional for test
+        )
+
+        # Verify our detection logic works
+        serialized = self._serialize_context(bad_error.model.context)
+        assert "password" in serialized, (
+            "Detection logic should find 'password' in context"
+        )
+
+    def test_detection_of_api_key_field_in_context(self) -> None:
+        """Verify detection logic catches api_key fields in error context."""
+        bad_error = RuntimeHostError(
+            "API request failed",
+            api_key="sk-1234567890abcdef",
+        )
+
+        serialized = self._serialize_context(bad_error.model.context)
+        assert "api_key" in serialized, (
+            "Detection logic should find 'api_key' in context"
+        )
+
+    def test_detection_of_connection_string_with_credentials(self) -> None:
+        """Verify detection logic catches connection strings with credentials."""
+        connection_string = "postgresql://admin:MyS3cr3tP@ss@db.internal:5432/mydb"
+
+        bad_error = InfraConnectionError(
+            "Database connection failed",
+            connection_string=connection_string,
+        )
+
+        serialized = self._serialize_context(bad_error.model.context)
+        # Verify credential pattern is detectable in serialized context
+        assert "mys3cr3tp@ss" in serialized.lower(), (
+            "Detection logic should find credentials in connection string"
+        )
+
+    def test_detection_of_token_field_in_context(self) -> None:
+        """Verify detection logic catches token fields in error context."""
+        jwt_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature"
+
+        bad_error = InfraAuthenticationError(
+            "Token validation failed",
+            token=jwt_token,
+        )
+
+        serialized = self._serialize_context(bad_error.model.context)
+        assert "token" in serialized, "Detection logic should find 'token' in context"
+
+    # =========================================================================
+    # Test: Detection of secrets in error messages
+    # =========================================================================
+
+    def test_detection_of_password_in_error_message(self) -> None:
+        """Verify detection logic catches passwords in error messages.
+
+        Error messages should be sanitized before construction. This test
+        validates that secrets in messages are detectable for code review.
+        """
+        bad_message = "Failed to connect with password=secret123"
+        error = InfraConnectionError(bad_message)
+
+        error_str = str(error).lower()
+        assert "password=secret123" in error_str, (
+            "Detection logic should find password in error message"
+        )
+
+    def test_detection_of_connection_string_in_error_message(self) -> None:
+        """Verify detection logic catches connection strings in error messages."""
+        connection_string = "postgresql://admin:hunter2@db.internal:5432/prod"
+        bad_message = f"Connection failed: {connection_string}"
+        error = InfraConnectionError(bad_message)
+
+        error_str = str(error).lower()
+        assert "hunter2" in error_str, (
+            "Detection logic should find credentials in error message"
+        )
+
+    # =========================================================================
+    # Test: Proper sanitized error construction patterns
+    # =========================================================================
+
+    def test_sanitized_error_excludes_password_from_context(self) -> None:
+        """Verify properly constructed errors exclude passwords.
+
+        This demonstrates the CORRECT pattern: do not pass password
+        fields to error constructors.
+        """
+        # CORRECT: Only safe fields
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="authenticate",
+            target_name="postgresql",
+        )
+        error = InfraAuthenticationError(
+            "Authentication failed",  # Generic message, no credentials
+            context=context,
+            username="admin",  # Username may be safe depending on context
+            # NO password field passed
+        )
+
+        serialized = self._serialize_context(error.model.context)
+        for secret in ["password", "secret", "credential"]:
+            assert secret not in serialized, (
+                f"Properly constructed error should not contain '{secret}'"
+            )
+
+    def test_sanitized_error_excludes_api_key_from_context(self) -> None:
+        """Verify properly constructed errors exclude API keys."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="api_request",
+            target_name="external-api",
+        )
+        error = InfraConnectionError(
+            "API request failed",
+            context=context,
+            endpoint="/api/v1/resource",  # Safe
+            status_code=401,  # Safe
+            # NO api_key field passed
+        )
+
+        serialized = self._serialize_context(error.model.context)
+        for secret in ["api_key", "apikey", "token", "bearer"]:
+            assert secret not in serialized, (
+                f"Properly constructed error should not contain '{secret}'"
+            )
+
+    def test_sanitized_connection_error_uses_parsed_components(self) -> None:
+        """Verify connection errors use parsed components, not raw strings.
+
+        Instead of passing full connection strings, parse and pass
+        only safe components (host, port, database name).
+        """
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="connect",
+            target_name="postgresql-primary",
+        )
+        error = InfraConnectionError(
+            "Failed to connect to database",  # Generic message
+            context=context,
+            # CORRECT: Parsed, safe components only
+            host="db.internal",
+            port=5432,
+            database="mydb",
+            # NO connection_string with embedded credentials
+        )
+
+        serialized = self._serialize_context(error.model.context)
+        # Verify safe fields present
+        assert "db.internal" in serialized
+        assert "5432" in serialized
+        # Verify no credential patterns
+        for pattern in ["://", "password", "secret", "@"]:
+            assert pattern not in serialized, (
+                f"Sanitized error should not contain credential pattern '{pattern}'"
+            )
+
+    # =========================================================================
+    # Test: All error types - comprehensive secret detection
+    # =========================================================================
+
+    @pytest.mark.parametrize(
+        ("error_class", "message"),
+        [
+            (RuntimeHostError, "Generic error"),
+            (ProtocolConfigurationError, "Config error"),
+            (SecretResolutionError, "Secret error"),
+            (InfraConnectionError, "Connection error"),
+            (InfraTimeoutError, "Timeout error"),
+            (InfraAuthenticationError, "Auth error"),
+            (InfraUnavailableError, "Unavailable error"),
+        ],
+    )
+    def test_all_error_types_context_serialization_is_safe(
+        self, error_class: type[RuntimeHostError], message: str
+    ) -> None:
+        """Verify all error types serialize context without exposing secrets.
+
+        This test validates that the structured context for each error type
+        only contains safe fields when properly constructed.
+        """
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="test_operation",
+            target_name="test-service",
+            correlation_id=correlation_id,
+        )
+
+        error = error_class(
+            message,
+            context=context,
+            host="service.example.com",
+            port=8080,
+            retry_count=2,
+        )
+
+        # Verify safe fields are present
+        assert error.model.context["operation"] == "test_operation"
+        assert error.model.context["target_name"] == "test-service"
+        assert error.model.context["host"] == "service.example.com"
+        assert error.model.context["port"] == 8080
+
+        # Verify no secret patterns in serialized context
+        self._assert_no_secret_patterns_in_context(
+            error, f"{error_class.__name__} with safe fields"
+        )
+
+    # =========================================================================
+    # Test: ModelInfraErrorContext model validation
+    # =========================================================================
+
+    def test_model_infra_error_context_has_no_secret_fields(self) -> None:
+        """Verify ModelInfraErrorContext does not have fields for secrets.
+
+        The context model should only define safe fields:
+        - transport_type
+        - operation
+        - target_name
+        - correlation_id
+        - namespace
+
+        It should NOT have fields like password, token, api_key, etc.
+        """
+        model_fields = set(ModelInfraErrorContext.model_fields.keys())
+
+        # These are the ONLY allowed fields
+        allowed_fields = {
+            "transport_type",
+            "operation",
+            "target_name",
+            "correlation_id",
+            "namespace",
+        }
+
+        # Verify no unexpected fields
+        unexpected = model_fields - allowed_fields
+        assert not unexpected, (
+            f"Unexpected fields in ModelInfraErrorContext: {unexpected}"
+        )
+
+        # Verify none of the secret patterns are field names
+        for secret_pattern in self.SECRET_PATTERNS:
+            assert secret_pattern not in model_fields, (
+                f"Secret pattern '{secret_pattern}' found as field in ModelInfraErrorContext"
+            )
+
+    def test_model_infra_error_context_forbids_extra_fields(self) -> None:
+        """Verify ModelInfraErrorContext rejects extra fields via extra='forbid'."""
+        # This should raise ValidationError because extra='forbid' is set
+        with pytest.raises(ValidationError) as exc_info:
+            ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.HTTP,
+                password="should_not_be_allowed",  # type: ignore[call-arg]  # noqa: S106
+            )
+
+        # Verify the error mentions the unexpected field
+        assert "password" in str(exc_info.value).lower()
+
+    # =========================================================================
+    # Test: Example of correct error construction (documentation)
+    # =========================================================================
+
+    def test_correct_error_construction_example(self) -> None:
+        """Example of CORRECT error construction without secrets.
+
+        This test serves as documentation for the correct pattern
+        when constructing infrastructure errors.
+        """
+        # CORRECT: Only safe, non-sensitive information
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="execute_query",
+            target_name="postgresql-primary",
+            correlation_id=uuid4(),
+        )
+
+        error = InfraConnectionError(
+            "Failed to connect to database",  # Generic message
+            context=context,
+            # Safe metadata only:
+            host="db.example.com",  # Hostname is safe
+            port=5432,  # Port is safe
+            retry_count=3,  # Retry count is safe
+            database="myapp",  # Database name (without credentials) is safe
+        )
+
+        # Verify construction is correct
+        assert error.model.context["host"] == "db.example.com"
+        assert error.model.context["port"] == 5432
+        assert error.model.context["database"] == "myapp"
+
+        # Verify no secrets leaked
+        self._assert_no_secret_patterns_in_context(error, "Correct error construction")
+        self._assert_no_secret_values_in_context(error, "Correct error construction")
