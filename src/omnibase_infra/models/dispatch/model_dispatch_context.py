@@ -78,6 +78,8 @@ from uuid import UUID
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
+
 
 class ModelDispatchContext(BaseModel):
     """
@@ -143,12 +145,10 @@ class ModelDispatchContext(BaseModel):
         description="The ONEX node type this context is for.",
     )
 
-    # ---- Extensibility Metadata ----
-    # NOTE: Using empty dict default instead of None reduces union count.
-    # Callers can check `if metadata:` for emptiness rather than `if metadata is not None`.
-    metadata: dict[str, str] = Field(
-        default_factory=dict,
-        description="Additional metadata for extensibility. Empty dict by default.",
+    # ---- Optional Metadata ----
+    metadata: ModelDispatchMetadata | None = Field(
+        default=None,
+        description="Optional additional metadata for extensibility.",
     )
 
     def _is_invalid_time_injection(self) -> bool:
@@ -244,7 +244,7 @@ class ModelDispatchContext(BaseModel):
         cls,
         correlation_id: UUID,
         trace_id: UUID | None = None,
-        metadata: dict[str, str] | None = None,
+        metadata: ModelDispatchMetadata | None = None,
     ) -> "ModelDispatchContext":
         """Create dispatch context for a REDUCER node.
 
@@ -254,7 +254,7 @@ class ModelDispatchContext(BaseModel):
         Args:
             correlation_id: Unique identifier for request tracing.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Additional metadata (None converts to empty dict).
+            metadata: Optional additional metadata for extensibility.
 
         Returns:
             ModelDispatchContext configured for REDUCER execution.
@@ -263,7 +263,7 @@ class ModelDispatchContext(BaseModel):
             >>> ctx = ModelDispatchContext.for_reducer(
             ...     correlation_id=uuid4(),
             ...     trace_id=uuid4(),
-            ...     metadata={"source": "kafka"},
+            ...     metadata=ModelDispatchMetadata(source_node="kafka"),
             ... )
             >>> assert ctx.now is None
             >>> assert ctx.node_kind == EnumNodeKind.REDUCER
@@ -273,7 +273,7 @@ class ModelDispatchContext(BaseModel):
             trace_id=trace_id,
             now=None,
             node_kind=EnumNodeKind.REDUCER,
-            metadata=metadata if metadata is not None else {},
+            metadata=metadata,
         )
 
     @classmethod
@@ -282,7 +282,7 @@ class ModelDispatchContext(BaseModel):
         correlation_id: UUID,
         now: datetime,
         trace_id: UUID | None = None,
-        metadata: dict[str, str] | None = None,
+        metadata: ModelDispatchMetadata | None = None,
     ) -> "ModelDispatchContext":
         """Create dispatch context for an ORCHESTRATOR node.
 
@@ -293,7 +293,7 @@ class ModelDispatchContext(BaseModel):
             correlation_id: Unique identifier for request tracing.
             now: Current time for time-dependent decisions.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Additional metadata (None converts to empty dict).
+            metadata: Optional additional metadata for extensibility.
 
         Returns:
             ModelDispatchContext configured for ORCHESTRATOR execution.
@@ -312,7 +312,7 @@ class ModelDispatchContext(BaseModel):
             trace_id=trace_id,
             now=now,
             node_kind=EnumNodeKind.ORCHESTRATOR,
-            metadata=metadata if metadata is not None else {},
+            metadata=metadata,
         )
 
     @classmethod
@@ -321,7 +321,7 @@ class ModelDispatchContext(BaseModel):
         correlation_id: UUID,
         now: datetime,
         trace_id: UUID | None = None,
-        metadata: dict[str, str] | None = None,
+        metadata: ModelDispatchMetadata | None = None,
     ) -> "ModelDispatchContext":
         """Create dispatch context for an EFFECT node.
 
@@ -333,7 +333,7 @@ class ModelDispatchContext(BaseModel):
             correlation_id: Unique identifier for request tracing.
             now: Current time for time-dependent decisions.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Additional metadata (None converts to empty dict).
+            metadata: Optional additional metadata for extensibility.
 
         Returns:
             ModelDispatchContext configured for EFFECT execution.
@@ -343,7 +343,7 @@ class ModelDispatchContext(BaseModel):
             >>> ctx = ModelDispatchContext.for_effect(
             ...     correlation_id=uuid4(),
             ...     now=datetime.now(UTC),
-            ...     metadata={"target": "database"},
+            ...     metadata=ModelDispatchMetadata(target_node="database"),
             ... )
             >>> assert ctx.now is not None
             >>> assert ctx.node_kind == EnumNodeKind.EFFECT
@@ -353,7 +353,7 @@ class ModelDispatchContext(BaseModel):
             trace_id=trace_id,
             now=now,
             node_kind=EnumNodeKind.EFFECT,
-            metadata=metadata if metadata is not None else {},
+            metadata=metadata,
         )
 
     @classmethod
@@ -361,7 +361,7 @@ class ModelDispatchContext(BaseModel):
         cls,
         correlation_id: UUID,
         trace_id: UUID | None = None,
-        metadata: dict[str, str] | None = None,
+        metadata: ModelDispatchMetadata | None = None,
     ) -> "ModelDispatchContext":
         """Create dispatch context for a COMPUTE node.
 
@@ -372,7 +372,7 @@ class ModelDispatchContext(BaseModel):
         Args:
             correlation_id: Unique identifier for request tracing.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Additional metadata (None converts to empty dict).
+            metadata: Optional additional metadata for extensibility.
 
         Returns:
             ModelDispatchContext configured for COMPUTE execution.
@@ -381,7 +381,7 @@ class ModelDispatchContext(BaseModel):
             >>> ctx = ModelDispatchContext.for_compute(
             ...     correlation_id=uuid4(),
             ...     trace_id=uuid4(),
-            ...     metadata={"algorithm": "sha256"},
+            ...     metadata=ModelDispatchMetadata(routing_decision="sha256"),
             ... )
             >>> assert ctx.now is None
             >>> assert ctx.node_kind == EnumNodeKind.COMPUTE
@@ -391,7 +391,7 @@ class ModelDispatchContext(BaseModel):
             trace_id=trace_id,
             now=None,
             node_kind=EnumNodeKind.COMPUTE,
-            metadata=metadata if metadata is not None else {},
+            metadata=metadata,
         )
 
     @classmethod
@@ -400,7 +400,7 @@ class ModelDispatchContext(BaseModel):
         correlation_id: UUID,
         now: datetime,
         trace_id: UUID | None = None,
-        metadata: dict[str, str] | None = None,
+        metadata: ModelDispatchMetadata | None = None,
     ) -> "ModelDispatchContext":
         """Create dispatch context for a RUNTIME_HOST node.
 
@@ -412,7 +412,7 @@ class ModelDispatchContext(BaseModel):
             correlation_id: Unique identifier for request tracing.
             now: Current time for infrastructure operations.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Additional metadata (None converts to empty dict).
+            metadata: Optional additional metadata for extensibility.
 
         Returns:
             ModelDispatchContext configured for RUNTIME_HOST execution.
@@ -422,7 +422,7 @@ class ModelDispatchContext(BaseModel):
             >>> ctx = ModelDispatchContext.for_runtime_host(
             ...     correlation_id=uuid4(),
             ...     now=datetime.now(UTC),
-            ...     metadata={"host": "infra-hub-1"},
+            ...     metadata=ModelDispatchMetadata(source_node="infra-hub-1"),
             ... )
             >>> assert ctx.now is not None
             >>> assert ctx.node_kind == EnumNodeKind.RUNTIME_HOST
@@ -432,7 +432,7 @@ class ModelDispatchContext(BaseModel):
             trace_id=trace_id,
             now=now,
             node_kind=EnumNodeKind.RUNTIME_HOST,
-            metadata=metadata if metadata is not None else {},
+            metadata=metadata,
         )
 
 

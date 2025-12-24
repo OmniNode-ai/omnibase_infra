@@ -95,8 +95,10 @@ from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchC
 from omnibase_infra.models.dispatch.model_dispatch_log_context import (
     ModelDispatchLogContext,
 )
+from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
 from omnibase_infra.models.dispatch.model_dispatch_outcome import ModelDispatchOutcome
+from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
@@ -119,7 +121,9 @@ __all__ = [
     "EnumTopicStandard",
     # Models
     "ModelDispatchContext",
+    "ModelDispatchMetadata",
     "ModelDispatchMetrics",
+    "ModelDispatchOutputs",
     "ModelDispatchResult",
     "ModelDispatchRoute",
     "ModelDispatcherMetrics",

@@ -1,0 +1,354 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+# ONEX Node Contract - Registration Orchestrator Node
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+name: "node_registration_orchestrator"
+node_type: "ORCHESTRATOR"
+description: "Registration workflow orchestrator that coordinates node lifecycle by calling reducer for intents and effect for execution."
+
+input_model:
+  name: "ModelOrchestratorInput"
+  module: "omnibase_infra.nodes.node_registration_orchestrator.models"
+  description: "Input containing introspection event and workflow configuration."
+
+output_model:
+  name: "ModelOrchestratorOutput"
+  module: "omnibase_infra.nodes.node_registration_orchestrator.models"
+  description: "Output containing dual registration outcome and workflow status."
+
+# OMN-973: Time injection context for timeout evaluation
+# FUTURE(OMN-973): Time injection wiring from contract to orchestrator workflow.
+# The infrastructure components (DispatchContextEnforcer, ModelDispatchContext) are
+# implemented and enforce time injection rules at dispatch time. However, this
+# contract-level declaration is not yet wired into the orchestrator's workflow
+# execution. To complete:
+#   1. Parse time_injection from contract at orchestrator initialization
+#   2. Configure workflow steps to receive injected `now` from dispatch context
+#   3. Wire RuntimeTick events to trigger timeout evaluation with injected time
+# Currently, time injection is handled implicitly by DispatchContextEnforcer when
+# dispatching to orchestrators (always receives `now`), not explicitly from contract.
+time_injection:
+  enabled: true
+  source: "RuntimeTick"
+  field: "now"
+  description: "Use injected timestamp from RuntimeTick for timeout evaluation"
+
+# OMN-930: Projection reader integration for state decisions
+# FUTURE(OMN-930): Projection reader dependency injection and wiring.
+# The ProjectionReaderRegistration implementation exists and provides full
+# read access to registration projections. However, this contract declaration
+# is not yet fully wired:
+#   1. ProtocolProjectionReader does not yet exist in omnibase_spi.protocols
+#      (need to define the SPI protocol for projection reading)
+#   2. Orchestrator does not inject/resolve projection_reader as a dependency
+#   3. Workflow execution graph step "read_projection" references this but
+#      has no implementation in the orchestrator to invoke it
+# The concrete implementation (ProjectionReaderRegistration) is complete and
+# ready for use once the protocol is defined and dependency injection is wired.
+projection_reader:
+  protocol: "ProtocolProjectionReader"
+  module: "omnibase_spi.protocols"
+  projections:
+    - name: "node_registration_state"
+      description: "Current registration state for all nodes"
+
+# Workflow Coordination Configuration
+# ====================================
+# Design Decision: Single Source of Truth for Coordination Settings
+#
+# CONSOLIDATION NOTE (PR #57 Review):
+# Previously, coordination settings could appear at two levels:
+#   1. Top-level workflow_coordination (parallel_execution, timeouts, etc.)
+#   2. Nested coordination_rules within workflow_definition
+#
+# This created ambiguity about which settings took precedence. The resolution:
+# ALL coordination settings are now consolidated ONLY within coordination_rules
+# (nested under workflow_definition). This eliminates duplication and ambiguity.
+#
+# Configuration Hierarchy (Single Source of Truth):
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ workflow_coordination                                                    │
+# │   └── workflow_definition                                               │
+# │         ├── workflow_metadata     → Name, version, description          │
+# │         ├── execution_graph       → DAG of nodes with dependencies      │
+# │         └── coordination_rules    → ALL coordination settings:          │
+# │               ├── execution_mode, parallel_execution_allowed            │
+# │               ├── max_parallel_branches                                 │
+# │               ├── failure_recovery_strategy, max_retries                │
+# │               ├── timeout_ms                                            │
+# │               ├── checkpoint_enabled, checkpoint_interval_ms            │
+# │               ├── state_persistence_enabled                             │
+# │               └── rollback_enabled                                      │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
+# IMPORTANT: No coordination settings exist at the workflow_coordination level
+# itself. All such settings MUST be placed in coordination_rules to ensure
+# a single authoritative source for all coordination behavior.
+workflow_coordination:
+  workflow_definition:
+    workflow_metadata:
+      workflow_name: "node_registration_workflow"
+      workflow_version:
+        major: 1
+        minor: 0
+        patch: 0
+      description: "Registers nodes with Consul and PostgreSQL based on introspection events"
+
+    execution_graph:
+      nodes:
+        - node_id: "receive_introspection"
+          node_type: effect
+          description: "Receive introspection or tick event"
+          step_config:
+            event_pattern: ["node.introspection.*", "runtime-tick.*"]
+
+        # FUTURE(OMN-930): This step is declared but not yet executed.
+        # Requires ProtocolProjectionReader protocol in omnibase_spi and
+        # orchestrator wiring to invoke ProjectionReaderRegistration.
+        - node_id: "read_projection"
+          node_type: effect
+          description: "Read current registration state from projection"
+          depends_on: ["receive_introspection"]
+          step_config:
+            protocol: "ProtocolProjectionReader"
+            operation: "read_projection"
+            projection_name: "node_registration_state"
+
+        # FUTURE(OMN-973): This step is declared but not yet executed.
+        # Requires orchestrator to receive injected `now` from dispatch context
+        # and pass it to a compute node for timeout evaluation logic.
+        - node_id: "evaluate_timeout"
+          node_type: compute
+          description: "Evaluate timeout based on injected now from RuntimeTick"
+          depends_on: ["read_projection"]
+          step_config:
+            time_injection: true
+            timeout_evaluation: true
+
+        - node_id: "compute_intents"
+          node_type: reducer
+          description: "Compute registration intents from introspection event"
+          depends_on: ["evaluate_timeout"]
+          step_config:
+            reducer_protocol: "ProtocolReducer"
+            output_type: "list[ModelRegistrationIntent]"
+
+        - node_id: "execute_consul_registration"
+          node_type: effect
+          description: "Execute Consul registration intent"
+          depends_on: ["compute_intents"]
+          step_config:
+            effect_node: "node_registry_effect"
+            intent_filter: "consul.*"
+
+        - node_id: "execute_postgres_registration"
+          node_type: effect
+          description: "Execute PostgreSQL registration intent"
+          depends_on: ["compute_intents"]
+          step_config:
+            effect_node: "node_registry_effect"
+            intent_filter: "postgres.*"
+
+        - node_id: "aggregate_results"
+          node_type: compute
+          description: "Aggregate registration results"
+          depends_on: ["execute_consul_registration", "execute_postgres_registration"]
+          step_config:
+            aggregation_strategy: "all_or_partial"
+
+        - node_id: "publish_outcome"
+          node_type: effect
+          description: "Publish registration outcome event"
+          depends_on: ["aggregate_results"]
+          step_config:
+            event_type: "NodeRegistrationResultEvent"
+
+    # ┌─────────────────────────────────────────────────────────────────────────┐
+    # │ COORDINATION RULES (Single Source of Truth - See header comments)        │
+    # ├─────────────────────────────────────────────────────────────────────────┤
+    # │ This section contains ALL coordination settings for the workflow.        │
+    # │ Per PR #57 consolidation, no coordination settings exist elsewhere.      │
+    # │ Settings are grouped by concern:                                         │
+    # │   - Execution mode (parallel vs sequential)                              │
+    # │   - Failure handling and recovery                                        │
+    # │   - Timeouts                                                             │
+    # │   - Checkpointing and state persistence                                  │
+    # │   - Rollback configuration                                               │
+    # └─────────────────────────────────────────────────────────────────────────┘
+    #
+    # Parallel Execution Design:
+    # The workflow uses parallel mode to execute Consul and Postgres registrations
+    # concurrently. Both depend only on compute_intents, so they run in the same
+    # wave. Error handling ensures one failure doesn't block the other's cleanup.
+    # See: omnibase_core.utils.workflow_executor._execute_parallel for wave-based
+    # parallel execution with proper error aggregation.
+    coordination_rules:
+      # Execution mode configuration
+      # PARALLEL: Steps with same dependencies run concurrently (wave-based)
+      # - execute_consul_registration and execute_postgres_registration run in parallel
+      # - Both depend only on compute_intents, so they form a single wave
+      # - Reduces latency for successful registrations
+      execution_mode: parallel
+      parallel_execution_allowed: true
+      max_parallel_branches: 2
+
+      # ┌─────────────────────────────────────────────────────────────────────┐
+      # │ WORKFLOW STEP RETRIES (coordination_rules.max_retries)              │
+      # ├─────────────────────────────────────────────────────────────────────┤
+      # │ Purpose: Retry an entire workflow step when it fails.               │
+      # │                                                                     │
+      # │ Behavior: If a step (e.g., execute_consul_registration) fails,      │
+      # │ the orchestrator will retry the ENTIRE step up to max_retries       │
+      # │ times before marking the workflow as failed.                        │
+      # │                                                                     │
+      # │ Use Case: Transient failures at the workflow coordination level,    │
+      # │ such as temporary network partitions or resource contention.        │
+      # │                                                                     │
+      # │ DISTINCT FROM: error_handling.retry_policy.max_retries which         │
+      # │ provides error-specific retries with exponential backoff.           │
+      # │                                                                     │
+      # │ Cross-reference: See error_handling.retry_policy section for        │
+      # │ error-level retry configuration.                                    │
+      # └─────────────────────────────────────────────────────────────────────┘
+      failure_recovery_strategy: retry
+      max_retries: 3  # Workflow step retry count (see box above)
+      recovery_enabled: true
+
+      # Timeout configuration
+      timeout_ms: 30000
+
+      # Checkpoint and state persistence
+      checkpoint_enabled: true
+      checkpoint_interval_ms: 5000
+      state_persistence_enabled: true
+
+      # Rollback configuration
+      rollback_enabled: true
+
+consumed_events:
+  - topic: "{env}.{namespace}.onex.evt.node-introspection.v1"
+    event_type: "NodeIntrospectionEvent"
+  - topic: "{env}.{namespace}.onex.evt.registry-request-introspection.v1"
+    event_type: "RegistryRequestIntrospectionEvent"
+  - topic: "{env}.{namespace}.onex.internal.runtime-tick.v1"
+    event_type: "RuntimeTick"
+    internal: true
+    description: "Internal tick for timeout evaluation"
+
+published_events:
+  - topic: "{env}.{namespace}.onex.evt.node-registration-result.v1"
+    event_type: "NodeRegistrationResultEvent"
+  - topic: "{env}.{namespace}.onex.evt.node-registration-initiated.v1"
+    event_type: "NodeRegistrationInitiated"
+  - topic: "{env}.{namespace}.onex.evt.node-registration-accepted.v1"
+    event_type: "NodeRegistrationAccepted"
+  - topic: "{env}.{namespace}.onex.evt.node-registration-rejected.v1"
+    event_type: "NodeRegistrationRejected"
+  - topic: "{env}.{namespace}.onex.evt.node-registration-ack-timed-out.v1"
+    event_type: "NodeRegistrationAckTimedOut"
+  - topic: "{env}.{namespace}.onex.evt.node-registration-ack-received.v1"
+    event_type: "NodeRegistrationAckReceived"
+  - topic: "{env}.{namespace}.onex.evt.node-became-active.v1"
+    event_type: "NodeBecameActive"
+  - topic: "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
+    event_type: "NodeLivenessExpired"
+
+intent_consumption:
+  subscribed_intents:
+    - "consul.register"
+    - "consul.deregister"
+    - "postgres.upsert_registration"
+  intent_routing_table:
+    "consul.register": "node_registry_effect"
+    "consul.deregister": "node_registry_effect"
+    "postgres.upsert_registration": "node_registry_effect"
+
+dependencies:
+  - name: "reducer_protocol"
+    type: "protocol"
+    description: "Protocol for calling reducer to get intents."
+  - name: "effect_node"
+    type: "node"
+    module: "omnibase_infra.nodes.node_registry_effect"
+    description: "Effect node for executing intents."
+  # FUTURE(OMN-930): This dependency is declared but protocol does not exist yet.
+  # ProtocolProjectionReader needs to be defined in omnibase_spi.protocols.
+  - name: "projection_reader"
+    type: "protocol"
+    module: "omnibase_spi.protocols"
+    description: "Protocol for reading projection state."
+
+# Error Handling Configuration
+# =============================
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ ERROR-LEVEL RETRIES (error_handling.retry_policy.max_retries)               │
+# ├─────────────────────────────────────────────────────────────────────────────┤
+# │ Purpose: Retry specific error types with exponential backoff.               │
+# │                                                                             │
+# │ Behavior: When a specific error type occurs (e.g., ConnectionError),        │
+# │ retry the failing operation with exponential backoff delays:                │
+# │   - 1st retry: 100ms delay                                                  │
+# │   - 2nd retry: 200ms delay                                                  │
+# │   - 3rd retry: 400ms delay (capped at max_delay_ms)                         │
+# │                                                                             │
+# │ Use Case: Transient infrastructure errors that may resolve quickly,         │
+# │ such as database connection timeouts or temporary service unavailability.   │
+# │                                                                             │
+# │ DISTINCT FROM: coordination_rules.max_retries which retries entire          │
+# │ workflow steps without backoff delays.                                      │
+# │                                                                             │
+# │ Interaction: Both retry mechanisms can be active simultaneously:            │
+# │   1. Error-level retry attempts the operation with backoff                  │
+# │   2. If all error-level retries fail, the step fails                        │
+# │   3. Workflow step retry then retries the entire step                       │
+# │                                                                             │
+# │ Cross-reference: See coordination_rules.max_retries for workflow step       │
+# │ retry configuration.                                                        │
+# └─────────────────────────────────────────────────────────────────────────────┘
+error_handling:
+  retry_policy:
+    max_retries: 3  # Error-level retry count (see box above)
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "EffectExecutionError"
+      - "ConnectionError"
+      - "TimeoutError"
+
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+
+  error_types:
+    - name: "ReducerError"
+      description: "Error from reducer during intent generation"
+      recoverable: true
+      retry_strategy: "none"
+    - name: "EffectExecutionError"
+      description: "Error from effect node during intent execution"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "AggregationError"
+      description: "Error during result aggregation"
+      recoverable: false
+      retry_strategy: "none"
+
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+
+metadata:
+  author: "OmniNode Team"
+  created: "2025-12-18"
+  tags:
+    - "orchestrator"
+    - "registration"
+    - "workflow"
+    - "mvp"

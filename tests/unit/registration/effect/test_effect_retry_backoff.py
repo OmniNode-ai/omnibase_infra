@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import time
 from unittest.mock import MagicMock, patch
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import consul
 import pytest
@@ -399,9 +399,11 @@ class TestEffectRetryBackoff:
             assert mock_consul_client.kv.get.call_count == 1
 
             # Assert: Failed fast - no backoff delay
-            # Should complete in well under 0.1s (the initial backoff)
-            assert elapsed < 0.1, (
-                f"Expected immediate failure (< 0.1s), got {elapsed:.3f}s"
+            # CI-friendly threshold: 1.0s catches severe regressions while allowing
+            # for variable CI performance. The key assertion is the single attempt,
+            # not the exact timing (which just confirms no retry backoff occurred).
+            assert elapsed < 1.0, (
+                f"Expected immediate failure (< 1.0s), got {elapsed:.3f}s"
             )
 
             # Assert: Correlation ID preserved

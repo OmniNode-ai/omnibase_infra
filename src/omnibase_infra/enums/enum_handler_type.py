@@ -12,8 +12,11 @@ Handler Type Output Constraints (see EnumNodeOutputType for output types):
     - COMPUTE: Pure data processing and business logic transformations.
                Can output EVENT, COMMAND, INTENT. No side effects.
     - REDUCER: State management and persistence operations.
-               Can output PROJECTION only. Cannot output EVENT.
-               Cannot access system time (must be deterministic).
+               TARGET DESIGN (post-OMN-914): Can output PROJECTION only.
+               Cannot output EVENT. Cannot access system time (must be deterministic).
+               MVP INTERIM: Current reducers (e.g., RegistrationReducer) may emit
+               intents that become EVENTs/COMMANDs. This will be enforced once
+               full purity gates are in place per OMN-914.
     - ORCHESTRATOR: Workflow coordination and step sequencing.
                     Can output COMMAND, EVENT but not INTENT or PROJECTION.
 
@@ -47,8 +50,10 @@ class EnumHandlerType(str, Enum):
             Can output: EVENT, COMMAND, INTENT.
         REDUCER: State management and persistence handlers.
             Manages state consolidation and projections.
-            Can output: PROJECTION only. Cannot output: EVENT.
-            Cannot access system time (must be deterministic).
+            TARGET DESIGN (post-OMN-914): Can output PROJECTION only.
+            Cannot output: EVENT. Cannot access system time (must be deterministic).
+            MVP INTERIM: Current reducers may emit intents that become EVENTs/COMMANDs
+            until full purity gates are enforced per OMN-914.
         ORCHESTRATOR: Workflow coordination handlers.
             Coordinates multi-step workflows and routing.
             Can output: COMMAND, EVENT. Cannot output: INTENT, PROJECTION.

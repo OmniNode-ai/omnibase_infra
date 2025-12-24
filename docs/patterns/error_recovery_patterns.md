@@ -482,6 +482,8 @@ async def resilient_operation(
 
 ## Related Patterns
 
+- [Security Patterns](./security_patterns.md) - Comprehensive security guide including credential refresh and secret management
 - [Error Handling Patterns](./error_handling_patterns.md) - Error classification and context
+- [Error Sanitization Patterns](./error_sanitization_patterns.md) - Data classification and secure error reporting
 - [Correlation ID Tracking](./correlation_id_tracking.md) - Request tracing
 - [Circuit Breaker Implementation](./circuit_breaker_implementation.md) - Detailed circuit breaker guide

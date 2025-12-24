@@ -91,9 +91,10 @@ async def wire_infrastructure_services(
         {'services': ['PolicyRegistry', 'ProtocolBindingRegistry']}
         >>> policy_reg = await container.service_registry.resolve_service(PolicyRegistry)
         >>> handler_reg = await container.service_registry.resolve_service(ProtocolBindingRegistry)
-        >>> isinstance(policy_reg, PolicyRegistry)
+        >>> # Verify via duck typing (per ONEX conventions)
+        >>> hasattr(policy_reg, 'register_policy') and callable(policy_reg.register_policy)
         True
-        >>> isinstance(handler_reg, ProtocolBindingRegistry)
+        >>> hasattr(handler_reg, 'register') and callable(handler_reg.register)
         True
     """
     services_registered: list[str] = []
@@ -418,7 +419,8 @@ async def get_handler_registry_from_container(
         >>> container = ModelONEXContainer()
         >>> await wire_infrastructure_services(container)
         >>> registry = await get_handler_registry_from_container(container)
-        >>> isinstance(registry, ProtocolBindingRegistry)
+        >>> # Verify via duck typing (per ONEX conventions)
+        >>> hasattr(registry, 'register') and callable(registry.register)
         True
 
     Note:

@@ -24,7 +24,11 @@ Thread Safety:
     making it thread-safe for concurrent read access.
 
 Example:
-    >>> from omnibase_infra.models.dispatch import ModelDispatchResult, EnumDispatchStatus
+    >>> from omnibase_infra.models.dispatch import (
+    ...     ModelDispatchResult,
+    ...     ModelDispatchOutputs,
+    ...     EnumDispatchStatus,
+    ... )
     >>> from uuid import uuid4
     >>> from datetime import datetime, UTC
     >>>
@@ -37,7 +41,7 @@ Example:
     ...     topic="dev.user.events.v1",
     ...     message_type="UserCreatedEvent",
     ...     duration_ms=45.2,
-    ...     outputs=["dev.notification.commands.v1"],
+    ...     outputs=ModelDispatchOutputs(topics=["dev.notification.commands.v1"]),
     ... )
     >>>
     >>> result.is_successful()
@@ -57,6 +61,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
+from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 
 
 class ModelDispatchResult(BaseModel):
@@ -164,9 +170,9 @@ class ModelDispatchResult(BaseModel):
     )
 
     # ---- Dispatcher Outputs ----
-    outputs: list[str] = Field(
-        default_factory=list,
-        description="List of topics where dispatcher outputs were published.",
+    outputs: ModelDispatchOutputs | None = Field(
+        default=None,
+        description="Validated output topics where dispatcher outputs were published.",
     )
     output_count: int = Field(
         default=0,
@@ -210,8 +216,8 @@ class ModelDispatchResult(BaseModel):
     )
 
     # ---- Optional Metadata ----
-    metadata: dict[str, str] = Field(
-        default_factory=dict,
+    metadata: ModelDispatchMetadata | None = Field(
+        default=None,
         description="Optional additional metadata about the dispatch.",
     )
 
@@ -322,14 +328,14 @@ class ModelDispatchResult(BaseModel):
 
     def with_success(
         self,
-        outputs: list[str] | None = None,
+        outputs: ModelDispatchOutputs | None = None,
         output_count: int | None = None,
     ) -> "ModelDispatchResult":
         """
         Create a new result marked as successful.
 
         Args:
-            outputs: Optional list of output topics
+            outputs: Optional ModelDispatchOutputs with validated output topics
             output_count: Optional count of outputs (defaults to len(outputs))
 
         Returns:
@@ -342,7 +348,7 @@ class ModelDispatchResult(BaseModel):
             ...     topic="test.events",
             ... )
             >>> success_result = result.with_success(
-            ...     outputs=["output.topic.v1"],
+            ...     outputs=ModelDispatchOutputs(topics=["output.topic.v1"]),
             ...     output_count=1,
             ... )
         """

@@ -13,14 +13,12 @@ from uuid import UUID, uuid4
 
 import consul
 import pytest
-from omnibase_core.enums import EnumCoreErrorCode
 from pydantic import SecretStr, ValidationError
 
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
     InfraTimeoutError,
-    InfraUnavailableError,
     ProtocolConfigurationError,
     RuntimeHostError,
 )

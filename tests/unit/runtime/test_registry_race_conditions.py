@@ -21,7 +21,6 @@ All tests are designed to be deterministic and not flaky.
 
 from __future__ import annotations
 
-import asyncio
 import threading
 import time
 from collections.abc import Iterator
@@ -34,18 +33,9 @@ from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError
 from omnibase_infra.runtime import handler_registry as registry_module
 from omnibase_infra.runtime.handler_registry import (
-    EVENT_BUS_INMEMORY,
-    EVENT_BUS_KAFKA,
-    HANDLER_TYPE_CONSUL,
-    HANDLER_TYPE_DATABASE,
-    HANDLER_TYPE_GRPC,
     HANDLER_TYPE_HTTP,
-    HANDLER_TYPE_KAFKA,
-    HANDLER_TYPE_VALKEY,
-    HANDLER_TYPE_VAULT,
     EventBusBindingRegistry,
     ProtocolBindingRegistry,
-    RegistryError,
     get_event_bus_registry,
     get_handler_registry,
 )

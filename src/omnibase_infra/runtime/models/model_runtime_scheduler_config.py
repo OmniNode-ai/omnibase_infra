@@ -80,6 +80,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -299,8 +300,6 @@ class ModelRuntimeSchedulerConfig(BaseModel):
             )
 
         # Kafka topic naming rules: alphanumeric, dots, underscores, hyphens
-        import re
-
         if not re.match(r"^[a-zA-Z0-9._-]+$", topic_name):
             raise ProtocolConfigurationError(
                 f"tick_topic '{topic_name}' contains invalid characters. "
@@ -406,8 +405,6 @@ class ModelRuntimeSchedulerConfig(BaseModel):
             )
 
         # Metrics prefixes should be alphanumeric with underscores only
-        import re
-
         if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", prefix):
             raise ProtocolConfigurationError(
                 f"metrics_prefix '{prefix}' is invalid. "
