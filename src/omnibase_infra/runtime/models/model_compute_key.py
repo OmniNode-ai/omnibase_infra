@@ -83,15 +83,39 @@ class ModelComputeKey(BaseModel):
     def from_tuple(cls, key_tuple: tuple[str, str]) -> ModelComputeKey:
         """Create from tuple for backward compatibility.
 
+        Validates the input tuple before creating the key instance.
+
         Args:
-            key_tuple: Tuple of (plugin_id, version)
+            key_tuple: Tuple of (plugin_id, version). Must be a tuple
+                with exactly 2 string elements.
 
         Returns:
             ModelComputeKey instance
+
+        Raises:
+            ValueError: If key_tuple is not a tuple, doesn't have exactly
+                2 elements, or contains non-string values.
         """
+        # Validate tuple type and length
+        if not isinstance(key_tuple, tuple):
+            raise ValueError(
+                f"Expected tuple[str, str], got {type(key_tuple).__name__}"
+            )
+        if len(key_tuple) != 2:
+            raise ValueError(f"Expected tuple with 2 elements, got {len(key_tuple)}")
+
+        # Validate element types
+        plugin_id, version = key_tuple
+        if not isinstance(plugin_id, str):
+            raise ValueError(
+                f"plugin_id must be a string, got {type(plugin_id).__name__}"
+            )
+        if not isinstance(version, str):
+            raise ValueError(f"version must be a string, got {type(version).__name__}")
+
         return cls(
-            plugin_id=key_tuple[0],
-            version=key_tuple[1],
+            plugin_id=plugin_id,
+            version=version,
         )
 
 
