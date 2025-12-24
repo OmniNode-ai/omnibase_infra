@@ -52,6 +52,9 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.models.validation.model_coverage_metrics import (
+    ModelCoverageMetrics,
+)
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
@@ -656,7 +659,7 @@ class RoutingCoverageValidator:
 
         >>> # Get coverage statistics
         >>> report = validator.get_coverage_report()
-        >>> print(f"Coverage: {report['coverage_percent']:.1f}%")
+        >>> print(f"Coverage: {report.coverage_percent:.1f}%")
 
         >>> # After source changes, refresh the cache
         >>> validator.refresh()
@@ -774,11 +777,11 @@ class RoutingCoverageValidator:
         discovered_names = set(self._discovered_types.keys())
         return discovered_names - self._registered_routes
 
-    def get_coverage_report(self) -> dict[str, int | float | list[str]]:
+    def get_coverage_report(self) -> ModelCoverageMetrics:
         """Get coverage statistics.
 
         Returns:
-            Dictionary containing:
+            ModelCoverageMetrics containing:
                 - total_types: Total number of discovered message types
                 - registered_types: Number of types with registered routes
                 - unmapped_types: List of type names without routes
@@ -788,17 +791,10 @@ class RoutingCoverageValidator:
         assert self._discovered_types is not None
         assert self._registered_routes is not None
 
-        total = len(self._discovered_types)
-        unmapped = self.get_unmapped_types()
-        registered = total - len(unmapped)
-        coverage = (registered / total * 100) if total > 0 else 100.0
-
-        return {
-            "total_types": total,
-            "registered_types": registered,
-            "unmapped_types": sorted(unmapped),
-            "coverage_percent": coverage,
-        }
+        return ModelCoverageMetrics.from_discovery(
+            discovered_types=self._discovered_types,
+            registered_routes=self._registered_routes,
+        )
 
     def fail_fast_on_unmapped(self) -> None:
         """Raise exception if any message types are unmapped.

@@ -545,11 +545,12 @@ class TestRoutingCoverageValidator:
         validator = RoutingCoverageValidator(source_directory=temp_source_dir)
         report = validator.get_coverage_report()
 
-        assert "total_types" in report
-        assert "registered_types" in report
-        assert "unmapped_types" in report
-        assert "coverage_percent" in report
-        assert report["total_types"] == 3  # 3 events in sample file
+        # Report is now a ModelCoverageMetrics instance
+        assert hasattr(report, "total_types")
+        assert hasattr(report, "registered_types")
+        assert hasattr(report, "unmapped_types")
+        assert hasattr(report, "coverage_percent")
+        assert report.total_types == 3  # 3 events in sample file
 
     def test_fail_fast_on_unmapped_raises(
         self, temp_source_dir: Path, sample_event_file: Path
@@ -790,7 +791,7 @@ registry.register("PaymentReceivedEvent", handler)
 
         validator = RoutingCoverageValidator(source_directory=temp_source_dir)
         report = validator.get_coverage_report()
-        assert report["coverage_percent"] == 100.0
+        assert report.coverage_percent == 100.0
 
     def test_50_percent_coverage(self, temp_source_dir: Path) -> None:
         """Verify 50% coverage is correctly calculated."""
@@ -811,7 +812,7 @@ registry.register("OrderCreatedEvent", handler)
 
         validator = RoutingCoverageValidator(source_directory=temp_source_dir)
         report = validator.get_coverage_report()
-        assert report["coverage_percent"] == 50.0
+        assert report.coverage_percent == 50.0
 
     def test_0_percent_coverage(
         self, temp_source_dir: Path, sample_event_file: Path
@@ -819,4 +820,4 @@ registry.register("OrderCreatedEvent", handler)
         """Verify 0% coverage is correctly calculated."""
         validator = RoutingCoverageValidator(source_directory=temp_source_dir)
         report = validator.get_coverage_report()
-        assert report["coverage_percent"] == 0.0
+        assert report.coverage_percent == 0.0

@@ -96,7 +96,7 @@ class ModelDispatchContext(BaseModel):
         trace_id: Optional trace identifier for distributed tracing systems.
         now: Injected current time (None for reducers, required validation).
         node_kind: The ONEX node type this context is for.
-        metadata: Optional additional metadata for extensibility.
+        metadata: Additional metadata for extensibility (empty dict by default).
 
     Example:
         >>> # Use factory methods for proper enforcement
@@ -143,10 +143,12 @@ class ModelDispatchContext(BaseModel):
         description="The ONEX node type this context is for.",
     )
 
-    # ---- Optional Metadata ----
-    metadata: dict[str, str] | None = Field(
-        default=None,
-        description="Optional additional metadata for extensibility.",
+    # ---- Extensibility Metadata ----
+    # NOTE: Using empty dict default instead of None reduces union count.
+    # Callers can check `if metadata:` for emptiness rather than `if metadata is not None`.
+    metadata: dict[str, str] = Field(
+        default_factory=dict,
+        description="Additional metadata for extensibility. Empty dict by default.",
     )
 
     def _is_invalid_time_injection(self) -> bool:
@@ -252,7 +254,7 @@ class ModelDispatchContext(BaseModel):
         Args:
             correlation_id: Unique identifier for request tracing.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Optional additional metadata.
+            metadata: Additional metadata (None converts to empty dict).
 
         Returns:
             ModelDispatchContext configured for REDUCER execution.
@@ -271,7 +273,7 @@ class ModelDispatchContext(BaseModel):
             trace_id=trace_id,
             now=None,
             node_kind=EnumNodeKind.REDUCER,
-            metadata=metadata,
+            metadata=metadata if metadata is not None else {},
         )
 
     @classmethod
@@ -291,7 +293,7 @@ class ModelDispatchContext(BaseModel):
             correlation_id: Unique identifier for request tracing.
             now: Current time for time-dependent decisions.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Optional additional metadata.
+            metadata: Additional metadata (None converts to empty dict).
 
         Returns:
             ModelDispatchContext configured for ORCHESTRATOR execution.
@@ -310,7 +312,7 @@ class ModelDispatchContext(BaseModel):
             trace_id=trace_id,
             now=now,
             node_kind=EnumNodeKind.ORCHESTRATOR,
-            metadata=metadata,
+            metadata=metadata if metadata is not None else {},
         )
 
     @classmethod
@@ -331,7 +333,7 @@ class ModelDispatchContext(BaseModel):
             correlation_id: Unique identifier for request tracing.
             now: Current time for time-dependent decisions.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Optional additional metadata.
+            metadata: Additional metadata (None converts to empty dict).
 
         Returns:
             ModelDispatchContext configured for EFFECT execution.
@@ -351,7 +353,7 @@ class ModelDispatchContext(BaseModel):
             trace_id=trace_id,
             now=now,
             node_kind=EnumNodeKind.EFFECT,
-            metadata=metadata,
+            metadata=metadata if metadata is not None else {},
         )
 
     @classmethod
@@ -370,7 +372,7 @@ class ModelDispatchContext(BaseModel):
         Args:
             correlation_id: Unique identifier for request tracing.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Optional additional metadata.
+            metadata: Additional metadata (None converts to empty dict).
 
         Returns:
             ModelDispatchContext configured for COMPUTE execution.
@@ -389,7 +391,7 @@ class ModelDispatchContext(BaseModel):
             trace_id=trace_id,
             now=None,
             node_kind=EnumNodeKind.COMPUTE,
-            metadata=metadata,
+            metadata=metadata if metadata is not None else {},
         )
 
     @classmethod
@@ -410,7 +412,7 @@ class ModelDispatchContext(BaseModel):
             correlation_id: Unique identifier for request tracing.
             now: Current time for infrastructure operations.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Optional additional metadata.
+            metadata: Additional metadata (None converts to empty dict).
 
         Returns:
             ModelDispatchContext configured for RUNTIME_HOST execution.
@@ -430,7 +432,7 @@ class ModelDispatchContext(BaseModel):
             trace_id=trace_id,
             now=now,
             node_kind=EnumNodeKind.RUNTIME_HOST,
-            metadata=metadata,
+            metadata=metadata if metadata is not None else {},
         )
 
 

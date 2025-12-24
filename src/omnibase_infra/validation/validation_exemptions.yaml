@@ -343,6 +343,74 @@ pattern_exemptions:
       table_name is a database configuration parameter specifying the PostgreSQL table name for storing idempotency records (default: "idempotency_records"). This is infrastructure configuration, not an entity reference.
 
     ticket: OMN-945
+  # ModelLogContext - Structured logging context with builder pattern
+  - file_pattern: 'model_log_context\.py'
+    # ==========================================================================
+    # Union Reduction Phase 2 Model Exemptions (OMN-1002)
+    # ==========================================================================
+    # These models use builder patterns with many convenience methods.
+    # Method counts exceed thresholds but provide valuable developer ergonomics.
+
+    class_pattern: "Class 'ModelLogContext'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Builder pattern model for structured logging with fluent interface. Many methods provide convenience factories (for_event_bus, for_dispatch, for_error) and builder methods (with_*). This is intentional API design for developer ergonomics.
+
+    ticket: OMN-1002
+  - file_pattern: 'model_log_context\.py'
+    violation_pattern: "Field 'correlation_id' should use UUID"
+    reason: >
+      correlation_id is stored as str for logging compatibility. Log formatters expect string values. The correlation ID is typically stringified from UUID before logging anyway.
+
+    ticket: OMN-1002
+  - file_pattern: 'model_log_context\.py'
+    violation_pattern: "Field 'group_id' should use UUID"
+    reason: >
+      group_id is Kafka consumer group ID which is a string, not a UUID. This is infrastructure-specific and follows Kafka naming conventions.
+
+    ticket: OMN-1002
+  - file_pattern: 'model_log_context\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name is a logging field for identifying the service (e.g., "kafka", "consul"). It is NOT an entity reference but a simple label for log correlation.
+
+    ticket: OMN-1002
+  # ModelDispatchLogContext - Dispatch-specific logging
+  - file_pattern: 'model_dispatch_log_context\.py'
+    class_pattern: "Class 'ModelDispatchLogContext'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Builder pattern model for dispatch logging with factory methods for common patterns (for_dispatch_start, for_dispatch_complete, for_dispatch_error). Intentional API design.
+
+    ticket: OMN-1002
+  - file_pattern: 'model_dispatch_log_context\.py'
+    violation_pattern: "Field 'dispatcher_id' should use UUID"
+    reason: >
+      dispatcher_id is a user-defined string identifier for dispatchers, not a UUID. Dispatchers are registered with string IDs for readability in logs and configuration.
+
+    ticket: OMN-1002
+  - file_pattern: 'model_dispatch_log_context\.py'
+    method_pattern: "Function 'for_dispatch_complete'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Factory method that captures all dispatch completion context. Parameters are optional with defaults. Breaking into multiple calls would reduce usability.
+
+    ticket: OMN-1002
+  - file_pattern: 'model_dispatch_log_context\.py'
+    method_pattern: "Function 'for_dispatch_error'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Factory method that captures all dispatch error context. Parameters are optional with defaults. Breaking into multiple calls would reduce usability.
+
+    ticket: OMN-1002
+  # ModelDispatchOutcome - Dispatcher output normalization
+  - file_pattern: 'model_dispatch_outcome\.py'
+    class_pattern: "Class 'ModelDispatchOutcome'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Model with multiple factory methods (none, single, multiple, from_legacy_output) and convenience properties (is_empty, has_topics, single_topic, has_single_topic). Provides comprehensive API for handling dispatcher outputs.
+
+    ticket: OMN-1002
 # Union usage validator exemptions
 # These handle complex union type violations
 union_exemptions:

@@ -82,9 +82,9 @@ class TestModelMessageTypeEntry:
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
         )
-        is_valid, error = entry.validate_category(EnumMessageCategory.EVENT)
-        assert is_valid is True
-        assert error is None
+        outcome = entry.validate_category(EnumMessageCategory.EVENT)
+        assert outcome.is_valid is True
+        assert outcome.error_message is None
 
     def test_validate_category_failure(self) -> None:
         """Test validate_category failure case."""
@@ -94,12 +94,12 @@ class TestModelMessageTypeEntry:
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
         )
-        is_valid, error = entry.validate_category(EnumMessageCategory.COMMAND)
-        assert is_valid is False
-        assert error is not None
-        assert "UserCreated" in error
-        assert "command" in error
-        assert "event" in error
+        outcome = entry.validate_category(EnumMessageCategory.COMMAND)
+        assert outcome.is_valid is False
+        assert outcome.error_message is not None
+        assert "UserCreated" in outcome.error_message
+        assert "command" in outcome.error_message
+        assert "event" in outcome.error_message
 
     def test_with_additional_handler(self) -> None:
         """Test adding additional handler to entry."""
