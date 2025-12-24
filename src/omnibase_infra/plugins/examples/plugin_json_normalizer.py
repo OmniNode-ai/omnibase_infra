@@ -8,8 +8,8 @@ from typing import TypedDict, cast
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
+from omnibase_core.types import JsonValue
 
-from omnibase_infra.models.types.json_types import JsonValue
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (
     PluginContext,
@@ -236,7 +236,7 @@ class PluginJsonNormalizer(PluginComputeBase):
 
     def _is_json_compatible(self, value: object) -> bool:
         """Type guard to check if value is JSON-compatible."""
-        return isinstance(value, (dict, list, str, int, float, bool, type(None)))
+        return isinstance(value, dict | list | str | int | float | bool | type(None))
 
     def _validate_json_structure(self, obj: JsonValue, _depth: int = 0) -> None:
         """Recursively validate JSON structure for non-JSON-compatible types.

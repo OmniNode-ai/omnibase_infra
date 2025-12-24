@@ -771,14 +771,3 @@ class TestAsyncBehavior:
 
         # Assert - Processing time reflects delays
         assert response.processing_time_ms >= 20.0  # At least 20ms total
-
-
-__all__ = [
-    "TestFullSuccessFlow",
-    "TestConsulFailureFlow",
-    "TestPostgresFailureFlow",
-    "TestBothFailFlow",
-    "TestRetrySuccessFlow",
-    "TestIdempotencyVerification",
-    "TestAsyncBehavior",
-]

@@ -144,39 +144,42 @@ class TestPolicyRegistryPerformance:
             f"100 failed lookups took {elapsed_ms:.2f}ms (expected < 500ms)"
         )
 
-    def test_get_performance_fast_path_no_filters(
+    def test_get_performance_fast_path_correctness(
         self, large_policy_registry: PolicyRegistry
     ) -> None:
-        """Verify fast path optimization when no filters applied.
+        """Verify fast path returns correct results and completes efficiently.
 
         Tests that when policy_type and version are None (common case),
-        we use a fast path that builds matches list more efficiently.
+        the fast path returns the semantically latest version correctly.
 
         This is the most common usage pattern: get("policy_id") to
         retrieve the latest version.
-        """
-        # Warm up
-        _ = large_policy_registry.get("policy_75")
 
-        # Measure fast path (no filters)
+        Note: Performance comparison between fast path and filtered path is
+        validated in TestPolicyRegistryPerformanceRegression.test_fast_path_speedup_vs_filtered.
+        This test focuses on correctness and absolute performance of the fast path.
+        """
+        # Verify fast path returns correct latest version
+        policy_cls = large_policy_registry.get("policy_75")
+        assert policy_cls is MockPolicy, f"Expected MockPolicy but got {policy_cls}"
+
+        # Verify all expected versions exist
+        versions = large_policy_registry.list_versions("policy_75")
+        expected_versions = {"0.0.0", "1.0.0", "2.0.0", "3.0.0", "4.0.0"}
+        assert set(versions) == expected_versions, (
+            f"Expected versions {expected_versions} but got {set(versions)}"
+        )
+
+        # Verify fast path completes in reasonable time (absolute performance)
         start_time = time.perf_counter()
         for _ in range(1000):
             _ = large_policy_registry.get("policy_75")
-        fast_path_ms = (time.perf_counter() - start_time) * 1000
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-        # Measure filtered path (with type filter)
-        start_time = time.perf_counter()
-        for _ in range(1000):
-            _ = large_policy_registry.get(
-                "policy_75", policy_type=EnumPolicyType.ORCHESTRATOR
-            )
-        filtered_path_ms = (time.perf_counter() - start_time) * 1000
-
-        # Fast path should be noticeably faster (at least 20% faster)
-        # This validates the optimization
-        speedup = filtered_path_ms / fast_path_ms
-        assert speedup > 1.1, (
-            f"Fast path not optimized (speedup: {speedup:.2f}x, expected > 1.1x)"
+        # 1000 fast path lookups should complete in < 150ms
+        # This validates the fast path is performant in absolute terms
+        assert elapsed_ms < 150, (
+            f"Fast path too slow: {elapsed_ms:.2f}ms for 1000 lookups (expected < 150ms)"
         )
 
     def test_semver_cache_performance(

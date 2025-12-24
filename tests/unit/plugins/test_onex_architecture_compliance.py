@@ -12,9 +12,8 @@ These tests ensure architectural integrity and prevent violations of the
 COMPUTE layer contract.
 """
 
-import io
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -66,7 +65,7 @@ class TestOnexArchitectureCompliance:
                 self, input_data: dict[str, Any], context: dict[str, Any]
             ) -> dict[str, Any]:
                 # ARCHITECTURAL VIOLATION: File I/O in COMPUTE layer
-                with open("/tmp/data.txt") as f:  # noqa: S108 - Intentional violation for testing
+                with open("/tmp/data.txt", encoding="utf-8") as f:  # noqa: S108 - Intentional violation for testing
                     return {"data": f.read()}
 
         plugin = FileIOViolator()

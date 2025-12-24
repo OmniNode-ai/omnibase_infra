@@ -25,8 +25,10 @@ Design Principles:
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from uuid import UUID
+
+from omnibase_infra.nodes.effects.models import ModelBackendResult
 
 
 @dataclass
@@ -84,13 +86,13 @@ class StubConsulClient:
     Example:
         >>> client = StubConsulClient()
         >>> result = await client.register_service("id-1", "svc", ["tag"])
-        >>> assert result["success"] is True
+        >>> assert result.success is True
         >>> assert len(client.registrations) == 1
 
         >>> # Simulate failure
         >>> client.should_fail = True
         >>> result = await client.register_service("id-2", "svc", ["tag"])
-        >>> assert result["success"] is False
+        >>> assert result.success is False
     """
 
     def __init__(
@@ -141,7 +143,7 @@ class StubConsulClient:
         service_name: str,
         tags: list[str],
         health_check: dict[str, str] | None = None,
-    ) -> dict[str, bool | str]:
+    ) -> ModelBackendResult:
         """Register a service in Consul.
 
         Implements ProtocolConsulClient.register_service with controllable
@@ -154,7 +156,7 @@ class StubConsulClient:
             health_check: Optional health check configuration.
 
         Returns:
-            Dict with "success" bool and optional "error" string.
+            ModelBackendResult with success status and optional error.
 
         Raises:
             Exception: If set_exception was called with an exception.
@@ -171,7 +173,7 @@ class StubConsulClient:
 
         # Simulate failure
         if self.should_fail:
-            return {"success": False, "error": self.failure_error}
+            return ModelBackendResult(success=False, error=self.failure_error)
 
         # Record successful registration
         registration = ConsulRegistration(
@@ -182,7 +184,7 @@ class StubConsulClient:
         )
         self.registrations.append(registration)
 
-        return {"success": True}
+        return ModelBackendResult(success=True)
 
 
 class StubPostgresAdapter:
@@ -204,13 +206,13 @@ class StubPostgresAdapter:
     Example:
         >>> adapter = StubPostgresAdapter()
         >>> result = await adapter.upsert(uuid4(), "effect", "1.0.0", {}, {})
-        >>> assert result["success"] is True
+        >>> assert result.success is True
         >>> assert len(adapter.registrations) == 1
 
         >>> # Simulate failure
         >>> adapter.should_fail = True
         >>> result = await adapter.upsert(uuid4(), "effect", "1.0.0", {}, {})
-        >>> assert result["success"] is False
+        >>> assert result.success is False
     """
 
     def __init__(
@@ -262,7 +264,7 @@ class StubPostgresAdapter:
         node_version: str,
         endpoints: dict[str, str],
         metadata: dict[str, str],
-    ) -> dict[str, bool | str]:
+    ) -> ModelBackendResult:
         """Upsert a node registration record.
 
         Implements ProtocolPostgresAdapter.upsert with controllable
@@ -276,7 +278,7 @@ class StubPostgresAdapter:
             metadata: Additional metadata.
 
         Returns:
-            Dict with "success" bool and optional "error" string.
+            ModelBackendResult with success status and optional error.
 
         Raises:
             Exception: If set_exception was called with an exception.
@@ -293,7 +295,7 @@ class StubPostgresAdapter:
 
         # Simulate failure
         if self.should_fail:
-            return {"success": False, "error": self.failure_error}
+            return ModelBackendResult(success=False, error=self.failure_error)
 
         # Record successful upsert
         registration = PostgresRegistration(
@@ -305,7 +307,7 @@ class StubPostgresAdapter:
         )
         self.registrations.append(registration)
 
-        return {"success": True}
+        return ModelBackendResult(success=True)
 
 
 __all__ = [

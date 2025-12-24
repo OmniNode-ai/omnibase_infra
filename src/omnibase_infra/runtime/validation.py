@@ -276,6 +276,13 @@ def load_and_validate_config(
             config_path=str(config_path),
             error_details=str(e),
         ) from e
+    except UnicodeDecodeError as e:
+        raise ProtocolConfigurationError(
+            f"Configuration file contains binary or non-UTF-8 content: {config_path}",
+            context=context,
+            config_path=str(config_path),
+            error_details=f"Encoding error at position {e.start}-{e.end}: {e.reason}",
+        ) from e
     except OSError as e:
         raise ProtocolConfigurationError(
             f"Failed to read configuration file {config_path}: {e}",
