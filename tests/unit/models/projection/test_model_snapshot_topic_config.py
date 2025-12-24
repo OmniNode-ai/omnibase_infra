@@ -13,9 +13,7 @@ Verifies Kafka snapshot topic configuration including:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 import pytest
 from pydantic import ValidationError
@@ -259,9 +257,18 @@ retention_ms: -1
         assert config.min_compaction_lag_ms == 120000
 
     def test_from_yaml_file_not_found(self) -> None:
-        """Test FileNotFoundError for missing YAML file."""
-        with pytest.raises(FileNotFoundError):
+        """Test ProtocolConfigurationError for missing YAML file.
+
+        Per PR #57 review, missing files should raise ProtocolConfigurationError
+        with proper context (correlation_id, transport_type, config_path) rather
+        than raw FileNotFoundError.
+        """
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             ModelSnapshotTopicConfig.from_yaml(Path("/nonexistent/config.yaml"))
+        assert "not found" in str(exc_info.value).lower()
+        assert (
+            exc_info.value.__cause__ is None
+        )  # No chained error for path.exists() check
 
     def test_from_yaml_invalid_content(self, tmp_path: Path) -> None:
         """Test error handling for invalid YAML content."""

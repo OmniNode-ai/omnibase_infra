@@ -5,6 +5,11 @@
 This module defines the protocol that PostgreSQL adapters must implement
 to be used with the NodeRegistryEffect node.
 
+Thread Safety:
+    Implementations MUST be thread-safe for concurrent async calls.
+    Multiple async tasks may invoke upsert() simultaneously for
+    different or identical node registrations.
+
 Related:
     - NodeRegistryEffect: Effect node that uses this protocol
     - ProtocolConsulClient: Protocol for Consul backend
@@ -24,6 +29,19 @@ class ProtocolPostgresAdapter(Protocol):
 
     Implementations must provide async upsert capability for
     registration records.
+
+    Thread Safety:
+        Implementations MUST be thread-safe for concurrent async calls.
+
+        **Guarantees implementers MUST provide:**
+            - Concurrent upsert() calls are safe
+            - Connection pooling (if used) is async-safe
+            - Database transactions are properly isolated
+
+        **What callers can assume:**
+            - Multiple coroutines can call upsert() concurrently
+            - Each upsert operation is independent
+            - Failures in one upsert do not affect others
     """
 
     async def upsert(

@@ -77,9 +77,15 @@ Example:
                     is_running=self._running,
                 )
 
-        # Type checking works via Protocol
-        scheduler: ProtocolRuntimeScheduler = InMemoryScheduler()
-        assert isinstance(scheduler, ProtocolRuntimeScheduler)
+        # Protocol conformance check via duck typing (per ONEX conventions)
+        scheduler = InMemoryScheduler()
+
+        # Verify required methods/properties exist and are callable
+        assert hasattr(scheduler, 'scheduler_id')
+        assert hasattr(scheduler, 'is_running')
+        assert hasattr(scheduler, 'start') and callable(scheduler.start)
+        assert hasattr(scheduler, 'stop') and callable(scheduler.stop)
+        assert hasattr(scheduler, 'emit_tick') and callable(scheduler.emit_tick)
 
 Related:
     - OMN-953: RuntimeTick scheduler implementation
@@ -115,15 +121,20 @@ class ProtocolRuntimeScheduler(Protocol):
     This is an **infrastructure concern** - orchestrators derive timeout
     decisions (domain concern) from the ticks.
 
-    Protocol Validation:
-        This protocol is marked ``@runtime_checkable``, enabling ``isinstance()``
-        checks for structural type verification. Use ``isinstance(obj, ProtocolRuntimeScheduler)``
-        to verify that an object implements the required interface.
+    Protocol Verification:
+        Per ONEX conventions, protocol compliance is verified via duck typing rather
+        than isinstance checks. Verify required methods and properties exist:
 
-        **Note on isinstance() Limitations**:
-        Python's runtime_checkable protocols only verify method/attribute existence,
-        not return types or parameter types. For complete type safety, use static
-        type checking (mypy) in addition to runtime checks.
+        .. code-block:: python
+
+            # Duck typing verification (preferred)
+            assert hasattr(scheduler, 'scheduler_id')
+            assert hasattr(scheduler, 'start') and callable(scheduler.start)
+            assert hasattr(scheduler, 'stop') and callable(scheduler.stop)
+            assert hasattr(scheduler, 'emit_tick') and callable(scheduler.emit_tick)
+
+        **Note**: For complete type safety, use static type checking (mypy)
+        in addition to duck typing verification.
 
     Thread Safety:
         Implementations MUST be thread-safe. The scheduler may be:

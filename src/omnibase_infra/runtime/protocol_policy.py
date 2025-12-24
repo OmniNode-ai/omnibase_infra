@@ -132,8 +132,22 @@ class ProtocolPolicy(Protocol):
         - Composition of multiple policies
 
     Thread Safety:
-        Implementations MUST be thread-safe. The evaluate() method may be called
-        concurrently from multiple threads. Avoid mutable instance state.
+        Implementations MUST be thread-safe for concurrent calls.
+
+        **Guarantees implementers MUST provide:**
+            - The evaluate() and decide() methods are safe for concurrent calls
+            - No mutable instance state that could cause race conditions
+            - Pure functions with no side effects
+
+        **Locking recommendations:**
+            - Policies SHOULD be stateless (no locking needed)
+            - If state is required (e.g., caching), use threading.Lock
+            - Avoid asyncio.Lock since policies are synchronous by design
+
+        **What callers can assume:**
+            - Multiple threads can call evaluate() concurrently
+            - Same input always produces same output (determinism)
+            - No side effects from policy evaluation
 
     Determinism:
         Implementations MUST be deterministic. Given identical context input,

@@ -63,7 +63,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -843,7 +843,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             ModelHealthCheckResult with health status and diagnostics:
             - healthy: bool - True if store is healthy
             - reason: str - "ok", "not_initialized", "table_not_found", or "check_failed"
-            - error_type: str - Exception type if check failed (optional)
+            - error_type: str | None - Exception type if check failed
         """
         if not self._initialized or self._pool is None:
             return ModelHealthCheckResult(healthy=False, reason="not_initialized")

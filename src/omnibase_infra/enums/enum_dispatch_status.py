@@ -31,6 +31,7 @@ class EnumDispatchStatus(str, Enum):
         INVALID_MESSAGE: Message failed validation before dispatch
         PUBLISH_FAILED: Dispatcher succeeded but output publishing failed
         SKIPPED: Message was intentionally skipped (e.g., filtered, deduplicated)
+        INTERNAL_ERROR: Internal error during dispatch result construction
 
     Example:
         >>> status = EnumDispatchStatus.SUCCESS
@@ -66,6 +67,9 @@ class EnumDispatchStatus(str, Enum):
     SKIPPED = "skipped"
     """Message was intentionally skipped (e.g., filtered, deduplicated)."""
 
+    INTERNAL_ERROR = "internal_error"
+    """Internal error during dispatch result construction (e.g., Pydantic ValidationError)."""
+
     def __str__(self) -> str:
         """Return the string value for serialization."""
         return self.value
@@ -94,6 +98,7 @@ class EnumDispatchStatus(str, Enum):
             EnumDispatchStatus.INVALID_MESSAGE,
             EnumDispatchStatus.PUBLISH_FAILED,
             EnumDispatchStatus.SKIPPED,
+            EnumDispatchStatus.INTERNAL_ERROR,
         }
 
     def is_successful(self) -> bool:
@@ -130,6 +135,7 @@ class EnumDispatchStatus(str, Enum):
             EnumDispatchStatus.TIMEOUT,
             EnumDispatchStatus.INVALID_MESSAGE,
             EnumDispatchStatus.PUBLISH_FAILED,
+            EnumDispatchStatus.INTERNAL_ERROR,
         }
 
     def requires_retry(self) -> bool:
@@ -177,6 +183,7 @@ class EnumDispatchStatus(str, Enum):
             cls.INVALID_MESSAGE: "Message failed validation before dispatch",
             cls.PUBLISH_FAILED: "Dispatcher succeeded but output publishing failed",
             cls.SKIPPED: "Message was intentionally skipped",
+            cls.INTERNAL_ERROR: "Internal error during dispatch result construction",
         }
         return descriptions.get(status, "Unknown dispatch status")
 

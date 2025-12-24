@@ -51,7 +51,6 @@ from omnibase_infra.idempotency import (
 )
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
-    ModelNodeIntrospectionEvent,
     ModelNodeMetadata,
     ModelNodeRegistrationRecord,
 )

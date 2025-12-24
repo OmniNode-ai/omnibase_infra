@@ -84,7 +84,7 @@ def validate_patterns_cmd(directory: str, strict: bool | None) -> None:
 @click.option(
     "--max-unions",
     default=None,
-    help="Maximum allowed complex unions (default: INFRA_MAX_UNIONS)",
+    help="Maximum allowed union count (default: INFRA_MAX_UNIONS)",
 )
 @click.option(
     "--strict/--no-strict",
@@ -94,7 +94,11 @@ def validate_patterns_cmd(directory: str, strict: bool | None) -> None:
 def validate_unions_cmd(
     directory: str, max_unions: int | None, strict: bool | None
 ) -> None:
-    """Validate Union type usage."""
+    """Validate Union type usage.
+
+    Counts total unions in the codebase.
+    Valid `X | None` patterns are counted but not flagged as violations.
+    """
     from omnibase_infra.validation.infra_validators import (
         INFRA_MAX_UNIONS,
         INFRA_UNIONS_STRICT,
