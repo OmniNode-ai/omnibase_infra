@@ -30,12 +30,16 @@ Running Tests:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 from uuid import UUID
 
 import pytest
 import yaml
+
+# Fixed timestamp for deterministic tests
+TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
@@ -1114,6 +1118,7 @@ class TestWorkflowExecutionWithMocks:
             capabilities={},
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
     @pytest.fixture
