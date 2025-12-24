@@ -411,9 +411,9 @@ class TestContractTimeInjectionConfiguration:
 
         # Verify required fields exist
         assert "enabled" in time_injection, "time_injection must have 'enabled' field"
-        assert (
-            time_injection["enabled"] is True
-        ), "time_injection.enabled must be true for orchestrators that need time"
+        assert time_injection["enabled"] is True, (
+            "time_injection.enabled must be true for orchestrators that need time"
+        )
 
         assert "source" in time_injection, "time_injection must have 'source' field"
         assert "field" in time_injection, "time_injection must have 'field' field"
@@ -430,9 +430,9 @@ class TestContractTimeInjectionConfiguration:
         - Enables time-based decisions without system clock access
         - Supports testing with fixed/mocked time values
         """
-        assert (
-            "time_injection" in contract_data
-        ), "Contract is missing 'time_injection' configuration"
+        assert "time_injection" in contract_data, (
+            "Contract is missing 'time_injection' configuration"
+        )
 
         time_injection = contract_data["time_injection"]
 
@@ -450,9 +450,9 @@ class TestContractTimeInjectionConfiguration:
         The 'now' field is the standard field name for injected time in
         dispatch contexts and RuntimeTick events.
         """
-        assert (
-            "time_injection" in contract_data
-        ), "Contract is missing 'time_injection' configuration"
+        assert "time_injection" in contract_data, (
+            "Contract is missing 'time_injection' configuration"
+        )
 
         time_injection = contract_data["time_injection"]
 
@@ -481,19 +481,19 @@ class TestContractTimeInjectionConfiguration:
                     time_injection: true
                     timeout_evaluation: true
         """
-        assert (
-            "workflow_coordination" in contract_data
-        ), "Contract is missing 'workflow_coordination'"
+        assert "workflow_coordination" in contract_data, (
+            "Contract is missing 'workflow_coordination'"
+        )
 
         workflow = contract_data["workflow_coordination"]
-        assert (
-            "workflow_definition" in workflow
-        ), "workflow_coordination is missing 'workflow_definition'"
+        assert "workflow_definition" in workflow, (
+            "workflow_coordination is missing 'workflow_definition'"
+        )
 
         workflow_def = workflow["workflow_definition"]
-        assert (
-            "execution_graph" in workflow_def
-        ), "workflow_definition is missing 'execution_graph'"
+        assert "execution_graph" in workflow_def, (
+            "workflow_definition is missing 'execution_graph'"
+        )
 
         execution_graph = workflow_def["execution_graph"]
         assert "nodes" in execution_graph, "execution_graph is missing 'nodes'"
@@ -513,9 +513,9 @@ class TestContractTimeInjectionConfiguration:
         )
 
         # Verify step_config exists and has time_injection: true
-        assert (
-            "step_config" in evaluate_timeout_node
-        ), "evaluate_timeout node is missing 'step_config'"
+        assert "step_config" in evaluate_timeout_node, (
+            "evaluate_timeout node is missing 'step_config'"
+        )
 
         step_config = evaluate_timeout_node["step_config"]
 
@@ -542,9 +542,9 @@ class TestContractTimeInjectionConfiguration:
               event_type: "RuntimeTick"
               internal: true
         """
-        assert (
-            "consumed_events" in contract_data
-        ), "Contract is missing 'consumed_events'"
+        assert "consumed_events" in contract_data, (
+            "Contract is missing 'consumed_events'"
+        )
 
         consumed_events = contract_data["consumed_events"]
 
@@ -575,9 +575,9 @@ class TestContractTimeInjectionConfiguration:
 
         # Verify topic pattern includes 'runtime-tick'
         topic = runtime_tick_event.get("topic", "")
-        assert (
-            "runtime-tick" in topic.lower()
-        ), f"RuntimeTick topic pattern should contain 'runtime-tick', got: {topic}"
+        assert "runtime-tick" in topic.lower(), (
+            f"RuntimeTick topic pattern should contain 'runtime-tick', got: {topic}"
+        )
 
 
 # =============================================================================
