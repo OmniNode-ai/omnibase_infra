@@ -2758,6 +2758,7 @@ class TestDeterminismProperty:
             node_version=node_version,
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute reduce twice with identical inputs
@@ -2917,6 +2918,7 @@ class TestDeterminismProperty:
             node_version="1.0.0",
             endpoints=endpoints,
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute reduce twice
@@ -2972,6 +2974,7 @@ class TestDeterminismProperty:
             node_version="2.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute reduce on all reducer instances
@@ -3077,6 +3080,7 @@ class TestDeterminismProperty:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute reduce twice
@@ -4132,6 +4136,7 @@ class TestEventReplayDeterminism:
                         write=(i % 3 == 0),
                     ),
                     metadata=ModelNodeMetadata(environment=f"env-{i}"),
+                    timestamp=TEST_TIMESTAMP,
                 )
             )
 
@@ -4201,6 +4206,7 @@ class TestEventReplayDeterminism:
                     node_version="1.0.0",
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
+                    timestamp=TEST_TIMESTAMP,
                 )
             )
 
@@ -4300,6 +4306,7 @@ class TestEventReplayDeterminism:
                     node_version=f"{i}.0.0",
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
+                    timestamp=TEST_TIMESTAMP,
                 )
             )
 
@@ -4387,6 +4394,7 @@ class TestEventReplayDeterminism:
                     node_version=f"{i + 1}.0.0",
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
+                    timestamp=TEST_TIMESTAMP,
                 )
             )
 
@@ -4494,6 +4502,7 @@ class TestEventReplayDeterminism:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Process first introspection
@@ -4521,6 +4530,7 @@ class TestEventReplayDeterminism:
             node_version="2.0.0",
             endpoints={"health": "http://localhost:8081/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         output2 = reducer.reduce(state, event2)
         first_pass_final = output2.result
@@ -4576,6 +4586,7 @@ class TestEventReplayDeterminism:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         events_and_expected_status.append((event1, "pending"))
 
@@ -4586,6 +4597,7 @@ class TestEventReplayDeterminism:
             node_version="2.0.0",
             endpoints={"health": "http://localhost:8081/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         events_and_expected_status.append((event2, "pending"))
 
@@ -4596,6 +4608,7 @@ class TestEventReplayDeterminism:
             node_version="3.0.0",
             endpoints={"health": "http://localhost:8082/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         events_and_expected_status.append((event3, "pending"))
 
@@ -4821,6 +4834,7 @@ class TestPropertyBasedStateInvariants:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Transition: idle -> pending
@@ -4886,6 +4900,7 @@ class TestPropertyBasedStateInvariants:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # First reduce - should process the event
@@ -5201,6 +5216,7 @@ class TestBoundaryConditions:
                 node_version="",  # Empty version string - should be rejected
                 endpoints={"health": "http://localhost:8080/health"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
 
         # Verify the validation error is about the version
