@@ -85,6 +85,9 @@ class ModelDispatchOutcome(BaseModel):
         Returns:
             ModelDispatchOutcome with normalized topics list.
 
+        Raises:
+            TypeError: If output is not str, list[str], or None.
+
         Example:
             >>> ModelDispatchOutcome.from_legacy_output(None).topics
             []

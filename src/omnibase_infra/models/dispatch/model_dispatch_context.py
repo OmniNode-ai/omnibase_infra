@@ -98,7 +98,7 @@ class ModelDispatchContext(BaseModel):
         trace_id: Optional trace identifier for distributed tracing systems.
         now: Injected current time (None for reducers, required validation).
         node_kind: The ONEX node type this context is for.
-        metadata: Additional metadata for extensibility (empty dict by default).
+        metadata: Optional additional metadata for extensibility.
 
     Example:
         >>> # Use factory methods for proper enforcement

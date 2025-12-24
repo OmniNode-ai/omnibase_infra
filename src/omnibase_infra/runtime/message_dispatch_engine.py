@@ -240,7 +240,7 @@ from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
 )
 
 
-class _LogContextKwargs(TypedDict, total=False):
+class ModelLogContextKwargs(TypedDict, total=False):
     """TypedDict for _build_log_context kwargs to ensure type safety.
 
     All fields are optional (total=False) since callers pass only the
@@ -851,7 +851,7 @@ class MessageDispatchEngine:
         return self._frozen
 
     def _build_log_context(
-        self, **kwargs: Unpack[_LogContextKwargs]
+        self, **kwargs: Unpack[ModelLogContextKwargs]
     ) -> dict[str, str | int | float]:
         """
         Build structured log context dictionary.
@@ -866,18 +866,18 @@ class MessageDispatchEngine:
             ModelDispatchLogContext validators handle None-to-sentinel conversion.
 
         .. versionchanged:: 0.6.3
-            Updated to use ``Unpack[_LogContextKwargs]`` TypedDict for type-safe
+            Updated to use ``Unpack[ModelLogContextKwargs]`` TypedDict for type-safe
             kwargs (OMN-1002). Eliminates need for ``type: ignore`` comment.
 
         Design Note (Union Reduction - OMN-1002):
-            This private method uses typed ``**kwargs`` via ``_LogContextKwargs``
+            This private method uses typed ``**kwargs`` via ``ModelLogContextKwargs``
             TypedDict to forward parameters to ModelDispatchLogContext. The
             TypedDict provides compile-time type checking while the model's
             field validators handle None-to-sentinel conversion at runtime.
 
         Args:
             **kwargs: Keyword arguments forwarded to ModelDispatchLogContext.
-                Typed via ``_LogContextKwargs`` TypedDict with supported keys:
+                Typed via ``ModelLogContextKwargs`` TypedDict with supported keys:
                 topic, category, message_type, dispatcher_id, dispatcher_count,
                 duration_ms, correlation_id, trace_id, error_code.
                 None values are automatically converted to sentinel values by

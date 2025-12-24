@@ -352,7 +352,9 @@ class ModelDispatchResult(BaseModel):
             ...     output_count=1,
             ... )
         """
-        resolved_outputs = outputs if outputs is not None else []
+        resolved_outputs: ModelDispatchOutputs = (
+            outputs if outputs is not None else ModelDispatchOutputs()
+        )
         count = output_count if output_count is not None else len(resolved_outputs)
         return self.model_copy(
             update={

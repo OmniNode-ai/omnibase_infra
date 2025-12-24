@@ -685,7 +685,7 @@ class TestMessageTypeRegistryValidation:
             message_type="UserCreated",
         )
         assert outcome.is_valid is False
-        assert outcome.error_message is not None
+        assert outcome.has_error
         assert "Domain mismatch" in outcome.error_message
 
 
