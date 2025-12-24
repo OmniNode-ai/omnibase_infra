@@ -100,9 +100,9 @@ class TestOrchestratorEventPurity:
         """
         published_events = contract_data.get("published_events", [])
 
-        assert (
-            len(published_events) > 0
-        ), "Contract must define at least one published event for orchestrator"
+        assert len(published_events) > 0, (
+            "Contract must define at least one published event for orchestrator"
+        )
 
         for event in published_events:
             topic = event.get("topic", "")
@@ -157,9 +157,9 @@ class TestOrchestratorEventPurity:
 
         # Published and consumed should not share command topics
         for topic in published_topics:
-            assert not re.search(
-                COMMAND_TOPIC_PATTERN, topic
-            ), f"Published topic '{topic}' is a command topic - not allowed"
+            assert not re.search(COMMAND_TOPIC_PATTERN, topic), (
+                f"Published topic '{topic}' is a command topic - not allowed"
+            )
 
     def test_no_intent_emission_in_output_model(self) -> None:
         """Verify ModelOrchestratorOutput only contains event-related fields.
@@ -285,9 +285,9 @@ class TestOrchestratorEventPurity:
 
         # Verify the module path is consistent with node structure
         module_path = output_model.get("module", "")
-        assert (
-            "node_registration_orchestrator" in module_path
-        ), f"Output model module '{module_path}' should be within orchestrator node package"
+        assert "node_registration_orchestrator" in module_path, (
+            f"Output model module '{module_path}' should be within orchestrator node package"
+        )
 
     def test_contract_published_events_match_onex_event_naming(
         self, contract_data: dict
@@ -327,12 +327,12 @@ class TestOrchestratorEventPurity:
             assert event_type, f"Event type missing for topic '{topic}'"
 
             # Test 3: Event type is PascalCase (starts with uppercase, no underscores)
-            assert (
-                event_type[0].isupper()
-            ), f"Event type '{event_type}' must start with uppercase (PascalCase)"
-            assert (
-                "_" not in event_type
-            ), f"Event type '{event_type}' must be PascalCase, not snake_case"
+            assert event_type[0].isupper(), (
+                f"Event type '{event_type}' must start with uppercase (PascalCase)"
+            )
+            assert "_" not in event_type, (
+                f"Event type '{event_type}' must be PascalCase, not snake_case"
+            )
 
             # Test 4: Event type contains semantic indicators
             # Events should indicate facts/state, not commands
@@ -462,9 +462,9 @@ class TestOrchestratorPurityEdgeCases:
 
         # Verify all expected events are present
         missing_events = expected_events - event_types
-        assert (
-            not missing_events
-        ), f"Missing expected published events: {missing_events}"
+        assert not missing_events, (
+            f"Missing expected published events: {missing_events}"
+        )
 
         # Verify count matches (exactly these events, no extras)
         assert len(published_events) == len(expected_events), (

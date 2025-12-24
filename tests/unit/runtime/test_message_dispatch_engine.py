@@ -1981,9 +1981,9 @@ class TestMessageDispatchEngineConcurrency:
         # Verify all dispatches completed successfully
         assert len(dispatch_results) == dispatch_count
         for result in dispatch_results:
-            assert (
-                result.status == EnumDispatchStatus.SUCCESS
-            ), f"Dispatch failed: {result.error_message}"
+            assert result.status == EnumDispatchStatus.SUCCESS, (
+                f"Dispatch failed: {result.error_message}"
+            )
 
         # Verify handler was invoked for all dispatches
         assert len(results) == dispatch_count
@@ -2176,9 +2176,9 @@ class TestMessageDispatchEngineConcurrency:
 
         # Each dispatch should have HANDLER_ERROR status (partial failure)
         for result in dispatch_results:
-            assert (
-                result.status == EnumDispatchStatus.HANDLER_ERROR
-            ), f"Expected HANDLER_ERROR, got {result.status}"
+            assert result.status == EnumDispatchStatus.HANDLER_ERROR, (
+                f"Expected HANDLER_ERROR, got {result.status}"
+            )
             # Should still have output from successful handler
             assert result.outputs is not None
             assert "success.output.v1" in result.outputs
@@ -2251,12 +2251,12 @@ class TestMessageDispatchEngineConcurrency:
 
         # Verify metrics accuracy
         metrics = dispatch_engine.get_metrics()
-        assert (
-            metrics["dispatch_count"] == dispatch_count
-        ), f"Expected {dispatch_count} dispatches, got {metrics['dispatch_count']}"
-        assert (
-            metrics["dispatch_success_count"] == dispatch_count
-        ), f"Expected {dispatch_count} successes, got {metrics['dispatch_success_count']}"
+        assert metrics["dispatch_count"] == dispatch_count, (
+            f"Expected {dispatch_count} dispatches, got {metrics['dispatch_count']}"
+        )
+        assert metrics["dispatch_success_count"] == dispatch_count, (
+            f"Expected {dispatch_count} successes, got {metrics['dispatch_success_count']}"
+        )
         assert metrics["dispatcher_execution_count"] == dispatch_count, (
             f"Expected {dispatch_count} dispatcher executions, "
             f"got {metrics['dispatcher_execution_count']}"
@@ -2351,9 +2351,9 @@ class TestConcurrentDispatchAdvanced:
         # Verify all dispatches completed successfully
         assert len(dispatch_results) == dispatch_count
         for result in dispatch_results:
-            assert (
-                result.status == EnumDispatchStatus.SUCCESS
-            ), f"Dispatch failed: {result.error_message}"
+            assert result.status == EnumDispatchStatus.SUCCESS, (
+                f"Dispatch failed: {result.error_message}"
+            )
 
         # Verify all handlers executed
         assert len(execution_order) == dispatch_count
@@ -2421,9 +2421,9 @@ class TestConcurrentDispatchAdvanced:
 
         # Verify metrics accuracy after high-concurrency stress
         metrics = dispatch_engine.get_metrics()
-        assert (
-            metrics["dispatch_count"] == dispatch_count
-        ), f"Expected {dispatch_count}, got {metrics['dispatch_count']}"
+        assert metrics["dispatch_count"] == dispatch_count, (
+            f"Expected {dispatch_count}, got {metrics['dispatch_count']}"
+        )
         assert metrics["dispatch_success_count"] == dispatch_count
         assert metrics["dispatcher_execution_count"] == dispatch_count
 
@@ -2533,12 +2533,12 @@ class TestConcurrentDispatchAdvanced:
             concurrent.futures.wait(futures)
 
         # Verify correct message type routing
-        assert (
-            len(created_results) == dispatch_count_per_type
-        ), f"Expected {dispatch_count_per_type} created, got {len(created_results)}"
-        assert (
-            len(updated_results) == dispatch_count_per_type
-        ), f"Expected {dispatch_count_per_type} updated, got {len(updated_results)}"
+        assert len(created_results) == dispatch_count_per_type, (
+            f"Expected {dispatch_count_per_type} created, got {len(created_results)}"
+        )
+        assert len(updated_results) == dispatch_count_per_type, (
+            f"Expected {dispatch_count_per_type} updated, got {len(updated_results)}"
+        )
 
         # Verify no cross-routing (created handler should not receive updated events)
         for result in created_results:
@@ -2613,9 +2613,9 @@ class TestConcurrentDispatchAdvanced:
         success_count = sum(
             1 for r in all_results if r.status == EnumDispatchStatus.SUCCESS
         )
-        assert (
-            success_count == dispatch_count
-        ), f"Expected {dispatch_count} successes, got {success_count}"
+        assert success_count == dispatch_count, (
+            f"Expected {dispatch_count} successes, got {success_count}"
+        )
 
         # Verify handler execution count matches
         assert results_count == dispatch_count

@@ -183,9 +183,9 @@ class TestPluginJsonNormalizer:
         # CI environments have variable performance due to shared resources,
         # containerization overhead, and CPU throttling. Using 0.5s threshold
         # to prevent flaky failures while still catching severe regressions.
-        assert (
-            elapsed_time < 0.5
-        ), f"Performance regression: took {elapsed_time:.3f}s for 1000 keys"
+        assert elapsed_time < 0.5, (
+            f"Performance regression: took {elapsed_time:.3f}s for 1000 keys"
+        )
 
     def test_wide_structure_performance(self, plugin: PluginJsonNormalizer) -> None:
         """Test performance for structures with many keys per level.
@@ -208,9 +208,9 @@ class TestPluginJsonNormalizer:
 
         # Should be very fast for flat structure
         # Using CI-friendly threshold (0.25s) to account for environment variability
-        assert (
-            elapsed_time < 0.25
-        ), f"Performance regression: took {elapsed_time:.3f}s for 500 keys"
+        assert elapsed_time < 0.25, (
+            f"Performance regression: took {elapsed_time:.3f}s for 500 keys"
+        )
 
     def test_mixed_structure_performance(self, plugin: PluginJsonNormalizer) -> None:
         """Test performance for mixed depth and width structures.
@@ -243,9 +243,9 @@ class TestPluginJsonNormalizer:
 
         # Should complete efficiently
         # Using CI-friendly threshold (0.75s) to account for environment variability
-        assert (
-            elapsed_time < 0.75
-        ), f"Performance regression: took {elapsed_time:.3f}s for mixed structure"
+        assert elapsed_time < 0.75, (
+            f"Performance regression: took {elapsed_time:.3f}s for mixed structure"
+        )
 
     def test_primitive_heavy_structure(self, plugin: PluginJsonNormalizer) -> None:
         """Test early exit optimization for structures with many primitives.
@@ -269,9 +269,9 @@ class TestPluginJsonNormalizer:
 
         # Early exit optimization should make this very fast
         # Using CI-friendly threshold (0.25s) to account for environment variability
-        assert (
-            elapsed_time < 0.25
-        ), f"Early exit optimization failed: took {elapsed_time:.3f}s"
+        assert elapsed_time < 0.25, (
+            f"Early exit optimization failed: took {elapsed_time:.3f}s"
+        )
 
     def test_recursion_depth_limit_exceeded(self, plugin: PluginJsonNormalizer) -> None:
         """Test that deeply nested structures exceeding MAX_RECURSION_DEPTH raise OnexError.

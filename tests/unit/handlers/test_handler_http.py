@@ -1022,9 +1022,9 @@ class TestHttpRestAdapterLifecycle:
 
         # Verify we got a new client (not reusing old one)
         # This confirms initialize() creates resources fresh each time
-        assert (
-            first_client is not second_client
-        ), "initialize() should create new client instance"
+        assert first_client is not second_client, (
+            "initialize() should create new client instance"
+        )
         await handler.shutdown()
 
 
@@ -1892,9 +1892,9 @@ class TestHttpRestAdapterLogWarnings:
 
         # Filter for warnings from our handler module
         handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
-        assert (
-            len(handler_warnings) == 0
-        ), f"Unexpected warnings: {[w.message for w in handler_warnings]}"
+        assert len(handler_warnings) == 0, (
+            f"Unexpected warnings: {[w.message for w in handler_warnings]}"
+        )
 
     @pytest.mark.asyncio
     async def test_expected_warning_on_invalid_max_request_size(

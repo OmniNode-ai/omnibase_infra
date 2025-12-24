@@ -303,15 +303,15 @@ class TestResultEvent:
         Topic pattern: {env}.{namespace}.onex.evt.node-registration-result.v1
         """
         event_type = RESULT_EVENT_TYPE
-        assert (
-            event_type in event_types_map
-        ), f"{event_type} must be defined in published_events"
+        assert event_type in event_types_map, (
+            f"{event_type} must be defined in published_events"
+        )
 
         event = event_types_map[event_type]
         expected_topic = "{env}.{namespace}.onex.evt.node-registration-result.v1"
-        assert (
-            event["topic"] == expected_topic
-        ), f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
+        assert event["topic"] == expected_topic, (
+            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
+        )
 
     def test_result_event_follows_topic_convention(
         self, event_types_map: dict[str, dict]
