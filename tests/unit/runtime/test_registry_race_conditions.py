@@ -79,7 +79,9 @@ class MockEventBus:
 class MockComputePlugin:
     """Mock synchronous compute plugin for testing."""
 
-    def execute(self, input_data: dict[str, object], context: dict[str, object]) -> dict[str, object]:
+    def execute(
+        self, input_data: dict[str, object], context: dict[str, object]
+    ) -> dict[str, object]:
         """Execute synchronous computation."""
         return {"result": "computed"}
 
@@ -87,7 +89,9 @@ class MockComputePlugin:
 class MockComputePluginV2:
     """Second mock compute plugin for version testing."""
 
-    def execute(self, input_data: dict[str, object], context: dict[str, object]) -> dict[str, object]:
+    def execute(
+        self, input_data: dict[str, object], context: dict[str, object]
+    ) -> dict[str, object]:
         """Execute synchronous computation v2."""
         return {"result": "computed_v2"}
 
@@ -294,9 +298,9 @@ class TestPolicyRegistrySecondaryIndexRaceConditions:
         for i in range(num_threads):
             policy_id = f"policy-{i}"
             versions = policy_registry.list_versions(policy_id)
-            assert len(versions) == 5, (
-                f"Policy {policy_id} has {len(versions)} versions, expected 5"
-            )
+            assert (
+                len(versions) == 5
+            ), f"Policy {policy_id} has {len(versions)} versions, expected 5"
 
     def test_secondary_index_consistency_during_unregister(
         self, policy_registry: PolicyRegistry
@@ -342,9 +346,9 @@ class TestPolicyRegistrySecondaryIndexRaceConditions:
         # Verify remaining versions
         for i in range(num_policies):
             versions = policy_registry.list_versions(f"policy-{i}")
-            assert len(versions) == 2, (
-                f"Policy policy-{i} should have 2 versions remaining"
-            )
+            assert (
+                len(versions) == 2
+            ), f"Policy policy-{i} should have 2 versions remaining"
 
 
 class TestPolicyRegistrySemverCacheRaceConditions:
@@ -408,9 +412,9 @@ class TestPolicyRegistrySemverCacheRaceConditions:
         # Each version should have consistent results
         for version, version_results in results.items():
             first = version_results[0]
-            assert all(r == first for r in version_results), (
-                f"Inconsistent results for {version}: {set(version_results)}"
-            )
+            assert all(
+                r == first for r in version_results
+            ), f"Inconsistent results for {version}: {set(version_results)}"
 
 
 class TestPolicyRegistryStressTest:
@@ -1177,8 +1181,7 @@ class TestComputeRegistryConcurrentWriteRead:
                 errors.append(e)
 
         threads = [
-            threading.Thread(target=writer_task, args=(i,))
-            for i in range(num_writers)
+            threading.Thread(target=writer_task, args=(i,)) for i in range(num_writers)
         ]
 
         for t in threads:
@@ -1190,9 +1193,9 @@ class TestComputeRegistryConcurrentWriteRead:
 
         # Verify all plugins were registered
         expected_count = num_writers * plugins_per_writer
-        assert len(compute_registry) == expected_count, (
-            f"Expected {expected_count} plugins, got {len(compute_registry)}"
-        )
+        assert (
+            len(compute_registry) == expected_count
+        ), f"Expected {expected_count} plugins, got {len(compute_registry)}"
 
         # Verify each plugin can be retrieved
         for thread_id in range(num_writers):
@@ -1600,7 +1603,9 @@ class TestComputeRegistryHighContention:
             t.join(timeout=5.0)
 
         # Verify no unexpected errors
-        unexpected_errors = [e for e in errors if not isinstance(e, ComputeRegistryError)]
+        unexpected_errors = [
+            e for e in errors if not isinstance(e, ComputeRegistryError)
+        ]
         assert len(unexpected_errors) == 0, f"Unexpected errors: {unexpected_errors}"
 
         # Verify significant operations occurred (at least 100 each)
@@ -1647,10 +1652,16 @@ class TestComputeRegistryHighContention:
             local_counts: dict[str, int] = {k: 0 for k in operation_counts}
             try:
                 for i in range(operations_per_thread):
-                    op = random.choice([
-                        "register", "get", "list_keys",
-                        "list_versions", "is_registered", "unregister"
-                    ])
+                    op = random.choice(
+                        [
+                            "register",
+                            "get",
+                            "list_keys",
+                            "list_versions",
+                            "is_registered",
+                            "unregister",
+                        ]
+                    )
 
                     if op == "register":
                         compute_registry.register_plugin(
@@ -1707,14 +1718,16 @@ class TestComputeRegistryHighContention:
             t.join()
 
         # Verify no unexpected errors
-        unexpected_errors = [e for e in errors if not isinstance(e, ComputeRegistryError)]
+        unexpected_errors = [
+            e for e in errors if not isinstance(e, ComputeRegistryError)
+        ]
         assert len(unexpected_errors) == 0, f"Unexpected errors: {unexpected_errors}"
 
         # Verify operations were performed
         total_ops = sum(operation_counts.values())
-        assert total_ops == num_threads * operations_per_thread, (
-            f"Expected {num_threads * operations_per_thread} operations, got {total_ops}"
-        )
+        assert (
+            total_ops == num_threads * operations_per_thread
+        ), f"Expected {num_threads * operations_per_thread} operations, got {total_ops}"
 
         # Registry should be in a consistent state (no corruption)
         final_keys = compute_registry.list_keys()
@@ -1831,7 +1844,9 @@ class TestComputeRegistryClearConcurrency:
                 errors.append(e)
 
         readers = [threading.Thread(target=read_operations) for _ in range(3)]
-        writers = [threading.Thread(target=write_operations, args=(i,)) for i in range(2)]
+        writers = [
+            threading.Thread(target=write_operations, args=(i,)) for i in range(2)
+        ]
         clear_thread = threading.Thread(target=clear_operation)
 
         for t in readers + writers + [clear_thread]:
@@ -1840,7 +1855,9 @@ class TestComputeRegistryClearConcurrency:
             t.join()
 
         # Should not have any unexpected errors
-        unexpected_errors = [e for e in errors if not isinstance(e, ComputeRegistryError)]
+        unexpected_errors = [
+            e for e in errors if not isinstance(e, ComputeRegistryError)
+        ]
         assert len(unexpected_errors) == 0, f"Unexpected errors: {unexpected_errors}"
 
         # Registry should be in consistent state

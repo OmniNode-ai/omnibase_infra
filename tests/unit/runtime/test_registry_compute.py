@@ -1326,9 +1326,7 @@ class TestUnicodePluginId:
     # Baseline ASCII Tests
     # =========================================================================
 
-    def test_unicode_ascii_plugin_id_baseline(
-        self, registry: RegistryCompute
-    ) -> None:
+    def test_unicode_ascii_plugin_id_baseline(self, registry: RegistryCompute) -> None:
         """Test standard ASCII plugin_id works correctly (baseline)."""
         registry.register_plugin(
             plugin_id="json_normalizer",
@@ -1665,9 +1663,7 @@ class TestUnicodePluginId:
     # Unicode Normalization Tests
     # =========================================================================
 
-    def test_unicode_normalization_not_applied(
-        self, registry: RegistryCompute
-    ) -> None:
+    def test_unicode_normalization_not_applied(self, registry: RegistryCompute) -> None:
         """Test that Unicode normalization is NOT applied to plugin_id.
 
         Current behavior: NO normalization
@@ -1762,9 +1758,7 @@ class TestUnicodePluginId:
     # Multiple Unicode Plugin Version Tests
     # =========================================================================
 
-    def test_unicode_plugin_multiple_versions(
-        self, registry: RegistryCompute
-    ) -> None:
+    def test_unicode_plugin_multiple_versions(self, registry: RegistryCompute) -> None:
         """Test registering multiple versions of a Unicode plugin_id."""
         plugin_id = "处理器"  # Chinese for "processor"
 
@@ -2000,9 +1994,9 @@ class TestStressAndPerformance:
         assert len(versions) == 100
 
         # Performance assertion
-        assert elapsed_ms < 200, (
-            f"100 version registrations took {elapsed_ms:.1f}ms (threshold: 200ms)."
-        )
+        assert (
+            elapsed_ms < 200
+        ), f"100 version registrations took {elapsed_ms:.1f}ms (threshold: 200ms)."
 
     @pytest.mark.slow
     def test_stress_get_random_lookups_1000(
@@ -2099,9 +2093,9 @@ class TestStressAndPerformance:
         assert plugin_ids == sorted(plugin_ids)
 
         # Performance assertion
-        assert elapsed_ms < 100, (
-            f"list_keys() took {elapsed_ms:.1f}ms for 1000 entries (threshold: 100ms)."
-        )
+        assert (
+            elapsed_ms < 100
+        ), f"list_keys() took {elapsed_ms:.1f}ms for 1000 entries (threshold: 100ms)."
 
     @pytest.mark.slow
     def test_stress_list_versions_100_versions(
@@ -2354,8 +2348,7 @@ class TestStressAndPerformance:
         # Run 10 threads concurrently
         start_time = time.perf_counter()
         threads = [
-            threading.Thread(target=concurrent_operation, args=(i,))
-            for i in range(10)
+            threading.Thread(target=concurrent_operation, args=(i,)) for i in range(10)
         ]
         for t in threads:
             t.start()
@@ -2370,9 +2363,9 @@ class TestStressAndPerformance:
         assert len(results) > 0
 
         # Performance assertion
-        assert elapsed_ms < 2000, (
-            f"Concurrent operations took {elapsed_ms:.1f}ms (threshold: 2000ms)."
-        )
+        assert (
+            elapsed_ms < 2000
+        ), f"Concurrent operations took {elapsed_ms:.1f}ms (threshold: 2000ms)."
 
     @pytest.mark.slow
     def test_stress_get_latest_with_100_versions(
@@ -2398,7 +2391,9 @@ class TestStressAndPerformance:
 
         # Verify latest version is returned (1.99.0 is semantically latest)
         versions = many_versions_registry.list_versions("versioned_plugin")
-        assert versions[-1] == "1.99.0", f"Expected 1.99.0 as latest, got {versions[-1]}"
+        assert (
+            versions[-1] == "1.99.0"
+        ), f"Expected 1.99.0 as latest, got {versions[-1]}"
 
         # Performance assertion
         assert elapsed_ms < 200, (
@@ -2483,21 +2478,21 @@ class TestStressAndPerformance:
         # All keys in index should exist in registry
         for plugin_id, keys in registry._plugin_id_index.items():
             for key in keys:
-                assert key in registry._registry, (
-                    f"Key {key} in index but not in registry"
-                )
-                assert key.plugin_id == plugin_id, (
-                    f"Key plugin_id {key.plugin_id} != index key {plugin_id}"
-                )
+                assert (
+                    key in registry._registry
+                ), f"Key {key} in index but not in registry"
+                assert (
+                    key.plugin_id == plugin_id
+                ), f"Key plugin_id {key.plugin_id} != index key {plugin_id}"
 
         # All keys in registry should be in index
         for key in registry._registry:
-            assert key.plugin_id in registry._plugin_id_index, (
-                f"plugin_id {key.plugin_id} not in secondary index"
-            )
-            assert key in registry._plugin_id_index[key.plugin_id], (
-                f"Key {key} not in secondary index for {key.plugin_id}"
-            )
+            assert (
+                key.plugin_id in registry._plugin_id_index
+            ), f"plugin_id {key.plugin_id} not in secondary index"
+            assert (
+                key in registry._plugin_id_index[key.plugin_id]
+            ), f"Key {key} not in secondary index for {key.plugin_id}"
 
     @pytest.mark.slow
     def test_stress_semver_cache_performance(self) -> None:
