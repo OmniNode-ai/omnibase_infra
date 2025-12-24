@@ -50,6 +50,7 @@ from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.models.validation import ModelValidationOutcome
 from omnibase_infra.runtime.registry.model_domain_constraint import (
     ModelDomainConstraint,
 )
@@ -623,22 +624,24 @@ class MessageTypeRegistry:
             )
 
         # Validate category constraint
-        is_valid, error_msg = entry.validate_category(topic_category)
-        if not is_valid:
+        category_outcome = entry.validate_category(topic_category)
+        if not category_outcome:
             raise MessageTypeRegistryError(
-                error_msg or f"Category validation failed for '{message_type}'",
+                category_outcome.error_message
+                or f"Category validation failed for '{message_type}'",
                 message_type=message_type,
                 category=topic_category,
             )
 
         # Validate domain constraint
-        is_valid, error_msg = entry.domain_constraint.validate_consumption(
+        domain_outcome = entry.domain_constraint.validate_consumption(
             topic_domain,
             message_type,
         )
-        if not is_valid:
+        if not domain_outcome:
             raise MessageTypeRegistryError(
-                error_msg or f"Domain validation failed for '{message_type}'",
+                domain_outcome.error_message
+                or f"Domain validation failed for '{message_type}'",
                 message_type=message_type,
                 domain=topic_domain,
             )
@@ -885,7 +888,7 @@ class MessageTypeRegistry:
         self,
         topic: str,
         message_type: str,
-    ) -> tuple[bool, str | None]:
+    ) -> ModelValidationOutcome:
         """
         Validate that a message type can appear on the given topic.
 
@@ -897,70 +900,68 @@ class MessageTypeRegistry:
             message_type: The message type to validate.
 
         Returns:
-            Tuple of (is_valid, error_message). If is_valid is True,
-            error_message is None.
+            ModelValidationOutcome with is_valid=True if valid,
+            or is_valid=False with error_message if invalid.
 
         Raises:
             ModelOnexError: If registry is not frozen (INVALID_STATE)
 
         Example:
-            >>> is_valid, error = registry.validate_topic_message_type(
+            >>> outcome = registry.validate_topic_message_type(
             ...     topic="dev.user.events.v1",
             ...     message_type="UserCreated",
             ... )
-            >>> if not is_valid:
-            ...     print(f"Validation failed: {error}")
+            >>> if not outcome:
+            ...     print(f"Validation failed: {outcome.error_message}")
 
         .. versionadded:: 0.5.0
+        .. versionchanged:: 0.6.0
+            Return type changed from tuple[bool, str | None] to ModelValidationOutcome.
         """
         self._require_frozen("validate_topic_message_type")
 
         # Extract category from topic
         category = EnumMessageCategory.from_topic(topic)
         if category is None:
-            return (
-                False,
+            return ModelValidationOutcome.failure(
                 f"Cannot infer message category from topic '{topic}'. "
-                f"Topic must contain .events, .commands, or .intents segment.",
+                f"Topic must contain .events, .commands, or .intents segment."
             )
 
         # Extract domain from topic
         domain = extract_domain_from_topic(topic)
         if domain is None:
-            return (
-                False,
+            return ModelValidationOutcome.failure(
                 f"Cannot extract domain from topic '{topic}'. "
-                f"Topic format not recognized.",
+                f"Topic format not recognized."
             )
 
         # Look up entry
         entry = self._entries.get(message_type)
         if entry is None:
-            return (
-                False,
-                f"Message type '{message_type}' is not registered.",
+            return ModelValidationOutcome.failure(
+                f"Message type '{message_type}' is not registered."
             )
 
         if not entry.enabled:
-            return (
-                False,
-                f"Message type '{message_type}' is registered but disabled.",
+            return ModelValidationOutcome.failure(
+                f"Message type '{message_type}' is registered but disabled."
             )
 
         # Validate category
-        is_valid, error_msg = entry.validate_category(category)
-        if not is_valid:
-            return (False, error_msg)
+        category_outcome = entry.validate_category(category)
+        if not category_outcome:
+            return category_outcome
 
         # Validate domain
-        is_valid, error_msg = entry.domain_constraint.validate_consumption(
+        domain_outcome = entry.domain_constraint.validate_consumption(
             domain,
             message_type,
         )
-        if not is_valid:
-            return (False, error_msg)
+        if not domain_outcome:
+            return domain_outcome
 
-        return (True, None)
+        return ModelValidationOutcome.success()
 
     # =========================================================================
     # Properties

@@ -18,6 +18,9 @@ from omnibase_infra.models.registration.events import (
     ModelNodeRegistrationInitiated,
     ModelNodeRegistrationRejected,
 )
+from omnibase_infra.models.registration.model_introspection_metrics import (
+    ModelIntrospectionMetrics,
+)
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
@@ -44,6 +47,8 @@ __all__ = [
     "ModelNodeRegistrationAckTimedOut",
     "ModelNodeRegistrationInitiated",
     "ModelNodeRegistrationRejected",
+    # Metrics
+    "ModelIntrospectionMetrics",
     # Core registration models
     "ModelNodeCapabilities",
     "ModelNodeHeartbeatEvent",

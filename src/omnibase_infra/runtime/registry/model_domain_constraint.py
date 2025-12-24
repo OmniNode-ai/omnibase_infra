@@ -28,6 +28,8 @@ Related:
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.validation import ModelValidationOutcome
+
 
 class ModelDomainConstraint(BaseModel):
     """
@@ -151,7 +153,7 @@ class ModelDomainConstraint(BaseModel):
         self,
         topic_domain: str,
         message_type: str,
-    ) -> tuple[bool, str | None]:
+    ) -> ModelValidationOutcome:
         """
         Validate if consumption is allowed and return detailed error if not.
 
@@ -163,37 +165,37 @@ class ModelDomainConstraint(BaseModel):
             message_type: The message type being consumed (for error messages).
 
         Returns:
-            Tuple of (is_valid, error_message). If is_valid is True,
-            error_message is None. If is_valid is False, error_message
-            contains a descriptive error.
+            ModelValidationOutcome with is_valid=True if valid,
+            or is_valid=False with error_message if invalid.
 
         Example:
             >>> constraint = ModelDomainConstraint(owning_domain="registration")
-            >>> constraint.validate_consumption("user", "UserCreated")
-            (False, "Domain mismatch: handler in domain 'registration' cannot ...")
+            >>> outcome = constraint.validate_consumption("user", "UserCreated")
+            >>> outcome.is_valid
+            False
 
         .. versionadded:: 0.5.0
+        .. versionchanged:: 0.6.0
+            Return type changed from tuple[bool, str | None] to ModelValidationOutcome.
         """
         if self.can_consume_from(topic_domain):
-            return (True, None)
+            return ModelValidationOutcome.success()
 
         # Build detailed error message
         if self.require_explicit_opt_in:
             allowed = [self.owning_domain]
             allowed.extend(sorted(self.allowed_cross_domains))
-            return (
-                False,
+            return ModelValidationOutcome.failure(
                 f"Domain mismatch: handler in domain '{self.owning_domain}' cannot "
                 f"consume message type '{message_type}' from domain '{topic_domain}'. "
                 f"Allowed domains: {allowed}. "
                 f"To enable cross-domain consumption, add '{topic_domain}' to "
-                f"allowed_cross_domains or set allow_all_domains=True.",
+                f"allowed_cross_domains or set allow_all_domains=True."
             )
         else:
-            return (
-                False,
+            return ModelValidationOutcome.failure(
                 f"Domain mismatch: handler domain '{self.owning_domain}' does not "
-                f"match topic domain '{topic_domain}' for message type '{message_type}'.",
+                f"match topic domain '{topic_domain}' for message type '{message_type}'."
             )
 
 

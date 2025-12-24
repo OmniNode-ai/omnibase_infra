@@ -643,12 +643,12 @@ class TestMessageTypeRegistryValidation:
         )
         registry.freeze()
 
-        is_valid, error = registry.validate_topic_message_type(
+        outcome = registry.validate_topic_message_type(
             topic="dev.user.events.v1",
             message_type="UserCreated",
         )
-        assert is_valid is True
-        assert error is None
+        assert outcome.is_valid is True
+        assert not outcome.has_error
 
     def test_validate_topic_message_type_category_mismatch(self) -> None:
         """Test topic-message type validation with category mismatch."""
@@ -661,13 +661,13 @@ class TestMessageTypeRegistryValidation:
         )
         registry.freeze()
 
-        is_valid, error = registry.validate_topic_message_type(
+        outcome = registry.validate_topic_message_type(
             topic="dev.user.commands.v1",  # Commands, not events
             message_type="UserCreated",
         )
-        assert is_valid is False
-        assert error is not None
-        assert "not allowed in category" in error
+        assert outcome.is_valid is False
+        assert outcome.has_error
+        assert "not allowed in category" in outcome.error_message
 
     def test_validate_topic_message_type_domain_mismatch(self) -> None:
         """Test topic-message type validation with domain mismatch."""
@@ -680,13 +680,13 @@ class TestMessageTypeRegistryValidation:
         )
         registry.freeze()
 
-        is_valid, error = registry.validate_topic_message_type(
+        outcome = registry.validate_topic_message_type(
             topic="dev.order.events.v1",  # order domain, not user
             message_type="UserCreated",
         )
-        assert is_valid is False
-        assert error is not None
-        assert "Domain mismatch" in error
+        assert outcome.is_valid is False
+        assert outcome.has_error
+        assert "Domain mismatch" in outcome.error_message
 
 
 class TestMessageTypeRegistryDomainCrossDomain:
