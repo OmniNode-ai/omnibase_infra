@@ -31,12 +31,21 @@ import pytest
 
 from omnibase_infra.mixins import MixinNodeIntrospection, ModelIntrospectionConfig
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
+from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 # Module-level markers
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.asyncio,
 ]
+
+# Test timing constants (in seconds)
+CACHE_TTL_WAIT = 0.15  # Wait for cache TTL expiration (TTL=0.1s + buffer)
+HEARTBEAT_INTERVAL = 0.05  # Default heartbeat interval for tests
+HEARTBEAT_WAIT = 0.1  # Wait for at least one heartbeat
+MULTIPLE_HEARTBEAT_WAIT = 0.2  # Wait for multiple heartbeats
+CACHE_EXPIRE_WAIT = 0.01  # Brief wait for cache expiration
+LISTENER_SUBSCRIBE_WAIT = 0.1  # Time for listener to subscribe
 
 
 # =============================================================================
@@ -49,14 +58,16 @@ class MockEventBus:
 
     def __init__(self) -> None:
         """Initialize mock event bus."""
-        self.published_envelopes: list[tuple[Any, str]] = []
+        self.published_envelopes: list[
+            tuple[ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent, str]
+        ] = []
         self.published_events: list[dict[str, Any]] = []
         self.subscribed_topics: list[str] = []
         self.subscribed_groups: list[str] = []
 
     async def publish_envelope(
         self,
-        envelope: Any,
+        envelope: object,
         topic: str,
     ) -> None:
         """Mock publish_envelope method.
@@ -65,7 +76,8 @@ class MockEventBus:
             envelope: Event envelope to publish.
             topic: Event topic.
         """
-        self.published_envelopes.append((envelope, topic))
+        if isinstance(envelope, ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent):
+            self.published_envelopes.append((envelope, topic))
 
     async def publish(
         self,
@@ -94,7 +106,7 @@ class MockEventBus:
         self,
         topic: str,
         group_id: str,
-        on_message: Callable[[Any], Awaitable[None]],
+        on_message: Callable[[object], Awaitable[None]],
     ) -> Callable[[], Awaitable[None]]:
         """Mock subscribe method.
 
@@ -480,7 +492,7 @@ class TestEndToEndIntrospectionWorkflow:
 
         try:
             # Wait for at least one heartbeat
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(CACHE_TTL_WAIT)
 
             # Verify heartbeat was published to correct topic
             heartbeat_topics = [
@@ -524,7 +536,7 @@ class TestEndToEndIntrospectionWorkflow:
 
         try:
             # Give listener time to subscribe
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(LISTENER_SUBSCRIBE_WAIT)
 
             # Verify subscription used correct topic from contract
             assert len(event_bus.subscribed_topics) >= 1

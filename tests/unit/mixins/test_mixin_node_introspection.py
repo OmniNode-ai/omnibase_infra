@@ -56,6 +56,13 @@ from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 _CI_MODE: bool = os.environ.get("CI", "false").lower() == "true"
 PERF_MULTIPLIER: float = 3.0 if _CI_MODE else 2.0
 
+# Test timing constants (in seconds)
+CACHE_TTL_WAIT = 0.15  # Wait for cache TTL expiration (TTL=0.1s + buffer)
+HEARTBEAT_INTERVAL = 0.05  # Default heartbeat interval for tests
+HEARTBEAT_WAIT = 0.1  # Wait for at least one heartbeat
+MULTIPLE_HEARTBEAT_WAIT = 0.2  # Wait for multiple heartbeats
+CACHE_EXPIRE_WAIT = 0.01  # Brief wait for cache expiration
+
 # Type alias for event bus published event structure
 PublishedEventDict = dict[
     str, str | bytes | None | dict[str, str | int | bool | list[str]]
@@ -575,7 +582,7 @@ class TestMixinNodeIntrospectionCaching:
         timestamp1 = data1.timestamp
 
         # Wait for TTL to expire (0.1s + buffer)
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(CACHE_TTL_WAIT)
 
         # Next call should recompute
         data2 = await mock_node.get_introspection_data()
@@ -739,7 +746,7 @@ class TestMixinNodeIntrospectionTasks:
             assert not node._heartbeat_task.done()
 
             # Wait for at least one heartbeat
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(HEARTBEAT_WAIT)
 
             # Should have published at least one event
             assert len(event_bus.published_envelopes) >= 1
@@ -803,7 +810,7 @@ class TestMixinNodeIntrospectionTasks:
 
         try:
             # Wait for multiple heartbeats
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(MULTIPLE_HEARTBEAT_WAIT)
 
             # Should have multiple events (at least 3)
             assert len(event_bus.published_envelopes) >= 3
@@ -874,7 +881,7 @@ class TestMixinNodeIntrospectionGracefulDegradation:
 
         try:
             # Let heartbeat run with failing publishes
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(CACHE_TTL_WAIT)
 
             # Task should still be running (not crashed)
             assert node._heartbeat_task is not None
@@ -1886,7 +1893,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         total_ms_1 = metrics1.total_introspection_ms
 
         # Wait for cache to expire
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(CACHE_EXPIRE_WAIT)
 
         # Second call with fresh computation
         await node.get_introspection_data()

@@ -1273,6 +1273,49 @@ class MixinNodeIntrospection:
 
         return event
 
+    def _validate_contract_topic(self, topic: str, operation: str) -> None:
+        """Validate that a topic is declared in the node's contract.
+
+        Performs contract enforcement by checking if the target topic is
+        declared in the node's ``_contract_topics`` attribute under the
+        ``publishes`` list. Logs a warning if validation fails but does
+        not block publishing for backwards compatibility.
+
+        This validation ensures nodes only publish to topics they have
+        explicitly declared in their contract's ``event_channels.publishes``
+        section.
+
+        Args:
+            topic: The topic being published to (e.g., "node.introspection")
+            operation: The operation name for logging (e.g., "publish_introspection")
+
+        Note:
+            This method uses warning logs (not assertions) to maintain
+            backwards compatibility with nodes that don't have contract
+            topic declarations. Future versions may make this stricter.
+        """
+        # Check if contract topics are defined on this node
+        contract_topics = getattr(self, "_contract_topics", None)
+        if contract_topics is None:
+            # No contract topics defined - skip validation for backwards compatibility
+            return
+
+        # Get declared publishes topics from contract
+        declared_publishes = contract_topics.get("publishes", [])
+
+        # Validate the topic is in the declared list
+        if topic not in declared_publishes:
+            logger.warning(
+                f"Topic '{topic}' not declared in contract publishes for "
+                f"{self._introspection_node_id}",
+                extra={
+                    "node_id": str(self._introspection_node_id),
+                    "topic": topic,
+                    "operation": operation,
+                    "declared_publishes": declared_publishes,
+                },
+            )
+
     async def publish_introspection(
         self,
         reason: str = "startup",
@@ -1282,6 +1325,13 @@ class MixinNodeIntrospection:
 
         Gracefully degrades if event bus is unavailable - logs warning
         and returns False instead of raising an exception.
+
+        Contract Enforcement:
+            If the node has a ``_contract_topics`` attribute (populated from
+            the contract's ``event_channels`` section), this method validates
+            that ``node.introspection`` is declared in the ``publishes`` list.
+            A warning is logged if the topic is not declared, but publishing
+            proceeds for backwards compatibility.
 
         Args:
             reason: Reason for the introspection event
@@ -1304,6 +1354,10 @@ class MixinNodeIntrospection:
             ```
         """
         self._ensure_initialized()
+
+        # Validate contract topic declaration
+        self._validate_contract_topic(INTROSPECTION_TOPIC, "publish_introspection")
+
         if self._introspection_event_bus is None:
             logger.warning(
                 f"Cannot publish introspection - no event bus configured for {self._introspection_node_id}",
@@ -1377,11 +1431,21 @@ class MixinNodeIntrospection:
         Internal method for heartbeat broadcasting. Calculates uptime
         and publishes heartbeat event.
 
+        Contract Enforcement:
+            If the node has a ``_contract_topics`` attribute (populated from
+            the contract's ``event_channels`` section), this method validates
+            that ``node.heartbeat`` is declared in the ``publishes`` list.
+            A warning is logged if the topic is not declared, but publishing
+            proceeds for backwards compatibility.
+
         Returns:
             True if published successfully, False otherwise
         """
         if self._introspection_event_bus is None:
             return False
+
+        # Validate contract topic declaration
+        self._validate_contract_topic(HEARTBEAT_TOPIC, "_publish_heartbeat")
 
         try:
             # Calculate uptime

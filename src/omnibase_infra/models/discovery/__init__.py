@@ -2,10 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Discovery models for node introspection and capability reporting."""
 
+from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
+    ModelIntrospectionPerformanceMetrics,
+)
 from omnibase_infra.models.discovery.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
 
 __all__ = [
+    "ModelIntrospectionPerformanceMetrics",
     "ModelNodeIntrospectionEvent",
 ]
