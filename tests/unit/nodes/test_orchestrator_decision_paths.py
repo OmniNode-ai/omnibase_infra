@@ -118,9 +118,7 @@ ALL_PUBLISHED_EVENT_TYPES = DECISION_PATH_EVENT_TYPES + [RESULT_EVENT_TYPE]
 
 # Topic pattern regex: {env}.{namespace}.onex.evt.<slug>.v1
 # The placeholders {env} and {namespace} are variable, followed by literal pattern
-TOPIC_PATTERN_REGEX = re.compile(
-    r"^\{env\}\.\{namespace\}\.onex\.evt\.[a-z0-9-]+\.v1$"
-)
+TOPIC_PATTERN_REGEX = re.compile(r"^\{env\}\.\{namespace\}\.onex\.evt\.[a-z0-9-]+\.v1$")
 
 
 # =============================================================================
@@ -181,8 +179,7 @@ class TestDecisionPathEvents:
         event = event_types_map[event_type]
         expected_topic = "{env}.{namespace}.onex.evt.node-registration-initiated.v1"
         assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', "
-            f"got '{event['topic']}'"
+            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
         )
 
     def test_node_registration_accepted_event_exists(
@@ -204,8 +201,7 @@ class TestDecisionPathEvents:
         event = event_types_map[event_type]
         expected_topic = "{env}.{namespace}.onex.evt.node-registration-accepted.v1"
         assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', "
-            f"got '{event['topic']}'"
+            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
         )
 
     def test_node_registration_rejected_event_exists(
@@ -227,8 +223,7 @@ class TestDecisionPathEvents:
         event = event_types_map[event_type]
         expected_topic = "{env}.{namespace}.onex.evt.node-registration-rejected.v1"
         assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', "
-            f"got '{event['topic']}'"
+            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
         )
 
     def test_node_registration_ack_timed_out_event_exists(
@@ -250,8 +245,7 @@ class TestDecisionPathEvents:
         event = event_types_map[event_type]
         expected_topic = "{env}.{namespace}.onex.evt.node-registration-ack-timed-out.v1"
         assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', "
-            f"got '{event['topic']}'"
+            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
         )
 
     def test_node_registration_ack_received_event_exists(
@@ -273,8 +267,7 @@ class TestDecisionPathEvents:
         event = event_types_map[event_type]
         expected_topic = "{env}.{namespace}.onex.evt.node-registration-ack-received.v1"
         assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', "
-            f"got '{event['topic']}'"
+            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
         )
 
     def test_node_became_active_event_exists(
@@ -296,8 +289,7 @@ class TestDecisionPathEvents:
         event = event_types_map[event_type]
         expected_topic = "{env}.{namespace}.onex.evt.node-became-active.v1"
         assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', "
-            f"got '{event['topic']}'"
+            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
         )
 
     def test_node_liveness_expired_event_exists(
@@ -319,8 +311,7 @@ class TestDecisionPathEvents:
         event = event_types_map[event_type]
         expected_topic = "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
         assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', "
-            f"got '{event['topic']}'"
+            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
         )
 
     def test_all_decision_events_follow_topic_convention(
@@ -355,7 +346,7 @@ class TestDecisionPathEvents:
                 )
 
         assert not non_conforming_events, (
-            f"Events with non-conforming topic patterns:\n"
+            "Events with non-conforming topic patterns:\n"
             + "\n".join(f"  - {e}" for e in non_conforming_events)
         )
 
@@ -421,8 +412,7 @@ class TestResultEvent:
         event = event_types_map[event_type]
         expected_topic = "{env}.{namespace}.onex.evt.node-registration-result.v1"
         assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', "
-            f"got '{event['topic']}'"
+            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
         )
 
     def test_result_event_follows_topic_convention(
@@ -472,7 +462,7 @@ class TestEventStructure:
                 events_missing_fields.append(f"{event_id}: missing {missing_fields}")
 
         assert not events_missing_fields, (
-            f"Events with missing required fields:\n"
+            "Events with missing required fields:\n"
             + "\n".join(f"  - {e}" for e in events_missing_fields)
         )
 
@@ -481,9 +471,7 @@ class TestEventStructure:
         event_types = [e["event_type"] for e in published_events if "event_type" in e]
         duplicates = [et for et in event_types if event_types.count(et) > 1]
 
-        assert not duplicates, (
-            f"Duplicate event types found: {list(set(duplicates))}"
-        )
+        assert not duplicates, f"Duplicate event types found: {list(set(duplicates))}"
 
     def test_topics_are_unique(self, published_events: list[dict]) -> None:
         """Test that all topics are unique (no duplicates)."""

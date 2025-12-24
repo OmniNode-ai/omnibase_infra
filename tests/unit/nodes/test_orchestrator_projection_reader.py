@@ -26,7 +26,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 # =============================================================================
 # Test Fixtures
 # =============================================================================
@@ -216,7 +215,11 @@ class TestReadProjectionStep:
         - read_projection node has depends_on including "receive_introspection"
         """
         read_projection_node = next(
-            (node for node in execution_graph_nodes if node["node_id"] == "read_projection"),
+            (
+                node
+                for node in execution_graph_nodes
+                if node["node_id"] == "read_projection"
+            ),
             None,
         )
 
@@ -243,7 +246,11 @@ class TestReadProjectionStep:
         - read_projection step_config contains protocol="ProtocolProjectionReader"
         """
         read_projection_node = next(
-            (node for node in execution_graph_nodes if node["node_id"] == "read_projection"),
+            (
+                node
+                for node in execution_graph_nodes
+                if node["node_id"] == "read_projection"
+            ),
             None,
         )
 
@@ -269,7 +276,11 @@ class TestReadProjectionStep:
         - read_projection step_config contains projection_name
         """
         read_projection_node = next(
-            (node for node in execution_graph_nodes if node["node_id"] == "read_projection"),
+            (
+                node
+                for node in execution_graph_nodes
+                if node["node_id"] == "read_projection"
+            ),
             None,
         )
 
@@ -375,9 +386,11 @@ class TestNoTopicScanning:
                     )
 
         # Verify no execution graph node consumes topics for state
-        execution_graph = contract_data.get("workflow_coordination", {}).get(
-            "workflow_definition", {}
-        ).get("execution_graph", {})
+        execution_graph = (
+            contract_data.get("workflow_coordination", {})
+            .get("workflow_definition", {})
+            .get("execution_graph", {})
+        )
         nodes = execution_graph.get("nodes", [])
 
         for node in nodes:
@@ -389,7 +402,10 @@ class TestNoTopicScanning:
                 continue
 
             # Check for patterns that suggest topic-based state reading
-            if "consume" in str(step_config).lower() and "state" in str(step_config).lower():
+            if (
+                "consume" in str(step_config).lower()
+                and "state" in str(step_config).lower()
+            ):
                 pytest.fail(
                     f"Node '{node_id}' appears to consume topics for state. "
                     f"State should be read through projection_reader. "
@@ -421,7 +437,11 @@ class TestProjectionBackedDecisionFlow:
         - evaluate_timeout node has depends_on including "read_projection"
         """
         evaluate_timeout_node = next(
-            (node for node in execution_graph_nodes if node["node_id"] == "evaluate_timeout"),
+            (
+                node
+                for node in execution_graph_nodes
+                if node["node_id"] == "evaluate_timeout"
+            ),
             None,
         )
 

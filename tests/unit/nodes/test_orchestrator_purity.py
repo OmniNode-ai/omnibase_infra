@@ -44,7 +44,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -245,7 +244,9 @@ class TestOrchestratorEventPurity:
             description = field_info.description or ""
 
             # Verify the field description indicates results, not emission
-            assert "result" in description.lower() or "execution" in description.lower(), (
+            assert (
+                "result" in description.lower() or "execution" in description.lower()
+            ), (
                 f"Field 'intent_results' should describe execution results, "
                 f"got description: '{description}'"
             )

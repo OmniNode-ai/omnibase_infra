@@ -30,10 +30,6 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-if TYPE_CHECKING:
-    pass
-
-
 # =============================================================================
 # Constants
 # =============================================================================
@@ -269,9 +265,7 @@ class TestOrchestratorNoDirectNetworkCalls:
             f"All I/O must be delegated to effect nodes."
         )
 
-    def test_orchestrator_methods_are_minimal(
-        self, mock_container: MagicMock
-    ) -> None:
+    def test_orchestrator_methods_are_minimal(self, mock_container: MagicMock) -> None:
         """Verify orchestrator has minimal methods (pure delegation pattern).
 
         A pure coordinator orchestrator should have very few methods defined
@@ -328,7 +322,7 @@ class TestOrchestratorDelegatesToEffectProtocol:
         )
 
         # Verify it's a Protocol (runtime_checkable)
-        from typing import runtime_checkable, Protocol
+        from typing import Protocol, runtime_checkable
 
         # Check it's marked as runtime_checkable
         assert hasattr(ProtocolEffect, "__protocol_attrs__") or hasattr(
@@ -367,9 +361,10 @@ class TestOrchestratorDelegatesToEffectProtocol:
 
         # Check docstring mentions no I/O
         docstring = ProtocolReducer.__doc__ or ""
-        assert "MUST NOT perform I/O" in docstring or "Reducer MUST NOT perform I/O" in docstring, (
-            "ProtocolReducer docstring must explicitly state reducers perform no I/O"
-        )
+        assert (
+            "MUST NOT perform I/O" in docstring
+            or "Reducer MUST NOT perform I/O" in docstring
+        ), "ProtocolReducer docstring must explicitly state reducers perform no I/O"
 
 
 # =============================================================================
@@ -420,8 +415,14 @@ class TestOrchestratorIsPureCoordinator:
 
             if in_class:
                 # End of class (next top-level definition)
-                if stripped and not stripped.startswith(" ") and not stripped.startswith("#"):
-                    if not stripped.startswith('"""') and not stripped.startswith("'''"):
+                if (
+                    stripped
+                    and not stripped.startswith(" ")
+                    and not stripped.startswith("#")
+                ):
+                    if not stripped.startswith('"""') and not stripped.startswith(
+                        "'''"
+                    ):
                         break
 
                 # Skip empty lines and comments
@@ -436,7 +437,7 @@ class TestOrchestratorIsPureCoordinator:
                         in_docstring = True
                         docstring_delimiter = '"""' if '"""' in stripped else "'''"
                         continue
-                    elif docstring_delimiter in stripped:
+                    if docstring_delimiter in stripped:
                         in_docstring = False
                         continue
 
@@ -448,9 +449,7 @@ class TestOrchestratorIsPureCoordinator:
         # Pure coordinator should have very few lines (mainly __init__ and super call)
         # Allow for: def __init__, super().__init__, any type hints
         effective_lines = [
-            line
-            for line in class_lines
-            if line and not line.startswith("def __init__")
+            line for line in class_lines if line and not line.startswith("def __init__")
         ]
 
         # The only real line should be the super().__init__ call
@@ -473,7 +472,9 @@ class TestOrchestratorIsPureCoordinator:
 
         # Should mention the delegation pattern
         delegation_keywords = ["contract", "workflow", "delegate", "effect", "reducer"]
-        found_keywords = [kw for kw in delegation_keywords if kw.lower() in docstring.lower()]
+        found_keywords = [
+            kw for kw in delegation_keywords if kw.lower() in docstring.lower()
+        ]
 
         assert len(found_keywords) >= 2, (
             f"Orchestrator docstring should document delegation pattern.\n"
@@ -490,9 +491,7 @@ class TestOrchestratorIsPureCoordinator:
 class TestContractIOOperationsAreEffectNodes:
     """Tests verifying contract structure enforces I/O in effect nodes only."""
 
-    def test_contract_io_operations_are_effect_nodes(
-        self, contract_data: dict
-    ) -> None:
+    def test_contract_io_operations_are_effect_nodes(self, contract_data: dict) -> None:
         """Verify all nodes with I/O operations in contract are type 'effect'.
 
         Per ONEX 4-node architecture:
@@ -556,7 +555,7 @@ class TestContractIOOperationsAreEffectNodes:
                 )
 
         assert not misclassified_nodes, (
-            f"Contract has misclassified nodes:\n"
+            "Contract has misclassified nodes:\n"
             + "\n".join(f"  - {msg}" for msg in misclassified_nodes)
             + "\n\nAll I/O operations must use node_type: effect"
         )
@@ -677,7 +676,9 @@ class TestOrchestratorModuleStructure:
                                 if isinstance(elt, ast.Constant)
                             ]
 
-        assert all_value is not None, "Module should define __all__ for explicit exports"
+        assert all_value is not None, (
+            "Module should define __all__ for explicit exports"
+        )
         assert all_value == ["NodeRegistrationOrchestrator"], (
             f"Module should only export NodeRegistrationOrchestrator.\n"
             f"Found exports: {all_value}"

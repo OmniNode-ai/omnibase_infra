@@ -247,13 +247,13 @@ class TestOrchestratorNoSystemClockCalls:
         violations = _find_datetime_now_calls(node_ast)
 
         assert len(violations) == 0, (
-            f"CRITICAL: Orchestrator node.py calls datetime.now() or datetime.utcnow()!\n"
-            f"Violations found:\n"
-            f"  - " + "\n  - ".join(violations) + "\n\n"
-            f"Orchestrators MUST use injected `now` from the dispatch context, "
-            f"not from system clock calls.\n"
-            f"See: src/omnibase_infra/runtime/dispatch_context_enforcer.py\n"
-            f"Ticket: OMN-952, OMN-973"
+            "CRITICAL: Orchestrator node.py calls datetime.now() or datetime.utcnow()!\n"
+            "Violations found:\n"
+            "  - " + "\n  - ".join(violations) + "\n\n"
+            "Orchestrators MUST use injected `now` from the dispatch context, "
+            "not from system clock calls.\n"
+            "See: src/omnibase_infra/runtime/dispatch_context_enforcer.py\n"
+            "Ticket: OMN-952, OMN-973"
         )
 
     def test_orchestrator_no_time_time_calls(self, node_ast: ast.AST) -> None:
@@ -275,13 +275,13 @@ class TestOrchestratorNoSystemClockCalls:
         violations = _find_time_module_calls(node_ast)
 
         assert len(violations) == 0, (
-            f"CRITICAL: Orchestrator node.py calls time module clock functions!\n"
-            f"Violations found:\n"
-            f"  - " + "\n  - ".join(violations) + "\n\n"
-            f"Orchestrators MUST use injected `now` from the dispatch context, "
-            f"not from time.time() or similar functions.\n"
-            f"See: src/omnibase_infra/runtime/dispatch_context_enforcer.py\n"
-            f"Ticket: OMN-952, OMN-973"
+            "CRITICAL: Orchestrator node.py calls time module clock functions!\n"
+            "Violations found:\n"
+            "  - " + "\n  - ".join(violations) + "\n\n"
+            "Orchestrators MUST use injected `now` from the dispatch context, "
+            "not from time.time() or similar functions.\n"
+            "See: src/omnibase_infra/runtime/dispatch_context_enforcer.py\n"
+            "Ticket: OMN-952, OMN-973"
         )
 
     def test_orchestrator_minimal_imports(self, node_ast: ast.AST) -> None:
@@ -298,7 +298,9 @@ class TestOrchestratorNoSystemClockCalls:
         imports = _find_imports(node_ast)
 
         # Time-related modules that suggest clock usage
-        time_related_imports = {"time"}  # Note: 'datetime' might be imported for type hints
+        time_related_imports = {
+            "time"
+        }  # Note: 'datetime' might be imported for type hints
 
         suspicious_imports = imports & time_related_imports
 
@@ -358,19 +360,13 @@ class TestContractTimeInjectionConfiguration:
         time_injection = contract_data["time_injection"]
 
         # Verify required fields exist
-        assert "enabled" in time_injection, (
-            "time_injection must have 'enabled' field"
-        )
+        assert "enabled" in time_injection, "time_injection must have 'enabled' field"
         assert time_injection["enabled"] is True, (
             "time_injection.enabled must be true for orchestrators that need time"
         )
 
-        assert "source" in time_injection, (
-            "time_injection must have 'source' field"
-        )
-        assert "field" in time_injection, (
-            "time_injection must have 'field' field"
-        )
+        assert "source" in time_injection, "time_injection must have 'source' field"
+        assert "field" in time_injection, "time_injection must have 'field' field"
 
     def test_time_injection_source_is_runtime_tick(self, contract_data: dict) -> None:
         """Verify time_injection.source is "RuntimeTick".
@@ -390,9 +386,7 @@ class TestContractTimeInjectionConfiguration:
 
         time_injection = contract_data["time_injection"]
 
-        assert "source" in time_injection, (
-            "time_injection must have 'source' field"
-        )
+        assert "source" in time_injection, "time_injection must have 'source' field"
 
         source = time_injection["source"]
         assert source == "RuntimeTick", (
@@ -412,9 +406,7 @@ class TestContractTimeInjectionConfiguration:
 
         time_injection = contract_data["time_injection"]
 
-        assert "field" in time_injection, (
-            "time_injection must have 'field' field"
-        )
+        assert "field" in time_injection, "time_injection must have 'field' field"
 
         field = time_injection["field"]
         assert field == "now", (
@@ -454,9 +446,7 @@ class TestContractTimeInjectionConfiguration:
         )
 
         execution_graph = workflow_def["execution_graph"]
-        assert "nodes" in execution_graph, (
-            "execution_graph is missing 'nodes'"
-        )
+        assert "nodes" in execution_graph, "execution_graph is missing 'nodes'"
 
         nodes = execution_graph["nodes"]
 
@@ -564,9 +554,7 @@ class TestOrchestratorTimeInjectionIntegration:
         Together, these ensure the orchestrator follows ONEX time injection rules.
         """
         # Verify contract declares time injection
-        assert "time_injection" in contract_data, (
-            "Contract must declare time_injection"
-        )
+        assert "time_injection" in contract_data, "Contract must declare time_injection"
         assert contract_data["time_injection"].get("enabled") is True
 
         # Verify node.py has no clock calls
@@ -599,7 +587,14 @@ class TestOrchestratorTimeInjectionIntegration:
         nodes = workflow_def["execution_graph"]["nodes"]
 
         # Keywords that suggest time-dependent operations
-        time_keywords = {"timeout", "deadline", "schedule", "expire", "duration", "wait"}
+        time_keywords = {
+            "timeout",
+            "deadline",
+            "schedule",
+            "expire",
+            "duration",
+            "wait",
+        }
 
         time_dependent_steps_without_config: list[str] = []
 
