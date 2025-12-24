@@ -84,7 +84,7 @@ class TestModelMessageTypeEntry:
         )
         outcome = entry.validate_category(EnumMessageCategory.EVENT)
         assert outcome.is_valid is True
-        assert outcome.error_message is None
+        assert not outcome.has_error
 
     def test_validate_category_failure(self) -> None:
         """Test validate_category failure case."""
@@ -96,7 +96,7 @@ class TestModelMessageTypeEntry:
         )
         outcome = entry.validate_category(EnumMessageCategory.COMMAND)
         assert outcome.is_valid is False
-        assert outcome.error_message is not None
+        assert outcome.has_error
         assert "UserCreated" in outcome.error_message
         assert "command" in outcome.error_message
         assert "event" in outcome.error_message

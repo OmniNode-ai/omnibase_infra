@@ -137,7 +137,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast, overload
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast, overload
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -236,6 +236,30 @@ from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRou
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
     ModelDispatcherMetrics,
 )
+
+
+class _LogContextKwargs(TypedDict, total=False):
+    """TypedDict for _build_log_context kwargs to ensure type safety.
+
+    All fields are optional (total=False) since callers pass only the
+    relevant subset. ModelDispatchLogContext validators handle None-to-sentinel
+    conversion for backwards compatibility.
+
+    .. versionadded:: 0.6.3
+        Created as part of Union Reduction Phase 2 (OMN-1002) to eliminate
+        type: ignore comment in _build_log_context.
+    """
+
+    topic: str | None
+    category: EnumMessageCategory | None
+    message_type: str | None
+    dispatcher_id: str | None
+    dispatcher_count: int | None
+    duration_ms: float | None
+    correlation_id: UUID | None
+    trace_id: UUID | None
+    error_code: EnumCoreErrorCode | None
+
 
 # Type alias for dispatcher output topics (LEGACY - for backwards compatibility)
 #
@@ -824,7 +848,9 @@ class MessageDispatchEngine:
         """
         return self._frozen
 
-    def _build_log_context(self, **kwargs: object) -> dict[str, str | int | float]:
+    def _build_log_context(
+        self, **kwargs: Unpack[_LogContextKwargs]
+    ) -> dict[str, str | int | float]:
         """
         Build structured log context dictionary.
 
@@ -837,17 +863,21 @@ class MessageDispatchEngine:
             parameters from method signature (OMN-1002 Union Reduction Phase 2).
             ModelDispatchLogContext validators handle None-to-sentinel conversion.
 
+        .. versionchanged:: 0.6.3
+            Updated to use ``Unpack[_LogContextKwargs]`` TypedDict for type-safe
+            kwargs (OMN-1002). Eliminates need for ``type: ignore`` comment.
+
         Design Note (Union Reduction - OMN-1002):
-            This private method now uses ``**kwargs`` to forward all parameters
-            to ModelDispatchLogContext, which handles type validation and
-            None-to-sentinel conversion via its field validators. This reduces
-            the union count in this file while maintaining full type safety at
-            the model layer.
+            This private method uses typed ``**kwargs`` via ``_LogContextKwargs``
+            TypedDict to forward parameters to ModelDispatchLogContext. The
+            TypedDict provides compile-time type checking while the model's
+            field validators handle None-to-sentinel conversion at runtime.
 
         Args:
             **kwargs: Keyword arguments forwarded to ModelDispatchLogContext.
-                Supported keys: topic, category, message_type, dispatcher_id,
-                dispatcher_count, duration_ms, correlation_id, trace_id, error_code.
+                Typed via ``_LogContextKwargs`` TypedDict with supported keys:
+                topic, category, message_type, dispatcher_id, dispatcher_count,
+                duration_ms, correlation_id, trace_id, error_code.
                 None values are automatically converted to sentinel values by
                 the model's field validators.
 
@@ -856,8 +886,10 @@ class MessageDispatchEngine:
             UUID values are converted to strings at serialization time.
         """
         # Forward all kwargs to ModelDispatchLogContext which handles
-        # None-to-sentinel conversion via field validators
-        ctx = ModelDispatchLogContext(**kwargs)  # type: ignore[arg-type]
+        # None-to-sentinel conversion via field validators.
+        # Use model_validate() to properly invoke "before" validators that
+        # accept None via object type annotation.
+        ctx = ModelDispatchLogContext.model_validate(kwargs)
         return ctx.to_dict()
 
     async def dispatch(

@@ -240,9 +240,9 @@ class ModelDispatcherMetrics(BaseModel):
                 "total_latency_ms": self.total_latency_ms + duration_ms,
                 "min_latency_ms": new_min,
                 "max_latency_ms": new_max,
-                "last_error_message": error_message or ""
-                if not success
-                else self.last_error_message,
+                "last_error_message": (
+                    (error_message or "") if not success else self.last_error_message
+                ),
                 "last_execution_topic": topic if topic else self.last_execution_topic,
             }
         )

@@ -648,7 +648,7 @@ class TestMessageTypeRegistryValidation:
             message_type="UserCreated",
         )
         assert outcome.is_valid is True
-        assert outcome.error_message is None
+        assert not outcome.has_error
 
     def test_validate_topic_message_type_category_mismatch(self) -> None:
         """Test topic-message type validation with category mismatch."""
@@ -666,7 +666,7 @@ class TestMessageTypeRegistryValidation:
             message_type="UserCreated",
         )
         assert outcome.is_valid is False
-        assert outcome.error_message is not None
+        assert outcome.has_error
         assert "not allowed in category" in outcome.error_message
 
     def test_validate_topic_message_type_domain_mismatch(self) -> None:

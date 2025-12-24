@@ -248,6 +248,7 @@ class ModelDispatchLogContext(BaseModel):
         if self._is_set_int(self.dispatcher_count):
             result["dispatcher_count"] = self.dispatcher_count
         if self._is_set_float(self.duration_ms):
+            # Round to 3 decimals: microsecond precision sufficient for log analysis
             result["duration_ms"] = round(self.duration_ms, 3)
 
         # UUID fields - exclude nil UUID sentinel

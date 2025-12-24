@@ -259,7 +259,7 @@ class IntrospectionPerformanceMetrics:
             "cache_hit": self.cache_hit,
             "method_count": self.method_count,
             "threshold_exceeded": self.threshold_exceeded,
-            "slow_operations": self.slow_operations,
+            "slow_operations": list(self.slow_operations),
         }
 
 

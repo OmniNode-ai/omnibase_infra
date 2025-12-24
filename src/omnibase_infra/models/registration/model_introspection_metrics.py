@@ -204,8 +204,11 @@ class ModelIntrospectionMetrics(BaseModel):
             the input dataclass.
 
         Raises:
-            AttributeError: If the input object is missing required attributes.
-            TypeError: If the input object has attributes of incompatible types.
+            pydantic.ValidationError: If any attribute has an incompatible type.
+
+        Note:
+            Missing attributes fall back to sensible defaults (0.0 / 0 / False / []),
+            making this factory tolerant of partially-populated legacy dataclasses.
 
         Example:
             >>> from dataclasses import dataclass, field

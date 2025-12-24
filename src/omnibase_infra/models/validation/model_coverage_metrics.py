@@ -180,7 +180,7 @@ class ModelCoverageMetrics(BaseModel):
             ModelCoverageMetrics with equivalent values.
 
         Raises:
-            AssertionError: If any value has an unexpected type.
+            TypeError: If any value has an unexpected type.
 
         Example:
             >>> legacy = {
@@ -201,10 +201,14 @@ class ModelCoverageMetrics(BaseModel):
         unmapped_types = report["unmapped_types"]
         coverage_percent = report["coverage_percent"]
 
-        assert isinstance(total_types, int)
-        assert isinstance(registered_types, int)
-        assert isinstance(unmapped_types, list)
-        assert isinstance(coverage_percent, (int, float))
+        if not isinstance(total_types, int):
+            raise TypeError("total_types must be int")
+        if not isinstance(registered_types, int):
+            raise TypeError("registered_types must be int")
+        if not isinstance(unmapped_types, list):
+            raise TypeError("unmapped_types must be list[str]")
+        if not isinstance(coverage_percent, int | float):
+            raise TypeError("coverage_percent must be int or float")
 
         return cls(
             total_types=total_types,
@@ -244,7 +248,7 @@ class ModelCoverageMetrics(BaseModel):
         return {
             "total_types": self.total_types,
             "registered_types": self.registered_types,
-            "unmapped_types": self.unmapped_types,
+            "unmapped_types": list(self.unmapped_types),  # defensive copy
             "coverage_percent": self.coverage_percent,
         }
 

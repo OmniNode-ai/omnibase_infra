@@ -330,6 +330,9 @@ class ModelLogContext(BaseModel):
         Returns:
             A new ModelLogContext with duration_ms set.
 
+        Raises:
+            ValueError: If duration_ms is negative.
+
         Example:
             >>> ctx = (
             ...     ModelLogContext.for_operation("query")
@@ -338,6 +341,8 @@ class ModelLogContext(BaseModel):
 
         .. versionadded:: 0.6.0
         """
+        if duration_ms < 0:
+            raise ValueError("duration_ms must be >= 0")
         return self.model_copy(update={"duration_ms": duration_ms})
 
     def with_retry_count(self, retry_count: int) -> ModelLogContext:
@@ -350,6 +355,9 @@ class ModelLogContext(BaseModel):
         Returns:
             A new ModelLogContext with retry_count set.
 
+        Raises:
+            ValueError: If retry_count is negative.
+
         Example:
             >>> ctx = (
             ...     ModelLogContext.for_operation("connect")
@@ -358,6 +366,8 @@ class ModelLogContext(BaseModel):
 
         .. versionadded:: 0.6.0
         """
+        if retry_count < 0:
+            raise ValueError("retry_count must be >= 0")
         return self.model_copy(update={"retry_count": retry_count})
 
     def with_service_name(self, service_name: str) -> ModelLogContext:
@@ -561,6 +571,9 @@ class ModelLogContext(BaseModel):
         Returns:
             A ModelLogContext configured for dispatch operations.
 
+        Raises:
+            ValueError: If duration_ms is negative (except sentinel -1.0).
+
         Example:
             >>> ctx = ModelLogContext.for_dispatch(
             ...     dispatcher_id="user-dispatcher",
@@ -571,6 +584,10 @@ class ModelLogContext(BaseModel):
 
         .. versionadded:: 0.6.0
         """
+        # Validate duration_ms: allow sentinel (-1.0) or non-negative values
+        if duration_ms != _SENTINEL_FLOAT and duration_ms < 0:
+            raise ValueError("duration_ms must be >= 0 when set")
+
         extra: dict[str, str] = {}
         if dispatcher_id != _SENTINEL_STR:
             extra["dispatcher_id"] = dispatcher_id
@@ -612,6 +629,9 @@ class ModelLogContext(BaseModel):
         Returns:
             A ModelLogContext configured for connection operations.
 
+        Raises:
+            ValueError: If retry_count is negative (except sentinel -1).
+
         Example:
             >>> ctx = ModelLogContext.for_connection(
             ...     operation="connect",
@@ -623,6 +643,10 @@ class ModelLogContext(BaseModel):
 
         .. versionadded:: 0.6.0
         """
+        # Validate retry_count: allow sentinel (-1) or non-negative values
+        if retry_count != _SENTINEL_INT and retry_count < 0:
+            raise ValueError("retry_count must be >= 0 when set")
+
         extra: dict[str, str] = {}
         if host != _SENTINEL_STR:
             extra["host"] = host
@@ -662,6 +686,9 @@ class ModelLogContext(BaseModel):
         Returns:
             A ModelLogContext configured for error logging.
 
+        Raises:
+            ValueError: If retry_count is negative (except sentinel -1).
+
         Example:
             >>> ctx = ModelLogContext.for_error(
             ...     operation="publish",
@@ -672,6 +699,10 @@ class ModelLogContext(BaseModel):
 
         .. versionadded:: 0.6.0
         """
+        # Validate retry_count: allow sentinel (-1) or non-negative values
+        if retry_count != _SENTINEL_INT and retry_count < 0:
+            raise ValueError("retry_count must be >= 0 when set")
+
         return cls(
             operation=operation,
             error_type=error_type,

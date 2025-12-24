@@ -40,7 +40,7 @@ Example:
     ... )
 
 See Also:
-    omnibase_infra.models.dispatch.ModelDispatchContext: Dispatch-specific context
+    omnibase_infra.models.dispatch.ModelDispatchLogContext: Dispatch-specific logging context
 
 .. versionadded:: 0.6.0
     Added as part of OMN-1002 Union Reduction Phase 2.
