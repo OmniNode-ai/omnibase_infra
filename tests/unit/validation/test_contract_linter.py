@@ -240,9 +240,9 @@ output_model:
                 if v.field_path == "node_type"
                 and v.severity == EnumContractViolationSeverity.ERROR
             ]
-            assert (
-                len(node_type_errors) == 0
-            ), f"Unexpected error for valid node_type: {node_type}"
+            assert len(node_type_errors) == 0, (
+                f"Unexpected error for valid node_type: {node_type}"
+            )
 
     def test_lint_invalid_contract_version_format(self, tmp_path: Path) -> None:
         """Test linting detects invalid contract_version format."""
@@ -699,7 +699,9 @@ class TestRealContract:
         result = lint_contract_file(contract_path, check_imports=False)
 
         # The real contract should be valid
-        assert result.is_valid, f"Real contract has errors: {[str(v) for v in result.violations if v.severity == EnumContractViolationSeverity.ERROR]}"
+        assert result.is_valid, (
+            f"Real contract has errors: {[str(v) for v in result.violations if v.severity == EnumContractViolationSeverity.ERROR]}"
+        )
         assert result.error_count == 0
 
     def test_lint_real_nodes_directory(self) -> None:
@@ -712,4 +714,6 @@ class TestRealContract:
         result = lint_contracts_in_directory(nodes_dir, check_imports=False)
 
         # All contracts should be valid
-        assert result.is_valid, f"Contracts have errors: {[str(v) for v in result.violations if v.severity == EnumContractViolationSeverity.ERROR]}"
+        assert result.is_valid, (
+            f"Contracts have errors: {[str(v) for v in result.violations if v.severity == EnumContractViolationSeverity.ERROR]}"
+        )

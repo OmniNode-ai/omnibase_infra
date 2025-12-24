@@ -614,9 +614,9 @@ class TestHandlerDirectPublishRejected:
                 if v.violation_type
                 == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
             ]
-            assert (
-                len(publish_violations) >= 1
-            ), f"{handler_type_name} handler should have direct publish violation"
+            assert len(publish_violations) >= 1, (
+                f"{handler_type_name} handler should have direct publish violation"
+            )
 
     def test_dispatch_method_also_rejected(self, tmp_path: Path) -> None:
         """Handler calling .dispatch() is also detected as direct publish."""
@@ -873,9 +873,9 @@ class TestAllowedReturnTypesValidation:
         # COMPUTE: allowed = [all 4 output types], forbidden = []
         compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
         for output_type in EnumNodeOutputType:
-            assert (
-                compute_rule.is_return_type_allowed(output_type) is True
-            ), f"COMPUTE should allow {output_type.value}"
+            assert compute_rule.is_return_type_allowed(output_type) is True, (
+                f"COMPUTE should allow {output_type.value}"
+            )
 
 
 class TestEnumMappingLogic:
@@ -979,9 +979,9 @@ class TestEnumMappingLogic:
         result_node_output = validator._is_return_type_allowed(
             EnumNodeOutputType.EVENT, EnumHandlerType.EFFECT, effect_rule
         )
-        assert (
-            result_message_cat == result_node_output
-        ), "Both enum types should produce consistent results for EVENT"
+        assert result_message_cat == result_node_output, (
+            "Both enum types should produce consistent results for EVENT"
+        )
 
 
 class TestProjectionOnlyAllowedForReducer:
@@ -1305,9 +1305,9 @@ class TestEnumMappingEdgeCases:
                 category, EnumHandlerType.COMPUTE, compute_rule
             )
             # COMPUTE allows all mapped types, so all should be True
-            assert (
-                result is True
-            ), f"EnumMessageCategory.{category.name} should map and be allowed for COMPUTE"
+            assert result is True, (
+                f"EnumMessageCategory.{category.name} should map and be allowed for COMPUTE"
+            )
 
     def test_all_node_output_types_handled(self) -> None:
         """Every EnumNodeOutputType value is properly handled."""
@@ -1322,9 +1322,9 @@ class TestEnumMappingEdgeCases:
             result = validator._is_return_type_allowed(
                 output_type, EnumHandlerType.COMPUTE, compute_rule
             )
-            assert (
-                result is True
-            ), f"EnumNodeOutputType.{output_type.name} should be allowed for COMPUTE"
+            assert result is True, (
+                f"EnumNodeOutputType.{output_type.name} should be allowed for COMPUTE"
+            )
 
     def test_message_category_to_output_type_value_consistency(self) -> None:
         """EnumMessageCategory and EnumNodeOutputType share consistent string values.
@@ -1345,15 +1345,15 @@ class TestEnumMappingEdgeCases:
         """
         # EnumMessageCategory should not have PROJECTION
         message_category_names = {m.name for m in EnumMessageCategory}
-        assert (
-            "PROJECTION" not in message_category_names
-        ), "PROJECTION should not be a message routing category"
+        assert "PROJECTION" not in message_category_names, (
+            "PROJECTION should not be a message routing category"
+        )
 
         # EnumNodeOutputType should have PROJECTION
         node_output_names = {o.name for o in EnumNodeOutputType}
-        assert (
-            "PROJECTION" in node_output_names
-        ), "PROJECTION should be a valid node output type"
+        assert "PROJECTION" in node_output_names, (
+            "PROJECTION should be a valid node output type"
+        )
 
 
 class TestEnumMappingCompleteness:

@@ -239,9 +239,7 @@ def assert_effect_protocol_interface(effect: object) -> None:
     Example:
         >>> assert_effect_protocol_interface(mock_effect)
     """
-    assert_has_async_methods(
-        effect, ["execute_intent"], protocol_name="ProtocolEffect"
-    )
+    assert_has_async_methods(effect, ["execute_intent"], protocol_name="ProtocolEffect")
     assert_method_signature(
         effect,
         "execute_intent",
