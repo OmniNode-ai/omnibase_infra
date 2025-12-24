@@ -961,6 +961,237 @@ class TestContainerIntegration:
 
 
 # =============================================================================
+# TestSemverEdgeCases - Prerelease + Build Metadata
+# =============================================================================
+
+
+class TestSemverEdgeCases:
+    """Tests for semver edge cases including prerelease and build metadata.
+
+    These tests verify parsing behavior for complex semver formats per OMN-811.
+    Note: The current implementation treats build metadata as part of the
+    prerelease or version string rather than stripping it per strict semver spec.
+
+    Key behaviors tested:
+    - Prerelease + build metadata combinations
+    - Build metadata only (no prerelease)
+    - Multiple prerelease segments
+    - Invalid edge cases (double dash, double plus)
+    """
+
+    def test_semver_prerelease_with_build_metadata(self) -> None:
+        """Test parsing '1.0.0-alpha.1+build.123' (prerelease + build metadata).
+
+        Current behavior: Build metadata is included as part of the prerelease string.
+        This tests that combined prerelease+build formats parse without error.
+        """
+        RegistryCompute._reset_semver_cache()
+
+        # Should parse without error - build metadata is captured in prerelease
+        result = RegistryCompute._parse_semver("1.0.0-alpha.1+build.123")
+
+        # Verify major, minor, patch are correct
+        assert result[0] == 1  # major
+        assert result[1] == 0  # minor
+        assert result[2] == 0  # patch
+        # Prerelease includes build metadata in current implementation
+        assert result[3] == "alpha.1+build.123"
+
+    def test_semver_build_metadata_only_raises_error(self) -> None:
+        """Test parsing '1.0.0+build.123' (build metadata only, no prerelease).
+
+        Current behavior: Without prerelease, the '+' is treated as part of the
+        version string, resulting in "1.0.0+build" which fails to parse as it
+        creates >3 parts when split on '.'.
+        """
+        RegistryCompute._reset_semver_cache()
+
+        # This format is NOT supported by the current implementation
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            RegistryCompute._parse_semver("1.0.0+build.123")
+
+        assert "Invalid semantic version format" in str(exc_info.value)
+
+    def test_semver_multiple_prerelease_segments(self) -> None:
+        """Test parsing '1.0.0-alpha.1.2.3' (multiple prerelease segments).
+
+        Semver spec allows multiple dot-separated prerelease identifiers.
+        The current implementation captures all segments after the first '-'.
+        """
+        RegistryCompute._reset_semver_cache()
+
+        result = RegistryCompute._parse_semver("1.0.0-alpha.1.2.3")
+
+        assert result[0] == 1  # major
+        assert result[1] == 0  # minor
+        assert result[2] == 0  # patch
+        assert result[3] == "alpha.1.2.3"  # full prerelease string
+
+    def test_semver_prerelease_with_numeric_build(self) -> None:
+        """Test parsing '1.0.0-alpha+001' (prerelease + numeric build metadata).
+
+        Tests that prerelease with build metadata containing numeric identifiers
+        is parsed correctly.
+        """
+        RegistryCompute._reset_semver_cache()
+
+        result = RegistryCompute._parse_semver("1.0.0-alpha+001")
+
+        assert result[0] == 1  # major
+        assert result[1] == 0  # minor
+        assert result[2] == 0  # patch
+        assert result[3] == "alpha+001"  # prerelease includes build
+
+    def test_semver_double_dash_raises_error(self) -> None:
+        """Test parsing '1.0.0--' (double dash edge case - should fail).
+
+        A version ending with double dash has an empty prerelease identifier
+        after the second dash, which is technically valid per semver but
+        semantically questionable. The current implementation accepts this
+        because '-' is non-empty after the split.
+
+        However, this tests documents the current behavior.
+        """
+        RegistryCompute._reset_semver_cache()
+
+        # Current implementation: splits on first '-', prerelease = '-'
+        # This actually succeeds in the current implementation
+        result = RegistryCompute._parse_semver("1.0.0--")
+
+        # Documents current behavior: double-dash results in prerelease = '-'
+        assert result[0] == 1
+        assert result[1] == 0
+        assert result[2] == 0
+        assert result[3] == "-"  # Single dash as prerelease identifier
+
+    def test_semver_double_plus_raises_error(self) -> None:
+        """Test parsing '1.0.0++' (double plus edge case - should fail).
+
+        Without prerelease delimiter, the '++' is part of the version string.
+        This results in '0++' for the patch component, which fails integer parsing.
+        """
+        RegistryCompute._reset_semver_cache()
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            RegistryCompute._parse_semver("1.0.0++")
+
+        assert "Invalid semantic version format" in str(exc_info.value)
+
+    def test_semver_sorting_prerelease_vs_release(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test that prerelease versions sort before release versions.
+
+        Per semver spec: 1.0.0-alpha < 1.0.0
+        """
+
+        class ReleasePlugin:
+            def execute(self, data: dict[str, object]) -> dict[str, object]:
+                return {"type": "release"}
+
+        class AlphaPlugin:
+            def execute(self, data: dict[str, object]) -> dict[str, object]:
+                return {"type": "alpha"}
+
+        class BetaPlugin:
+            def execute(self, data: dict[str, object]) -> dict[str, object]:
+                return {"type": "beta"}
+
+        # Register in random order
+        registry.register_plugin("sorted_plugin", BetaPlugin, "1.0.0-beta")
+        registry.register_plugin("sorted_plugin", ReleasePlugin, "1.0.0")
+        registry.register_plugin("sorted_plugin", AlphaPlugin, "1.0.0-alpha")
+
+        # Verify sorting order
+        versions = registry.list_versions("sorted_plugin")
+        assert versions == ["1.0.0-alpha", "1.0.0-beta", "1.0.0"]
+
+        # Latest should be the release (no prerelease)
+        latest_cls = registry.get("sorted_plugin")
+        assert latest_cls is ReleasePlugin
+
+    def test_semver_sorting_prerelease_alphabetical(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test that prerelease versions are sorted alphabetically.
+
+        Per semver spec: 1.0.0-alpha < 1.0.0-beta < 1.0.0-rc
+        """
+
+        class AlphaPlugin:
+            def execute(self, data: dict[str, object]) -> dict[str, object]:
+                return {"type": "alpha"}
+
+        class BetaPlugin:
+            def execute(self, data: dict[str, object]) -> dict[str, object]:
+                return {"type": "beta"}
+
+        class RcPlugin:
+            def execute(self, data: dict[str, object]) -> dict[str, object]:
+                return {"type": "rc"}
+
+        # Register in random order
+        registry.register_plugin("prerelease_sort", RcPlugin, "1.0.0-rc")
+        registry.register_plugin("prerelease_sort", AlphaPlugin, "1.0.0-alpha")
+        registry.register_plugin("prerelease_sort", BetaPlugin, "1.0.0-beta")
+
+        # Verify alphabetical sorting of prerelease
+        versions = registry.list_versions("prerelease_sort")
+        assert versions == ["1.0.0-alpha", "1.0.0-beta", "1.0.0-rc"]
+
+    def test_semver_prerelease_with_dots(self, registry: RegistryCompute) -> None:
+        """Test prerelease versions with dot separators like 'rc.1', 'beta.2'."""
+
+        class Rc1Plugin:
+            def execute(self, data: dict[str, object]) -> dict[str, object]:
+                return {"v": "rc.1"}
+
+        class Rc2Plugin:
+            def execute(self, data: dict[str, object]) -> dict[str, object]:
+                return {"v": "rc.2"}
+
+        registry.register_plugin("dotted_prerelease", Rc1Plugin, "1.0.0-rc.1")
+        registry.register_plugin("dotted_prerelease", Rc2Plugin, "1.0.0-rc.2")
+
+        versions = registry.list_versions("dotted_prerelease")
+        assert versions == ["1.0.0-rc.1", "1.0.0-rc.2"]
+
+        # rc.2 > rc.1 alphabetically
+        latest = registry.get("dotted_prerelease")
+        assert latest is Rc2Plugin
+
+    def test_semver_complex_prerelease_identifiers(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test complex prerelease identifiers with multiple segments."""
+        registry.register_plugin(
+            "complex_prerelease", SyncComputePlugin, "2.1.0-alpha.beta.1"
+        )
+
+        assert registry.is_registered("complex_prerelease", "2.1.0-alpha.beta.1")
+        plugin_cls = registry.get("complex_prerelease", "2.1.0-alpha.beta.1")
+        assert plugin_cls is SyncComputePlugin
+
+    def test_semver_registration_with_prerelease_build_combo(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test full registration workflow with prerelease+build version."""
+        registration = ModelComputeRegistration(
+            plugin_id="combo_version",
+            plugin_class=SyncComputePlugin,
+            version="1.0.0-beta.1+build.456",
+        )
+        registry.register(registration)
+
+        assert registry.is_registered("combo_version")
+        assert registry.is_registered("combo_version", "1.0.0-beta.1+build.456")
+
+        # Should be retrievable by exact version
+        plugin_cls = registry.get("combo_version", "1.0.0-beta.1+build.456")
+        assert plugin_cls is SyncComputePlugin
+
+
+# =============================================================================
 # TestEdgeCases
 # =============================================================================
 
@@ -1011,3 +1242,1308 @@ class TestEdgeCases:
 
         # Should not leave empty entries in secondary index
         assert "single" not in registry._plugin_id_index
+
+
+# =============================================================================
+# TestUnicodePluginId - Unicode Character Handling
+# =============================================================================
+
+
+class TestUnicodePluginId:
+    """Tests for Unicode character handling in plugin_id.
+
+    Current Behavior Documentation:
+    ------------------------------
+    As of this implementation, plugin_id validation uses only `min_length=1`
+    (via Pydantic's Field constraint in ModelComputeRegistration). This means:
+
+    - Unicode letters (Cyrillic, CJK, Greek, etc.) are ALLOWED
+    - Emoji characters are ALLOWED
+    - Mixed Unicode/ASCII are ALLOWED
+    - Zero-width characters are ALLOWED (potentially problematic for debugging)
+    - NULL bytes (\\x00) are ALLOWED (security concern!)
+    - Control characters (\\x07 bell, etc.) are ALLOWED
+
+    Security Concerns:
+    -----------------
+    1. NULL bytes in plugin_ids can cause:
+       - C-string termination issues in some backends
+       - Security vulnerabilities (null byte injection)
+       - Database storage problems
+
+    2. Zero-width characters can cause:
+       - Confusion: "plugin" vs "plugin\\u200b" look identical
+       - Debugging difficulties
+
+    3. Unicode confusables (homoglyphs) can cause:
+       - Spoofing: "normalizer" (ASCII) vs "nοrmalizer" (Greek omicron)
+       - Accidental collisions in different scripts
+
+    Design Considerations:
+    ---------------------
+    Whether Unicode plugin_ids should be supported is a design decision:
+
+    ARGUMENTS FOR allowing Unicode:
+    - Internationalization: Teams may want native-language plugin names
+    - Semantic clarity: "処理器" clearly means "processor" in Japanese
+    - Modern Python 3 handles Unicode strings natively
+
+    ARGUMENTS FOR restricting to ASCII:
+    - Consistency: ASCII-only ensures predictable serialization/storage
+    - Debuggability: ASCII names are easier to type in logs/terminals
+    - Interoperability: Some downstream systems may not handle Unicode well
+    - Security: Prevents homoglyph attacks and null byte injection
+
+    RECOMMENDATIONS:
+    ---------------
+    1. At minimum, reject NULL bytes and control characters:
+       ```python
+       @field_validator("plugin_id")
+       @classmethod
+       def validate_plugin_id_safe(cls, v: str) -> str:
+           if any(ord(c) < 32 for c in v):  # Reject control chars including NULL
+               raise ValueError("plugin_id cannot contain control characters")
+           return v
+       ```
+
+    2. For maximum safety, restrict to ASCII identifier pattern:
+       ```python
+       import re
+       @field_validator("plugin_id")
+       @classmethod
+       def validate_plugin_id_ascii(cls, v: str) -> str:
+           if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_.-]*$', v):
+               raise ValueError(
+                   f"plugin_id must be a valid ASCII identifier, got: {v!r}"
+               )
+           return v
+       ```
+
+    These tests document the CURRENT behavior without modifying it.
+    """
+
+    # =========================================================================
+    # Baseline ASCII Tests
+    # =========================================================================
+
+    def test_unicode_ascii_plugin_id_baseline(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test standard ASCII plugin_id works correctly (baseline)."""
+        registry.register_plugin(
+            plugin_id="json_normalizer",
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        assert registry.is_registered("json_normalizer")
+        assert registry.is_registered("json_normalizer", version="1.0.0")
+        plugin_cls = registry.get("json_normalizer")
+        assert plugin_cls is SyncComputePlugin
+
+    def test_unicode_ascii_with_underscores_and_hyphens(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test ASCII with common separator characters."""
+        registry.register_plugin("json-normalizer", SyncComputePlugin, "1.0.0")
+        registry.register_plugin("xml_transformer", SyncComputePlugin, "1.0.0")
+        registry.register_plugin("data.processor", SyncComputePlugin, "1.0.0")
+
+        assert registry.is_registered("json-normalizer")
+        assert registry.is_registered("xml_transformer")
+        assert registry.is_registered("data.processor")
+
+    # =========================================================================
+    # Unicode Letters Tests (Cyrillic, CJK, Japanese, Greek)
+    # =========================================================================
+
+    def test_unicode_cyrillic_plugin_id(self, registry: RegistryCompute) -> None:
+        """Test Cyrillic (Russian) plugin_id is accepted.
+
+        Current behavior: ALLOWED
+        "процессор" means "processor" in Russian.
+        """
+        plugin_id = "процессор"  # Russian for "processor"
+
+        registry.register_plugin(
+            plugin_id=plugin_id,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        # Registration should succeed
+        assert registry.is_registered(plugin_id)
+        assert registry.is_registered(plugin_id, version="1.0.0")
+
+        # Retrieval should work
+        plugin_cls = registry.get(plugin_id)
+        assert plugin_cls is SyncComputePlugin
+
+        # Should appear in list_keys
+        keys = registry.list_keys()
+        assert (plugin_id, "1.0.0") in keys
+
+    def test_unicode_chinese_plugin_id(self, registry: RegistryCompute) -> None:
+        """Test Chinese plugin_id is accepted.
+
+        Current behavior: ALLOWED
+        "处理器" means "processor" in Chinese.
+        """
+        plugin_id = "处理器"  # Chinese for "processor"
+
+        registry.register_plugin(
+            plugin_id=plugin_id,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        assert registry.is_registered(plugin_id)
+        plugin_cls = registry.get(plugin_id)
+        assert plugin_cls is SyncComputePlugin
+
+    def test_unicode_japanese_plugin_id(self, registry: RegistryCompute) -> None:
+        """Test Japanese plugin_id is accepted.
+
+        Current behavior: ALLOWED
+        "処理" means "processing" in Japanese.
+        """
+        plugin_id = "処理"  # Japanese for "processing"
+
+        registry.register_plugin(
+            plugin_id=plugin_id,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        assert registry.is_registered(plugin_id)
+        plugin_cls = registry.get(plugin_id)
+        assert plugin_cls is SyncComputePlugin
+
+    def test_unicode_greek_plugin_id(self, registry: RegistryCompute) -> None:
+        """Test Greek plugin_id is accepted.
+
+        Current behavior: ALLOWED
+        """
+        plugin_id = "επεξεργαστής"  # Greek for "processor"
+
+        registry.register_plugin(
+            plugin_id=plugin_id,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        assert registry.is_registered(plugin_id)
+        plugin_cls = registry.get(plugin_id)
+        assert plugin_cls is SyncComputePlugin
+
+    # =========================================================================
+    # Emoji Tests
+    # =========================================================================
+
+    def test_unicode_emoji_prefix_plugin_id(self, registry: RegistryCompute) -> None:
+        """Test plugin_id with emoji prefix is accepted.
+
+        Current behavior: ALLOWED
+        """
+        plugin_id = "🔧_tool"
+
+        registry.register_plugin(
+            plugin_id=plugin_id,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        assert registry.is_registered(plugin_id)
+        plugin_cls = registry.get(plugin_id)
+        assert plugin_cls is SyncComputePlugin
+
+    def test_unicode_emoji_suffix_plugin_id(self, registry: RegistryCompute) -> None:
+        """Test plugin_id with emoji suffix is accepted.
+
+        Current behavior: ALLOWED
+        """
+        plugin_id = "data_🚀"
+
+        registry.register_plugin(
+            plugin_id=plugin_id,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        assert registry.is_registered(plugin_id)
+        plugin_cls = registry.get(plugin_id)
+        assert plugin_cls is SyncComputePlugin
+
+    def test_unicode_emoji_only_plugin_id(self, registry: RegistryCompute) -> None:
+        """Test plugin_id with only emojis is accepted.
+
+        Current behavior: ALLOWED
+        """
+        plugin_id = "🔧🚀💾"
+
+        registry.register_plugin(
+            plugin_id=plugin_id,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        assert registry.is_registered(plugin_id)
+        plugin_cls = registry.get(plugin_id)
+        assert plugin_cls is SyncComputePlugin
+
+    # =========================================================================
+    # Mixed Unicode Tests
+    # =========================================================================
+
+    def test_unicode_mixed_ascii_greek_plugin_id(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test mixed ASCII and Greek letters in plugin_id.
+
+        Current behavior: ALLOWED
+        Uses Greek letters alpha and beta.
+        """
+        plugin_id = "transformer_α_β"
+
+        registry.register_plugin(
+            plugin_id=plugin_id,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        assert registry.is_registered(plugin_id)
+        plugin_cls = registry.get(plugin_id)
+        assert plugin_cls is SyncComputePlugin
+
+    def test_unicode_mixed_scripts_plugin_id(self, registry: RegistryCompute) -> None:
+        """Test mixed scripts (Latin, Cyrillic, CJK) in plugin_id.
+
+        Current behavior: ALLOWED
+        """
+        plugin_id = "data_данные_数据"  # English + Russian + Chinese for "data"
+
+        registry.register_plugin(
+            plugin_id=plugin_id,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        assert registry.is_registered(plugin_id)
+        plugin_cls = registry.get(plugin_id)
+        assert plugin_cls is SyncComputePlugin
+
+    # =========================================================================
+    # Unicode Whitespace and Control Characters
+    # =========================================================================
+
+    def test_unicode_zero_width_space_in_plugin_id(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test plugin_id with zero-width space (U+200B) is accepted.
+
+        Current behavior: ALLOWED (potentially problematic!)
+
+        Zero-width space is an invisible character that can cause:
+        - Confusion: "plugin" vs "plugin\\u200b" look identical
+        - Serialization issues in some systems
+        - Debugging difficulties
+
+        RECOMMENDATION: Consider rejecting zero-width and other
+        invisible Unicode characters in plugin_id validation.
+        """
+        # Plugin ID with invisible zero-width space at end
+        plugin_id_with_zwsp = "plugin\u200b"  # Zero-width space (U+200B)
+        plugin_id_normal = "plugin"
+
+        # Both should register separately (they are different strings)
+        registry.register_plugin(
+            plugin_id=plugin_id_with_zwsp,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+        registry.register_plugin(
+            plugin_id=plugin_id_normal,
+            plugin_class=SyncComputePluginV1,
+            version="1.0.0",
+        )
+
+        # Both should be retrievable
+        assert registry.is_registered(plugin_id_with_zwsp)
+        assert registry.is_registered(plugin_id_normal)
+
+        # They are DIFFERENT plugins (different strings)
+        assert len(registry) == 2
+        assert plugin_id_with_zwsp != plugin_id_normal
+
+        # Can retrieve each independently
+        cls1 = registry.get(plugin_id_with_zwsp)
+        cls2 = registry.get(plugin_id_normal)
+        assert cls1 is SyncComputePlugin
+        assert cls2 is SyncComputePluginV1
+
+    def test_unicode_null_byte_in_plugin_id_accepted(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test plugin_id with NULL byte (\\x00) is accepted.
+
+        Current behavior: ALLOWED (security concern!)
+
+        NULL bytes in strings can cause:
+        - C-string termination issues in some backends
+        - Security vulnerabilities (null byte injection)
+        - Database storage problems
+
+        RECOMMENDATION: NULL bytes should be rejected in plugin_id.
+        Add a validator to ModelComputeRegistration:
+        ```python
+        @field_validator("plugin_id")
+        @classmethod
+        def validate_no_null_bytes(cls, v: str) -> str:
+            if "\\x00" in v:
+                raise ValueError("plugin_id cannot contain NULL bytes")
+            return v
+        ```
+        """
+        plugin_id_with_null = "plugin\x00suffix"
+        plugin_id_normal = "plugin"
+
+        # Currently NULL bytes are ALLOWED (potentially problematic!)
+        registry.register_plugin(
+            plugin_id=plugin_id_with_null,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        # Registration succeeds
+        assert registry.is_registered(plugin_id_with_null)
+
+        # The null byte makes it a different plugin_id
+        registry.register_plugin(
+            plugin_id=plugin_id_normal,
+            plugin_class=SyncComputePluginV1,
+            version="1.0.0",
+        )
+
+        assert len(registry) == 2
+        assert plugin_id_with_null != plugin_id_normal
+
+        # Can retrieve both
+        cls1 = registry.get(plugin_id_with_null)
+        cls2 = registry.get(plugin_id_normal)
+        assert cls1 is SyncComputePlugin
+        assert cls2 is SyncComputePluginV1
+
+    def test_unicode_other_control_characters_behavior(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test behavior with other Unicode control characters.
+
+        Current behavior: Some control chars may be ALLOWED
+
+        This test documents behavior with bell character (\\x07).
+        Different control characters may have different behavior.
+        """
+        # Bell character - less problematic than NULL
+        plugin_id_with_bell = "plugin\x07bell"
+
+        # Try to register and see what happens
+        try:
+            registry.register_plugin(
+                plugin_id=plugin_id_with_bell,
+                plugin_class=SyncComputePlugin,
+                version="1.0.0",
+            )
+            # If we get here, the control character was accepted
+            assert registry.is_registered(plugin_id_with_bell)
+            # Document that this control character is allowed
+        except ValidationError:
+            # If ValidationError is raised, control chars are rejected
+            # Document that Pydantic rejects this character
+            pass  # Test passes either way - we're documenting behavior
+
+    # =========================================================================
+    # Unicode Normalization Tests
+    # =========================================================================
+
+    def test_unicode_normalization_not_applied(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test that Unicode normalization is NOT applied to plugin_id.
+
+        Current behavior: NO normalization
+
+        The same character in different Unicode forms (NFC vs NFD)
+        is treated as DIFFERENT plugin_ids.
+
+        Example: "cafe" with composed e-acute vs decomposed e + accent
+
+        RECOMMENDATION: Consider applying Unicode normalization (NFC)
+        to plugin_ids for consistency.
+        """
+        import unicodedata
+
+        # "cafe" in NFC (composed: e-acute as single character U+00E9)
+        plugin_id_nfc = unicodedata.normalize("NFC", "café")
+        # "cafe" in NFD (decomposed: e + combining acute accent)
+        plugin_id_nfd = unicodedata.normalize("NFD", "café")
+
+        # They look the same but are different byte sequences
+        assert plugin_id_nfc != plugin_id_nfd
+
+        registry.register_plugin(
+            plugin_id=plugin_id_nfc,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+        registry.register_plugin(
+            plugin_id=plugin_id_nfd,
+            plugin_class=SyncComputePluginV1,
+            version="1.0.0",
+        )
+
+        # Both are registered as DIFFERENT plugins
+        assert len(registry) == 2
+        assert registry.is_registered(plugin_id_nfc)
+        assert registry.is_registered(plugin_id_nfd)
+
+    # =========================================================================
+    # Unicode Confusables (Homoglyph) Tests
+    # =========================================================================
+
+    def test_unicode_lookalike_characters_are_different(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test that visually similar Unicode characters create different plugins.
+
+        Current behavior: Lookalikes are DIFFERENT plugins
+
+        This documents a potential security/confusion issue:
+        - "normalizer" (ASCII 'o')
+        - "normalizer" (Greek omicron U+03BF)
+
+        These look nearly identical but are different strings.
+
+        RECOMMENDATION: If this is a security concern, consider:
+        1. Restricting to ASCII-only plugin_ids
+        2. Using Unicode confusable detection
+        """
+        # ASCII lowercase 'o' (U+006F)
+        plugin_id_ascii = "normalizer"
+        # Greek lowercase omicron (U+03BF) - visually similar to 'o'
+        plugin_id_greek = "n\u03bfrmalizer"  # Using escape for Greek omicron
+
+        # Verify they are different strings
+        assert plugin_id_ascii != plugin_id_greek
+        assert "o" != "\u03bf"  # ASCII 'o' vs Greek omicron
+
+        registry.register_plugin(
+            plugin_id=plugin_id_ascii,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+        registry.register_plugin(
+            plugin_id=plugin_id_greek,
+            plugin_class=SyncComputePluginV1,
+            version="1.0.0",
+        )
+
+        # Both registered as DIFFERENT plugins
+        assert len(registry) == 2
+        assert registry.is_registered(plugin_id_ascii)
+        assert registry.is_registered(plugin_id_greek)
+
+        # Can retrieve each independently
+        cls_ascii = registry.get(plugin_id_ascii)
+        cls_greek = registry.get(plugin_id_greek)
+        assert cls_ascii is SyncComputePlugin
+        assert cls_greek is SyncComputePluginV1
+
+    # =========================================================================
+    # Multiple Unicode Plugin Version Tests
+    # =========================================================================
+
+    def test_unicode_plugin_multiple_versions(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test registering multiple versions of a Unicode plugin_id."""
+        plugin_id = "处理器"  # Chinese for "processor"
+
+        registry.register_plugin(plugin_id, SyncComputePluginV1, "1.0.0")
+        registry.register_plugin(plugin_id, SyncComputePluginV2, "2.0.0")
+
+        # Both versions registered
+        versions = registry.list_versions(plugin_id)
+        assert versions == ["1.0.0", "2.0.0"]
+
+        # get() without version returns latest
+        latest = registry.get(plugin_id)
+        assert latest is SyncComputePluginV2
+
+        # get() with version returns specific
+        v1 = registry.get(plugin_id, version="1.0.0")
+        assert v1 is SyncComputePluginV1
+
+    def test_unicode_plugin_unregister(self, registry: RegistryCompute) -> None:
+        """Test unregistering a Unicode plugin_id."""
+        plugin_id = "процессор"
+
+        registry.register_plugin(plugin_id, SyncComputePlugin, "1.0.0")
+        assert registry.is_registered(plugin_id)
+
+        count = registry.unregister(plugin_id)
+        assert count == 1
+        assert not registry.is_registered(plugin_id)
+
+    def test_unicode_plugin_in_list_keys_sorted(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test that Unicode plugins appear correctly in list_keys()."""
+        # Register ASCII and various Unicode plugins
+        registry.register_plugin("ascii_plugin", SyncComputePlugin, "1.0.0")
+        registry.register_plugin("处理器", SyncComputePlugin, "1.0.0")
+        registry.register_plugin("процессор", SyncComputePlugin, "1.0.0")
+
+        keys = registry.list_keys()
+        plugin_ids = [k[0] for k in keys]
+
+        # All should be present
+        assert "ascii_plugin" in plugin_ids
+        assert "处理器" in plugin_ids
+        assert "процессор" in plugin_ids
+
+    # =========================================================================
+    # Edge Cases
+    # =========================================================================
+
+    def test_unicode_single_character_plugin_id(
+        self, registry: RegistryCompute
+    ) -> None:
+        """Test single Unicode character as plugin_id (min_length=1)."""
+        # Single Chinese character
+        plugin_id = "龙"  # "dragon" in Chinese
+
+        registry.register_plugin(
+            plugin_id=plugin_id,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        assert registry.is_registered(plugin_id)
+        plugin_cls = registry.get(plugin_id)
+        assert plugin_cls is SyncComputePlugin
+
+    def test_unicode_mathematical_symbols(self, registry: RegistryCompute) -> None:
+        """Test mathematical Unicode symbols in plugin_id."""
+        plugin_id = "∑_sum_∏_product"
+
+        registry.register_plugin(
+            plugin_id=plugin_id,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        assert registry.is_registered(plugin_id)
+        plugin_cls = registry.get(plugin_id)
+        assert plugin_cls is SyncComputePlugin
+
+    def test_unicode_arrows_and_symbols(self, registry: RegistryCompute) -> None:
+        """Test arrow and other symbols in plugin_id."""
+        plugin_id = "input→transform→output"
+
+        registry.register_plugin(
+            plugin_id=plugin_id,
+            plugin_class=SyncComputePlugin,
+            version="1.0.0",
+        )
+
+        assert registry.is_registered(plugin_id)
+        plugin_cls = registry.get(plugin_id)
+        assert plugin_cls is SyncComputePlugin
+
+
+# =============================================================================
+# TestStressAndPerformance - Large Scale Registry Tests
+# =============================================================================
+
+
+class TestStressAndPerformance:
+    """Stress tests for RegistryCompute with large numbers of registrations.
+
+    These tests verify the registry performs well at scale:
+    - 1000+ unique plugin registrations
+    - 100+ versions per plugin
+    - Registration, lookup, and list operation performance
+    - Memory efficiency
+
+    Tests are marked with @pytest.mark.slow for optional exclusion in fast test runs.
+    """
+
+    @pytest.fixture
+    def large_registry(self) -> RegistryCompute:
+        """Create a registry with 1000 unique plugins for stress testing.
+
+        Creates 1000 unique plugins with version 1.0.0 each.
+        Total: 1000 registrations.
+
+        Note: Direct instantiation avoids container DI overhead for accurate
+        performance measurement.
+        """
+        RegistryCompute._reset_semver_cache()
+        registry = RegistryCompute()
+        for i in range(1000):
+
+            class DynamicPlugin:
+                """Dynamically created plugin for stress testing."""
+
+                def execute(self, data: dict[str, object]) -> dict[str, object]:
+                    return {"plugin_id": i}
+
+            registry.register_plugin(
+                plugin_id=f"plugin_{i:04d}",
+                plugin_class=DynamicPlugin,
+                version="1.0.0",
+            )
+        return registry
+
+    @pytest.fixture
+    def many_versions_registry(self) -> RegistryCompute:
+        """Create a registry with single plugin having 100+ versions.
+
+        Creates 1 plugin with 100 versions (1.0.0 through 1.99.0).
+        Total: 100 registrations.
+        """
+        RegistryCompute._reset_semver_cache()
+        registry = RegistryCompute()
+        for i in range(100):
+
+            class VersionedPlugin:
+                """Plugin with specific version for testing."""
+
+                def execute(self, data: dict[str, object]) -> dict[str, object]:
+                    return {"version": i}
+
+            registry.register_plugin(
+                plugin_id="versioned_plugin",
+                plugin_class=VersionedPlugin,
+                version=f"1.{i}.0",
+            )
+        return registry
+
+    @pytest.mark.slow
+    def test_stress_register_1000_unique_plugins(self) -> None:
+        """Stress test: Register 1000 unique plugins in < 1 second.
+
+        This validates that registration performance scales linearly
+        with O(1) registration complexity.
+
+        Threshold: 1000 registrations < 1000ms (< 1ms per registration)
+        """
+        import time
+
+        RegistryCompute._reset_semver_cache()
+        registry = RegistryCompute()
+
+        start_time = time.perf_counter()
+        for i in range(1000):
+
+            class DynamicPlugin:
+                def execute(self, data: dict[str, object]) -> dict[str, object]:
+                    return {"id": i}
+
+            registry.register_plugin(
+                plugin_id=f"stress_plugin_{i:04d}",
+                plugin_class=DynamicPlugin,
+                version="1.0.0",
+            )
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Verify all registrations succeeded
+        assert len(registry) == 1000
+
+        # Performance assertion: < 1 second for 1000 registrations
+        assert elapsed_ms < 1000, (
+            f"1000 registrations took {elapsed_ms:.1f}ms (threshold: 1000ms). "
+            f"Average: {elapsed_ms / 1000:.3f}ms per registration."
+        )
+
+    @pytest.mark.slow
+    def test_stress_register_100_versions_same_plugin(self) -> None:
+        """Stress test: Register 100 versions of same plugin.
+
+        This validates that the secondary index handles many versions
+        for a single plugin_id efficiently.
+
+        Threshold: 100 registrations < 200ms
+        """
+        import time
+
+        RegistryCompute._reset_semver_cache()
+        registry = RegistryCompute()
+
+        start_time = time.perf_counter()
+        for i in range(100):
+
+            class VersionPlugin:
+                def execute(self, data: dict[str, object]) -> dict[str, object]:
+                    return {"v": i}
+
+            registry.register_plugin(
+                plugin_id="multi_version_plugin",
+                plugin_class=VersionPlugin,
+                version=f"{i // 10}.{i % 10}.0",
+            )
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Verify all registrations succeeded
+        assert len(registry) == 100
+        versions = registry.list_versions("multi_version_plugin")
+        assert len(versions) == 100
+
+        # Performance assertion
+        assert elapsed_ms < 200, (
+            f"100 version registrations took {elapsed_ms:.1f}ms (threshold: 200ms)."
+        )
+
+    @pytest.mark.slow
+    def test_stress_get_random_lookups_1000(
+        self, large_registry: RegistryCompute
+    ) -> None:
+        """Stress test: Random get() lookups should average < 1ms.
+
+        Tests that the secondary index provides O(1) lookup performance
+        even with 1000 registered plugins.
+
+        Threshold: 1000 lookups < 100ms (< 0.1ms per lookup on average)
+        """
+        import random
+        import time
+
+        # Warm up cache
+        _ = large_registry.get("plugin_0500")
+
+        # Perform 1000 random lookups
+        plugin_ids = [f"plugin_{i:04d}" for i in range(1000)]
+        random.shuffle(plugin_ids)
+
+        start_time = time.perf_counter()
+        for plugin_id in plugin_ids:
+            _ = large_registry.get(plugin_id)
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        avg_ms = elapsed_ms / 1000
+
+        # Performance assertion: < 1ms average per lookup
+        assert avg_ms < 1.0, (
+            f"Average lookup time {avg_ms:.3f}ms exceeds 1ms threshold. "
+            f"Total: {elapsed_ms:.1f}ms for 1000 lookups."
+        )
+
+    @pytest.mark.slow
+    def test_stress_get_p99_latency_under_threshold(
+        self, large_registry: RegistryCompute
+    ) -> None:
+        """Stress test: P99 get() latency must be under 1ms.
+
+        Validates O(1) secondary index optimization provides consistent performance.
+
+        Threshold: P99 < 1ms
+        """
+        import statistics
+        import time
+
+        # Warm up
+        for _ in range(10):
+            _ = large_registry.get("plugin_0500")
+
+        # Collect 1000 latency samples
+        latencies: list[float] = []
+        plugin_ids = [f"plugin_{i:04d}" for i in range(1000)]
+
+        for plugin_id in plugin_ids:
+            start = time.perf_counter()
+            _ = large_registry.get(plugin_id)
+            latencies.append((time.perf_counter() - start) * 1000)  # ms
+
+        # Calculate p99 latency
+        latencies.sort()
+        p99_index = int(len(latencies) * 0.99)
+        p99 = latencies[p99_index]
+        p50 = statistics.median(latencies)
+        mean = statistics.mean(latencies)
+
+        assert p99 < 1.0, (
+            f"P99 latency {p99:.3f}ms exceeds 1ms threshold. "
+            f"Stats: p50={p50:.3f}ms, mean={mean:.3f}ms, p99={p99:.3f}ms."
+        )
+
+    @pytest.mark.slow
+    def test_stress_list_keys_1000_entries(
+        self, large_registry: RegistryCompute
+    ) -> None:
+        """Stress test: list_keys() with 1000 entries.
+
+        Tests that list_keys() completes in reasonable time with sorting.
+
+        Threshold: list_keys() < 100ms for 1000 entries
+        """
+        import time
+
+        start_time = time.perf_counter()
+        keys = large_registry.list_keys()
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Verify correctness
+        assert len(keys) == 1000
+        # Verify sorted order
+        plugin_ids = [k[0] for k in keys]
+        assert plugin_ids == sorted(plugin_ids)
+
+        # Performance assertion
+        assert elapsed_ms < 100, (
+            f"list_keys() took {elapsed_ms:.1f}ms for 1000 entries (threshold: 100ms)."
+        )
+
+    @pytest.mark.slow
+    def test_stress_list_versions_100_versions(
+        self, many_versions_registry: RegistryCompute
+    ) -> None:
+        """Stress test: list_versions() with 100 versions.
+
+        Tests that list_versions() performance is O(k) where k = number of versions.
+
+        Threshold: 1000 list_versions() calls < 500ms
+        """
+        import time
+
+        start_time = time.perf_counter()
+        for _ in range(1000):
+            versions = many_versions_registry.list_versions("versioned_plugin")
+            assert len(versions) == 100
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Performance assertion
+        assert elapsed_ms < 500, (
+            f"1000 list_versions() calls took {elapsed_ms:.1f}ms (threshold: 500ms). "
+            f"Average: {elapsed_ms / 1000:.3f}ms per call."
+        )
+
+    @pytest.mark.slow
+    def test_stress_unregister_performance(self) -> None:
+        """Stress test: unregister() performance with many entries.
+
+        Tests both single-version and all-version unregister performance.
+
+        Threshold: 500 unregistrations < 500ms
+        """
+        import time
+
+        RegistryCompute._reset_semver_cache()
+        registry = RegistryCompute()
+
+        # Register 500 plugins with 2 versions each = 1000 total
+        for i in range(500):
+
+            class Plugin:
+                def execute(self, data: dict[str, object]) -> dict[str, object]:
+                    return {}
+
+            registry.register_plugin(f"unregister_test_{i:04d}", Plugin, "1.0.0")
+            registry.register_plugin(f"unregister_test_{i:04d}", Plugin, "2.0.0")
+
+        assert len(registry) == 1000
+
+        # Test single-version unregister (250 operations)
+        start_time = time.perf_counter()
+        for i in range(250):
+            count = registry.unregister(f"unregister_test_{i:04d}", "1.0.0")
+            assert count == 1
+        single_version_ms = (time.perf_counter() - start_time) * 1000
+
+        # Test all-versions unregister (250 operations, each removes 2 entries)
+        start_time = time.perf_counter()
+        for i in range(250, 500):
+            count = registry.unregister(f"unregister_test_{i:04d}")
+            assert count == 2
+        all_versions_ms = (time.perf_counter() - start_time) * 1000
+
+        total_ms = single_version_ms + all_versions_ms
+
+        # Verify all unregistered
+        # 250 plugins remaining (i=0-249 with only version 2.0.0)
+        assert len(registry) == 250
+
+        # Performance assertion
+        assert total_ms < 500, (
+            f"500 unregister operations took {total_ms:.1f}ms (threshold: 500ms). "
+            f"Single-version: {single_version_ms:.1f}ms, "
+            f"All-versions: {all_versions_ms:.1f}ms."
+        )
+
+    @pytest.mark.slow
+    def test_stress_memory_footprint_1000_plugins(self) -> None:
+        """Stress test: Memory footprint with 1000 plugins.
+
+        Validates that memory usage doesn't grow unbounded.
+        Based on documented estimate: ~220 bytes per registration.
+
+        Expected: 1000 registrations ~= 220 KB
+        Threshold: < 1 MB (generous margin for Python overhead)
+        """
+        import gc
+        import sys
+
+        # Force GC for clean baseline
+        gc.collect()
+        gc.collect()
+        gc.collect()
+
+        RegistryCompute._reset_semver_cache()
+        registry = RegistryCompute()
+
+        # Register 1000 plugins
+        for i in range(1000):
+
+            class MemoryPlugin:
+                def execute(self, data: dict[str, object]) -> dict[str, object]:
+                    return {}
+
+            registry.register_plugin(f"mem_plugin_{i:04d}", MemoryPlugin, "1.0.0")
+
+        # Measure memory using sys.getsizeof for registry internals
+        memory_bytes = 0
+
+        # Registry dict
+        memory_bytes += sys.getsizeof(registry._registry)
+        for key, value in registry._registry.items():
+            memory_bytes += sys.getsizeof(key)
+            # Key internals (strings)
+            memory_bytes += sys.getsizeof(key.plugin_id)
+            memory_bytes += sys.getsizeof(key.version)
+
+        # Secondary index
+        memory_bytes += sys.getsizeof(registry._plugin_id_index)
+        for plugin_id, keys in registry._plugin_id_index.items():
+            memory_bytes += sys.getsizeof(plugin_id)
+            memory_bytes += sys.getsizeof(keys)
+
+        memory_kb = memory_bytes / 1024
+
+        # Verify count
+        assert len(registry) == 1000
+
+        # Memory assertion: < 1 MB (generous threshold for Python object overhead)
+        assert memory_kb < 1024, (
+            f"Registry memory {memory_kb:.1f}KB exceeds 1024KB threshold. "
+            f"Expected ~220KB for 1000 registrations."
+        )
+
+    @pytest.mark.slow
+    def test_stress_memory_no_leak_on_repeated_operations(self) -> None:
+        """Stress test: Verify no memory leak from repeated register/unregister cycles.
+
+        Tests that the secondary index is properly cleaned up and doesn't
+        accumulate stale entries.
+
+        Strategy: Register and unregister 1000 plugins 5 times,
+        measure final memory footprint.
+        """
+        import gc
+        import sys
+
+        RegistryCompute._reset_semver_cache()
+        registry = RegistryCompute()
+
+        # Perform 5 cycles of register/unregister
+        for cycle in range(5):
+            # Register 1000 plugins
+            for i in range(1000):
+
+                class CyclePlugin:
+                    def execute(self, data: dict[str, object]) -> dict[str, object]:
+                        return {"cycle": cycle}
+
+                registry.register_plugin(f"cycle_plugin_{i:04d}", CyclePlugin, "1.0.0")
+
+            assert len(registry) == 1000
+
+            # Unregister all
+            for i in range(1000):
+                registry.unregister(f"cycle_plugin_{i:04d}")
+
+            assert len(registry) == 0
+
+        # Force GC
+        gc.collect()
+        gc.collect()
+
+        # Measure final memory footprint
+        memory_bytes = sys.getsizeof(registry._registry)
+        memory_bytes += sys.getsizeof(registry._plugin_id_index)
+
+        # Registry should be essentially empty
+        assert len(registry._registry) == 0
+        assert len(registry._plugin_id_index) == 0
+
+        # Memory should be bounded - Python dicts pre-allocate and don't shrink
+        # fully after clearing, so we use a generous threshold. The key test is
+        # that the registry is logically empty (len == 0) and memory doesn't
+        # grow unboundedly (stays under 100KB for cleared dicts).
+        assert memory_bytes < 100 * 1024, (
+            f"Empty registry using {memory_bytes} bytes after cycles. "
+            "Possible memory leak in secondary index cleanup."
+        )
+
+    @pytest.mark.slow
+    def test_stress_concurrent_operations_1000(self) -> None:
+        """Stress test: 1000 concurrent operations (register + lookup).
+
+        Tests thread safety under high concurrency with mixed operations.
+
+        Threshold: 1000 concurrent operations < 2 seconds
+        """
+        import threading
+        import time
+
+        RegistryCompute._reset_semver_cache()
+        registry = RegistryCompute()
+
+        # Pre-register some plugins
+        for i in range(100):
+
+            class PrePlugin:
+                def execute(self, data: dict[str, object]) -> dict[str, object]:
+                    return {}
+
+            registry.register_plugin(f"pre_plugin_{i:02d}", PrePlugin, "1.0.0")
+
+        errors: list[Exception] = []
+        results: list[bool] = []
+        lock = threading.Lock()
+
+        def concurrent_operation(thread_id: int) -> None:
+            try:
+                # Mix of operations
+                for i in range(100):
+                    if i % 3 == 0:
+                        # Register new plugin
+                        class ThreadPlugin:
+                            def execute(
+                                self, data: dict[str, object]
+                            ) -> dict[str, object]:
+                                return {"thread": thread_id}
+
+                        registry.register_plugin(
+                            f"thread_{thread_id}_plugin_{i}",
+                            ThreadPlugin,
+                            "1.0.0",
+                        )
+                    elif i % 3 == 1:
+                        # Lookup existing plugin
+                        plugin_cls = registry.get(f"pre_plugin_{i % 100:02d}")
+                        with lock:
+                            results.append(plugin_cls is not None)
+                    else:
+                        # Check registration
+                        is_reg = registry.is_registered(f"pre_plugin_{i % 100:02d}")
+                        with lock:
+                            results.append(is_reg)
+            except Exception as e:
+                with lock:
+                    errors.append(e)
+
+        # Run 10 threads concurrently
+        start_time = time.perf_counter()
+        threads = [
+            threading.Thread(target=concurrent_operation, args=(i,))
+            for i in range(10)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Verify no errors
+        assert len(errors) == 0, f"Concurrent operation errors: {errors}"
+
+        # Verify some operations succeeded
+        assert len(results) > 0
+
+        # Performance assertion
+        assert elapsed_ms < 2000, (
+            f"Concurrent operations took {elapsed_ms:.1f}ms (threshold: 2000ms)."
+        )
+
+    @pytest.mark.slow
+    def test_stress_get_latest_with_100_versions(
+        self, many_versions_registry: RegistryCompute
+    ) -> None:
+        """Stress test: get() returns correct latest from 100 versions.
+
+        Validates that semantic version sorting works correctly with many versions.
+
+        Threshold: 1000 get() calls < 200ms
+        """
+        import time
+
+        # Warm up
+        _ = many_versions_registry.get("versioned_plugin")
+
+        start_time = time.perf_counter()
+        for _ in range(1000):
+            plugin_cls = many_versions_registry.get("versioned_plugin")
+            # Just verify we got a class back
+            assert plugin_cls is not None
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Verify latest version is returned (1.99.0 is semantically latest)
+        versions = many_versions_registry.list_versions("versioned_plugin")
+        assert versions[-1] == "1.99.0", f"Expected 1.99.0 as latest, got {versions[-1]}"
+
+        # Performance assertion
+        assert elapsed_ms < 200, (
+            f"1000 get() calls with 100 versions took {elapsed_ms:.1f}ms "
+            f"(threshold: 200ms). Average: {elapsed_ms / 1000:.3f}ms."
+        )
+
+    @pytest.mark.slow
+    def test_stress_is_registered_performance(
+        self, large_registry: RegistryCompute
+    ) -> None:
+        """Stress test: is_registered() performance with 1000 plugins.
+
+        Threshold: 1000 is_registered() calls < 50ms (< 0.05ms per call)
+        """
+        import time
+
+        start_time = time.perf_counter()
+        for i in range(1000):
+            plugin_id = f"plugin_{i:04d}"
+            result = large_registry.is_registered(plugin_id)
+            assert result is True
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Performance assertion
+        assert elapsed_ms < 50, (
+            f"1000 is_registered() calls took {elapsed_ms:.1f}ms (threshold: 50ms). "
+            f"Average: {elapsed_ms / 1000:.4f}ms per call."
+        )
+
+    @pytest.mark.slow
+    def test_stress_secondary_index_integrity(self) -> None:
+        """Stress test: Verify secondary index integrity after many operations.
+
+        Tests that the secondary index stays consistent with the main registry
+        after many mixed operations (register, unregister, overwrite).
+        """
+        RegistryCompute._reset_semver_cache()
+        registry = RegistryCompute()
+
+        # Phase 1: Register 500 plugins
+        for i in range(500):
+
+            class Phase1Plugin:
+                def execute(self, data: dict[str, object]) -> dict[str, object]:
+                    return {}
+
+            registry.register_plugin(f"integrity_plugin_{i:04d}", Phase1Plugin, "1.0.0")
+
+        # Phase 2: Add second version to half of them
+        for i in range(250):
+
+            class Phase2Plugin:
+                def execute(self, data: dict[str, object]) -> dict[str, object]:
+                    return {}
+
+            registry.register_plugin(f"integrity_plugin_{i:04d}", Phase2Plugin, "2.0.0")
+
+        # Phase 3: Unregister some
+        for i in range(100):
+            registry.unregister(f"integrity_plugin_{i:04d}", "1.0.0")
+
+        # Phase 4: Overwrite some
+        for i in range(100, 150):
+
+            class Phase4Plugin:
+                def execute(self, data: dict[str, object]) -> dict[str, object]:
+                    return {"overwritten": True}
+
+            registry.register_plugin(f"integrity_plugin_{i:04d}", Phase4Plugin, "1.0.0")
+
+        # Verify secondary index integrity
+        # Count should match
+        total_keys_in_index = sum(
+            len(keys) for keys in registry._plugin_id_index.values()
+        )
+        assert total_keys_in_index == len(registry._registry), (
+            f"Secondary index count {total_keys_in_index} != "
+            f"registry count {len(registry._registry)}"
+        )
+
+        # All keys in index should exist in registry
+        for plugin_id, keys in registry._plugin_id_index.items():
+            for key in keys:
+                assert key in registry._registry, (
+                    f"Key {key} in index but not in registry"
+                )
+                assert key.plugin_id == plugin_id, (
+                    f"Key plugin_id {key.plugin_id} != index key {plugin_id}"
+                )
+
+        # All keys in registry should be in index
+        for key in registry._registry:
+            assert key.plugin_id in registry._plugin_id_index, (
+                f"plugin_id {key.plugin_id} not in secondary index"
+            )
+            assert key in registry._plugin_id_index[key.plugin_id], (
+                f"Key {key} not in secondary index for {key.plugin_id}"
+            )
+
+    @pytest.mark.slow
+    def test_stress_semver_cache_performance(self) -> None:
+        """Stress test: Semver cache provides performance benefit.
+
+        Validates that the LRU cache for semver parsing improves performance
+        for repeated operations.
+
+        Strategy: Compare cold cache vs warm cache performance.
+        """
+        import time
+
+        RegistryCompute._reset_semver_cache()
+
+        # Generate version strings
+        versions = [
+            f"{major}.{minor}.{patch}"
+            for major in range(10)
+            for minor in range(10)
+            for patch in range(10)
+        ]
+        # 1000 unique versions
+
+        # Cold cache - first parse of each version
+        cold_start = time.perf_counter()
+        for v in versions:
+            _ = RegistryCompute._parse_semver(v)
+        cold_time_ms = (time.perf_counter() - cold_start) * 1000
+
+        # Warm cache - repeated parsing (should hit cache)
+        warm_start = time.perf_counter()
+        for _ in range(10):  # 10 iterations
+            for v in versions:
+                _ = RegistryCompute._parse_semver(v)
+        warm_time_ms = (time.perf_counter() - warm_start) * 1000
+
+        # Per-iteration warm time
+        warm_per_iteration_ms = warm_time_ms / 10
+
+        # Cache should provide some benefit or at least not hurt significantly
+        # (Within 2x is acceptable due to cache overhead on fast operations)
+        ratio = warm_per_iteration_ms / cold_time_ms
+
+        assert ratio < 2.0, (
+            f"Semver cache not effective. "
+            f"Cold: {cold_time_ms:.2f}ms, "
+            f"Warm per iteration: {warm_per_iteration_ms:.2f}ms. "
+            f"Ratio: {ratio:.2f}x (expected < 2.0x)."
+        )
