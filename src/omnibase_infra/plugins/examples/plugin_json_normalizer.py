@@ -236,7 +236,7 @@ class PluginJsonNormalizer(PluginComputeBase):
 
     def _is_json_compatible(self, value: object) -> bool:
         """Type guard to check if value is JSON-compatible."""
-        return isinstance(value, (dict, list, str, int, float, bool, type(None)))
+        return isinstance(value, dict | list | str | int | float | bool | type(None))
 
     def _validate_json_structure(self, obj: JsonValue, _depth: int = 0) -> None:
         """Recursively validate JSON structure for non-JSON-compatible types.

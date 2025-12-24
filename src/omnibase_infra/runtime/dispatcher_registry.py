@@ -72,20 +72,22 @@ class ProtocolMessageDispatcher(Protocol):
     - message_types: Specific message types it accepts (empty = all)
     - node_kind: The ONEX node kind this dispatcher represents
 
-    Protocol Validation:
-        This protocol is marked ``@runtime_checkable``, enabling ``isinstance()``
-        checks for structural type verification. Use ``isinstance(obj, ProtocolMessageDispatcher)``
-        to verify that an object implements the required interface.
+    Protocol Verification:
+        Per ONEX conventions, protocol compliance is verified via duck typing rather
+        than isinstance checks. Verify required methods and properties exist:
 
         **Validation Approaches**:
 
-        1. **isinstance Check** (recommended for quick structural validation):
+        1. **Duck Typing Check** (recommended for quick structural validation):
            Use when you need to verify an object implements the dispatcher interface
            before passing it to components that expect a dispatcher.
 
            .. code-block:: python
 
-               if isinstance(dispatcher, ProtocolMessageDispatcher):
+               # Verify required properties and methods exist
+               if (hasattr(dispatcher, 'dispatcher_id') and
+                   hasattr(dispatcher, 'category') and
+                   hasattr(dispatcher, 'handle') and callable(dispatcher.handle)):
                    registry.register_dispatcher(dispatcher)
                else:
                    raise TypeError("Object does not implement ProtocolMessageDispatcher")
@@ -100,10 +102,8 @@ class ProtocolMessageDispatcher(Protocol):
            This is the recommended approach for production registration as it
            provides detailed error messages for debugging.
 
-        **Note on isinstance() Limitations**:
-        Python's runtime_checkable protocols only verify method/attribute existence,
-        not return types or parameter types. For complete type safety, use static
-        type checking (mypy) in addition to runtime checks.
+        **Note**: For complete type safety, use static type checking (mypy)
+        in addition to duck typing verification.
 
     Thread Safety:
         WARNING: Dispatcher implementations may be invoked concurrently from the
@@ -156,9 +156,11 @@ class ProtocolMessageDispatcher(Protocol):
                         dispatcher_id=self.dispatcher_id,
                     )
 
-            # Verify protocol compliance using isinstance (quick structural check)
-            dispatcher: ProtocolMessageDispatcher = UserEventDispatcher()
-            assert isinstance(dispatcher, ProtocolMessageDispatcher)
+            # Verify protocol compliance via duck typing (per ONEX conventions)
+            dispatcher = UserEventDispatcher()
+            assert hasattr(dispatcher, 'dispatcher_id')
+            assert hasattr(dispatcher, 'category')
+            assert hasattr(dispatcher, 'handle') and callable(dispatcher.handle)
 
             # Or use DispatcherRegistry for comprehensive validation
             registry = DispatcherRegistry()
@@ -790,10 +792,8 @@ class DispatcherRegistry:
         """
         Validate that a dispatcher meets the ProtocolMessageDispatcher requirements.
 
-        This method provides comprehensive validation beyond what ``isinstance()``
-        checks offer. While ``isinstance(obj, ProtocolMessageDispatcher)`` verifies
-        that required attributes exist (due to ``@runtime_checkable``), this method
-        additionally validates:
+        This method provides comprehensive validation using duck typing patterns.
+        It validates:
 
         - Property values have correct types (e.g., dispatcher_id is a non-empty str)
         - EnumMessageCategory and EnumNodeKind are the actual enum instances
@@ -802,7 +802,7 @@ class DispatcherRegistry:
 
         **When to Use Each Validation Approach**:
 
-        - ``isinstance(obj, ProtocolMessageDispatcher)``: Quick structural check,
+        - ``hasattr() + callable()``: Quick structural check via duck typing,
           suitable for type guards or early rejection of obviously invalid objects.
         - ``_validate_dispatcher()``: Comprehensive validation with detailed error
           messages, used internally by ``register_dispatcher()``.

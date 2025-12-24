@@ -51,6 +51,7 @@ from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 
 
 class ModelDispatcherRegistration(BaseModel):
@@ -194,7 +195,7 @@ class ModelDispatcherRegistration(BaseModel):
         default=None,
         description="Optional tags for categorization and filtering.",
     )
-    metadata: dict[str, str] | None = Field(
+    metadata: ModelDispatchMetadata | None = Field(
         default=None,
         description="Optional additional metadata about the dispatcher.",
     )

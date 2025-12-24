@@ -99,8 +99,9 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
     Cache is cleared when the module is reloaded.
 
     Returns:
-        Dictionary with 'pattern_exemptions' and 'union_exemptions' keys,
-        each containing a list of ExemptionPattern dictionaries.
+        Dictionary with 'pattern_exemptions', 'union_exemptions', and
+        'architecture_exemptions' keys, each containing a list of
+        ExemptionPattern dictionaries.
         Returns empty lists if file is missing or malformed.
 
     Note:
@@ -109,24 +110,36 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
     """
     if not EXEMPTIONS_YAML_PATH.exists():
         # Fallback to empty exemptions if file is missing
-        return {"pattern_exemptions": [], "union_exemptions": []}
+        return {
+            "pattern_exemptions": [],
+            "union_exemptions": [],
+            "architecture_exemptions": [],
+        }
 
     try:
         with EXEMPTIONS_YAML_PATH.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
         if not isinstance(data, dict):
-            return {"pattern_exemptions": [], "union_exemptions": []}
+            return {
+                "pattern_exemptions": [],
+                "union_exemptions": [],
+                "architecture_exemptions": [],
+            }
 
         # Extract exemption lists, converting YAML structure to ExemptionPattern format
         pattern_exemptions = _convert_yaml_exemptions(
             data.get("pattern_exemptions", [])
         )
         union_exemptions = _convert_yaml_exemptions(data.get("union_exemptions", []))
+        architecture_exemptions = _convert_yaml_exemptions(
+            data.get("architecture_exemptions", [])
+        )
 
         return {
             "pattern_exemptions": pattern_exemptions,
             "union_exemptions": union_exemptions,
+            "architecture_exemptions": architecture_exemptions,
         }
     except (yaml.YAMLError, OSError) as e:
         # Log warning but continue with empty exemptions
@@ -135,7 +148,11 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
             EXEMPTIONS_YAML_PATH,
             e,
         )
-        return {"pattern_exemptions": [], "union_exemptions": []}
+        return {
+            "pattern_exemptions": [],
+            "union_exemptions": [],
+            "architecture_exemptions": [],
+        }
 
 
 def _convert_yaml_exemptions(yaml_list: list[dict]) -> list[ExemptionPattern]:
@@ -269,6 +286,17 @@ def get_union_exemptions() -> list[ExemptionPattern]:
     return _load_exemptions_yaml()["union_exemptions"]
 
 
+def get_architecture_exemptions() -> list[ExemptionPattern]:
+    """
+    Get architecture validator exemptions from YAML configuration.
+
+    Returns:
+        List of ExemptionPattern dictionaries for architecture validation.
+    """
+    exemptions = _load_exemptions_yaml()
+    return exemptions.get("architecture_exemptions", [])
+
+
 # Default paths for infrastructure validation
 INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
@@ -336,13 +364,12 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
 # - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots (~24 unions added)
 # - 540 (2025-12-23): OMN-950 comprehensive reducer tests (~25 unions from type annotations)
-# - 544 (2025-12-23): OMN-954 effect idempotency and retry tests (PR #78) (~14 unions added)
-#   - nodes/effects/ module with protocol and model definitions
-#   - Legitimate X | None nullable patterns for optional fields
+# - 544 (2025-12-23): OMN-954 effect idempotency and retry tests (PR #78) (~4 unions added)
+# - 580 (2025-12-23): OMN-888 + PR #57 + OMN-954 merge (~36 additional unions combined)
 #
-# Threshold: 555 (11 buffer above 544 baseline for codebase growth)
+# Threshold: 580 (buffer above ~569 combined baseline for codebase growth)
 # Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
-INFRA_MAX_UNIONS = 555
+INFRA_MAX_UNIONS = 580
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
@@ -369,14 +396,34 @@ def validate_infra_architecture(
 
     Enforces ONEX one-model-per-file principle critical for infrastructure nodes.
 
+    Exemptions:
+        Exemption patterns are loaded from validation_exemptions.yaml (architecture_exemptions section).
+        See that file for the complete list of exemptions with rationale and ticket references.
+
+        Key exemption categories:
+        - contract_linter.py: Domain-grouped validation models (PR-57)
+        - protocols.py: Domain-grouped protocols per CLAUDE.md convention (OMN-888)
+
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
         max_violations: Maximum allowed violations. Defaults to INFRA_MAX_VIOLATIONS (0).
 
     Returns:
-        ModelValidationResult with validation status and any errors.
+        ModelValidationResult with validation status and filtered errors.
+        Documented exemptions are filtered from error list but logged for transparency.
     """
-    return validate_architecture(str(directory), max_violations=max_violations)
+    # Run base validation
+    base_result = validate_architecture(str(directory), max_violations=max_violations)
+
+    # Load exemption patterns from YAML configuration
+    # See validation_exemptions.yaml for pattern definitions and rationale
+    exempted_patterns = get_architecture_exemptions()
+
+    # Filter errors using regex-based pattern matching
+    filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
+
+    # Create wrapper result (avoid mutation)
+    return _create_filtered_result(base_result, filtered_errors)
 
 
 def validate_infra_contracts(
@@ -540,6 +587,9 @@ def _create_filtered_result(
     Avoids mutating the original result object for better functional programming practices.
     Creates new metadata using model_validate to prevent mutation of Pydantic models.
 
+    Guards against missing attributes on base_result to handle edge cases where
+    validation results may have incomplete or missing fields.
+
     Args:
         base_result: Original validation result.
         filtered_errors: Filtered error list.
@@ -547,34 +597,56 @@ def _create_filtered_result(
     Returns:
         New ValidationResult with filtered errors and updated metadata.
     """
+    # Guard against missing errors attribute on base_result
+    base_errors = getattr(base_result, "errors", None)
+    base_errors_count = len(base_errors) if base_errors is not None else 0
+
     # Calculate filtering statistics
-    violations_filtered = len(base_result.errors) - len(filtered_errors)
+    violations_filtered = base_errors_count - len(filtered_errors)
     all_violations_exempted = violations_filtered > 0 and len(filtered_errors) == 0
 
     # Create new metadata if present (avoid mutation)
+    # Use getattr to guard against missing metadata attribute on base_result
     new_metadata = None
-    if base_result.metadata:
+    base_metadata = getattr(base_result, "metadata", None)
+    if base_metadata is not None:
         # Use model_copy for deep copy with updates (Pydantic v2 pattern)
         # This works with both real Pydantic models and test mocks
         try:
-            new_metadata = base_result.metadata.model_copy(deep=True)
-            # Update violations_found if the field exists
-            if hasattr(new_metadata, "violations_found"):
-                new_metadata.violations_found = len(filtered_errors)
+            new_metadata = base_metadata.model_copy(deep=True)
+            # Update violations_found if the field exists and is writable
+            # Guard against None return from model_copy and missing/read-only attributes
+            if new_metadata is not None and hasattr(new_metadata, "violations_found"):
+                try:
+                    new_metadata.violations_found = len(filtered_errors)
+                except (AttributeError, TypeError):
+                    # violations_found may be a read-only property or frozen field
+                    pass
         except AttributeError:
             # Fallback for test mocks that don't support model_copy
-            new_metadata = base_result.metadata
+            # Use original metadata without modification to avoid mutation
+            new_metadata = base_metadata
+
+    # Guard against missing attributes on base_result
+    # Use getattr with sensible defaults to handle incomplete validation results
+    base_is_valid = getattr(base_result, "is_valid", False)
+    base_validated_value = getattr(base_result, "validated_value", None)
+    base_issues = getattr(base_result, "issues", [])
+    base_warnings = getattr(base_result, "warnings", [])
+    base_suggestions = getattr(base_result, "suggestions", [])
+    base_summary = getattr(base_result, "summary", None)
+    base_details = getattr(base_result, "details", None)
 
     # Create new result (wrapper pattern - no mutation)
     return ModelValidationResult(
-        is_valid=all_violations_exempted or base_result.is_valid,
-        validated_value=base_result.validated_value,
-        issues=base_result.issues,
+        is_valid=all_violations_exempted or base_is_valid,
+        validated_value=base_validated_value,
+        issues=base_issues if base_issues is not None else [],
         errors=filtered_errors,
-        warnings=base_result.warnings,
-        suggestions=base_result.suggestions,
-        summary=base_result.summary,
-        details=base_result.details,
+        warnings=base_warnings if base_warnings is not None else [],
+        suggestions=base_suggestions if base_suggestions is not None else [],
+        summary=base_summary,
+        details=base_details,
         metadata=new_metadata,
     )
 
@@ -748,23 +820,24 @@ def get_validation_summary(
         # Skip entries with non-string keys
         if not isinstance(name, str):
             continue
-        # NOTE: isinstance usage here is justified as CircularImportValidationResult
-        # and ValidationResult have different APIs (has_circular_imports vs is_valid).
-        # Duck typing would require protocol definitions in omnibase_core.
-        # This is acceptable for result type discrimination in summary generation.
-        if isinstance(result, CircularImportValidationResult):
+        # Use duck typing to determine result API:
+        # - CircularImportValidationResult has 'has_circular_imports' attribute
+        # - ModelValidationResult has 'is_valid' attribute
+        # This follows ONEX convention of duck typing over isinstance for protocols.
+        if hasattr(result, "has_circular_imports"):
             # Circular import validator uses has_circular_imports
             if not result.has_circular_imports:
                 passed += 1
             else:
                 failed += 1
                 failed_validators.append(name)
-        # Standard ModelValidationResult uses is_valid
-        elif result.is_valid:
-            passed += 1
-        else:
-            failed += 1
-            failed_validators.append(name)
+        elif hasattr(result, "is_valid"):
+            # Standard ModelValidationResult uses is_valid
+            if result.is_valid:
+                passed += 1
+            else:
+                failed += 1
+                failed_validators.append(name)
 
     return {
         "total_validators": passed + failed,
@@ -791,6 +864,7 @@ __all__ = [
     # Exemption loaders
     "get_pattern_exemptions",
     "get_union_exemptions",
+    "get_architecture_exemptions",
     # Validators
     "validate_infra_architecture",
     "validate_infra_contracts",

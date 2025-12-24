@@ -44,6 +44,11 @@ Environment Variables:
             Range: 0-10
             Example: "5"
 
+            NOTE: This is the BUS-LEVEL retry for Kafka connection/publish failures.
+            This is distinct from MESSAGE-LEVEL retry tracked in ModelEventHeaders
+            (retry_count/max_retries), which is for application-level message
+            delivery tracking across services. See "Dual Retry Configuration" below.
+
         KAFKA_RETRY_BACKOFF_BASE: Base delay for exponential backoff (float seconds)
             Default: 1.0
             Range: 0.1-60.0
@@ -98,6 +103,32 @@ Environment Variables:
             - Failure reason and timestamp
             - Correlation ID for tracking
             - Retry count and error type
+
+Dual Retry Configuration:
+    ONEX uses TWO distinct retry mechanisms that serve different purposes:
+
+    1. **Bus-Level Retry** (KafkaEventBus internal):
+       - Configured via: max_retry_attempts, retry_backoff_base
+       - Purpose: Handle transient Kafka connection/publish failures
+       - Scope: Single publish operation within the event bus
+       - Applies to: Producer.send() failures, timeouts, connection errors
+       - Example: If Kafka broker is temporarily unreachable, retry 3 times
+         with exponential backoff before failing
+
+    2. **Message-Level Retry** (ModelEventHeaders):
+       - Configured via: retry_count, max_retries in message headers
+       - Purpose: Track application-level message delivery attempts
+       - Scope: End-to-end message delivery across services
+       - Applies to: Business logic failures, handler exceptions
+       - Example: If order processing fails, increment retry_count and
+         republish; stop after max_retries reached
+
+    These mechanisms are INDEPENDENT and work together:
+    - Bus-level retry handles infrastructure failures (network, broker)
+    - Message-level retry handles application failures (handler errors)
+
+    A single message publish may trigger multiple bus-level retries,
+    while still counting as a single message-level delivery attempt.
 
 Usage:
     ```python

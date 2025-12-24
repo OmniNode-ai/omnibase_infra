@@ -324,7 +324,7 @@ class TestLoadAndValidateConfig:
             "input_topic": "requests",
             "output_topic": "responses",
         }
-        with open(config_file, "w") as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         result = load_and_validate_config(config_file)
@@ -356,7 +356,7 @@ class TestLoadAndValidateConfig:
         config_data = {
             "input_topic": "invalid topic with spaces",
         }
-        with open(config_file, "w") as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:

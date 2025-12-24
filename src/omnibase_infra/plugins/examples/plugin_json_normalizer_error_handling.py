@@ -203,7 +203,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
         if json_data is not None:
             # Ensure it's a JSON-compatible type
             if not isinstance(
-                json_data, (dict, list, str, int, float, bool, type(None))
+                json_data, dict | list | str | int | float | bool | type(None)
             ):
                 raise ValueError(
                     f"Input 'json' must be JSON-compatible type "

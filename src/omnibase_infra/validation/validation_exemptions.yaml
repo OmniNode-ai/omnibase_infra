@@ -390,6 +390,70 @@ pattern_exemptions:
       plugin_id is a human-readable semantic identifier, consistent with ModelComputeKey. Follows the policy_id/dispatcher_id pattern.
 
     ticket: OMN-811
+  # ==========================================================================
+  # Consul Intent Payload Exemptions (OMN-888)
+  # ==========================================================================
+  # service_name in ModelConsulIntentPayload is the Consul service name to register,
+  # NOT a reference to an internal entity. It is a Consul-specific configuration field.
+  - file_pattern: 'model_consul_intent_payload\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name is the Consul service name to register in service discovery
+      (e.g., "node-effect-123"). This is Consul-specific configuration, not an
+      entity reference. The field specifies how the node appears in Consul's
+      service catalog.
+
+    ticket: OMN-888
+# Architecture validator exemptions
+# These handle one-model-per-file violations for domain-grouped protocols
+architecture_exemptions:
+  # ==========================================================================
+  # Contract Linter Models Exemption (PR #57)
+  # ==========================================================================
+  # contract_linter.py contains domain-grouped validation models and enums
+  # that are cohesive and always used together. These define the complete
+  # interface for contract linting results.
+  - file_pattern: 'validation/contract_linter\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      Domain-grouped validation result models for contract linting.
+      ModelContractViolation and ModelContractLintResult define the complete
+      interface for contract validation results. Per CLAUDE.md domain-grouping
+      convention for cohesive models that are always used together.
+    ticket: PR-57
+  - file_pattern: 'validation/contract_linter\.py'
+    violation_pattern: 'Mixed types in one file'
+    reason: >
+      Contract linter module contains cohesive types (enum + models) for
+      validation results. EnumContractViolationSeverity is tightly coupled
+      with ModelContractViolation and ModelContractLintResult.
+    ticket: PR-57
+  # ==========================================================================
+  # Domain-Grouped Protocol Exemptions (CLAUDE.md Convention)
+  # ==========================================================================
+  # Per CLAUDE.md "Protocol File Naming" section:
+  # "Domain-grouped protocols: Use protocols.py when multiple cohesive protocols
+  # belong to a specific domain or node module"
+  - file_pattern: 'nodes/node_registration_orchestrator/protocols\.py'
+    violation_pattern: '\d+ protocols in one file'
+    reason: >
+      Domain-grouped protocols for registration orchestrator workflow.
+      ProtocolReducer and ProtocolEffect define the complete interface for the
+      reducer-effect pattern in node registration. Per CLAUDE.md convention.
+
+      Architectural documentation included in module:
+      - Thread safety requirements (lines 13-24): Implementations MUST be thread-safe
+      - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors
+      - Protocol contracts with examples in docstrings
+
+      Full architectural documentation:
+      - Node architecture: docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - Protocol design: docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
+      - Node README: src/omnibase_infra/nodes/node_registration_orchestrator/README.md
+    documentation:
+      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
+    ticket: OMN-888
 # Union usage validator exemptions
 # These handle complex union type violations
 union_exemptions:

@@ -20,17 +20,40 @@ import pytest
 from omnibase_infra.idempotency import (
     InMemoryIdempotencyStore,
     ModelIdempotencyRecord,
-    ProtocolIdempotencyStore,
 )
 
 
 class TestInMemoryIdempotencyStoreProtocol:
-    """Test protocol conformance."""
+    """Test protocol conformance.
+
+    Per ONEX conventions, protocol conformance is verified via duck typing
+    by checking for required method presence and callability, rather than
+    using isinstance checks with Protocol types.
+    """
 
     def test_conforms_to_protocol(self) -> None:
-        """InMemoryIdempotencyStore should conform to ProtocolIdempotencyStore."""
+        """InMemoryIdempotencyStore should conform to ProtocolIdempotencyStore.
+
+        Verifies protocol conformance via duck typing by checking that all
+        required methods exist and are callable.
+        """
         store = InMemoryIdempotencyStore()
-        assert isinstance(store, ProtocolIdempotencyStore)
+
+        # Verify all ProtocolIdempotencyStore methods via duck typing
+        # Required methods: check_and_record, is_processed, mark_processed, cleanup_expired
+        required_methods = [
+            "check_and_record",
+            "is_processed",
+            "mark_processed",
+            "cleanup_expired",
+        ]
+        for method_name in required_methods:
+            assert hasattr(store, method_name), (
+                f"Store must have '{method_name}' method"
+            )
+            assert callable(getattr(store, method_name)), (
+                f"'{method_name}' must be callable"
+            )
 
 
 class TestCheckAndRecord:

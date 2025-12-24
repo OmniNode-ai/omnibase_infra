@@ -5,6 +5,11 @@
 This module defines the protocol that Consul clients must implement
 to be used with the NodeRegistryEffect node.
 
+Thread Safety:
+    Implementations MUST be thread-safe for concurrent async calls.
+    Multiple async tasks may invoke register_service() simultaneously
+    for different or identical service registrations.
+
 Related:
     - NodeRegistryEffect: Effect node that uses this protocol
     - ProtocolPostgresAdapter: Protocol for PostgreSQL backend
@@ -22,6 +27,19 @@ class ProtocolConsulClient(Protocol):
     """Protocol for Consul service registration client.
 
     Implementations must provide async service registration capability.
+
+    Thread Safety:
+        Implementations MUST be thread-safe for concurrent async calls.
+
+        **Guarantees implementers MUST provide:**
+            - Concurrent register_service() calls are safe
+            - Connection pooling (if used) is async-safe
+            - Internal state (if any) is protected by asyncio.Lock
+
+        **What callers can assume:**
+            - Multiple coroutines can call register_service() concurrently
+            - Each registration operation is independent
+            - Failures in one registration do not affect others
     """
 
     async def register_service(

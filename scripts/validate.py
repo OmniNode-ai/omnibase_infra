@@ -24,15 +24,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
 def run_architecture(verbose: bool = False) -> bool:
-    """Run architecture validation."""
+    """Run architecture validation with infrastructure-specific exemptions."""
     try:
-        from omnibase_core.validation import validate_architecture
-
-        from omnibase_infra.validation.infra_validators import INFRA_MAX_VIOLATIONS
-
-        result = validate_architecture(
-            "src/omnibase_infra/", max_violations=INFRA_MAX_VIOLATIONS
+        # Use the infrastructure validator which includes exemption filtering
+        # for domain-grouped protocols per CLAUDE.md convention
+        from omnibase_infra.validation.infra_validators import (
+            validate_infra_architecture,
         )
+
+        result = validate_infra_architecture()
         if verbose or not result.is_valid:
             print(f"Architecture: {'PASS' if result.is_valid else 'FAIL'}")
             for e in result.errors:
@@ -50,32 +50,71 @@ def run_architecture(verbose: bool = False) -> bool:
 
 
 def run_contracts(verbose: bool = False) -> bool:
-    """Run contract validation."""
+    """Run contract validation with infrastructure-specific linting.
+
+    Uses two-phase validation:
+    1. Basic YAML validation from omnibase_core
+    2. Infrastructure contract linting for required fields and type consistency
+    """
     nodes_dir = Path("src/omnibase_infra/nodes")
     if not nodes_dir.exists():
         if verbose:
             print("Contracts: SKIP (no nodes directory)")
         return True
 
+    all_passed = True
+
+    # Phase 1: Basic YAML validation from omnibase_core
     try:
         from omnibase_core.validation import validate_contracts
 
         result = validate_contracts("src/omnibase_infra/nodes/")
         if verbose or not result.is_valid:
-            print(f"Contracts: {'PASS' if result.is_valid else 'FAIL'}")
+            print(f"Contracts (YAML): {'PASS' if result.is_valid else 'FAIL'}")
             for e in result.errors:
                 print(f"  - {e}")
-            if hasattr(result, "metadata") and result.metadata:
-                meta = result.metadata
-                if meta.yaml_files_found is not None:
-                    print(
-                        f"  YAML files found: {meta.yaml_files_found}, "
-                        f"violations: {meta.violations_found}"
-                    )
-        return bool(result.is_valid)
+        if not result.is_valid:
+            all_passed = False
     except ImportError as e:
-        print(f"Skipping contract validation: {e}")
-        return True
+        print(f"Skipping YAML validation: {e}")
+
+    # Phase 2: Infrastructure contract linting
+    try:
+        from omnibase_infra.validation.contract_linter import (
+            EnumContractViolationSeverity,
+            lint_contracts_in_directory,
+        )
+
+        lint_result = lint_contracts_in_directory(
+            "src/omnibase_infra/nodes/",
+            check_imports=True,
+            strict_mode=False,
+        )
+
+        if verbose or not lint_result.is_valid:
+            print(f"Contracts (Lint): {'PASS' if lint_result.is_valid else 'FAIL'}")
+            print(
+                f"  Files: {lint_result.files_checked}, "
+                f"errors: {lint_result.error_count}, "
+                f"warnings: {lint_result.warning_count}"
+            )
+            # Show errors and warnings
+            for v in lint_result.violations:
+                if v.severity in (
+                    EnumContractViolationSeverity.ERROR,
+                    EnumContractViolationSeverity.WARNING,
+                ):
+                    print(f"  - {v}")
+        if not lint_result.is_valid:
+            all_passed = False
+
+    except ImportError as e:
+        print(f"Skipping contract linting: {e}")
+
+    if verbose or not all_passed:
+        print(f"Contracts: {'PASS' if all_passed else 'FAIL'}")
+
+    return all_passed
 
 
 def run_patterns(verbose: bool = False) -> bool:
@@ -104,7 +143,11 @@ def run_patterns(verbose: bool = False) -> bool:
 
 
 def run_unions(verbose: bool = False) -> bool:
-    """Run union usage validation."""
+    """Run union usage validation.
+
+    Counts total unions in the codebase.
+    Valid `X | None` patterns are counted but not flagged as violations.
+    """
     try:
         # Use infrastructure wrapper which includes exemption filtering
         # for documented infrastructure patterns
@@ -126,7 +169,7 @@ def run_unions(verbose: bool = False) -> bool:
                 meta = result.metadata
                 if hasattr(meta, "total_unions"):
                     print(
-                        f"  Total unions: {meta.total_unions}, max allowed: {meta.max_unions}"
+                        f"  Total unions: {meta.total_unions}, max allowed: {INFRA_MAX_UNIONS}"
                     )
         return bool(result.is_valid)
     except ImportError as e:

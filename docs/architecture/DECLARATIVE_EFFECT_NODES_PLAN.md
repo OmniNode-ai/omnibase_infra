@@ -1519,7 +1519,7 @@ SCHEMA_PATH = Path(__file__).parent / "_schema" / "effect_contract_schema.json"
 
 def load_schema() -> dict:
     """Load the effect contract JSON schema."""
-    with open(SCHEMA_PATH) as f:
+    with open(SCHEMA_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 def validate_contract(contract_path: Path) -> list[str]:
@@ -1532,7 +1532,7 @@ def validate_contract(contract_path: Path) -> list[str]:
     errors = []
 
     try:
-        with open(contract_path) as f:
+        with open(contract_path, encoding="utf-8") as f:
             contract = yaml.safe_load(f)
 
         schema = load_schema()

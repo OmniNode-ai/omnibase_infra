@@ -30,8 +30,12 @@ description: >
   Effect node for dual-backend node registration. Executes registration operations against both Consul (service discovery) and PostgreSQL (registration record persistence), with support for partial failure handling and targeted retries.
 
 # Strongly typed I/O models
-input_model: "ModelRegistryRequest"
-output_model: "ModelRegistryResponse"
+input_model:
+  name: "ModelRegistryRequest"
+  module: "omnibase_infra.nodes.effects.models"
+output_model:
+  name: "ModelRegistryResponse"
+  module: "omnibase_infra.nodes.effects.models"
 # IO operations (EFFECT node specific)
 io_operations:
   - operation: "register_node"
