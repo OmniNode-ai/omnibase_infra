@@ -79,9 +79,9 @@ class TestProjectionReaderDependency:
             None,
         )
 
-        assert projection_reader_dep is not None, (
-            "projection_reader dependency not found in dependencies list"
-        )
+        assert (
+            projection_reader_dep is not None
+        ), "projection_reader dependency not found in dependencies list"
         assert projection_reader_dep.get("type") == "protocol", (
             f"projection_reader must have type='protocol', "
             f"found: {projection_reader_dep.get('type')}"
@@ -102,9 +102,9 @@ class TestProjectionReaderDependency:
             None,
         )
 
-        assert projection_reader_dep is not None, (
-            "projection_reader dependency not found in dependencies list"
-        )
+        assert (
+            projection_reader_dep is not None
+        ), "projection_reader dependency not found in dependencies list"
         assert projection_reader_dep.get("module") == "omnibase_spi.protocols", (
             f"projection_reader must have module='omnibase_spi.protocols', "
             f"found: {projection_reader_dep.get('module')}"
@@ -161,9 +161,9 @@ class TestReadProjectionStep:
             None,
         )
 
-        assert read_projection_node is not None, (
-            "read_projection node not found in execution graph"
-        )
+        assert (
+            read_projection_node is not None
+        ), "read_projection node not found in execution graph"
 
         depends_on = read_projection_node.get("depends_on", [])
         assert "receive_introspection" in depends_on, (
@@ -192,9 +192,9 @@ class TestReadProjectionStep:
             None,
         )
 
-        assert read_projection_node is not None, (
-            "read_projection node not found in execution graph"
-        )
+        assert (
+            read_projection_node is not None
+        ), "read_projection node not found in execution graph"
 
         step_config = read_projection_node.get("step_config", {})
         assert step_config.get("protocol") == "ProtocolProjectionReader", (
@@ -222,9 +222,9 @@ class TestReadProjectionStep:
             None,
         )
 
-        assert read_projection_node is not None, (
-            "read_projection node not found in execution graph"
-        )
+        assert (
+            read_projection_node is not None
+        ), "read_projection node not found in execution graph"
 
         step_config = read_projection_node.get("step_config", {})
         assert "projection_name" in step_config, (
@@ -256,14 +256,14 @@ class TestProjectionConfiguration:
         - projection_reader.projections includes an entry with
           name="node_registration_state"
         """
-        assert "projection_reader" in contract_data, (
-            "projection_reader section must exist in contract"
-        )
+        assert (
+            "projection_reader" in contract_data
+        ), "projection_reader section must exist in contract"
 
         projection_reader = contract_data["projection_reader"]
-        assert "projections" in projection_reader, (
-            "projection_reader must have 'projections' list"
-        )
+        assert (
+            "projections" in projection_reader
+        ), "projection_reader must have 'projections' list"
 
         projections = projection_reader["projections"]
         projection_names = {p["name"] for p in projections}
@@ -383,9 +383,9 @@ class TestProjectionBackedDecisionFlow:
             None,
         )
 
-        assert evaluate_timeout_node is not None, (
-            "evaluate_timeout node not found in execution graph"
-        )
+        assert (
+            evaluate_timeout_node is not None
+        ), "evaluate_timeout node not found in execution graph"
 
         depends_on = evaluate_timeout_node.get("depends_on", [])
         assert "read_projection" in depends_on, (
@@ -417,21 +417,21 @@ class TestProjectionBackedDecisionFlow:
         }
 
         # Verify receive_introspection has no dependencies (it's the entry point)
-        assert node_deps.get("receive_introspection", []) == [], (
-            "receive_introspection should have no dependencies"
-        )
+        assert (
+            node_deps.get("receive_introspection", []) == []
+        ), "receive_introspection should have no dependencies"
 
         # Verify read_projection depends on receive_introspection
-        assert "receive_introspection" in node_deps.get("read_projection", []), (
-            "read_projection must depend on receive_introspection"
-        )
+        assert "receive_introspection" in node_deps.get(
+            "read_projection", []
+        ), "read_projection must depend on receive_introspection"
 
         # Verify evaluate_timeout depends on read_projection
-        assert "read_projection" in node_deps.get("evaluate_timeout", []), (
-            "evaluate_timeout must depend on read_projection"
-        )
+        assert "read_projection" in node_deps.get(
+            "evaluate_timeout", []
+        ), "evaluate_timeout must depend on read_projection"
 
         # Verify compute_intents depends on evaluate_timeout
-        assert "evaluate_timeout" in node_deps.get("compute_intents", []), (
-            "compute_intents must depend on evaluate_timeout"
-        )
+        assert "evaluate_timeout" in node_deps.get(
+            "compute_intents", []
+        ), "compute_intents must depend on evaluate_timeout"
