@@ -143,13 +143,11 @@ class TestTopicDomainCoverage:
             "onex.node.heartbeat.published.v1",
             "onex.node.shutdown.announced.v1",
         ]
-        assert len(node_topics) == 3, (
-            f"Expected 3 node lifecycle topics, found {len(node_topics)}: {node_topics}"
-        )
+        assert (
+            len(node_topics) == 3
+        ), f"Expected 3 node lifecycle topics, found {len(node_topics)}: {node_topics}"
         for expected in expected_node_topics:
-            assert expected in node_topics, (
-                f"Missing node lifecycle topic: {expected}"
-            )
+            assert expected in node_topics, f"Missing node lifecycle topic: {expected}"
 
     def test_registry_topics_present(self) -> None:
         """Verify all registry topics are present."""
@@ -169,13 +167,11 @@ class TestTopicDomainCoverage:
             "onex.infra.circuit_breaker.state_changed.v1",
             "onex.infra.error.detected.v1",
         ]
-        assert len(infra_topics) == 2, (
-            f"Expected 2 infrastructure topics, found {len(infra_topics)}: {infra_topics}"
-        )
+        assert (
+            len(infra_topics) == 2
+        ), f"Expected 2 infrastructure topics, found {len(infra_topics)}: {infra_topics}"
         for expected in expected_infra_topics:
-            assert expected in infra_topics, (
-                f"Missing infrastructure topic: {expected}"
-            )
+            assert expected in infra_topics, f"Missing infrastructure topic: {expected}"
 
 
 class TestTopicCategorization:
@@ -183,27 +179,22 @@ class TestTopicCategorization:
 
     def test_workflow_topics_grouped_correctly(self) -> None:
         """Verify workflow observability topics are correctly identified."""
-        workflow_topics = [
-            t for t in CANONICAL_ONEX_TOPICS if "workflow" in t
-        ]
+        workflow_topics = [t for t in CANONICAL_ONEX_TOPICS if "workflow" in t]
         expected_workflow_topics = [
             "onex.registry.workflow.started.v1",
             "onex.registry.workflow.completed.v1",
             "onex.registry.workflow.failed.v1",
         ]
-        assert len(workflow_topics) == 3, (
-            f"Expected 3 workflow topics, found {len(workflow_topics)}: {workflow_topics}"
-        )
+        assert (
+            len(workflow_topics) == 3
+        ), f"Expected 3 workflow topics, found {len(workflow_topics)}: {workflow_topics}"
         for expected in expected_workflow_topics:
-            assert expected in workflow_topics, (
-                f"Missing workflow topic: {expected}"
-            )
+            assert expected in workflow_topics, f"Missing workflow topic: {expected}"
 
     def test_registration_state_topics_grouped_correctly(self) -> None:
         """Verify registration state change topics are correctly identified."""
         registration_topics = [
-            t for t in CANONICAL_ONEX_TOPICS
-            if t.startswith("onex.registry.node.")
+            t for t in CANONICAL_ONEX_TOPICS if t.startswith("onex.registry.node.")
         ]
         expected_registration_topics = [
             "onex.registry.node.registered.v1",
@@ -215,9 +206,9 @@ class TestTopicCategorization:
             f"found {len(registration_topics)}: {registration_topics}"
         )
         for expected in expected_registration_topics:
-            assert expected in registration_topics, (
-                f"Missing registration state topic: {expected}"
-            )
+            assert (
+                expected in registration_topics
+            ), f"Missing registration state topic: {expected}"
 
 
 class TestTopicVersionSuffixValidation:
@@ -227,33 +218,33 @@ class TestTopicVersionSuffixValidation:
         """Test that .v1 suffix is valid."""
         topic = "onex.node.introspection.published.v1"
         version_pattern = re.compile(r"\.v[0-9]+$")
-        assert version_pattern.search(topic), (
-            f"Topic '{topic}' should have valid version suffix"
-        )
+        assert version_pattern.search(
+            topic
+        ), f"Topic '{topic}' should have valid version suffix"
 
     def test_valid_version_suffix_v2(self) -> None:
         """Test that .v2 suffix is valid."""
         topic = "onex.node.heartbeat.published.v2"
         version_pattern = re.compile(r"\.v[0-9]+$")
-        assert version_pattern.search(topic), (
-            f"Topic '{topic}' should have valid version suffix"
-        )
+        assert version_pattern.search(
+            topic
+        ), f"Topic '{topic}' should have valid version suffix"
 
     def test_valid_version_suffix_v10(self) -> None:
         """Test that multi-digit version suffix is valid."""
         topic = "onex.registry.workflow.completed.v10"
         version_pattern = re.compile(r"\.v[0-9]+$")
-        assert version_pattern.search(topic), (
-            f"Topic '{topic}' should have valid multi-digit version suffix"
-        )
+        assert version_pattern.search(
+            topic
+        ), f"Topic '{topic}' should have valid multi-digit version suffix"
 
     def test_invalid_missing_version_suffix(self) -> None:
         """Test that topic without version suffix is invalid."""
         topic = "onex.node.introspection.published"
         version_pattern = re.compile(r"\.v[0-9]+$")
-        assert not version_pattern.search(topic), (
-            f"Topic '{topic}' should be invalid without version suffix"
-        )
+        assert not version_pattern.search(
+            topic
+        ), f"Topic '{topic}' should be invalid without version suffix"
 
     def test_invalid_wrong_version_format(self) -> None:
         """Test that incorrect version format is invalid."""
@@ -266,9 +257,9 @@ class TestTopicVersionSuffixValidation:
         ]
         version_pattern = re.compile(r"\.v[0-9]+$")
         for topic in invalid_topics:
-            assert not version_pattern.search(topic), (
-                f"Topic '{topic}' should be invalid - incorrect version format"
-            )
+            assert not version_pattern.search(
+                topic
+            ), f"Topic '{topic}' should be invalid - incorrect version format"
 
 
 class TestTopicInvalidNamesValidation:
@@ -290,9 +281,9 @@ class TestTopicInvalidNamesValidation:
             "onex.topic{brace}",
         ]
         for topic in invalid_topics:
-            assert not ONEX_TOPIC_PATTERN.match(topic), (
-                f"Topic '{topic}' should be rejected - contains special characters"
-            )
+            assert not ONEX_TOPIC_PATTERN.match(
+                topic
+            ), f"Topic '{topic}' should be rejected - contains special characters"
 
     def test_reject_empty_after_prefix(self) -> None:
         """Test that empty topic after prefix is rejected."""
@@ -302,9 +293,9 @@ class TestTopicInvalidNamesValidation:
             "onex...",
         ]
         for topic in invalid_topics:
-            assert not ONEX_TOPIC_PATTERN.match(topic), (
-                f"Topic '{topic}' should be rejected - empty after prefix"
-            )
+            assert not ONEX_TOPIC_PATTERN.match(
+                topic
+            ), f"Topic '{topic}' should be rejected - empty after prefix"
 
     def test_reject_missing_onex_prefix(self) -> None:
         """Test that topics without onex. prefix are rejected."""
@@ -315,9 +306,9 @@ class TestTopicInvalidNamesValidation:
             "Onex.node.introspection.published.v1",  # Mixed case
         ]
         for topic in invalid_topics:
-            assert not ONEX_TOPIC_PATTERN.match(topic), (
-                f"Topic '{topic}' should be rejected - missing or invalid onex. prefix"
-            )
+            assert not ONEX_TOPIC_PATTERN.match(
+                topic
+            ), f"Topic '{topic}' should be rejected - missing or invalid onex. prefix"
 
     def test_reject_whitespace_in_topic(self) -> None:
         """Test that whitespace in topic names is rejected."""
@@ -331,9 +322,9 @@ class TestTopicInvalidNamesValidation:
             "onex.\tnode.introspection.published.v1",
         ]
         for topic in invalid_topics:
-            assert not ONEX_TOPIC_PATTERN.match(topic), (
-                f"Topic '{topic}' should be rejected - contains whitespace"
-            )
+            assert not ONEX_TOPIC_PATTERN.match(
+                topic
+            ), f"Topic '{topic}' should be rejected - contains whitespace"
 
     def test_reject_uppercase_domain(self) -> None:
         """Test that uppercase in domain is rejected."""
@@ -343,9 +334,9 @@ class TestTopicInvalidNamesValidation:
             "onex.nOdE.introspection.published.v1",
         ]
         for topic in invalid_topics:
-            assert not ONEX_TOPIC_PATTERN.match(topic), (
-                f"Topic '{topic}' should be rejected - uppercase in domain"
-            )
+            assert not ONEX_TOPIC_PATTERN.match(
+                topic
+            ), f"Topic '{topic}' should be rejected - uppercase in domain"
 
     def test_reject_invalid_domain_start(self) -> None:
         """Test that domain starting with number or hyphen is rejected."""
@@ -355,6 +346,6 @@ class TestTopicInvalidNamesValidation:
             "onex._node.introspection.published.v1",  # Starts with underscore
         ]
         for topic in invalid_topics:
-            assert not ONEX_TOPIC_PATTERN.match(topic), (
-                f"Topic '{topic}' should be rejected - invalid domain start character"
-            )
+            assert not ONEX_TOPIC_PATTERN.match(
+                topic
+            ), f"Topic '{topic}' should be rejected - invalid domain start character"

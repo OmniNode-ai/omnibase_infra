@@ -1367,7 +1367,9 @@ class MixinNodeIntrospection:
         self._ensure_initialized()
 
         # Validate contract topic declaration
-        self._validate_contract_topic(self._introspection_topic, "publish_introspection")
+        self._validate_contract_topic(
+            self._introspection_topic, "publish_introspection"
+        )
 
         if self._introspection_event_bus is None:
             logger.warning(

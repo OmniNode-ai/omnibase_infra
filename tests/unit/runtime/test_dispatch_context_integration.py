@@ -460,9 +460,9 @@ class TestSyncDispatcherWithContext:
         await engine.dispatch("test.user.commands.v1", envelope)
 
         assert received_context is not None, "Sync dispatcher was not called"
-        assert received_context.now is not None, (
-            "Sync effect dispatcher did not receive time injection"
-        )
+        assert (
+            received_context.now is not None
+        ), "Sync effect dispatcher did not receive time injection"
         assert received_context.node_kind == EnumNodeKind.EFFECT
 
     @pytest.mark.asyncio
@@ -611,15 +611,15 @@ class TestAllNodeKindsTimeInjectionMatrix:
         envelope = create_test_envelope()
         await engine.dispatch("test.user.events.v1", envelope)
 
-        assert received_context is not None, (
-            f"Dispatcher for {node_kind} was not called"
-        )
+        assert (
+            received_context is not None
+        ), f"Dispatcher for {node_kind} was not called"
         assert received_context.node_kind == node_kind
 
         if expects_time:
-            assert received_context.now is not None, (
-                f"{node_kind.value} should receive time injection but got now=None"
-            )
+            assert (
+                received_context.now is not None
+            ), f"{node_kind.value} should receive time injection but got now=None"
             assert received_context.has_time_injection is True
         else:
             assert received_context.now is None, (
@@ -978,9 +978,9 @@ class TestUninspectableDispatcherFallback:
         )
 
         # Verify dispatcher is registered by checking dispatcher_count increased
-        assert engine.dispatcher_count == 1, (
-            "Uninspectable dispatcher should be registered successfully"
-        )
+        assert (
+            engine.dispatcher_count == 1
+        ), "Uninspectable dispatcher should be registered successfully"
 
     @pytest.mark.asyncio
     async def test_uninspectable_dispatcher_with_context_param_works(self) -> None:
@@ -1074,11 +1074,11 @@ class TestUninspectableDispatcherFallback:
 
         # Dispatcher receives only envelope - context is not passed
         # The dispatcher's default value (None) applies
-        assert len(received_args) == 2, (
-            "Dispatcher should record 2 args (envelope, context default)"
-        )
+        assert (
+            len(received_args) == 2
+        ), "Dispatcher should record 2 args (envelope, context default)"
         assert received_args[0] is envelope
         # Context is None because engine didn't pass it (uninspectable fallback)
-        assert received_args[1] is None, (
-            "Uninspectable dispatcher should not receive context from engine"
-        )
+        assert (
+            received_args[1] is None
+        ), "Uninspectable dispatcher should not receive context from engine"

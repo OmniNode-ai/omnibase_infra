@@ -177,9 +177,7 @@ class ModelIntrospectionConfig(BaseModel):
         """
         if v not in VALID_NODE_TYPES:
             valid_types = ", ".join(sorted(t for t in VALID_NODE_TYPES if t.isupper()))
-            raise ValueError(
-                f"Invalid node_type '{v}'. Must be one of: {valid_types}"
-            )
+            raise ValueError(f"Invalid node_type '{v}'. Must be one of: {valid_types}")
         return v
 
     @field_validator("cache_ttl", mode="after")

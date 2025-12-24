@@ -30,6 +30,11 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.mixins import MixinNodeIntrospection, ModelIntrospectionConfig
+from omnibase_infra.mixins.model_introspection_config import (
+    DEFAULT_HEARTBEAT_TOPIC,
+    DEFAULT_INTROSPECTION_TOPIC,
+    DEFAULT_REQUEST_INTROSPECTION_TOPIC,
+)
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
@@ -161,18 +166,31 @@ class ContractDrivenEffectNode(MixinNodeIntrospection):
             ch["event_type"]: ch["topic"] for ch in event_channels.get("subscribes", [])
         }
 
-        # Create introspection config from contract data
-        config = ModelIntrospectionConfig(
-            node_id=metadata.get("name", "unknown-node"),
-            node_type=metadata.get("node_type", "EFFECT"),
-            event_bus=event_bus,
-            version=metadata.get("version", "1.0.0"),
-            introspection_topic=publishes.get("introspection"),
-            heartbeat_topic=publishes.get("heartbeat"),
-            request_introspection_topic=subscribes.get("introspection_request"),
-        )
+        # Store the node name from contract for test verification
+        self._contract_node_name = metadata.get("name", "unknown-node")
 
-        self.initialize_introspection(config=config)
+        # Build config kwargs, only including topics that are explicitly defined
+        config_kwargs: dict[str, Any] = {
+            "node_id": uuid4(),  # Generate unique UUID for each node instance
+            "node_type": metadata.get("node_type", "EFFECT"),
+            "event_bus": event_bus,
+            "version": metadata.get("version", "1.0.0"),
+        }
+
+        # Only add topic overrides if they are explicitly defined in contract
+        if publishes.get("introspection"):
+            config_kwargs["introspection_topic"] = publishes["introspection"]
+        if publishes.get("heartbeat"):
+            config_kwargs["heartbeat_topic"] = publishes["heartbeat"]
+        if subscribes.get("introspection_request"):
+            config_kwargs["request_introspection_topic"] = subscribes[
+                "introspection_request"
+            ]
+
+        # Create introspection config from contract data
+        config = ModelIntrospectionConfig(**config_kwargs)
+
+        self.initialize_introspection_from_config(config)
 
     async def execute_effect(
         self, operation: str, payload: dict[str, Any]
@@ -194,22 +212,23 @@ class ComputeNodeWithCustomTopics(MixinNodeIntrospection):
 
     def __init__(
         self,
-        node_id: str,
+        node_name: str,
         domain: str,
         event_bus: MockEventBus | None = None,
     ) -> None:
         """Initialize compute node with domain-specific topics.
 
         Args:
-            node_id: Unique node identifier.
+            node_name: Human-readable node name (for test identification).
             domain: Domain name for topic namespacing.
             event_bus: Optional event bus for publishing.
         """
         self._state = "ready"
+        self._node_name = node_name  # Store for test verification
 
         # Create domain-specific topics
         config = ModelIntrospectionConfig(
-            node_id=node_id,
+            node_id=uuid4(),  # Generate unique UUID for each node instance
             node_type="COMPUTE",
             event_bus=event_bus,
             version="2.0.0",
@@ -218,7 +237,7 @@ class ComputeNodeWithCustomTopics(MixinNodeIntrospection):
             request_introspection_topic=f"onex.{domain}.introspection.requested.v1",
         )
 
-        self.initialize_introspection(config=config)
+        self.initialize_introspection_from_config(config)
 
     async def process_data(self, data: dict[str, Any]) -> dict[str, Any]:
         """Mock compute processing.
@@ -281,7 +300,11 @@ class TestContractToIntrospectionIntegration:
         )
 
         # Verify node metadata from contract
-        assert node._introspection_node_id == "test-effect-node"
+        # node_id is now a UUID (generated at initialization)
+        from uuid import UUID
+
+        assert isinstance(node._introspection_node_id, UUID)
+        assert node._contract_node_name == "test-effect-node"
         assert node._introspection_node_type == "EFFECT"
         assert node._introspection_version == "1.0.0"
 
@@ -350,11 +373,8 @@ class TestContractToIntrospectionIntegration:
         assert node._introspection_topic == "onex.custom.introspection.topic.v1"
 
         # Missing topics should fall back to defaults
-        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
-        assert (
-            node._request_introspection_topic
-            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
-        )
+        assert node._heartbeat_topic == DEFAULT_HEARTBEAT_TOPIC
+        assert node._request_introspection_topic == DEFAULT_REQUEST_INTROSPECTION_TOPIC
 
 
 # =============================================================================
@@ -403,7 +423,8 @@ class TestEndToEndIntrospectionWorkflow:
 
         # Verify envelope content
         assert isinstance(envelope, ModelNodeIntrospectionEvent)
-        assert envelope.node_id == "workflow-test-node"
+        # node_id is a UUID, verify it matches the node's internal ID
+        assert envelope.node_id == node._introspection_node_id
         assert envelope.node_type == "EFFECT"
         assert envelope.version == "1.5.0"
         assert envelope.reason == "startup"
@@ -433,7 +454,8 @@ class TestEndToEndIntrospectionWorkflow:
         data = await node.get_introspection_data()
 
         # Verify node identification
-        assert data.node_id == "capability-test-node"
+        # node_id is a UUID, verify it matches the node's internal ID
+        assert data.node_id == node._introspection_node_id
         assert data.node_type == "EFFECT"
         assert data.version == "1.0.0"
 
@@ -542,9 +564,10 @@ class TestEndToEndIntrospectionWorkflow:
             assert len(event_bus.subscribed_topics) >= 1
             assert "onex.custom.registry.request.v1" in event_bus.subscribed_topics
 
-            # Verify group ID includes node ID
+            # Verify group ID includes node ID (now a UUID)
+            node_id_str = str(node._introspection_node_id)
             assert any(
-                "listener-test-node" in group for group in event_bus.subscribed_groups
+                node_id_str in group for group in event_bus.subscribed_groups
             )
         finally:
             await node.stop_introspection_tasks()
@@ -565,13 +588,13 @@ class TestMultiDomainConfiguration:
 
         # Create nodes for different domains
         payments_node = ComputeNodeWithCustomTopics(
-            node_id="payments-compute",
+            node_name="payments-compute",
             domain="payments",
             event_bus=payments_bus,
         )
 
         orders_node = ComputeNodeWithCustomTopics(
-            node_id="orders-compute",
+            node_name="orders-compute",
             domain="orders",
             event_bus=orders_bus,
         )
@@ -682,15 +705,9 @@ class TestContractIntegrationEdgeCases:
         node = ContractDrivenEffectNode(contract_data)
 
         # Should fall back to all defaults
-        assert (
-            node._introspection_topic
-            == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
-        )
-        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
-        assert (
-            node._request_introspection_topic
-            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
-        )
+        assert node._introspection_topic == DEFAULT_INTROSPECTION_TOPIC
+        assert node._heartbeat_topic == DEFAULT_HEARTBEAT_TOPIC
+        assert node._request_introspection_topic == DEFAULT_REQUEST_INTROSPECTION_TOPIC
 
     async def test_contract_with_missing_event_channels_key(self) -> None:
         """Verify handling of contract without event_channels key."""
@@ -706,11 +723,8 @@ class TestContractIntegrationEdgeCases:
         node = ContractDrivenEffectNode(contract_data)
 
         # Should fall back to all defaults
-        assert (
-            node._introspection_topic
-            == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
-        )
-        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
+        assert node._introspection_topic == DEFAULT_INTROSPECTION_TOPIC
+        assert node._heartbeat_topic == DEFAULT_HEARTBEAT_TOPIC
 
     async def test_introspection_cache_invalidation_workflow(self) -> None:
         """Verify cache invalidation works in contract-driven workflow."""
@@ -735,14 +749,15 @@ class TestContractIntegrationEdgeCases:
 
         # First call populates cache
         data1 = await node.get_introspection_data()
-        assert data1.node_id == "cache-test-node"
+        # node_id is a UUID, verify it matches the node's internal ID
+        assert data1.node_id == node._introspection_node_id
 
         # Second call should return cached data (same correlation_id)
         data2 = await node.get_introspection_data()
         assert data2.correlation_id == data1.correlation_id
 
-        # Invalidate cache
-        await node.invalidate_introspection_cache()
+        # Invalidate cache (synchronous method)
+        node.invalidate_introspection_cache()
 
         # Third call should generate fresh data (different correlation_id)
         data3 = await node.get_introspection_data()
@@ -858,35 +873,38 @@ class TestTopicValidation:
         for topic in valid_topics:
             # Should not raise
             config = ModelIntrospectionConfig(
-                node_id="validation-test",
+                node_id=uuid4(),
                 node_type="EFFECT",
                 introspection_topic=topic,
             )
             assert config.introspection_topic == topic
 
-    async def test_invalid_topic_without_onex_prefix_rejected(self) -> None:
-        """Verify topics without 'onex.' prefix are rejected."""
-        with pytest.raises(ValueError, match=r"must start with 'onex\.'"):
+    async def test_topic_starting_with_uppercase_rejected(self) -> None:
+        """Verify topics starting with uppercase are rejected."""
+        # Topic validation requires starting with a lowercase letter
+        with pytest.raises(ValueError, match=r"must start with a lowercase letter"):
             ModelIntrospectionConfig(
-                node_id="validation-test",
+                node_id=uuid4(),
                 node_type="EFFECT",
-                introspection_topic="invalid.topic.v1",
+                introspection_topic="Invalid.topic.v1",
             )
 
     async def test_invalid_topic_with_special_chars_rejected(self) -> None:
         """Verify topics with invalid characters are rejected."""
+        # Use @ which is in the invalid_chars set to trigger the "invalid characters" error
         with pytest.raises(ValueError, match="invalid characters"):
             ModelIntrospectionConfig(
-                node_id="validation-test",
+                node_id=uuid4(),
                 node_type="EFFECT",
-                introspection_topic="onex.invalid/topic.v1",
+                introspection_topic="onex.invalid@topic.v1",
             )
 
     async def test_empty_topic_suffix_rejected(self) -> None:
-        """Verify topic with only 'onex.' prefix is rejected."""
-        with pytest.raises(ValueError, match="must have content after"):
+        """Verify topic ending with a dot is rejected."""
+        # Topic "onex." fails pattern validation because it ends with a dot
+        with pytest.raises(ValueError, match="must start with a lowercase letter"):
             ModelIntrospectionConfig(
-                node_id="validation-test",
+                node_id=uuid4(),
                 node_type="EFFECT",
                 introspection_topic="onex.",
             )
@@ -900,29 +918,29 @@ class TestTopicValidation:
 class TestSubclassTopicOverrides:
     """Test subclass override of default topics."""
 
-    async def test_subclass_default_topic_override(self) -> None:
-        """Verify subclass can override default topics at class level."""
+    async def test_explicit_topic_config_overrides_defaults(self) -> None:
+        """Verify explicitly configured topics override model defaults."""
+        # Generate a test UUID for node identification
+        test_node_id = uuid4()
 
         class TenantSpecificNode(MixinNodeIntrospection):
-            """Node with tenant-specific default topics."""
+            """Node that explicitly configures tenant-specific topics."""
 
-            DEFAULT_INTROSPECTION_TOPIC = "onex.tenant1.introspection.published.v1"
-            DEFAULT_HEARTBEAT_TOPIC = "onex.tenant1.heartbeat.published.v1"
-            DEFAULT_REQUEST_INTROSPECTION_TOPIC = (
-                "onex.tenant1.introspection.requested.v1"
-            )
-
-            def __init__(self) -> None:
-                """Initialize tenant-specific node."""
+            def __init__(self, node_id: str) -> None:
+                """Initialize tenant-specific node with explicit topic config."""
                 self._state = "ready"
-                self.initialize_introspection(
-                    node_id="tenant1-node",
+                config = ModelIntrospectionConfig(
+                    node_id=node_id,
                     node_type="EFFECT",
+                    introspection_topic="onex.tenant1.introspection.published.v1",
+                    heartbeat_topic="onex.tenant1.heartbeat.published.v1",
+                    request_introspection_topic="onex.tenant1.introspection.requested.v1",
                 )
+                self.initialize_introspection_from_config(config)
 
-        node = TenantSpecificNode()
+        node = TenantSpecificNode(node_id=str(test_node_id))
 
-        # Verify class-level defaults were used
+        # Verify explicitly configured topics are used
         assert node._introspection_topic == "onex.tenant1.introspection.published.v1"
         assert node._heartbeat_topic == "onex.tenant1.heartbeat.published.v1"
         assert (
@@ -930,30 +948,37 @@ class TestSubclassTopicOverrides:
             == "onex.tenant1.introspection.requested.v1"
         )
 
-    async def test_config_overrides_subclass_defaults(self) -> None:
-        """Verify config topics take precedence over subclass defaults."""
+    async def test_partial_topic_config_uses_defaults_for_unspecified(self) -> None:
+        """Verify partial config uses model defaults for unspecified topics."""
+        # Generate test UUIDs for node identification
+        test_node_id_1 = uuid4()
+        test_node_id_2 = uuid4()
 
-        class TenantSpecificNode(MixinNodeIntrospection):
-            """Node with tenant-specific default topics."""
+        class PartialConfigNode(MixinNodeIntrospection):
+            """Node with partial topic configuration."""
 
-            DEFAULT_INTROSPECTION_TOPIC = "onex.tenant1.introspection.published.v1"
-
-            def __init__(self, introspection_topic: str | None = None) -> None:
-                """Initialize with optional config override."""
+            def __init__(
+                self, node_id: str, introspection_topic: str | None = None
+            ) -> None:
+                """Initialize with optional topic override."""
                 self._state = "ready"
-                config = ModelIntrospectionConfig(
-                    node_id="tenant1-node",
-                    node_type="EFFECT",
-                    introspection_topic=introspection_topic,
-                )
-                self.initialize_introspection(config=config)
+                # Build config with optional topic override
+                config_kwargs: dict[str, Any] = {
+                    "node_id": node_id,
+                    "node_type": "EFFECT",
+                }
+                if introspection_topic is not None:
+                    config_kwargs["introspection_topic"] = introspection_topic
+                config = ModelIntrospectionConfig(**config_kwargs)
+                self.initialize_introspection_from_config(config)
 
-        # Without config override - uses class default
-        node1 = TenantSpecificNode()
-        assert node1._introspection_topic == "onex.tenant1.introspection.published.v1"
+        # Without topic override - uses model default
+        node1 = PartialConfigNode(node_id=str(test_node_id_1))
+        assert node1._introspection_topic == DEFAULT_INTROSPECTION_TOPIC
 
-        # With config override - config takes precedence
-        node2 = TenantSpecificNode(
-            introspection_topic="onex.override.introspection.published.v1"
+        # With topic override - uses provided value
+        node2 = PartialConfigNode(
+            node_id=str(test_node_id_2),
+            introspection_topic="onex.override.introspection.published.v1",
         )
         assert node2._introspection_topic == "onex.override.introspection.published.v1"
