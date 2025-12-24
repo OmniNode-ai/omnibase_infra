@@ -38,7 +38,6 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
@@ -52,10 +51,6 @@ from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
-
-if TYPE_CHECKING:
-    pass
-
 
 # =============================================================================
 # Mock Event Bus
@@ -343,6 +338,100 @@ class MockProjector:
             sequence_info=sequence_info,
             correlation_id=correlation_id,
         )
+
+    async def update_ack_timeout_marker(
+        self,
+        entity_id: UUID,
+        domain: str,
+        emitted_at: datetime,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Update ack timeout emission marker.
+
+        Args:
+            entity_id: Node UUID to update
+            domain: Domain namespace
+            emitted_at: Timestamp when the timeout event was emitted
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            True if marker was updated, False if entity not found
+        """
+        async with self.store._lock:
+            key = (entity_id, domain)
+            existing = self.store.projections.get(key)
+            if existing is None:
+                return False
+
+            # Create updated projection with marker set
+            updated = ModelRegistrationProjection(
+                entity_id=existing.entity_id,
+                domain=existing.domain,
+                current_state=existing.current_state,
+                node_type=existing.node_type,
+                node_version=existing.node_version,
+                capabilities=existing.capabilities,
+                ack_deadline=existing.ack_deadline,
+                liveness_deadline=existing.liveness_deadline,
+                ack_timeout_emitted_at=emitted_at,  # Set the marker
+                liveness_timeout_emitted_at=existing.liveness_timeout_emitted_at,
+                last_applied_event_id=existing.last_applied_event_id,
+                last_applied_offset=existing.last_applied_offset,
+                last_applied_sequence=existing.last_applied_sequence,
+                last_applied_partition=existing.last_applied_partition,
+                registered_at=existing.registered_at,
+                updated_at=emitted_at,
+                correlation_id=correlation_id,
+            )
+            self.store.projections[key] = updated
+            return True
+
+    async def update_liveness_timeout_marker(
+        self,
+        entity_id: UUID,
+        domain: str,
+        emitted_at: datetime,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Update liveness timeout emission marker.
+
+        Args:
+            entity_id: Node UUID to update
+            domain: Domain namespace
+            emitted_at: Timestamp when the expiration event was emitted
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            True if marker was updated, False if entity not found
+        """
+        async with self.store._lock:
+            key = (entity_id, domain)
+            existing = self.store.projections.get(key)
+            if existing is None:
+                return False
+
+            # Create updated projection with marker set
+            updated = ModelRegistrationProjection(
+                entity_id=existing.entity_id,
+                domain=existing.domain,
+                current_state=existing.current_state,
+                node_type=existing.node_type,
+                node_version=existing.node_version,
+                capabilities=existing.capabilities,
+                ack_deadline=existing.ack_deadline,
+                liveness_deadline=existing.liveness_deadline,
+                ack_timeout_emitted_at=existing.ack_timeout_emitted_at,
+                liveness_timeout_emitted_at=emitted_at,  # Set the marker
+                last_applied_event_id=existing.last_applied_event_id,
+                last_applied_offset=existing.last_applied_offset,
+                last_applied_sequence=existing.last_applied_sequence,
+                last_applied_partition=existing.last_applied_partition,
+                registered_at=existing.registered_at,
+                updated_at=emitted_at,
+                correlation_id=correlation_id,
+            )
+            self.store.projections[key] = updated
+            return True
 
 
 # =============================================================================

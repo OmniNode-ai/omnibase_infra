@@ -36,10 +36,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.mixins import ProtocolEventBusLike
-from omnibase_infra.models.projection import (
-    ModelRegistrationProjection,
-    ModelSequenceInfo,
-)
+from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.projectors.projector_registration import ProjectorRegistration
 from omnibase_infra.services.service_timeout_query import ServiceTimeoutQuery
 
@@ -176,8 +173,12 @@ class ServiceTimeoutEmission:
     """
 
     # Default topic patterns following ONEX conventions
-    DEFAULT_ACK_TIMEOUT_TOPIC = "{env}.{namespace}.onex.evt.node-registration-ack-timed-out.v1"
-    DEFAULT_LIVENESS_EXPIRED_TOPIC = "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
+    DEFAULT_ACK_TIMEOUT_TOPIC = (
+        "{env}.{namespace}.onex.evt.node-registration-ack-timed-out.v1"
+    )
+    DEFAULT_LIVENESS_EXPIRED_TOPIC = (
+        "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
+    )
 
     def __init__(
         self,
@@ -330,7 +331,10 @@ class ServiceTimeoutEmission:
                 ack_emitted += 1
                 markers_updated += 1
             except Exception as e:
-                error_msg = f"ack_timeout failed for node {projection.entity_id}: {type(e).__name__}"
+                error_msg = (
+                    f"ack_timeout failed for node {projection.entity_id}: "
+                    f"{type(e).__name__}"
+                )
                 errors.append(error_msg)
                 logger.warning(
                     error_msg,
@@ -353,7 +357,10 @@ class ServiceTimeoutEmission:
                 liveness_emitted += 1
                 markers_updated += 1
             except Exception as e:
-                error_msg = f"liveness_expiration failed for node {projection.entity_id}: {type(e).__name__}"
+                error_msg = (
+                    f"liveness_expiration failed for node {projection.entity_id}: "
+                    f"{type(e).__name__}"
+                )
                 errors.append(error_msg)
                 logger.warning(
                     error_msg,
@@ -361,6 +368,23 @@ class ServiceTimeoutEmission:
                         "node_id": str(projection.entity_id),
                         "correlation_id": str(correlation_id),
                         "error_type": type(e).__name__,
+                    },
+                )
+
+        # Check error rate for circuit breaker trigger
+        total_attempted = len(query_result.ack_timeouts) + len(
+            query_result.liveness_expirations
+        )
+        if total_attempted > 0:
+            error_rate = len(errors) / total_attempted
+            if error_rate > 0.5:  # More than 50% failed
+                logger.error(
+                    "High timeout emission failure rate - possible systemic issue",
+                    extra={
+                        "error_rate": error_rate,
+                        "total_attempted": total_attempted,
+                        "error_count": len(errors),
+                        "correlation_id": str(correlation_id),
                     },
                 )
 
@@ -400,7 +424,7 @@ class ServiceTimeoutEmission:
 
         This method follows the event-first pattern:
         1. Create and emit the timeout event
-        2. Update the emission marker in projection
+        2. Update the emission marker in projection atomically
 
         If the emit succeeds but marker update fails, the event will be
         duplicated on retry (at-least-once semantics). Downstream consumers
@@ -421,10 +445,11 @@ class ServiceTimeoutEmission:
         # Validate ack_deadline exists (should always be present for timeout candidates)
         if projection.ack_deadline is None:
             raise ValueError(
-                f"Cannot emit ack timeout for node {projection.entity_id}: ack_deadline is None"
+                f"Cannot emit ack timeout for node {projection.entity_id}: "
+                "ack_deadline is None"
             )
 
-        # Runtime import to avoid circular import (see TYPE_CHECKING block for explanation)
+        # Runtime import to avoid circular import (see TYPE_CHECKING block)
         from omnibase_infra.nodes.node_registration_orchestrator.models.model_node_registration_ack_timed_out import (
             ModelNodeRegistrationAckTimedOut,
         )
@@ -456,39 +481,13 @@ class ServiceTimeoutEmission:
             topic=topic,
         )
 
-        # 3. Update emission marker in projection via persist with updated model
+        # 3. Update emission marker atomically
         # This MUST happen AFTER successful publish to ensure exactly-once semantics
-        updated_projection = ModelRegistrationProjection(
+        # Uses atomic marker update to avoid race conditions with concurrent updates
+        await self._projector.update_ack_timeout_marker(
             entity_id=projection.entity_id,
             domain=projection.domain,
-            current_state=projection.current_state,
-            node_type=projection.node_type,
-            node_version=projection.node_version,
-            capabilities=projection.capabilities,
-            ack_deadline=projection.ack_deadline,
-            liveness_deadline=projection.liveness_deadline,
-            ack_timeout_emitted_at=detected_at,  # Set the marker
-            liveness_timeout_emitted_at=projection.liveness_timeout_emitted_at,
-            last_applied_event_id=tick_id,  # Use tick_id as event_id
-            last_applied_offset=projection.last_applied_offset + 1,
-            last_applied_sequence=projection.last_applied_sequence,
-            last_applied_partition=projection.last_applied_partition,
-            registered_at=projection.registered_at,
-            updated_at=detected_at,
-            correlation_id=correlation_id,
-        )
-
-        sequence_info = ModelSequenceInfo(
-            sequence=updated_projection.last_applied_offset,
-            offset=updated_projection.last_applied_offset,
-            partition=updated_projection.last_applied_partition,
-        )
-
-        await self._projector.persist(
-            projection=updated_projection,
-            entity_id=projection.entity_id,
-            domain=projection.domain,
-            sequence_info=sequence_info,
+            emitted_at=detected_at,
             correlation_id=correlation_id,
         )
 
@@ -503,7 +502,7 @@ class ServiceTimeoutEmission:
 
         This method follows the event-first pattern:
         1. Create and emit the expiration event
-        2. Update the emission marker in projection
+        2. Update the emission marker in projection atomically
 
         If the emit succeeds but marker update fails, the event will be
         duplicated on retry (at-least-once semantics). Downstream consumers
@@ -524,10 +523,11 @@ class ServiceTimeoutEmission:
         # Validate liveness_deadline exists
         if projection.liveness_deadline is None:
             raise ValueError(
-                f"Cannot emit liveness expiration for node {projection.entity_id}: liveness_deadline is None"
+                f"Cannot emit liveness expiration for node {projection.entity_id}: "
+                "liveness_deadline is None"
             )
 
-        # Runtime import to avoid circular import (see TYPE_CHECKING block for explanation)
+        # Runtime import to avoid circular import (see TYPE_CHECKING block)
         from omnibase_infra.nodes.node_registration_orchestrator.models.model_node_liveness_expired import (
             ModelNodeLivenessExpired,
         )
@@ -561,39 +561,13 @@ class ServiceTimeoutEmission:
             topic=topic,
         )
 
-        # 3. Update emission marker in projection via persist with updated model
+        # 3. Update emission marker atomically
         # This MUST happen AFTER successful publish to ensure exactly-once semantics
-        updated_projection = ModelRegistrationProjection(
+        # Uses atomic marker update to avoid race conditions with concurrent updates
+        await self._projector.update_liveness_timeout_marker(
             entity_id=projection.entity_id,
             domain=projection.domain,
-            current_state=projection.current_state,
-            node_type=projection.node_type,
-            node_version=projection.node_version,
-            capabilities=projection.capabilities,
-            ack_deadline=projection.ack_deadline,
-            liveness_deadline=projection.liveness_deadline,
-            ack_timeout_emitted_at=projection.ack_timeout_emitted_at,
-            liveness_timeout_emitted_at=detected_at,  # Set the marker
-            last_applied_event_id=tick_id,  # Use tick_id as event_id
-            last_applied_offset=projection.last_applied_offset + 1,
-            last_applied_sequence=projection.last_applied_sequence,
-            last_applied_partition=projection.last_applied_partition,
-            registered_at=projection.registered_at,
-            updated_at=detected_at,
-            correlation_id=correlation_id,
-        )
-
-        sequence_info = ModelSequenceInfo(
-            sequence=updated_projection.last_applied_offset,
-            offset=updated_projection.last_applied_offset,
-            partition=updated_projection.last_applied_partition,
-        )
-
-        await self._projector.persist(
-            projection=updated_projection,
-            entity_id=projection.entity_id,
-            domain=projection.domain,
-            sequence_info=sequence_info,
+            emitted_at=detected_at,
             correlation_id=correlation_id,
         )
 

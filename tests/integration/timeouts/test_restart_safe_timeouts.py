@@ -56,6 +56,27 @@ if TYPE_CHECKING:
         MockProjector,
     )
 
+# =============================================================================
+# Test Constants
+# =============================================================================
+
+# Time offsets for deadline scenarios
+OVERDUE_DEADLINE_OFFSET = timedelta(minutes=10)
+"""Offset for creating past/overdue deadlines in tests."""
+
+FUTURE_DEADLINE_OFFSET = timedelta(hours=1)
+"""Offset for creating future (not yet due) deadlines in tests."""
+
+MARKER_TIME_OFFSET = timedelta(minutes=5)
+"""Offset for emission marker timestamps in tests."""
+
+# Projection sequence values
+DEFAULT_TEST_OFFSET = 100
+"""Default offset/sequence value for test projections."""
+
+DEFAULT_TEST_PARTITION = "0"
+"""Default partition value for test projections."""
+
 # Test markers
 pytestmark = [
     pytest.mark.integration,
@@ -147,14 +168,14 @@ class TestRestartSafeTimeouts:
         """
         # Arrange: Create projection with overdue deadline
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - OVERDUE_DEADLINE_OFFSET
 
         entity_id = uuid4()
         projection = projection_factory(
             entity_id=entity_id,
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=past_deadline,
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
 
         # Store projection
@@ -162,7 +183,11 @@ class TestRestartSafeTimeouts:
             projection=projection,
             entity_id=entity_id,
             domain="registration",
-            sequence_info=ModelSequenceInfo(sequence=100, offset=100, partition="0"),
+            sequence_info=ModelSequenceInfo(
+                sequence=DEFAULT_TEST_OFFSET,
+                offset=DEFAULT_TEST_OFFSET,
+                partition=DEFAULT_TEST_PARTITION,
+            ),
         )
 
         # Create first service instances (before restart)
@@ -219,14 +244,14 @@ class TestRestartSafeTimeouts:
         """
         # Arrange: Create projection with future deadline
         now = datetime.now(UTC)
-        future_deadline = now + timedelta(hours=1)
+        future_deadline = now + FUTURE_DEADLINE_OFFSET
 
         entity_id = uuid4()
         projection = projection_factory(
             entity_id=entity_id,
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=future_deadline,
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
 
         # Store projection
@@ -234,7 +259,11 @@ class TestRestartSafeTimeouts:
             projection=projection,
             entity_id=entity_id,
             domain="registration",
-            sequence_info=ModelSequenceInfo(sequence=100, offset=100, partition="0"),
+            sequence_info=ModelSequenceInfo(
+                sequence=DEFAULT_TEST_OFFSET,
+                offset=DEFAULT_TEST_OFFSET,
+                partition=DEFAULT_TEST_PARTITION,
+            ),
         )
 
         # "Restart" is simulated - in-memory store persists (like PostgreSQL would)
@@ -264,27 +293,27 @@ class TestRestartSafeTimeouts:
         """
         # Arrange
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
-        marker_time = now - timedelta(minutes=5)
+        past_deadline = now - OVERDUE_DEADLINE_OFFSET
+        marker_time = now - MARKER_TIME_OFFSET
 
         # Create 3 projections, all with overdue deadlines
         proj_unmarked = projection_factory(
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=past_deadline,
             ack_timeout_emitted_at=None,  # UNMARKED
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
         proj_marked_1 = projection_factory(
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=past_deadline,
             ack_timeout_emitted_at=marker_time,  # MARKED
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
         proj_marked_2 = projection_factory(
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=past_deadline,
             ack_timeout_emitted_at=marker_time,  # MARKED
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
 
         # Store all projections
@@ -294,7 +323,9 @@ class TestRestartSafeTimeouts:
                 entity_id=proj.entity_id,
                 domain="registration",
                 sequence_info=ModelSequenceInfo(
-                    sequence=100, offset=100, partition="0"
+                    sequence=DEFAULT_TEST_OFFSET,
+                    offset=DEFAULT_TEST_OFFSET,
+                    partition=DEFAULT_TEST_PARTITION,
                 ),
             )
 
@@ -341,21 +372,25 @@ class TestRestartSafeTimeouts:
         """
         # Arrange
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - OVERDUE_DEADLINE_OFFSET
 
         entity_id = uuid4()
         projection = projection_factory(
             entity_id=entity_id,
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=past_deadline,
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
 
         await in_memory_store.persist(
             projection=projection,
             entity_id=entity_id,
             domain="registration",
-            sequence_info=ModelSequenceInfo(sequence=100, offset=100, partition="0"),
+            sequence_info=ModelSequenceInfo(
+                sequence=DEFAULT_TEST_OFFSET,
+                offset=DEFAULT_TEST_OFFSET,
+                partition=DEFAULT_TEST_PARTITION,
+            ),
         )
 
         # Create services
@@ -402,21 +437,25 @@ class TestRestartSafeTimeouts:
         """
         # Arrange
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - OVERDUE_DEADLINE_OFFSET
 
         entity_id = uuid4()
         projection = projection_factory(
             entity_id=entity_id,
             state=EnumRegistrationState.ACTIVE,  # Must be ACTIVE for liveness
             liveness_deadline=past_deadline,
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
 
         await in_memory_store.persist(
             projection=projection,
             entity_id=entity_id,
             domain="registration",
-            sequence_info=ModelSequenceInfo(sequence=100, offset=100, partition="0"),
+            sequence_info=ModelSequenceInfo(
+                sequence=DEFAULT_TEST_OFFSET,
+                offset=DEFAULT_TEST_OFFSET,
+                partition=DEFAULT_TEST_PARTITION,
+            ),
         )
 
         # First tick
@@ -473,19 +512,19 @@ class TestTimeoutQuery:
     ) -> None:
         """Verify query returns only entities past their deadline."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
-        future_deadline = now + timedelta(minutes=10)
+        past_deadline = now - OVERDUE_DEADLINE_OFFSET
+        future_deadline = now + OVERDUE_DEADLINE_OFFSET
 
         # Create projections with different deadline states
         proj_overdue = projection_factory(
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=past_deadline,
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
         proj_not_due = projection_factory(
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=future_deadline,
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
 
         for proj in [proj_overdue, proj_not_due]:
@@ -494,7 +533,9 @@ class TestTimeoutQuery:
                 entity_id=proj.entity_id,
                 domain="registration",
                 sequence_info=ModelSequenceInfo(
-                    sequence=100, offset=100, partition="0"
+                    sequence=DEFAULT_TEST_OFFSET,
+                    offset=DEFAULT_TEST_OFFSET,
+                    partition=DEFAULT_TEST_PARTITION,
                 ),
             )
 
@@ -518,14 +559,18 @@ class TestTimeoutQuery:
         projection = projection_factory(
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=deadline,
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
 
         await in_memory_store.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain="registration",
-            sequence_info=ModelSequenceInfo(sequence=100, offset=100, partition="0"),
+            sequence_info=ModelSequenceInfo(
+                sequence=DEFAULT_TEST_OFFSET,
+                offset=DEFAULT_TEST_OFFSET,
+                partition=DEFAULT_TEST_PARTITION,
+            ),
         )
 
         query_service = create_timeout_query_service(in_memory_store)
@@ -547,23 +592,23 @@ class TestTimeoutQuery:
     ) -> None:
         """Verify ack timeout query only returns AWAITING_ACK/ACCEPTED states."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - OVERDUE_DEADLINE_OFFSET
 
         # Create projections in different states
         proj_awaiting = projection_factory(
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=past_deadline,
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
         proj_active = projection_factory(
             state=EnumRegistrationState.ACTIVE,  # Wrong state for ack timeout
             ack_deadline=past_deadline,
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
         proj_rejected = projection_factory(
             state=EnumRegistrationState.REJECTED,  # Wrong state
             ack_deadline=past_deadline,
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
 
         for proj in [proj_awaiting, proj_active, proj_rejected]:
@@ -572,7 +617,9 @@ class TestTimeoutQuery:
                 entity_id=proj.entity_id,
                 domain="registration",
                 sequence_info=ModelSequenceInfo(
-                    sequence=100, offset=100, partition="0"
+                    sequence=DEFAULT_TEST_OFFSET,
+                    offset=DEFAULT_TEST_OFFSET,
+                    partition=DEFAULT_TEST_PARTITION,
                 ),
             )
 
@@ -602,21 +649,25 @@ class TestEmissionMarkers:
     ) -> None:
         """Verify marker is set in projection after successful emit."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - OVERDUE_DEADLINE_OFFSET
 
         entity_id = uuid4()
         projection = projection_factory(
             entity_id=entity_id,
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=past_deadline,
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
 
         await in_memory_store.persist(
             projection=projection,
             entity_id=entity_id,
             domain="registration",
-            sequence_info=ModelSequenceInfo(sequence=100, offset=100, partition="0"),
+            sequence_info=ModelSequenceInfo(
+                sequence=DEFAULT_TEST_OFFSET,
+                offset=DEFAULT_TEST_OFFSET,
+                partition=DEFAULT_TEST_PARTITION,
+            ),
         )
 
         # Verify marker is initially None
@@ -655,7 +706,7 @@ class TestEmissionMarkers:
     ) -> None:
         """Verify ack and liveness markers are independent."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - OVERDUE_DEADLINE_OFFSET
 
         # Create ACTIVE node with both deadlines overdue
         entity_id = uuid4()
@@ -664,14 +715,18 @@ class TestEmissionMarkers:
             state=EnumRegistrationState.ACTIVE,
             ack_deadline=past_deadline,  # Won't trigger (wrong state for ack)
             liveness_deadline=past_deadline,  # Will trigger
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
 
         await in_memory_store.persist(
             projection=projection,
             entity_id=entity_id,
             domain="registration",
-            sequence_info=ModelSequenceInfo(sequence=100, offset=100, partition="0"),
+            sequence_info=ModelSequenceInfo(
+                sequence=DEFAULT_TEST_OFFSET,
+                offset=DEFAULT_TEST_OFFSET,
+                partition=DEFAULT_TEST_PARTITION,
+            ),
         )
 
         # Process timeout
@@ -715,19 +770,23 @@ class TestEdgeCases:
     ) -> None:
         """Verify empty result when no entities are overdue."""
         now = datetime.now(UTC)
-        future_deadline = now + timedelta(hours=1)
+        future_deadline = now + FUTURE_DEADLINE_OFFSET
 
         projection = projection_factory(
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=future_deadline,
-            offset=100,
+            offset=DEFAULT_TEST_OFFSET,
         )
 
         await in_memory_store.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain="registration",
-            sequence_info=ModelSequenceInfo(sequence=100, offset=100, partition="0"),
+            sequence_info=ModelSequenceInfo(
+                sequence=DEFAULT_TEST_OFFSET,
+                offset=DEFAULT_TEST_OFFSET,
+                partition=DEFAULT_TEST_PARTITION,
+            ),
         )
 
         query_service = create_timeout_query_service(in_memory_store)
@@ -773,21 +832,23 @@ class TestEdgeCases:
     ) -> None:
         """Verify batch_size limits number of returned entities."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - OVERDUE_DEADLINE_OFFSET
 
         # Create 10 overdue projections
         for _ in range(10):
             proj = projection_factory(
                 state=EnumRegistrationState.AWAITING_ACK,
                 ack_deadline=past_deadline,
-                offset=100,
+                offset=DEFAULT_TEST_OFFSET,
             )
             await in_memory_store.persist(
                 projection=proj,
                 entity_id=proj.entity_id,
                 domain="registration",
                 sequence_info=ModelSequenceInfo(
-                    sequence=100, offset=100, partition="0"
+                    sequence=DEFAULT_TEST_OFFSET,
+                    offset=DEFAULT_TEST_OFFSET,
+                    partition=DEFAULT_TEST_PARTITION,
                 ),
             )
 
@@ -808,21 +869,23 @@ class TestEdgeCases:
     ) -> None:
         """Verify multiple ticks can process all overdue entities."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - OVERDUE_DEADLINE_OFFSET
 
         # Create 5 overdue projections
         for _ in range(5):
             proj = projection_factory(
                 state=EnumRegistrationState.AWAITING_ACK,
                 ack_deadline=past_deadline,
-                offset=100,
+                offset=DEFAULT_TEST_OFFSET,
             )
             await in_memory_store.persist(
                 projection=proj,
                 entity_id=proj.entity_id,
                 domain="registration",
                 sequence_info=ModelSequenceInfo(
-                    sequence=100, offset=100, partition="0"
+                    sequence=DEFAULT_TEST_OFFSET,
+                    offset=DEFAULT_TEST_OFFSET,
+                    partition=DEFAULT_TEST_PARTITION,
                 ),
             )
 
