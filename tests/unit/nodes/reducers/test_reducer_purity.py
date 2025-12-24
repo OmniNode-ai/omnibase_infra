@@ -47,7 +47,6 @@ REDUCER_FILE = Path("src/omnibase_infra/nodes/reducers/registration_reducer.py")
 # See: tests/helpers/ast_analysis.py for implementation details.
 from tests.helpers.ast_analysis import get_imported_root_modules
 
-
 # Alias for backward compatibility with existing test code in this file
 _get_imported_root_modules = get_imported_root_modules
 
@@ -1249,7 +1248,7 @@ class TestAdditionalBehavioralGates:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, (property, classmethod, staticmethod))
+            and not isinstance(value, property | classmethod | staticmethod)
         }
 
         # Check for mutable types
@@ -1300,7 +1299,7 @@ class TestAdditionalBehavioralGates:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, (property, classmethod, staticmethod))
+            and not isinstance(value, property | classmethod | staticmethod)
         }
 
         # Create first reducer instance and run reduce
@@ -1335,7 +1334,7 @@ class TestAdditionalBehavioralGates:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, (property, classmethod, staticmethod))
+            and not isinstance(value, property | classmethod | staticmethod)
         }
 
         assert class_vars_before == class_vars_after, (

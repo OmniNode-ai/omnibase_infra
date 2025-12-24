@@ -158,7 +158,6 @@ from tests.helpers.ast_analysis import (
     get_imported_root_modules,
 )
 
-
 # Alias for backward compatibility with existing test code in this file
 _find_datetime_now_calls = find_datetime_now_calls
 _find_time_module_calls = find_time_module_calls

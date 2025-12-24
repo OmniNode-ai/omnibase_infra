@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import ast
 
-
 __all__ = [
     "find_datetime_now_calls",
     "find_io_method_calls",
