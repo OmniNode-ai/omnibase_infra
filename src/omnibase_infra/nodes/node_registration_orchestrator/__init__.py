@@ -18,6 +18,8 @@ The orchestrator extends NodeOrchestrator from omnibase_core, which provides:
 
 Exports:
     NodeRegistrationOrchestrator: Main orchestrator node implementation (declarative)
+    HandlerTimeout: Handler for RuntimeTick timeout processing
+    ModelTimeoutHandlerResult: Result model for timeout handler
     ModelOrchestratorConfig: Configuration model
     ModelOrchestratorInput: Input model
     ModelOrchestratorOutput: Output model
@@ -26,6 +28,10 @@ Exports:
 
 from __future__ import annotations
 
+from omnibase_infra.nodes.node_registration_orchestrator.handler_timeout import (
+    HandlerTimeout,
+    ModelTimeoutHandlerResult,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.models import (
     ModelIntentExecutionResult,
     ModelOrchestratorConfig,
@@ -39,6 +45,9 @@ from omnibase_infra.nodes.node_registration_orchestrator.node import (
 __all__: list[str] = [
     # Primary export - the declarative orchestrator
     "NodeRegistrationOrchestrator",
+    # Handlers
+    "HandlerTimeout",
+    "ModelTimeoutHandlerResult",
     # Models
     "ModelOrchestratorConfig",
     "ModelOrchestratorInput",

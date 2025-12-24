@@ -136,11 +136,14 @@ class TestDeclarativeOrchestratorPattern:
         """
         assert not hasattr(NodeRegistrationOrchestrator, "create")
 
-    def test_only_init_method_defined(self, mock_container: MagicMock) -> None:
-        """Test that only __init__ is defined in the class.
+    def test_only_minimal_methods_defined(self, mock_container: MagicMock) -> None:
+        """Test that only minimal methods are defined in the class.
 
         The declarative pattern should have minimal code - just __init__
         that calls super().__init__. All other behavior comes from base class.
+
+        Exception: Timeout handling methods (OMN-932) are intentional extensions
+        to support RuntimeTick processing for durable timeout detection.
         """
         # Get methods defined directly on NodeRegistrationOrchestrator
         # (not inherited from base classes)
@@ -152,9 +155,23 @@ class TestDeclarativeOrchestratorPattern:
             and name in NodeRegistrationOrchestrator.__dict__
         ]
 
-        # Should have no public methods defined directly on the class
-        # (all behavior inherited from NodeOrchestrator)
-        assert own_methods == [], f"Unexpected methods: {own_methods}"
+        # Expected methods for timeout handling (OMN-932)
+        # These are intentional extensions for RuntimeTick processing
+        expected_timeout_methods = {"set_timeout_handler", "handle_runtime_tick"}
+
+        # Filter out expected timeout methods
+        unexpected_methods = [m for m in own_methods if m not in expected_timeout_methods]
+
+        # Should have no unexpected public methods defined directly on the class
+        # (all other behavior inherited from NodeOrchestrator)
+        assert unexpected_methods == [], f"Unexpected methods: {unexpected_methods}"
+
+        # Verify the timeout methods are present (OMN-932 requirement)
+        present_timeout_methods = set(own_methods) & expected_timeout_methods
+        assert present_timeout_methods == expected_timeout_methods, (
+            f"Missing timeout methods. Expected: {expected_timeout_methods}, "
+            f"Found: {present_timeout_methods}"
+        )
 
 
 # =============================================================================
@@ -394,3 +411,107 @@ class TestNodeInstantiation:
         orch2 = NodeRegistrationOrchestrator(mock_container)
 
         assert orch1 is not orch2
+
+
+# =============================================================================
+# TestTimeoutHandling (OMN-932)
+# =============================================================================
+
+
+class TestTimeoutHandling:
+    """Tests for RuntimeTick timeout handling (OMN-932)."""
+
+    def test_has_timeout_handler_initially_false(
+        self, mock_container: MagicMock
+    ) -> None:
+        """Test that has_timeout_handler is False initially."""
+        orchestrator = NodeRegistrationOrchestrator(mock_container)
+
+        assert orchestrator.has_timeout_handler is False
+
+    def test_set_timeout_handler_updates_property(
+        self, mock_container: MagicMock
+    ) -> None:
+        """Test that set_timeout_handler updates has_timeout_handler."""
+        from unittest.mock import MagicMock as MM
+
+        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        mock_handler = MM()
+
+        orchestrator.set_timeout_handler(mock_handler)
+
+        assert orchestrator.has_timeout_handler is True
+
+    @pytest.mark.asyncio
+    async def test_handle_runtime_tick_raises_without_handler(
+        self, mock_container: MagicMock
+    ) -> None:
+        """Test that handle_runtime_tick raises RuntimeError without handler."""
+        from datetime import UTC, datetime
+        from unittest.mock import MagicMock as MM
+        from uuid import uuid4
+
+        # Create a minimal tick mock
+        tick = MM()
+        tick.now = datetime.now(UTC)
+        tick.tick_id = uuid4()
+        tick.correlation_id = uuid4()
+
+        orchestrator = NodeRegistrationOrchestrator(mock_container)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await orchestrator.handle_runtime_tick(tick)
+
+        assert "Timeout handler not configured" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_handle_runtime_tick_delegates_to_handler(
+        self, mock_container: MagicMock
+    ) -> None:
+        """Test that handle_runtime_tick delegates to the configured handler."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, MagicMock as MM
+        from uuid import uuid4
+
+        # Create a mock tick
+        tick = MM()
+        tick.now = datetime.now(UTC)
+        tick.tick_id = uuid4()
+        tick.correlation_id = uuid4()
+
+        # Create a mock handler with async handle method
+        mock_handler = MM()
+        mock_result = MM()
+        mock_handler.handle = AsyncMock(return_value=mock_result)
+
+        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator.set_timeout_handler(mock_handler)
+
+        result = await orchestrator.handle_runtime_tick(tick)
+
+        mock_handler.handle.assert_called_once_with(tick, domain="registration")
+        assert result is mock_result
+
+    @pytest.mark.asyncio
+    async def test_handle_runtime_tick_passes_custom_domain(
+        self, mock_container: MagicMock
+    ) -> None:
+        """Test that handle_runtime_tick passes custom domain to handler."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, MagicMock as MM
+        from uuid import uuid4
+
+        tick = MM()
+        tick.now = datetime.now(UTC)
+        tick.tick_id = uuid4()
+        tick.correlation_id = uuid4()
+
+        mock_handler = MM()
+        mock_handler.handle = AsyncMock(return_value=MM())
+
+        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator.set_timeout_handler(mock_handler)
+
+        await orchestrator.handle_runtime_tick(tick, domain="custom_domain")
+
+        mock_handler.handle.assert_called_once_with(tick, domain="custom_domain")
