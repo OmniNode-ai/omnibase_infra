@@ -27,6 +27,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+# Import shared AST analysis utilities from test helpers
+# See: tests/helpers/ast_analysis.py for implementation details.
+from tests.helpers.ast_analysis import (
+    find_io_method_calls,
+    get_imported_root_modules,
+    is_docstring,
+)
+
 # =============================================================================
 # Constants
 # =============================================================================
@@ -171,20 +179,8 @@ class TestOrchestratorNoIOImports:
         - kafka, aiokafka (message queues)
         - consul, hvac (infrastructure)
         """
-        imported_modules: set[str] = set()
-
-        for node in ast.walk(node_ast):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    # Get the top-level module name
-                    top_level = alias.name.split(".")[0]
-                    imported_modules.add(top_level)
-
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    # Get the top-level module name
-                    top_level = node.module.split(".")[0]
-                    imported_modules.add(top_level)
+        # Use shared utility for import extraction
+        imported_modules = get_imported_root_modules(node_ast)
 
         # Check for I/O library imports
         io_imports_found = imported_modules & IO_LIBRARIES
@@ -201,15 +197,9 @@ class TestOrchestratorNoIOImports:
     def test_no_socket_or_network_imports(self, node_ast: ast.Module) -> None:
         """Verify no low-level socket or network imports."""
         network_modules = {"socket", "ssl", "http", "http.client"}
-        imported_modules: set[str] = set()
 
-        for node in ast.walk(node_ast):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    imported_modules.add(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    imported_modules.add(node.module)
+        # Use shared utility for import extraction
+        imported_modules = get_imported_root_modules(node_ast)
 
         network_imports_found = imported_modules & network_modules
 
@@ -242,21 +232,12 @@ class TestOrchestratorNoDirectNetworkCalls:
         - conn.execute(), cursor.query() (database)
         - producer.send(), consumer.poll() (Kafka)
         """
-        io_calls_found: list[str] = []
-
-        for node in ast.walk(node_ast):
-            if isinstance(node, ast.ClassDef):
-                if node.name == "NodeRegistrationOrchestrator":
-                    # Walk through all function definitions in the class
-                    for item in ast.walk(node):
-                        if isinstance(item, ast.Call):
-                            # Check for attribute calls like client.get()
-                            if isinstance(item.func, ast.Attribute):
-                                method_name = item.func.attr.lower()
-                                if method_name in IO_METHOD_PATTERNS:
-                                    io_calls_found.append(
-                                        f"{item.func.attr}() at line {item.lineno}"
-                                    )
+        # Use shared utility for I/O method detection
+        io_calls_found = find_io_method_calls(
+            node_ast,
+            method_patterns=IO_METHOD_PATTERNS,
+            class_name="NodeRegistrationOrchestrator",
+        )
 
         assert not io_calls_found, (
             f"Orchestrator should not make direct I/O calls.\n"
@@ -434,13 +415,7 @@ class TestOrchestratorIsPureCoordinator:
 
         # Analyze class body using AST - count meaningful statements
         # Exclude docstrings (first Expr with Constant) from statement count
-        def is_docstring(stmt: ast.stmt) -> bool:
-            """Check if statement is a docstring (Expr containing a Constant string)."""
-            return (
-                isinstance(stmt, ast.Expr)
-                and isinstance(stmt.value, ast.Constant)
-                and isinstance(stmt.value.value, str)
-            )
+        # Note: is_docstring is imported from tests.helpers.ast_analysis
 
         # Filter out docstrings from class body
         meaningful_statements = [

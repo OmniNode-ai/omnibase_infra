@@ -43,28 +43,13 @@ __all__ = [
 REDUCER_FILE = Path("src/omnibase_infra/nodes/reducers/registration_reducer.py")
 
 
-def _get_imported_root_modules(tree: ast.AST) -> set[str]:
-    """Extract root module names from all import statements in an AST.
+# Import shared AST analysis utilities from test helpers
+# See: tests/helpers/ast_analysis.py for implementation details.
+from tests.helpers.ast_analysis import get_imported_root_modules
 
-    This helper function walks the AST and extracts the root module name from
-    both `import X` and `from X import Y` statements.
 
-    Args:
-        tree: The AST tree to analyze.
-
-    Returns:
-        A set of root module names (e.g., {"requests", "psycopg2", "pydantic"}).
-    """
-    imported_modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                # Extract root module (e.g., "consul" from "consul.client")
-                imported_modules.add(alias.name.split(".")[0])
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                imported_modules.add(node.module.split(".")[0])
-    return imported_modules
+# Alias for backward compatibility with existing test code in this file
+_get_imported_root_modules = get_imported_root_modules
 
 
 # Forbidden I/O libraries that must NEVER appear in reducer imports

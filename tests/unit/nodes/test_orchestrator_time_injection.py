@@ -149,108 +149,20 @@ def _is_time_dependent(node_id: str, description: str, step_config: dict) -> boo
 # =============================================================================
 # AST Analysis Helpers
 # =============================================================================
+# These utilities are imported from the shared test helpers module.
+# See: tests/helpers/ast_analysis.py for implementation details.
+
+from tests.helpers.ast_analysis import (
+    find_datetime_now_calls,
+    find_time_module_calls,
+    get_imported_root_modules,
+)
 
 
-def _find_datetime_now_calls(tree: ast.AST) -> list[str]:
-    """Find all datetime.now() and datetime.utcnow() calls in the AST.
-
-    This function walks the AST and detects:
-    - datetime.now() calls (attribute access on 'datetime' module)
-    - datetime.utcnow() calls (deprecated but still checked)
-    - Direct now() calls after 'from datetime import datetime'
-
-    Args:
-        tree: The AST tree to analyze.
-
-    Returns:
-        List of descriptions of datetime.now/utcnow calls found.
-    """
-    violations: list[str] = []
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = node.func
-
-            # Pattern 1: datetime.datetime.now() or datetime.datetime.utcnow()
-            if isinstance(func, ast.Attribute):
-                attr_name = func.attr
-                if attr_name in ("now", "utcnow"):
-                    # Check if it's on datetime or datetime.datetime
-                    if isinstance(func.value, ast.Attribute):
-                        # datetime.datetime.now()
-                        if (
-                            func.value.attr == "datetime"
-                            and isinstance(func.value.value, ast.Name)
-                            and func.value.value.id == "datetime"
-                        ):
-                            violations.append(
-                                f"datetime.datetime.{attr_name}() at line {node.lineno}"
-                            )
-                    elif isinstance(func.value, ast.Name):
-                        # datetime.now() (after 'from datetime import datetime')
-                        if func.value.id == "datetime":
-                            violations.append(
-                                f"datetime.{attr_name}() at line {node.lineno}"
-                            )
-
-    return violations
-
-
-def _find_time_module_calls(tree: ast.AST) -> list[str]:
-    """Find all time.time() and time.monotonic() calls in the AST.
-
-    This function walks the AST and detects:
-    - time.time() calls
-    - time.monotonic() calls
-    - time.perf_counter() calls (also a clock function)
-
-    Args:
-        tree: The AST tree to analyze.
-
-    Returns:
-        List of descriptions of time module calls found.
-    """
-    violations: list[str] = []
-
-    # Time functions that indicate system clock access
-    forbidden_time_functions = {"time", "monotonic", "perf_counter"}
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = node.func
-
-            # Pattern: time.time(), time.monotonic(), time.perf_counter()
-            if isinstance(func, ast.Attribute):
-                if (
-                    func.attr in forbidden_time_functions
-                    and isinstance(func.value, ast.Name)
-                    and func.value.id == "time"
-                ):
-                    violations.append(f"time.{func.attr}() at line {node.lineno}")
-
-    return violations
-
-
-def _find_imports(tree: ast.AST) -> set[str]:
-    """Extract all imported module names from the AST.
-
-    Args:
-        tree: The AST tree to analyze.
-
-    Returns:
-        Set of imported module names.
-    """
-    imports: set[str] = set()
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                imports.add(alias.name.split(".")[0])
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                imports.add(node.module.split(".")[0])
-
-    return imports
+# Alias for backward compatibility with existing test code in this file
+_find_datetime_now_calls = find_datetime_now_calls
+_find_time_module_calls = find_time_module_calls
+_find_imports = get_imported_root_modules
 
 
 # =============================================================================
