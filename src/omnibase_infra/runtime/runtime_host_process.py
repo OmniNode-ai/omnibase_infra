@@ -1203,7 +1203,9 @@ class RuntimeHostProcess:
 
             # Process results and build the results dict
             for health_result in results:
-                handler_health_results[health_result.handler_type] = health_result.details
+                handler_health_results[health_result.handler_type] = (
+                    health_result.details
+                )
                 if not health_result.healthy:
                     handlers_all_healthy = False
 

@@ -158,7 +158,9 @@ class ModelLifecycleResult(BaseModel):
         """
         if not error_message:
             raise ValueError("error_message must be non-empty for failed results")
-        return cls(handler_type=handler_type, success=False, error_message=error_message)
+        return cls(
+            handler_type=handler_type, success=False, error_message=error_message
+        )
 
     def is_success(self) -> bool:
         """Check if the lifecycle operation succeeded.

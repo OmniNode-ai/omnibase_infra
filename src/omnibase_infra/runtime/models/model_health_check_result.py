@@ -1,30 +1,30 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Handler Health Check Result Model.
+"""Health Check Result Model.
 
-This module provides the Pydantic model for handler health check operation results.
+This module provides the Pydantic model for component health check operation results.
 
 Design Pattern:
-    ModelHandlerHealthCheckResult replaces tuple[str, JsonValue] returns from
-    check_handler_health() with a strongly-typed model that provides:
-    - Handler type identification
+    ModelHealthCheckResult replaces tuple[str, JsonValue] returns from
+    check_health() with a strongly-typed model that provides:
+    - Component type identification
     - Typed health status with structured details
     - Factory methods for common healthy/unhealthy patterns
 
 Thread Safety:
-    ModelHandlerHealthCheckResult is immutable (frozen=True) after creation,
+    ModelHealthCheckResult is immutable (frozen=True) after creation,
     making it thread-safe for concurrent read access.
 
 Example:
-    >>> from omnibase_infra.runtime.models import ModelHandlerHealthCheckResult
+    >>> from omnibase_infra.runtime.models import ModelHealthCheckResult
     >>>
     >>> # Create a healthy result
-    >>> healthy = ModelHandlerHealthCheckResult.healthy_result("kafka")
+    >>> healthy = ModelHealthCheckResult.healthy_result("kafka")
     >>> healthy.healthy
     True
     >>>
     >>> # Create an unhealthy result (timeout)
-    >>> unhealthy = ModelHandlerHealthCheckResult.timeout_result("db", 5.0)
+    >>> unhealthy = ModelHealthCheckResult.timeout_result("db", 5.0)
     >>> unhealthy.healthy
     False
 """
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
 
 
-class ModelHandlerHealthCheckResult(BaseModel):
+class ModelHealthCheckResult(BaseModel):
     """Result of a handler health check operation.
 
     Encapsulates the result of checking a single handler's health,
@@ -76,7 +76,7 @@ class ModelHandlerHealthCheckResult(BaseModel):
         cls,
         handler_type: str,
         note: str = "",
-    ) -> "ModelHandlerHealthCheckResult":
+    ) -> ModelHealthCheckResult:
         """Create a healthy result for a handler.
 
         Args:
@@ -84,10 +84,10 @@ class ModelHandlerHealthCheckResult(BaseModel):
             note: Optional note about the healthy status. Empty string means no note.
 
         Returns:
-            ModelHandlerHealthCheckResult indicating healthy status.
+            ModelHealthCheckResult indicating healthy status.
 
         Example:
-            >>> result = ModelHandlerHealthCheckResult.healthy_result("kafka")
+            >>> result = ModelHealthCheckResult.healthy_result("kafka")
             >>> result.healthy
             True
         """
@@ -97,7 +97,7 @@ class ModelHandlerHealthCheckResult(BaseModel):
         return cls(handler_type=handler_type, healthy=True, details=details)
 
     @classmethod
-    def no_health_check_result(cls, handler_type: str) -> "ModelHandlerHealthCheckResult":
+    def no_health_check_result(cls, handler_type: str) -> ModelHealthCheckResult:
         """Create a result for a handler without health_check method.
 
         By convention, handlers without health_check are assumed healthy.
@@ -106,10 +106,10 @@ class ModelHandlerHealthCheckResult(BaseModel):
             handler_type: The handler type identifier.
 
         Returns:
-            ModelHandlerHealthCheckResult indicating healthy (no health_check method).
+            ModelHealthCheckResult indicating healthy (no health_check method).
 
         Example:
-            >>> result = ModelHandlerHealthCheckResult.no_health_check_result("custom")
+            >>> result = ModelHealthCheckResult.no_health_check_result("custom")
             >>> result.healthy
             True
         """
@@ -124,7 +124,7 @@ class ModelHandlerHealthCheckResult(BaseModel):
         cls,
         handler_type: str,
         timeout_seconds: float,
-    ) -> "ModelHandlerHealthCheckResult":
+    ) -> ModelHealthCheckResult:
         """Create an unhealthy result for a health check timeout.
 
         Args:
@@ -132,10 +132,10 @@ class ModelHandlerHealthCheckResult(BaseModel):
             timeout_seconds: The timeout duration that was exceeded.
 
         Returns:
-            ModelHandlerHealthCheckResult indicating timeout failure.
+            ModelHealthCheckResult indicating timeout failure.
 
         Example:
-            >>> result = ModelHandlerHealthCheckResult.timeout_result("db", 5.0)
+            >>> result = ModelHealthCheckResult.timeout_result("db", 5.0)
             >>> result.healthy
             False
         """
@@ -153,7 +153,7 @@ class ModelHandlerHealthCheckResult(BaseModel):
         cls,
         handler_type: str,
         error: str,
-    ) -> "ModelHandlerHealthCheckResult":
+    ) -> ModelHealthCheckResult:
         """Create an unhealthy result for a health check exception.
 
         Args:
@@ -161,10 +161,10 @@ class ModelHandlerHealthCheckResult(BaseModel):
             error: The error message from the exception.
 
         Returns:
-            ModelHandlerHealthCheckResult indicating error failure.
+            ModelHealthCheckResult indicating error failure.
 
         Example:
-            >>> result = ModelHandlerHealthCheckResult.error_result(
+            >>> result = ModelHealthCheckResult.error_result(
             ...     "vault",
             ...     "Authentication token expired",
             ... )
@@ -181,8 +181,8 @@ class ModelHandlerHealthCheckResult(BaseModel):
     def from_handler_response(
         cls,
         handler_type: str,
-        health_response: "JsonValue",
-    ) -> "ModelHandlerHealthCheckResult":
+        health_response: JsonValue,
+    ) -> ModelHealthCheckResult:
         """Create a result from a raw handler health check response.
 
         Parses the handler's health check response and extracts health status.
@@ -192,11 +192,11 @@ class ModelHandlerHealthCheckResult(BaseModel):
             health_response: The raw response from handler.health_check().
 
         Returns:
-            ModelHandlerHealthCheckResult from the response.
+            ModelHealthCheckResult from the response.
 
         Example:
             >>> response = {"healthy": True, "lag": 100}
-            >>> result = ModelHandlerHealthCheckResult.from_handler_response(
+            >>> result = ModelHealthCheckResult.from_handler_response(
             ...     "kafka",
             ...     response,
             ... )
@@ -218,4 +218,4 @@ class ModelHandlerHealthCheckResult(BaseModel):
         )
 
 
-__all__: list[str] = ["ModelHandlerHealthCheckResult"]
+__all__: list[str] = ["ModelHealthCheckResult"]

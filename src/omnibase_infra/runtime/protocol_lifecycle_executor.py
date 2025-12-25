@@ -18,7 +18,7 @@ Example Usage:
 
     executor = ProtocolLifecycleExecutor(health_check_timeout_seconds=10.0)
 
-    # Check handler health - returns ModelHandlerHealthCheckResult
+    # Check handler health - returns ModelHealthCheckResult
     result = await executor.check_handler_health("http", handler)
     print(f"Handler: {result.handler_type}, Healthy: {result.healthy}")
 
@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING
 
 from omnibase_infra.runtime.models import (
     ModelBatchLifecycleResult,
-    ModelHandlerHealthCheckResult,
+    ModelHealthCheckResult,
     ModelLifecycleResult,
 )
 
@@ -114,7 +114,7 @@ class ProtocolLifecycleExecutor:
         # Get shutdown priority for ordering
         priority = ProtocolLifecycleExecutor.get_shutdown_priority(handler)
 
-        # Check individual handler health - returns ModelHandlerHealthCheckResult
+        # Check individual handler health - returns ModelHealthCheckResult
         result = await executor.check_handler_health("db", handler)
         if result.healthy:
             print(f"Handler {result.handler_type} is healthy")
@@ -269,7 +269,7 @@ class ProtocolLifecycleExecutor:
         handler_type: str,
         handler: ProtocolHandler,
         timeout_seconds: float = -1.0,
-    ) -> ModelHandlerHealthCheckResult:
+    ) -> ModelHealthCheckResult:
         """Check health of a single handler with timeout.
 
         This method performs an individual handler health check with a configurable
@@ -282,7 +282,7 @@ class ProtocolLifecycleExecutor:
                 (default: -1.0), uses the configured health_check_timeout_seconds.
 
         Returns:
-            ModelHandlerHealthCheckResult with handler_type, healthy status, and details.
+            ModelHealthCheckResult with handler_type, healthy status, and details.
         """
         # Use provided timeout or fall back to configured instance timeout
         # Negative value signals "use default from config"
@@ -298,13 +298,13 @@ class ProtocolLifecycleExecutor:
                     handler.health_check(),
                     timeout=effective_timeout,
                 )
-                return ModelHandlerHealthCheckResult.from_handler_response(
+                return ModelHealthCheckResult.from_handler_response(
                     handler_type=handler_type,
                     health_response=handler_health,
                 )
             else:
                 # Handler doesn't implement health_check - assume healthy
-                return ModelHandlerHealthCheckResult.no_health_check_result(handler_type)
+                return ModelHealthCheckResult.no_health_check_result(handler_type)
         except TimeoutError:
             logger.warning(
                 "Handler health check timed out",
@@ -313,7 +313,7 @@ class ProtocolLifecycleExecutor:
                     "timeout_seconds": effective_timeout,
                 },
             )
-            return ModelHandlerHealthCheckResult.timeout_result(
+            return ModelHealthCheckResult.timeout_result(
                 handler_type=handler_type,
                 timeout_seconds=effective_timeout,
             )
@@ -322,7 +322,7 @@ class ProtocolLifecycleExecutor:
                 "Handler health check failed",
                 extra={"handler_type": handler_type, "error": str(e)},
             )
-            return ModelHandlerHealthCheckResult.error_result(
+            return ModelHealthCheckResult.error_result(
                 handler_type=handler_type,
                 error=str(e),
             )
@@ -411,7 +411,9 @@ class ProtocolLifecycleExecutor:
             "Priority-based handler shutdown completed",
             extra={
                 "succeeded_handlers": batch_result.succeeded_handlers,
-                "failed_handlers": [f.handler_type for f in batch_result.failed_handlers],
+                "failed_handlers": [
+                    f.handler_type for f in batch_result.failed_handlers
+                ],
                 "total_handlers": batch_result.total_count,
                 "success_count": batch_result.success_count,
                 "failure_count": batch_result.failure_count,
