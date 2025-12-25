@@ -70,12 +70,14 @@ Example:
                 tick_time = now or datetime.now(timezone.utc)
                 # Emit event to Kafka...
 
-            def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
-                return ModelRuntimeSchedulerMetrics(
-                    scheduler_id=self._scheduler_id,
-                    ticks_emitted=self._sequence,
-                    is_running=self._running,
-                )
+            async def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
+                # Lock ensures consistent snapshot of all metrics
+                async with self._state_lock:
+                    return ModelRuntimeSchedulerMetrics(
+                        scheduler_id=self._scheduler_id,
+                        ticks_emitted=self._sequence,
+                        is_running=self._running,
+                    )
 
         # Protocol conformance check via duck typing (per ONEX conventions)
         scheduler = InMemoryScheduler()
@@ -172,7 +174,7 @@ class ProtocolRuntimeScheduler(Protocol):
                         await asyncio.sleep(1.0)
                 finally:
                     await scheduler.stop()
-                    metrics = scheduler.get_metrics()
+                    metrics = await scheduler.get_metrics()
                     print(f"Scheduler stopped after {metrics.ticks_emitted} ticks")
 
     Attributes:
@@ -412,7 +414,7 @@ class ProtocolRuntimeScheduler(Protocol):
         """
         ...
 
-    def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
+    async def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
         """Get current scheduler metrics.
 
         Returns a snapshot of the scheduler's operational metrics for
@@ -431,26 +433,28 @@ class ProtocolRuntimeScheduler(Protocol):
             ModelRuntimeSchedulerMetrics: Current metrics snapshot.
 
         Thread Safety:
-            This method MUST be safe for concurrent calls. The returned
-            metrics object is a snapshot and SHOULD NOT reflect changes
-            after the call returns.
+            This method acquires the internal state lock to ensure a consistent
+            snapshot of all metrics. The returned metrics object is immutable
+            and safe to use after the call returns. All state variables are
+            read atomically within a single lock acquisition.
 
         Example:
             .. code-block:: python
 
-                def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
-                    return ModelRuntimeSchedulerMetrics(
-                        scheduler_id=self._scheduler_id,
-                        is_running=self._running,
-                        ticks_emitted=self._total_ticks_emitted,
-                        current_sequence=self._sequence_number,
-                        last_tick_time=self._last_tick_time,
-                        interval_seconds=self._interval,
-                        errors_count=self._error_count,
-                    )
+                async def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
+                    async with self._state_lock:
+                        return ModelRuntimeSchedulerMetrics(
+                            scheduler_id=self._scheduler_id,
+                            is_running=self._running,
+                            ticks_emitted=self._total_ticks_emitted,
+                            current_sequence=self._sequence_number,
+                            last_tick_time=self._last_tick_time,
+                            interval_seconds=self._interval,
+                            errors_count=self._error_count,
+                        )
 
                 # Usage in monitoring
-                metrics = scheduler.get_metrics()
+                metrics = await scheduler.get_metrics()
                 if not metrics.is_running:
                     alert("Scheduler is not running!")
         """

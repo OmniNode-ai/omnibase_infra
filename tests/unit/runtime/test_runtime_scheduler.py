@@ -579,7 +579,7 @@ class TestRuntimeSchedulerLifecycle:
 
         # Verify tick loop has stopped
         assert scheduler.is_running is False
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.STOPPED
 
     async def test_scheduler_status_transitions(
@@ -587,17 +587,17 @@ class TestRuntimeSchedulerLifecycle:
     ) -> None:
         """Test scheduler status transitions through lifecycle."""
         # Initial state
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.STOPPED
 
         # After start
         await scheduler.start()
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.RUNNING
 
         # After stop
         await scheduler.stop()
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.STOPPED
 
 
@@ -769,7 +769,7 @@ class TestRuntimeSchedulerRestartSafety:
         await scheduler.stop()
 
         # Check metrics show persistence was tracked
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.current_sequence_number == 5
         # last_persisted_sequence should be updated on stop
         assert metrics.last_persisted_sequence == 5
@@ -813,14 +813,14 @@ class TestRuntimeSchedulerMetrics:
         self, scheduler: RuntimeScheduler, mock_event_bus: AsyncMock
     ) -> None:
         """Test that ticks_emitted counter increments."""
-        metrics_before = scheduler.get_metrics()
+        metrics_before = await scheduler.get_metrics()
         assert metrics_before.ticks_emitted == 0
 
         await scheduler.emit_tick()
         await scheduler.emit_tick()
         await scheduler.emit_tick()
 
-        metrics_after = scheduler.get_metrics()
+        metrics_after = await scheduler.get_metrics()
         assert metrics_after.ticks_emitted == 3
 
     async def test_metrics_track_failures(
@@ -838,7 +838,7 @@ class TestRuntimeSchedulerMetrics:
         with pytest.raises(Exception, match="Publish failed"):
             await scheduler.emit_tick()
 
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.ticks_failed == 1
 
     async def test_metrics_timing_recorded(
@@ -847,7 +847,7 @@ class TestRuntimeSchedulerMetrics:
         """Test that tick duration timing is recorded."""
         await scheduler.emit_tick()
 
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
 
         # Duration should be recorded (non-zero)
         assert metrics.last_tick_duration_ms > 0
@@ -862,7 +862,7 @@ class TestRuntimeSchedulerMetrics:
         for _ in range(5):
             await scheduler.emit_tick()
 
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
 
         # Max should be >= average
         assert metrics.max_tick_duration_ms >= metrics.average_tick_duration_ms
@@ -876,7 +876,7 @@ class TestRuntimeSchedulerMetrics:
         # Wait a bit
         await asyncio.sleep(0.1)
 
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.started_at is not None
         assert metrics.total_uptime_seconds > 0
 
@@ -889,7 +889,7 @@ class TestRuntimeSchedulerMetrics:
         # Successful emit
         await scheduler.emit_tick()
 
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.consecutive_failures == 0
 
 
@@ -922,7 +922,7 @@ class TestRuntimeSchedulerCircuitBreaker:
                 pass
 
         # Circuit should now be open
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.circuit_breaker_open is True
 
     async def test_circuit_breaker_blocks_when_open(
@@ -964,7 +964,7 @@ class TestRuntimeSchedulerCircuitBreaker:
         scheduler = RuntimeScheduler(config=scheduler_config, event_bus=mock_event_bus)
         await scheduler.emit_tick()
 
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.circuit_breaker_open is False
 
     async def test_circuit_breaker_auto_reset_after_timeout(
@@ -992,7 +992,7 @@ class TestRuntimeSchedulerCircuitBreaker:
             except Exception:
                 pass
 
-        assert scheduler.get_metrics().circuit_breaker_open is True
+        assert (await scheduler.get_metrics()).circuit_breaker_open is True
 
         # Wait for reset timeout (1.0 seconds + small buffer)
         await asyncio.sleep(1.1)
@@ -1004,7 +1004,7 @@ class TestRuntimeSchedulerCircuitBreaker:
         await scheduler.emit_tick()
 
         # Circuit should be closed after success
-        assert scheduler.get_metrics().circuit_breaker_open is False
+        assert (await scheduler.get_metrics()).circuit_breaker_open is False
 
     async def test_start_blocked_when_circuit_open(
         self,
@@ -1152,7 +1152,7 @@ class TestRuntimeSchedulerEdgeCases:
         # Concurrently get metrics while ticks are being emitted
         async def get_metrics_repeatedly() -> None:
             for _ in range(10):
-                metrics = scheduler.get_metrics()
+                metrics = await scheduler.get_metrics()
                 assert metrics.scheduler_id == "test-scheduler"
                 await asyncio.sleep(0.01)
 
@@ -1174,7 +1174,7 @@ class TestRuntimeSchedulerEdgeCases:
         """Test that metrics snapshot doesn't change after emission."""
         await scheduler.emit_tick()
 
-        metrics1 = scheduler.get_metrics()
+        metrics1 = await scheduler.get_metrics()
         ticks1 = metrics1.ticks_emitted
 
         await scheduler.emit_tick()
@@ -1183,7 +1183,7 @@ class TestRuntimeSchedulerEdgeCases:
         assert metrics1.ticks_emitted == ticks1
 
         # New snapshot should show update
-        metrics2 = scheduler.get_metrics()
+        metrics2 = await scheduler.get_metrics()
         assert metrics2.ticks_emitted == ticks1 + 1
 
 
@@ -1202,14 +1202,14 @@ class TestRuntimeSchedulerIntegration:
     ) -> None:
         """Test complete lifecycle with metrics verification."""
         # Initial state
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.STOPPED
         assert metrics.ticks_emitted == 0
         assert metrics.started_at is None
 
         # Start scheduler
         await scheduler.start()
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.RUNNING
         assert metrics.started_at is not None
 
@@ -1217,13 +1217,13 @@ class TestRuntimeSchedulerIntegration:
         await asyncio.sleep(0.35)
 
         # Verify ticks were emitted
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.ticks_emitted >= 2
         assert metrics.current_sequence_number >= 2
 
         # Stop scheduler
         await scheduler.stop()
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.STOPPED
         assert not metrics.is_healthy()
 

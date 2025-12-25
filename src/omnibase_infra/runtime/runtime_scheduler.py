@@ -439,7 +439,7 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             )
             raise
 
-    def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
+    async def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
         """Get current scheduler metrics.
 
         Returns a snapshot of the scheduler's operational metrics for
@@ -449,37 +449,40 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             ModelRuntimeSchedulerMetrics: Current metrics snapshot.
 
         Thread Safety:
-            This method returns an immutable snapshot and is safe for
-            concurrent calls.
+            This method acquires ``_state_lock`` to ensure a consistent snapshot
+            of all metrics. The returned Pydantic model is immutable and safe
+            to use after the lock is released. All state variables are read
+            atomically within a single lock acquisition.
         """
-        # Calculate uptime
-        uptime_seconds = 0.0
-        if self._started_at is not None:
-            uptime_seconds = (datetime.now(UTC) - self._started_at).total_seconds()
+        async with self._state_lock:
+            # Calculate uptime
+            uptime_seconds = 0.0
+            if self._started_at is not None:
+                uptime_seconds = (datetime.now(UTC) - self._started_at).total_seconds()
 
-        # Calculate average tick duration
-        average_tick_duration_ms = 0.0
-        if self._ticks_emitted > 0:
-            average_tick_duration_ms = (
-                self._total_tick_duration_ms / self._ticks_emitted
+            # Calculate average tick duration
+            average_tick_duration_ms = 0.0
+            if self._ticks_emitted > 0:
+                average_tick_duration_ms = (
+                    self._total_tick_duration_ms / self._ticks_emitted
+                )
+
+            return ModelRuntimeSchedulerMetrics(
+                scheduler_id=self.scheduler_id,
+                status=self._status,
+                ticks_emitted=self._ticks_emitted,
+                ticks_failed=self._ticks_failed,
+                last_tick_at=self._last_tick_at,
+                last_tick_duration_ms=self._last_tick_duration_ms,
+                average_tick_duration_ms=average_tick_duration_ms,
+                max_tick_duration_ms=self._max_tick_duration_ms,
+                current_sequence_number=self._sequence_number,
+                last_persisted_sequence=self._last_persisted_sequence,
+                circuit_breaker_open=self._circuit_breaker_open,
+                consecutive_failures=self._consecutive_failures,
+                started_at=self._started_at,
+                total_uptime_seconds=uptime_seconds,
             )
-
-        return ModelRuntimeSchedulerMetrics(
-            scheduler_id=self.scheduler_id,
-            status=self._status,
-            ticks_emitted=self._ticks_emitted,
-            ticks_failed=self._ticks_failed,
-            last_tick_at=self._last_tick_at,
-            last_tick_duration_ms=self._last_tick_duration_ms,
-            average_tick_duration_ms=average_tick_duration_ms,
-            max_tick_duration_ms=self._max_tick_duration_ms,
-            current_sequence_number=self._sequence_number,
-            last_persisted_sequence=self._last_persisted_sequence,
-            circuit_breaker_open=self._circuit_breaker_open,
-            consecutive_failures=self._consecutive_failures,
-            started_at=self._started_at,
-            total_uptime_seconds=uptime_seconds,
-        )
 
     # =========================================================================
     # Internal Methods

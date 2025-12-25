@@ -60,8 +60,9 @@ from omnibase_infra.projectors.projection_reader_registration import (
 logger = logging.getLogger(__name__)
 
 
-# TODO(OMN-XXX): Make liveness interval configurable via container
-# For MVP, using reasonable default of 60 seconds
+# Liveness interval default. The handler accepts liveness_interval_seconds as a
+# constructor parameter, allowing container wiring to inject environment-specific
+# values. The default of 60 seconds is suitable for most deployments.
 _DEFAULT_LIVENESS_INTERVAL_SECONDS: int = 60
 
 
