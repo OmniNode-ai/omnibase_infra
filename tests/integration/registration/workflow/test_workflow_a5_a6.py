@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.reducers import RegistrationReducer
@@ -44,7 +45,7 @@ def create_deterministic_event(
     node_id: UUID,
     correlation_id: UUID,
     timestamp: datetime | None = None,
-    node_type: str = "effect",
+    node_type: EnumNodeKind = EnumNodeKind.EFFECT,
     node_version: str = "1.0.0",
 ) -> ModelNodeIntrospectionEvent:
     """Create a deterministic introspection event with fixed values.
@@ -56,7 +57,7 @@ def create_deterministic_event(
         node_id: Fixed node identifier.
         correlation_id: Fixed correlation ID for tracing.
         timestamp: Fixed timestamp (defaults to epoch for max determinism).
-        node_type: Node type (effect, compute, reducer, orchestrator).
+        node_type: Node type (EnumNodeKind.EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
         node_version: Semantic version string.
 
     Returns:

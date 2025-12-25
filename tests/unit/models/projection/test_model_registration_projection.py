@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -783,7 +784,7 @@ class TestModelRegistrationProjectionFromAttributes:
             entity_id: UUID
             domain: str
             current_state: EnumRegistrationState
-            node_type: str
+            node_type: EnumNodeKind
             node_version: str
             capabilities: ModelNodeCapabilities
             ack_deadline: datetime | None
@@ -802,7 +803,7 @@ class TestModelRegistrationProjectionFromAttributes:
                 self.entity_id = entity_id
                 self.domain = "registration"
                 self.current_state = EnumRegistrationState.ACTIVE
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "1.0.0"
                 self.capabilities = ModelNodeCapabilities()
                 self.ack_deadline = None
@@ -821,7 +822,7 @@ class TestModelRegistrationProjectionFromAttributes:
         proj = ModelRegistrationProjection.model_validate(row)
         assert proj.entity_id == entity_id
         assert proj.current_state == EnumRegistrationState.ACTIVE
-        assert proj.node_type == "effect"
+        assert proj.node_type == EnumNodeKind.EFFECT
 
 
 class TestModelRegistrationProjectionCapabilities:
@@ -887,15 +888,20 @@ class TestModelRegistrationProjectionAllNodeTypes:
 
     @pytest.mark.parametrize(
         "node_type",
-        ["effect", "compute", "reducer", "orchestrator"],
+        [
+            EnumNodeKind.EFFECT,
+            EnumNodeKind.COMPUTE,
+            EnumNodeKind.REDUCER,
+            EnumNodeKind.ORCHESTRATOR,
+        ],
     )
-    def test_all_node_types_are_valid(self, node_type: str) -> None:
+    def test_all_node_types_are_valid(self, node_type: EnumNodeKind) -> None:
         """Test that all node types are valid."""
         now = datetime.now(UTC)
         proj = ModelRegistrationProjection(
             entity_id=uuid4(),
             current_state=EnumRegistrationState.ACTIVE,
-            node_type=node_type,  # type: ignore[arg-type]
+            node_type=node_type,
             last_applied_event_id=uuid4(),
             registered_at=now,
             updated_at=now,

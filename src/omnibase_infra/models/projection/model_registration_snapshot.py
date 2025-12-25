@@ -22,10 +22,13 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from omnibase_core.enums import EnumNodeKind
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.registration.model_node_capabilities import (
@@ -121,7 +124,7 @@ class ModelRegistrationSnapshot(BaseModel):
     )
 
     # Node Information (cached from introspection/registration)
-    node_type: Literal["effect", "compute", "reducer", "orchestrator"] | None = Field(
+    node_type: EnumNodeKind | None = Field(
         default=None,
         description="ONEX node type (cached from introspection)",
     )

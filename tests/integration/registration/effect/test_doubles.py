@@ -26,9 +26,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from omnibase_infra.nodes.effects.models import ModelBackendResult
+
+if TYPE_CHECKING:
+    from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 
 @dataclass
@@ -54,14 +58,14 @@ class PostgresRegistration:
 
     Attributes:
         node_id: Unique identifier for the node.
-        node_type: Type of ONEX node.
+        node_type: Type of ONEX node (EnumNodeKind).
         node_version: Semantic version of the node.
         endpoints: Dict of endpoint type to URL.
         metadata: Additional metadata.
     """
 
     node_id: UUID
-    node_type: str
+    node_type: EnumNodeKind
     node_version: str
     endpoints: dict[str, str]
     metadata: dict[str, str]
@@ -260,7 +264,7 @@ class StubPostgresAdapter:
     async def upsert(
         self,
         node_id: UUID,
-        node_type: str,
+        node_type: EnumNodeKind,
         node_version: str,
         endpoints: dict[str, str],
         metadata: dict[str, str],
@@ -272,7 +276,7 @@ class StubPostgresAdapter:
 
         Args:
             node_id: Unique identifier for the node.
-            node_type: Type of ONEX node.
+            node_type: Type of ONEX node (EnumNodeKind).
             node_version: Semantic version of the node.
             endpoints: Dict of endpoint type to URL.
             metadata: Additional metadata.

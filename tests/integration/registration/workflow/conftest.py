@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Literal
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 
@@ -73,7 +74,7 @@ class IntrospectableTestNode(MixinNodeIntrospection):
     def __init__(
         self,
         node_id: UUID | None = None,
-        node_type: str = "effect",
+        node_type: EnumNodeKind = EnumNodeKind.EFFECT,
         version: str = "1.0.0",
         event_bus: InMemoryEventBus | None = None,
     ) -> None:
@@ -81,7 +82,7 @@ class IntrospectableTestNode(MixinNodeIntrospection):
 
         Args:
             node_id: Optional node ID (generated if not provided).
-            node_type: Node type classification.
+            node_type: Node type classification (EnumNodeKind).
             version: Node version string.
             event_bus: Optional event bus for publishing.
         """
@@ -507,7 +508,7 @@ def test_node_factory(
 
     def _create_node(
         node_id: UUID | None = None,
-        node_type: str = "effect",
+        node_type: EnumNodeKind = EnumNodeKind.EFFECT,
         version: str = "1.0.0",
     ) -> IntrospectableTestNode:
         return IntrospectableTestNode(
@@ -839,7 +840,7 @@ class MockPostgresEffect:
     async def upsert(
         self,
         node_id: UUID,
-        node_type: str,
+        node_type: EnumNodeKind,
         node_version: str,
         endpoints: dict[str, str],
         metadata: dict[str, str],
@@ -848,7 +849,7 @@ class MockPostgresEffect:
 
         Args:
             node_id: Unique node identifier.
-            node_type: ONEX node type.
+            node_type: ONEX node type (EnumNodeKind).
             node_version: Semantic version.
             endpoints: Endpoint URLs.
             metadata: Additional metadata.

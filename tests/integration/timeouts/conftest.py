@@ -41,6 +41,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection import (
@@ -476,7 +477,7 @@ def create_runtime_tick(
 def create_test_projection(
     entity_id: UUID | None = None,
     state: EnumRegistrationState = EnumRegistrationState.AWAITING_ACK,
-    node_type: str = "effect",
+    node_type: EnumNodeKind = EnumNodeKind.EFFECT,
     ack_deadline: datetime | None = None,
     liveness_deadline: datetime | None = None,
     ack_timeout_emitted_at: datetime | None = None,
@@ -488,7 +489,7 @@ def create_test_projection(
     Args:
         entity_id: Node UUID (generated if not provided)
         state: FSM state
-        node_type: ONEX node type
+        node_type: ONEX node type (EnumNodeKind)
         ack_deadline: Optional ack deadline
         liveness_deadline: Optional liveness deadline
         ack_timeout_emitted_at: Optional ack timeout emission marker
