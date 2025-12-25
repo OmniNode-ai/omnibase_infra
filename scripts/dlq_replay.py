@@ -139,7 +139,9 @@ class ModelDlqMessage(BaseModel):
     original_topic: str
     original_key: str | None
     original_value: str
-    original_offset: str | None
+    original_offset: (
+        str | None
+    )  # Kafka offsets are int, converted to str in from_kafka_message
     original_partition: int | None
     failure_reason: str
     failure_timestamp: str
@@ -179,7 +181,10 @@ class ModelDlqMessage(BaseModel):
             original_topic=str(payload.get("original_topic", "unknown")),
             original_key=original_message.get("key"),
             original_value=str(original_message.get("value", "")),
-            original_offset=original_message.get("offset"),
+            # Convert offset to str for type consistency (Kafka offsets are int in JSON)
+            original_offset=str(original_message["offset"])
+            if "offset" in original_message and original_message["offset"] is not None
+            else None,
             original_partition=original_message.get("partition"),
             failure_reason=str(payload.get("failure_reason", "")),
             failure_timestamp=str(payload.get("failure_timestamp", "")),
@@ -305,11 +310,12 @@ class ModelReplayResult(BaseModel):
 
 NON_RETRYABLE_ERRORS = frozenset(
     {
-        # Infrastructure errors from omnibase_infra.errors
+        # Authentication/authorization errors (omnibase_infra.errors)
         "InfraAuthenticationError",
+        # Configuration errors (omnibase_infra.errors)
         "ProtocolConfigurationError",
         "SecretResolutionError",
-        # Pydantic validation errors
+        # Schema validation errors (pydantic)
         "ValidationError",
     }
 )

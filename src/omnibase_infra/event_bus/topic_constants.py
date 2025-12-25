@@ -291,8 +291,8 @@ def get_dlq_topic_for_original(
     """Get the DLQ topic for an original message topic.
 
     Infers the appropriate DLQ topic based on the category of the original
-    topic. If the original topic follows ONEX naming conventions, the
-    category is extracted automatically.
+    topic. If it follows ONEX naming conventions, the category is extracted
+    automatically.
 
     Args:
         original_topic: The original topic where the message was consumed from.
