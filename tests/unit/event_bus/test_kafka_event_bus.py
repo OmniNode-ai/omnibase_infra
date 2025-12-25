@@ -12,7 +12,7 @@ import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from aiokafka.errors import KafkaError
@@ -1476,8 +1476,6 @@ class TestKafkaEventBusTopicValidation:
     @pytest.fixture
     def correlation_id(self) -> UUID:
         """Create a correlation ID for tests."""
-        from uuid import uuid4
-
         return uuid4()
 
     def test_valid_topic_name_simple(

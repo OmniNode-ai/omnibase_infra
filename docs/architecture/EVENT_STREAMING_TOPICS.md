@@ -452,11 +452,71 @@ Arbitrary partition counts are forbidden.
 
 ## 9. Migration from Legacy Topics
 
-| Legacy | New |
-|--------|-----|
-| `node.introspection` | `onex.node.introspection.published.v1` |
-| `node.heartbeat` | `onex.node.heartbeat.published.v1` |
-| `node.request_introspection` | `onex.registry.introspection.requested.v1` |
+### Legacy to ONEX Canonical Topic Mapping
+
+| Legacy Topic | ONEX Canonical Topic | Purpose |
+|--------------|---------------------|---------|
+| `node.introspection` | `onex.node.introspection.published.v1` | Node capability announcements |
+| `node.heartbeat` | `onex.node.heartbeat.published.v1` | Node liveness signals |
+| `node.request_introspection` | `onex.registry.introspection.requested.v1` | Registry re-broadcast requests |
+
+### Migration Strategy
+
+**Recommended Approach**: Parallel production with gradual consumer migration.
+
+1. **Phase 1: Dual Publishing**
+   - Configure producers to publish to both legacy and ONEX topics
+   - All existing consumers continue working unchanged
+   - No service disruption
+
+2. **Phase 2: Consumer Migration**
+   - Update consumers to subscribe to ONEX topics
+   - Verify message processing with new topic names
+   - Monitor consumer lag on both topic sets
+
+3. **Phase 3: Legacy Deprecation**
+   - Stop publishing to legacy topics
+   - Delete legacy topics after retention period expires
+   - Update documentation and configuration
+
+### Producer Update Example
+
+```python
+# Before: Legacy topic name
+INTROSPECTION_TOPIC = "node.introspection"
+
+# During migration: Dual publishing
+LEGACY_INTROSPECTION_TOPIC = "node.introspection"
+ONEX_INTROSPECTION_TOPIC = "onex.node.introspection.published.v1"
+
+async def publish_introspection(event: ModelNodeIntrospectionEvent) -> None:
+    """Publish to both topics during migration."""
+    await event_bus.publish(LEGACY_INTROSPECTION_TOPIC, event)
+    await event_bus.publish(ONEX_INTROSPECTION_TOPIC, event)
+
+# After: ONEX topic only
+INTROSPECTION_TOPIC = "onex.node.introspection.published.v1"
+```
+
+### Consumer Update Example
+
+```python
+# Before: Legacy topic subscription
+consumer.subscribe(["node.introspection", "node.heartbeat"])
+
+# After: ONEX topic subscription
+consumer.subscribe([
+    "onex.node.introspection.published.v1",
+    "onex.node.heartbeat.published.v1",
+])
+```
+
+### Key Migration Considerations
+
+- **Message Format**: Payload schemas remain unchanged; only topic names change
+- **Consumer Groups**: Create new consumer groups for ONEX topics to track offset independently
+- **Monitoring**: Compare message rates between legacy and ONEX topics during migration
+- **Rollback**: Keep legacy topic publishing capability until migration is verified
 
 ---
 
@@ -494,7 +554,78 @@ Arbitrary partition counts are forbidden.
 
 ---
 
-## 12. Contract Integration
+## 12. Security and Access Control
+
+### Topic ACL Configuration
+
+In production and multi-tenant environments, Kafka topic access must be controlled using ACLs (Access Control Lists).
+
+#### Recommended ACL Policies
+
+| Topic Pattern | Principal | Operation | Permission |
+|--------------|-----------|-----------|------------|
+| `onex.node.*` | Node services | WRITE | ALLOW |
+| `onex.node.*` | Registry services | READ | ALLOW |
+| `onex.registry.*` | Registry services | WRITE | ALLOW |
+| `onex.registry.*` | Node services | READ | ALLOW |
+| `onex.infra.*` | Infrastructure services | WRITE | ALLOW |
+| `onex.infra.*` | Observability services | READ | ALLOW |
+
+#### ACL Configuration Example (Redpanda/Kafka)
+
+```bash
+# Allow node services to produce to node lifecycle topics
+rpk acl create --allow-principal 'User:node-service' \
+    --operation write \
+    --topic 'onex.node.*'
+
+# Allow registry to consume node lifecycle events
+rpk acl create --allow-principal 'User:registry-service' \
+    --operation read \
+    --topic 'onex.node.*'
+
+# Allow registry to produce state change events
+rpk acl create --allow-principal 'User:registry-service' \
+    --operation write \
+    --topic 'onex.registry.*'
+
+# Allow observability systems to consume all topics
+rpk acl create --allow-principal 'User:observability' \
+    --operation read \
+    --topic 'onex.*'
+```
+
+### Introspection Topic Security
+
+Introspection topics (`onex.node.introspection.published.v1`, `onex.registry.introspection.requested.v1`) require special consideration:
+
+**Security Concerns**:
+- Introspection data exposes node capabilities and method signatures
+- Attackers could use introspection data for reconnaissance
+- Request topic allows triggering re-broadcasts from all nodes
+
+**Recommended Controls**:
+1. **Network Segmentation**: Isolate introspection topics to internal network only
+2. **Consumer Whitelisting**: Only allow authorized consumers (registry, monitoring)
+3. **Rate Limiting**: Limit introspection request frequency to prevent abuse
+4. **Audit Logging**: Log all consumers of introspection topics
+
+### Multi-Tenant Considerations
+
+For multi-tenant deployments:
+
+1. **Topic Namespacing**: Consider prefixing topics with tenant ID
+   - Example: `tenant-123.onex.node.introspection.published.v1`
+
+2. **Consumer Group Isolation**: Each tenant should use isolated consumer groups
+
+3. **Cross-Tenant Access**: Disable by default; require explicit ACL grants
+
+4. **Topic Quotas**: Set per-tenant quotas to prevent resource exhaustion
+
+---
+
+## 13. Contract Integration
 
 ONEX node contracts declare their event channel dependencies in `contract.yaml`. This enables:
 - Static analysis of event topology
@@ -639,7 +770,7 @@ except ValidationError as e:
 
 **Note:** Topic naming validation is available via contract-driven topic configuration (implemented in OMN-881). Nodes can define their event channels in `contract.yaml` and the runtime validates topic names against the canonical list.
 
-See `src/omnibase_infra/mixins/model_introspection_config.py` for the configuration model implementation.
+See `src/omnibase_infra/models/discovery/model_introspection_config.py` for the configuration model implementation.
 
 ### Code Integration Example
 
@@ -744,6 +875,81 @@ class RegistryEffectNode(MixinNodeIntrospection):
 
 **Current Behavior:**
 Topic names are defined as module-level constants in `mixin_node_introspection.py` as defaults. Contract-driven topic configuration is available via `ModelIntrospectionConfig` (implemented in OMN-881), enabling topology analysis and multi-tenant deployments.
+
+---
+
+## 14. Performance Metrics and Thresholds
+
+### Event Publishing Metrics
+
+The following metrics should be monitored for event streaming health:
+
+| Metric | Expected Threshold | Alert Threshold | Description |
+|--------|-------------------|-----------------|-------------|
+| `publish_latency_ms` | < 50ms (p50) | > 200ms (p99) | Time to publish event to Kafka |
+| `publish_success_rate` | > 99.9% | < 99% | Percentage of successful publishes |
+| `event_queue_depth` | < 100 | > 1000 | Pending events in local buffer |
+| `circuit_breaker_open_count` | 0 | > 0 | Number of open circuit breakers |
+
+### Heartbeat Monitoring
+
+For node heartbeat events (`onex.node.heartbeat.published.v1`):
+
+| Metric | Expected Value | Alert Condition | Action |
+|--------|---------------|-----------------|--------|
+| `heartbeat_interval_seconds` | 30 | Missing > 90s | Node may be unhealthy |
+| `heartbeat_jitter_seconds` | < 5 | > 15 | Network or scheduling issues |
+| `heartbeat_payload_size_bytes` | < 1KB | > 10KB | Payload bloat |
+
+### Consumer Lag Thresholds
+
+| Topic Category | Acceptable Lag | Warning Lag | Critical Lag |
+|---------------|----------------|-------------|--------------|
+| Heartbeats | < 30s | > 60s | > 120s |
+| Introspection | < 60s | > 120s | > 300s |
+| Registry state | < 30s | > 60s | > 120s |
+| Workflow events | < 120s | > 300s | > 600s |
+| Infrastructure | < 60s | > 120s | > 300s |
+
+### Performance Event Fields
+
+Introspection events include performance metrics in the payload:
+
+```json
+{
+  "node_id": "postgres-adapter-001",
+  "node_type": "EFFECT",
+  "performance_metrics": {
+    "cpu_usage_percent": 15.2,
+    "memory_usage_mb": 256.5,
+    "uptime_seconds": 3600,
+    "active_operations_count": 5
+  }
+}
+```
+
+**Interpretation Guidelines**:
+
+| Metric | Healthy | Warning | Critical |
+|--------|---------|---------|----------|
+| `cpu_usage_percent` | < 70% | 70-85% | > 85% |
+| `memory_usage_mb` | < 80% of limit | 80-90% of limit | > 90% of limit |
+| `active_operations_count` | < pool_size | = pool_size | > pool_size (queuing) |
+
+### Alerting Best Practices
+
+1. **Rate-based alerts**: Alert on rate of change, not absolute values
+   - Example: "Heartbeat rate dropped 50% in 5 minutes"
+
+2. **Composite alerts**: Combine metrics for meaningful alerts
+   - Example: "High latency AND high CPU" vs just "high latency"
+
+3. **Silence during deployment**: Suppress alerts during planned deployments
+
+4. **Escalation tiers**:
+   - Warning: Slack notification
+   - Critical: PagerDuty alert
+   - Emergency: Phone call
 
 ---
 

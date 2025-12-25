@@ -9,15 +9,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
-#### MixinNodeIntrospection API (PR #54)
-- **`invalidate_introspection_cache()` is now synchronous**: The cache invalidation method no longer requires `await`.
-  - **Old**: `await node.invalidate_introspection_cache()`
-  - **New**: `node.invalidate_introspection_cache()`
-  - **Migration**: Remove `await` from all calls to `invalidate_introspection_cache()`.
-  - **Rationale**: Cache invalidation is a simple in-memory operation that does not require async I/O. Synchronous semantics simplify usage and avoid unnecessary coroutine overhead.
-- **New configuration model**: Added `ModelIntrospectionConfig` as the preferred configuration method.
-  - **Migration**: Use `initialize_introspection_from_config(config)` for new code; legacy `initialize_introspection()` method remains supported for backward compatibility.
-  - **Rationale**: Typed configuration model provides better validation and extensibility.
+> **IMPORTANT**: This section documents API changes that may require code modifications when upgrading. Review each item carefully before upgrading.
+
+#### MixinNodeIntrospection API (OMN-881, PR #54)
+
+##### 1. Cache Invalidation Method Signature Change
+
+**`invalidate_introspection_cache()` is now synchronous (was async)**
+
+This is a **breaking change** for any code that awaits this method.
+
+| Aspect | Details |
+|--------|---------|
+| **What changed** | Method signature changed from `async def` to `def` (synchronous) |
+| **Why it changed** | Cache invalidation is a simple in-memory operation (setting `_introspection_cache = None`) that does not require async I/O. Synchronous semantics simplify usage and avoid unnecessary coroutine overhead. |
+| **Error if not migrated** | `TypeError: object NoneType can't be used in 'await' expression` |
+
+**Migration Steps**:
+
+```python
+# BEFORE (will cause TypeError after upgrade)
+await node.invalidate_introspection_cache()
+
+# AFTER (correct usage)
+node.invalidate_introspection_cache()
+```
+
+**Search pattern** to find affected code:
+```bash
+grep -r "await.*invalidate_introspection_cache" --include="*.py"
+```
+
+##### 2. Configuration Model API
+
+**`initialize_introspection()` requires `ModelIntrospectionConfig`**
+
+The initialization method uses a typed configuration model for all parameters.
+
+| Aspect | Details |
+|--------|---------|
+| **What changed** | `initialize_introspection(config: ModelIntrospectionConfig)` is the initialization API |
+| **Why** | Typed configuration model provides validation, IDE support, and extensibility |
+| **Model location** | `omnibase_infra.models.discovery.ModelIntrospectionConfig` |
+
+**Usage Example**:
+
+```python
+from uuid import uuid4
+from omnibase_infra.models.discovery import ModelIntrospectionConfig
+from omnibase_infra.mixins import MixinNodeIntrospection
+
+class MyNode(MixinNodeIntrospection):
+    def __init__(self, event_bus=None):
+        config = ModelIntrospectionConfig(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=event_bus,
+            version="1.0.0",
+            cache_ttl=300.0,
+        )
+        self.initialize_introspection(config)
+
+    async def shutdown(self):
+        # Note: invalidate_introspection_cache() is now SYNC (see above)
+        self.invalidate_introspection_cache()
+```
 
 #### Error Code for Unhandled node_kind (OMN-990, PR #73)
 - **Error code changed from `VALIDATION_ERROR` to `INTERNAL_ERROR`**: When `DispatchContextEnforcer.create_context_for_dispatcher()` encounters an unhandled `node_kind` value, it now raises `ModelOnexError` with `INTERNAL_ERROR` instead of `VALIDATION_ERROR`.
@@ -37,17 +93,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Node Introspection (OMN-881, PR #54)
 - **ModelIntrospectionConfig**: Configuration model for `MixinNodeIntrospection` that provides typed configuration
-  - `node_id` (required): Unique identifier for this node instance (UUID, strings auto-converted)
-  - `node_type` (required): Type of node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
-  - `event_bus`: Optional event bus for publishing introspection and heartbeat events (must have `publish_envelope()` method if provided)
+  - `node_id` (required): Unique identifier for this node instance (UUID)
+  - `node_type` (required): Type of node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR). Cannot be empty (min_length=1).
+  - `event_bus`: Optional event bus for publishing introspection and heartbeat events. Must have `publish_envelope()` method if provided. Uses duck typing (`object | None`).
   - `version`: Node version string (default: `"1.0.0"`)
-  - `cache_ttl`: Cache time-to-live in seconds (default: `300.0`)
-  - `operation_keywords`: Optional set of keywords to identify operation methods (if None, uses DEFAULT_OPERATION_KEYWORDS)
-  - `exclude_prefixes`: Optional set of prefixes to exclude from capability discovery (if None, uses DEFAULT_EXCLUDE_PREFIXES)
-  - `introspection_topic`: Custom topic name for introspection events (default: `"node.introspection"`)
-  - `heartbeat_topic`: Custom topic name for heartbeat events (default: `"node.heartbeat"`)
-  - `request_introspection_topic`: Custom topic name for request introspection events (default: `"node.request_introspection"`)
-- **Performance Metrics Tracking**: Added `IntrospectionPerformanceMetrics` dataclass and `get_performance_metrics()` method for monitoring introspection operation timing and threshold violations
+  - `cache_ttl`: Cache time-to-live in seconds (default: `300.0`, minimum: `0.0`)
+  - `operation_keywords`: Optional set of keywords to identify operation methods. If None, uses `MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS`.
+  - `exclude_prefixes`: Optional set of prefixes to exclude from capability discovery. If None, uses `MixinNodeIntrospection.DEFAULT_EXCLUDE_PREFIXES`.
+  - Model is frozen and forbids extra fields for immutability and strict validation.
+- **Performance Metrics Tracking**:
+  - Added `IntrospectionPerformanceMetrics` dataclass (internal) and `ModelIntrospectionPerformanceMetrics` Pydantic model (for event payloads)
+  - Added `get_performance_metrics()` method for monitoring introspection operation timing and threshold violations
+  - Performance thresholds: `get_capabilities` <50ms, `discover_capabilities` <30ms, `total_introspection` <50ms, `cache_hit` <1ms
+- **Topic Constants**: Introspection events use fixed topic names (not configurable via ModelIntrospectionConfig):
+  - `INTROSPECTION_TOPIC = "node.introspection"`
+  - `HEARTBEAT_TOPIC = "node.heartbeat"`
+  - `REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"`
 
 #### Handlers
 - **HttpHandler** (OMN-237, PR #26): HTTP REST protocol handler for MVP

@@ -24,18 +24,21 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 from uuid import UUID, uuid4
 
 import pytest
 
 from omnibase_infra.mixins import MixinNodeIntrospection, ModelIntrospectionConfig
-from omnibase_infra.mixins.model_introspection_config import (
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
+from omnibase_infra.models.discovery.model_introspection_config import (
     DEFAULT_HEARTBEAT_TOPIC,
     DEFAULT_INTROSPECTION_TOPIC,
     DEFAULT_REQUEST_INTROSPECTION_TOPIC,
 )
-from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 # Module-level markers
@@ -84,13 +87,14 @@ class MockEventBus:
 
     async def publish_envelope(
         self,
-        envelope: object,
+        envelope: BaseModel,
         topic: str,
     ) -> None:
         """Mock publish_envelope method.
 
         Args:
-            envelope: Event envelope to publish.
+            envelope: Event envelope to publish. Uses BaseModel for type safety
+                since all event envelopes are Pydantic models.
             topic: Event topic.
         """
         if isinstance(envelope, ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent):
@@ -935,7 +939,7 @@ class TestTopicValidation:
         """Verify topic ending with a dot is rejected."""
         # Topic "onex." fails pattern validation because it ends with a dot
         # (pattern requires ending with alphanumeric character)
-        with pytest.raises(ValueError, match="only lowercase alphanumeric"):
+        with pytest.raises(ValueError, match="must not end with a dot"):
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type="EFFECT",
