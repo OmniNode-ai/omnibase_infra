@@ -106,9 +106,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from omnibase_infra.models.scheduler.model_runtime_scheduler_metrics import (
-        ModelRuntimeSchedulerMetrics,
-    )
+    from omnibase_infra.runtime.models import ModelRuntimeSchedulerMetrics
 
 __all__: list[str] = [
     "ProtocolRuntimeScheduler",

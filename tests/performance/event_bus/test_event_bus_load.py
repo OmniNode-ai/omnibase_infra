@@ -487,6 +487,7 @@ class TestRecoveryResilience:
         good_count = 0
         error_count = 0
         good_lock = asyncio.Lock()
+        error_lock = asyncio.Lock()
 
         async def good_handler(msg: ModelEventMessage) -> None:
             nonlocal good_count
@@ -495,7 +496,8 @@ class TestRecoveryResilience:
 
         async def bad_handler(msg: ModelEventMessage) -> None:
             nonlocal error_count
-            error_count += 1
+            async with error_lock:
+                error_count += 1
             raise ValueError("Intentional error")
 
         await bus.subscribe(topic, "good", good_handler)

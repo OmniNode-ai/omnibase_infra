@@ -155,7 +155,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             - delete_snapshot clears the version tracker entry for that entity
             - For persistent version tracking across restarts, inject a shared
               snapshot_version_tracker dict in __init__
-            - Thread-safe: Uses asyncio.Lock for concurrent access
+            - Coroutine-safe: Uses asyncio.Lock for concurrent access
 
     NOTE: Snapshots are for READ OPTIMIZATION only. The immutable event
     log remains the authoritative source of truth. Snapshots can be

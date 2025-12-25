@@ -140,10 +140,10 @@ class CircuitState(str, Enum):
 
 
 class MixinAsyncCircuitBreaker:
-    """Thread-safe async circuit breaker mixin for infrastructure components.
+    """Coroutine-safe async circuit breaker mixin for infrastructure components.
 
     Provides circuit breaker pattern implementation with:
-    - Thread-safe state management using asyncio.Lock
+    - Coroutine-safe state management using asyncio.Lock
     - Configurable failure thresholds and reset timeouts
     - Automatic state transitions (CLOSED → OPEN → HALF_OPEN → CLOSED)
     - Infrastructure error integration (InfraUnavailableError)

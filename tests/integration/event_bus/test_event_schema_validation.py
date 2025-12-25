@@ -198,6 +198,28 @@ class TestModelEventHeadersValidation:
         )
         assert headers.timestamp == datetime(2025, 1, 1, tzinfo=UTC)
 
+    def test_headers_naive_timestamp_rejected(self) -> None:
+        """Verify naive datetime (without tzinfo) is rejected.
+
+        Timezone-aware timestamps are required to prevent ambiguity in
+        distributed systems where events may be processed across time zones.
+        """
+        from datetime import datetime as dt
+
+        from omnibase_infra.event_bus.models import ModelEventHeaders
+
+        # Naive datetime (no timezone) should be rejected
+        naive_timestamp = dt(2025, 1, 1, 12, 0, 0)  # No tzinfo
+        with pytest.raises(ValidationError) as exc_info:
+            ModelEventHeaders(
+                source="test",
+                event_type="event",
+                timestamp=naive_timestamp,
+            )
+
+        error_str = str(exc_info.value).lower()
+        assert "timezone-aware" in error_str or "tzinfo" in error_str
+
     def test_headers_priority_validation(self) -> None:
         """Verify priority field only accepts valid values."""
         from omnibase_infra.event_bus.models import ModelEventHeaders

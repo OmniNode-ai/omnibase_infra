@@ -81,53 +81,48 @@ class ModelNodeIntrospectionEvent(BaseModel):
             None when metrics were not captured or are unavailable.
 
     Example:
-        ```python
-        from datetime import UTC, datetime
-        from uuid import uuid4
-
-        from omnibase_infra.models.discovery import (
-            ModelIntrospectionPerformanceMetrics,
-            ModelNodeIntrospectionEvent,
-        )
-
-        # Basic event without performance metrics
-        event = ModelNodeIntrospectionEvent(
-            node_id=uuid4(),
-            node_type="EFFECT",
-            capabilities={
-                "operations": ["execute", "query", "batch_execute"],
-                "protocols": ["ProtocolDatabaseAdapter"],
-                "has_fsm": True,
-            },
-            endpoints={
-                "health": "http://localhost:8080/health",
-                "metrics": "http://localhost:8080/metrics",
-            },
-            current_state="connected",
-            version="1.0.0",
-            reason="startup",
-            correlation_id=uuid4(),
-            timestamp=datetime.now(UTC),
-        )
-
-        # Event with performance metrics attached
-        event_with_metrics = ModelNodeIntrospectionEvent(
-            node_id=uuid4(),
-            node_type="EFFECT",
-            capabilities={"operations": ["execute"], "protocols": [], "has_fsm": False},
-            endpoints={"health": "/health"},
-            version="1.0.0",
-            reason="request",
-            correlation_id=uuid4(),
-            timestamp=datetime.now(UTC),
-            performance_metrics=ModelIntrospectionPerformanceMetrics(
-                get_capabilities_ms=15.2,
-                total_introspection_ms=18.5,
-                cache_hit=True,
-                method_count=5,
-            ),
-        )
-        ```
+        >>> from datetime import UTC, datetime
+        >>> from uuid import uuid4
+        >>> from omnibase_infra.models.discovery import (
+        ...     ModelIntrospectionPerformanceMetrics,
+        ...     ModelNodeIntrospectionEvent,
+        ... )
+        >>> # Basic event without performance metrics
+        >>> event = ModelNodeIntrospectionEvent(
+        ...     node_id=uuid4(),
+        ...     node_type="EFFECT",
+        ...     capabilities={
+        ...         "operations": ["execute", "query", "batch_execute"],
+        ...         "protocols": ["ProtocolDatabaseAdapter"],
+        ...         "has_fsm": True,
+        ...     },
+        ...     endpoints={
+        ...         "health": "http://localhost:8080/health",
+        ...         "metrics": "http://localhost:8080/metrics",
+        ...     },
+        ...     current_state="connected",
+        ...     version="1.0.0",
+        ...     reason="startup",
+        ...     correlation_id=uuid4(),
+        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
+        ... )
+        >>> # Event with performance metrics attached
+        >>> event_with_metrics = ModelNodeIntrospectionEvent(
+        ...     node_id=uuid4(),
+        ...     node_type="EFFECT",
+        ...     capabilities={"operations": ["execute"], "protocols": [], "has_fsm": False},
+        ...     endpoints={"health": "/health"},
+        ...     version="1.0.0",
+        ...     reason="request",
+        ...     correlation_id=uuid4(),
+        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
+        ...     performance_metrics=ModelIntrospectionPerformanceMetrics(
+        ...         get_capabilities_ms=15.2,
+        ...         total_introspection_ms=18.5,
+        ...         cache_hit=True,
+        ...         method_count=5,
+        ...     ),
+        ... )
     """
 
     node_id: UUID = Field(..., description="Unique node identifier")

@@ -390,6 +390,28 @@ class TestModelNodeIntrospectionEventTimestamp:
         )
         assert isinstance(event.timestamp, datetime)
 
+    def test_naive_timestamp_rejected(self) -> None:
+        """Test that naive datetime (without tzinfo) is rejected.
+
+        Timezone-aware timestamps are required to prevent ambiguity in
+        distributed systems where events may be processed across time zones.
+        """
+        from datetime import datetime as dt
+
+        test_node_id = uuid4()
+        naive_timestamp = dt(2025, 1, 1, 12, 0, 0)  # No tzinfo
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                correlation_id=uuid4(),
+                timestamp=naive_timestamp,
+            )
+
+        error_str = str(exc_info.value).lower()
+        assert "timezone-aware" in error_str or "tzinfo" in error_str
+
 
 class TestModelNodeIntrospectionEventImmutability:
     """Tests for frozen model immutability."""
