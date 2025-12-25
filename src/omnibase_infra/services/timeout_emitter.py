@@ -42,10 +42,19 @@ from omnibase_infra.projectors.projector_registration import ProjectorRegistrati
 from omnibase_infra.services.timeout_scanner import TimeoutScanner
 
 if TYPE_CHECKING:
-    # Import protocols and models inside TYPE_CHECKING to avoid circular imports.
+    # Import protocols inside TYPE_CHECKING to avoid circular imports.
     # ProtocolEventBus is used only for type annotations.
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
 
+    # Import models inside TYPE_CHECKING to avoid circular import.
+    # The circular import occurs because:
+    # 1. services/__init__.py imports timeout_emitter
+    # 2. timeout_emitter imports from node_registration_orchestrator.models
+    # 3. node_registration_orchestrator/__init__.py imports timeout_coordinator
+    # 4. timeout_coordinator imports from services (which is partially initialized)
+    #
+    # Using TYPE_CHECKING defers the import until type-checking time only.
+    # The actual model classes are imported at runtime inside the methods.
     from omnibase_infra.nodes.node_registration_orchestrator.models.model_node_liveness_expired import (
         ModelNodeLivenessExpired as ModelNodeLivenessExpiredType,
     )
