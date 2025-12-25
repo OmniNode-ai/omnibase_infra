@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
@@ -317,9 +317,9 @@ class TestA1IntrospectionPublish:
         assert isinstance(node_id, str), "node_id should be serialized as string"
         UUID(node_id)  # Raises if invalid UUID
 
-        # Verify node_type is a valid ONEX type
+        # Verify node_type is a valid ONEX type (EnumNodeKind value)
         node_type = event_data["node_type"]
-        valid_types: set[str] = {"effect", "compute", "reducer", "orchestrator"}
+        valid_types: set[str] = {kind.value for kind in EnumNodeKind}
         assert node_type in valid_types, f"node_type {node_type} not in {valid_types}"
 
         # Verify correlation_id is a valid UUID
@@ -378,11 +378,11 @@ class TestA1IntrospectionPublish:
         Tests all four ONEX node types to ensure they can all
         emit properly structured introspection events.
         """
-        node_types: list[Literal["effect", "compute", "reducer", "orchestrator"]] = [
-            "effect",
-            "compute",
-            "reducer",
-            "orchestrator",
+        node_types: list[EnumNodeKind] = [
+            EnumNodeKind.EFFECT,
+            EnumNodeKind.COMPUTE,
+            EnumNodeKind.REDUCER,
+            EnumNodeKind.ORCHESTRATOR,
         ]
 
         for node_type in node_types:
@@ -399,10 +399,10 @@ class TestA1IntrospectionPublish:
             history = await event_bus.get_event_history(limit=10)
             assert len(history) > 0, f"No event for node_type={node_type}"
 
-            # Parse and verify
+            # Parse and verify (compare with enum value since JSON serializes to string)
             event_data = json.loads(history[-1].value.decode("utf-8"))
-            assert event_data["node_type"] == node_type, (
-                f"node_type mismatch: expected {node_type}, got {event_data['node_type']}"
+            assert event_data["node_type"] == node_type.value, (
+                f"node_type mismatch: expected {node_type.value}, got {event_data['node_type']}"
             )
 
     @pytest.mark.integration
@@ -703,9 +703,10 @@ class TestWorkflowIntegration:
         correlation_id = UUID(introspection_data["correlation_id"])
 
         # Create ModelNodeIntrospectionEvent from the data
+        # Convert node_type string from JSON to EnumNodeKind
         introspection_event = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type=introspection_data.get("node_type", "effect"),
+            node_type=EnumNodeKind(introspection_data.get("node_type", "effect")),
             node_version=introspection_data.get("node_version", "1.0.0"),
             correlation_id=correlation_id,
             endpoints=introspection_data.get("endpoints", {}),

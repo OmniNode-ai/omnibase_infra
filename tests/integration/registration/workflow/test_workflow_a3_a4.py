@@ -78,14 +78,21 @@ def _convert_intents_to_request(
     Returns:
         ModelRegistryRequest for the effect node.
     """
+    # node_type may be string (from Pydantic Literal) or EnumNodeKind
+    # Handle both cases for compatibility
+    node_type_value = (
+        event.node_type.value
+        if isinstance(event.node_type, EnumNodeKind)
+        else event.node_type
+    )
     return ModelRegistryRequest(
         node_id=event.node_id,
-        node_type=event.node_type,
+        node_type=node_type_value,
         node_version=event.node_version,
         correlation_id=event.correlation_id,
-        service_name=f"onex-{event.node_type}",
+        service_name=f"onex-{node_type_value}",
         endpoints=dict(event.endpoints) if event.endpoints else {},
-        tags=[f"node_type:{event.node_type}", f"node_version:{event.node_version}"],
+        tags=[f"node_type:{node_type_value}", f"node_version:{event.node_version}"],
         metadata={},
     )
 

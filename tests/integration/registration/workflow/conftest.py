@@ -69,7 +69,7 @@ class IntrospectableTestNode(MixinNodeIntrospection):
 
     Attributes:
         node_id: Unique node identifier.
-        node_type: Node type (effect, compute, reducer, orchestrator).
+        node_type: Node type classification (EnumNodeKind.EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
         version: Node version string.
         health_url: Health endpoint URL.
     """
