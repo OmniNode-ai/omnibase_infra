@@ -2960,35 +2960,25 @@ class TestTopicVersionSuffixValidation:
             )
 
     def test_legacy_topic_without_version_allowed(self) -> None:
-        """Test that legacy topics without version suffix are allowed with warning."""
-        import warnings
+        """Test that legacy topics without version suffix are allowed.
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            config = ModelIntrospectionConfig(
-                node_id=TEST_NODE_UUID_1,
-                node_type="EFFECT",
-                introspection_topic="custom.legacy.topic",
-            )
-            assert config.introspection_topic == "custom.legacy.topic"
-            # Should have generated a warning
-            assert len(w) == 1
-            assert "does not have version suffix" in str(w[0].message)
+        Legacy topics (not starting with 'onex.') are supported for flexibility.
+        """
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+            introspection_topic="custom.legacy.topic",
+        )
+        assert config.introspection_topic == "custom.legacy.topic"
 
-    def test_legacy_topic_with_version_no_warning(self) -> None:
-        """Test that legacy topics with version suffix don't warn."""
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            config = ModelIntrospectionConfig(
-                node_id=TEST_NODE_UUID_1,
-                node_type="EFFECT",
-                introspection_topic="custom.legacy.topic.v1",
-            )
-            assert config.introspection_topic == "custom.legacy.topic.v1"
-            # Should not have generated a warning
-            assert len(w) == 0
+    def test_legacy_topic_with_version_allowed(self) -> None:
+        """Test that legacy topics with version suffix are allowed."""
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+            introspection_topic="custom.legacy.topic.v1",
+        )
+        assert config.introspection_topic == "custom.legacy.topic.v1"
 
 
 @pytest.mark.unit

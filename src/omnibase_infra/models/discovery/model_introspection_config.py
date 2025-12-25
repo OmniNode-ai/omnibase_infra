@@ -11,15 +11,16 @@ Topic Validation:
     - Must start with a lowercase letter
     - Can contain lowercase alphanumeric characters, dots, hyphens, and underscores
     - ONEX topics (starting with 'onex.') require a version suffix (.v1, .v2, etc.)
-    - Legacy topics (not starting with 'onex.') generate a warning but are allowed
-      for backward compatibility
+    - Legacy topics (not starting with 'onex.') are allowed for flexibility
+
+See Also:
+    - docs/architecture/EVENT_STREAMING_TOPICS.md: Topic naming conventions
 """
 
 from __future__ import annotations
 
 import logging
 import re
-import warnings
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -215,14 +216,7 @@ class ModelIntrospectionConfig(BaseModel):
                 raise ValueError(
                     f"ONEX topic must have version suffix (.v1, .v2, etc.): {v}"
                 )
-        # Legacy topics get a warning but are allowed
-        elif not VERSION_SUFFIX_PATTERN.search(v):
-            warnings.warn(
-                f"Topic '{v}' does not have version suffix. "
-                "Consider using ONEX format: onex.<domain>.<name>.v1",
-                UserWarning,
-                stacklevel=2,
-            )
+        # Legacy topics (not starting with 'onex.') are allowed without version suffix
 
         return v
 

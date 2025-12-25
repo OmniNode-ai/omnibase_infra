@@ -450,364 +450,77 @@ Arbitrary partition counts are forbidden.
 
 ---
 
-## 9. Migration from Legacy Topics
+## 9. Topic Formats
 
-This section provides comprehensive guidance for migrating from legacy topic naming (`node.*`) to ONEX-compliant topic naming (`onex.*`). The migration is designed to be non-disruptive with full backward compatibility during the transition period.
+This section documents the supported topic naming formats.
 
-### Legacy to ONEX Canonical Topic Mapping
+### ONEX Topic Format
 
-| Legacy Topic | ONEX Canonical Topic | Purpose |
-|--------------|---------------------|---------|
-| `node.introspection` | `onex.node.introspection.published.v1` | Node capability announcements |
-| `node.heartbeat` | `onex.node.heartbeat.published.v1` | Node liveness signals |
-| `node.request_introspection` | `onex.registry.introspection.requested.v1` | Registry re-broadcast requests |
+The recommended format for new deployments:
 
-### Naming Convention Differences
+```
+onex.<domain>.<entity>.<event>.v<version>
+```
 
-| Aspect | Legacy Format | ONEX Format |
-|--------|--------------|-------------|
-| **Prefix** | `node.` | `onex.` (platform namespace) |
-| **Structure** | `<entity>.<name>` | `<domain>.<entity>.<event>.v<version>` |
-| **Versioning** | None | Required (`.v1`, `.v2`, etc.) |
-| **Example** | `node.introspection` | `onex.node.introspection.published.v1` |
+| Component | Description | Example |
+|-----------|-------------|---------|
+| `onex` | Platform namespace | `onex` |
+| `<domain>` | Logical domain | `node`, `registry`, `infra` |
+| `<entity>` | Entity type | `introspection`, `heartbeat`, `workflow` |
+| `<event>` | Event meaning | `published`, `requested`, `completed` |
+| `v<version>` | Schema version | `v1` |
 
-**Why ONEX Format?**
+**ONEX Topic Examples**:
+| Topic | Purpose |
+|-------|---------|
+| `onex.node.introspection.published.v1` | Node capability announcements |
+| `onex.node.heartbeat.published.v1` | Node liveness signals |
+| `onex.registry.introspection.requested.v1` | Registry re-broadcast requests |
+
+**Benefits of ONEX Format**:
 - Explicit versioning enables schema evolution without breaking consumers
 - Domain namespace prevents collisions in multi-service environments
 - Event suffix (`published`, `requested`) clarifies message semantics
 - Consistent with CloudEvents and industry best practices
 
-### Backward Compatibility
+### Legacy Topic Format
 
-**Legacy topics are fully supported** during migration:
-- `ModelIntrospectionConfig` defaults to legacy topic names for backward compatibility
-- Legacy topic names generate a warning (not an error) during validation
-- No code changes required to continue using legacy topics
-- Migration can be performed incrementally, node by node
+Legacy topics without the `onex.` prefix are also supported for flexibility:
 
-The validation warning looks like:
-```
-UserWarning: Topic 'node.introspection' does not have version suffix.
-Consider using ONEX format: onex.<domain>.<name>.v1
-```
+| Legacy Topic | Purpose |
+|--------------|---------|
+| `node.introspection` | Node capability announcements |
+| `node.heartbeat` | Node liveness signals |
+| `node.request_introspection` | Registry re-broadcast requests |
 
-### Migration Strategy
+Both formats are fully supported. Use whichever format best fits your deployment needs.
 
-**Recommended Approach**: Parallel production with gradual consumer migration.
-
-#### Phase 1: Assessment and Preparation (Day 0)
-
-**Duration**: 1-2 days
-
-1. **Inventory existing topics and consumers**:
-   ```bash
-   # List all topics
-   rpk topic list | grep -E "^node\."
-
-   # List consumer groups using legacy topics
-   rpk group list
-   rpk group describe <group-name>
-   ```
-
-2. **Create ONEX topics** (if not auto-created):
-   ```bash
-   rpk topic create onex.node.introspection.published.v1 \
-       --partitions 3 \
-       --config retention.ms=86400000
-
-   rpk topic create onex.node.heartbeat.published.v1 \
-       --partitions 3 \
-       --config retention.ms=3600000
-
-   rpk topic create onex.registry.introspection.requested.v1 \
-       --partitions 3 \
-       --config retention.ms=3600000
-   ```
-
-3. **Document current consumer groups** for rollback reference
-
-#### Phase 2: Dual Publishing (Day 1-7)
-
-**Duration**: 1 week minimum (allows observation)
-
-Configure producers to publish to both legacy and ONEX topics simultaneously.
-
-**Using ModelIntrospectionConfig for Dual Publishing**:
+### Configuration Example
 
 ```python
 from uuid import uuid4
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
-from omnibase_infra.mixins import MixinNodeIntrospection
 
-# Legacy configuration (current default)
-legacy_config = ModelIntrospectionConfig(
-    node_id=uuid4(),
-    node_type="EFFECT",
-    event_bus=event_bus,
-    # These are the defaults - legacy topic names
-    introspection_topic="node.introspection",
-    heartbeat_topic="node.heartbeat",
-    request_introspection_topic="node.request_introspection",
-)
-
-# ONEX configuration (migration target)
+# Using ONEX format
 onex_config = ModelIntrospectionConfig(
     node_id=uuid4(),
     node_type="EFFECT",
     event_bus=event_bus,
-    # ONEX-compliant topic names
     introspection_topic="onex.node.introspection.published.v1",
     heartbeat_topic="onex.node.heartbeat.published.v1",
     request_introspection_topic="onex.registry.introspection.requested.v1",
 )
-```
 
-**Dual Publishing Implementation**:
-
-```python
-from omnibase_infra.models.events import ModelNodeIntrospectionEvent
-
-# Topic constants for migration period
-LEGACY_INTROSPECTION_TOPIC = "node.introspection"
-ONEX_INTROSPECTION_TOPIC = "onex.node.introspection.published.v1"
-
-LEGACY_HEARTBEAT_TOPIC = "node.heartbeat"
-ONEX_HEARTBEAT_TOPIC = "onex.node.heartbeat.published.v1"
-
-async def publish_introspection_dual(
-    event_bus: ProtocolEventBus,
-    event: ModelNodeIntrospectionEvent,
-) -> None:
-    """Publish to both legacy and ONEX topics during migration.
-
-    This ensures all consumers (legacy and migrated) receive events.
-    """
-    # Publish to legacy topic for existing consumers
-    await event_bus.publish_envelope(LEGACY_INTROSPECTION_TOPIC, event)
-
-    # Publish to ONEX topic for migrated consumers
-    await event_bus.publish_envelope(ONEX_INTROSPECTION_TOPIC, event)
-```
-
-**Verification Steps**:
-```bash
-# Verify messages appear on both topics
-rpk topic consume node.introspection --num 1
-rpk topic consume onex.node.introspection.published.v1 --num 1
-
-# Compare message rates (should be equal)
-rpk topic describe node.introspection
-rpk topic describe onex.node.introspection.published.v1
-```
-
-#### Phase 3: Consumer Migration (Day 8-14)
-
-**Duration**: 1 week (staggered rollout)
-
-Migrate consumers to ONEX topics one service at a time.
-
-**Consumer Group Strategy**:
-- Create **new consumer groups** for ONEX topics
-- Do NOT reuse legacy consumer group names (offset tracking would be lost)
-- Naming convention: `<service>-onex-v1` (e.g., `registry-introspection-onex-v1`)
-
-**Before (Legacy Consumer)**:
-```python
-# Legacy consumer configuration
-consumer_config = {
-    "group.id": "registry-introspection",
-    "auto.offset.reset": "earliest",
-}
-consumer.subscribe(["node.introspection", "node.heartbeat"])
-```
-
-**After (ONEX Consumer)**:
-```python
-# ONEX consumer configuration with new group
-consumer_config = {
-    "group.id": "registry-introspection-onex-v1",  # New group name
-    "auto.offset.reset": "earliest",
-}
-consumer.subscribe([
-    "onex.node.introspection.published.v1",
-    "onex.node.heartbeat.published.v1",
-])
-```
-
-**Node Configuration Migration**:
-```python
-from uuid import uuid4
-from omnibase_infra.models.discovery import ModelIntrospectionConfig
-from omnibase_infra.mixins import MixinNodeIntrospection
-
-
-class MyNode(MixinNodeIntrospection):
-    """Node with ONEX-compliant topic configuration."""
-
-    def __init__(self, node_id: uuid4, event_bus: ProtocolEventBus) -> None:
-        # Migrate to ONEX topics via configuration
-        config = ModelIntrospectionConfig(
-            node_id=node_id,
-            node_type="EFFECT",
-            event_bus=event_bus,
-            version="1.0.0",
-            # ONEX-compliant topic names
-            introspection_topic="onex.node.introspection.published.v1",
-            heartbeat_topic="onex.node.heartbeat.published.v1",
-            request_introspection_topic="onex.registry.introspection.requested.v1",
-        )
-        self.initialize_introspection_from_config(config)
-```
-
-**Verification Steps**:
-```bash
-# Monitor consumer lag on new groups
-rpk group describe registry-introspection-onex-v1
-
-# Verify no lag accumulation on legacy topics (consumers migrated away)
-rpk group describe registry-introspection
-
-# Check consumer offsets are advancing
-watch -n 5 'rpk group describe registry-introspection-onex-v1'
-```
-
-#### Phase 4: Legacy Deprecation (Day 15-21)
-
-**Duration**: 1 week observation, then cleanup
-
-1. **Stop dual publishing** (publish only to ONEX topics):
-   ```python
-   # Final configuration - ONEX only
-   config = ModelIntrospectionConfig(
-       node_id=uuid4(),
-       node_type="EFFECT",
-       event_bus=event_bus,
-       introspection_topic="onex.node.introspection.published.v1",
-       heartbeat_topic="onex.node.heartbeat.published.v1",
-       request_introspection_topic="onex.registry.introspection.requested.v1",
-   )
-   ```
-
-2. **Monitor for stragglers**:
-   ```bash
-   # Check if any consumers still reading legacy topics
-   rpk group list | xargs -I {} rpk group describe {}
-
-   # Check for any lag on legacy topics (indicates unmigrated consumers)
-   rpk topic describe node.introspection
-   ```
-
-3. **Delete legacy topics** after retention period:
-   ```bash
-   # Wait for retention period (typically 1-7 days)
-   # Then delete legacy topics
-   rpk topic delete node.introspection
-   rpk topic delete node.heartbeat
-   rpk topic delete node.request_introspection
-   ```
-
-4. **Update documentation** and remove legacy topic references
-
-### Environment-Based Configuration
-
-For staged rollouts, use environment variables to control topic names:
-
-```python
-import os
-from uuid import uuid4
-from omnibase_infra.models.discovery import ModelIntrospectionConfig
-
-# Environment-driven topic selection
-USE_ONEX_TOPICS = os.getenv("USE_ONEX_TOPICS", "false").lower() == "true"
-
-if USE_ONEX_TOPICS:
-    introspection_topic = "onex.node.introspection.published.v1"
-    heartbeat_topic = "onex.node.heartbeat.published.v1"
-    request_topic = "onex.registry.introspection.requested.v1"
-else:
-    introspection_topic = "node.introspection"
-    heartbeat_topic = "node.heartbeat"
-    request_topic = "node.request_introspection"
-
-config = ModelIntrospectionConfig(
+# Using legacy format
+legacy_config = ModelIntrospectionConfig(
     node_id=uuid4(),
     node_type="EFFECT",
     event_bus=event_bus,
-    introspection_topic=introspection_topic,
-    heartbeat_topic=heartbeat_topic,
-    request_introspection_topic=request_topic,
-)
-```
-
-**Deployment Strategy**:
-```bash
-# Canary deployment (10% of nodes)
-kubectl set env deployment/node-service USE_ONEX_TOPICS=true --containers=canary
-
-# Full rollout after validation
-kubectl set env deployment/node-service USE_ONEX_TOPICS=true
-```
-
-### Rollback Procedures
-
-If issues are detected during migration:
-
-#### Rollback During Phase 2 (Dual Publishing)
-
-No rollback needed - legacy consumers continue working.
-
-#### Rollback During Phase 3 (Consumer Migration)
-
-```python
-# Revert consumer subscription to legacy topics
-consumer.subscribe(["node.introspection", "node.heartbeat"])
-
-# Revert node configuration to legacy topics
-config = ModelIntrospectionConfig(
-    node_id=node_id,
-    node_type="EFFECT",
-    event_bus=event_bus,
-    # Revert to legacy defaults
     introspection_topic="node.introspection",
     heartbeat_topic="node.heartbeat",
     request_introspection_topic="node.request_introspection",
 )
 ```
-
-#### Rollback After Phase 4 (Legacy Deleted)
-
-If legacy topics were deleted but rollback is needed:
-
-1. **Recreate legacy topics**:
-   ```bash
-   rpk topic create node.introspection --partitions 3
-   rpk topic create node.heartbeat --partitions 3
-   rpk topic create node.request_introspection --partitions 3
-   ```
-
-2. **Re-enable dual publishing** in producers
-
-3. **Revert consumer configurations** to legacy topics
-
-### Key Migration Considerations
-
-- **Message Format**: Payload schemas remain unchanged; only topic names change
-- **Consumer Groups**: Create new consumer groups for ONEX topics to track offset independently
-- **Monitoring**: Compare message rates between legacy and ONEX topics during migration
-- **Rollback**: Keep legacy topic publishing capability until migration is verified
-- **Validation Warnings**: Legacy topics generate warnings but are allowed for backward compatibility
-- **Topic ACLs**: Update ACL rules for new ONEX topic names (see Section 12)
-
-### Migration Timeline Summary
-
-| Phase | Duration | Actions | Verification |
-|-------|----------|---------|--------------|
-| Assessment | 1-2 days | Inventory topics, create ONEX topics | Topics created |
-| Dual Publishing | 1 week | Enable dual publishing | Messages on both topics |
-| Consumer Migration | 1 week | Migrate consumers one by one | Consumer lag monitored |
-| Legacy Deprecation | 1 week | Stop legacy publishing, delete topics | No legacy consumers |
-
-**Total Migration Time**: 3-4 weeks (recommended minimum)
 
 ---
 
