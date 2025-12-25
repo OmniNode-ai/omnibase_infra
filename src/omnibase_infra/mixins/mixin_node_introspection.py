@@ -169,9 +169,10 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
+
+from pydantic import BaseModel, Field
 
 from omnibase_infra.models.discovery import (
     ModelIntrospectionConfig,
@@ -206,13 +207,15 @@ PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS = 50.0
 PERF_THRESHOLD_CACHE_HIT_MS = 1.0
 
 
-@dataclass
-class IntrospectionPerformanceMetrics:
+class ModelIntrospectionPerformanceMetrics(BaseModel):
     """Performance metrics for introspection operations.
 
-    This dataclass captures timing information for introspection operations,
+    This Pydantic model captures timing information for introspection operations,
     enabling performance monitoring and alerting when operations exceed
     the <50ms target threshold.
+
+    Replaces the previous dataclass implementation to comply with ONEX
+    requirements for Pydantic-based data structures.
 
     Attributes:
         get_capabilities_ms: Time taken by get_capabilities() in milliseconds.
@@ -247,7 +250,7 @@ class IntrospectionPerformanceMetrics:
     cache_hit: bool = False
     method_count: int = 0
     threshold_exceeded: bool = False
-    slow_operations: list[str] = field(default_factory=list)
+    slow_operations: list[str] = Field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         """Convert metrics to dictionary for logging/serialization.
@@ -268,6 +271,10 @@ class IntrospectionPerformanceMetrics:
             "threshold_exceeded": self.threshold_exceeded,
             "slow_operations": list(self.slow_operations),
         }
+
+
+# Backwards compatibility alias
+IntrospectionPerformanceMetrics = ModelIntrospectionPerformanceMetrics
 
 
 class IntrospectionCacheDict(TypedDict):

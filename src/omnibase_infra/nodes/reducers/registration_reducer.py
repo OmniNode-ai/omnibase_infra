@@ -342,7 +342,6 @@ import hashlib
 import logging
 import os
 import time
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
@@ -354,6 +353,7 @@ from omnibase_core.models.intents import (
 )
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
+from pydantic import BaseModel, ConfigDict
 
 from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
@@ -418,9 +418,11 @@ ValidationErrorCode = Literal[
 ]
 
 
-@dataclass(frozen=True)
-class ValidationResult:
+class ModelValidationResult(BaseModel):
     """Result of event validation with detailed error information.
+
+    This Pydantic model replaces the previous dataclass implementation
+    to comply with ONEX requirements for Pydantic-based data structures.
 
     Attributes:
         is_valid: Whether the event passed validation.
@@ -429,13 +431,15 @@ class ValidationResult:
         error_message: Human-readable error message for logging (if any).
     """
 
+    model_config = ConfigDict(frozen=True)
+
     is_valid: bool
     error_code: ValidationErrorCode | None = None
     field_name: str | None = None
     error_message: str | None = None
 
     @classmethod
-    def success(cls) -> ValidationResult:
+    def success(cls) -> ModelValidationResult:
         """Create a successful validation result."""
         return cls(is_valid=True)
 
@@ -445,7 +449,7 @@ class ValidationResult:
         error_code: ValidationErrorCode,
         field_name: str,
         error_message: str,
-    ) -> ValidationResult:
+    ) -> ModelValidationResult:
         """Create a failed validation result with error details."""
         return cls(
             is_valid=False,
@@ -453,6 +457,10 @@ class ValidationResult:
             field_name=field_name,
             error_message=error_message,
         )
+
+
+# Backwards compatibility alias
+ValidationResult = ModelValidationResult
 
 
 # TODO(OMN-889): Complete pure reducer implementation - add reduce_confirmation() method
