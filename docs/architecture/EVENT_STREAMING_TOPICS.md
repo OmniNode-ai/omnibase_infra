@@ -505,12 +505,12 @@ ONEX node contracts declare their event channel dependencies in `contract.yaml`.
 
 ```yaml
 # contract.yaml - Event channel configuration for a registry effect node
-metadata:
+meta:
   name: registry-effect
   version: 1.0.0
   node_type: EFFECT
 
-# event_channels is at top level, NOT under metadata
+# event_channels is at top level, NOT under meta
 event_channels:
   # Topics this node publishes to
   publishes:
@@ -542,12 +542,12 @@ event_channels:
 
 ```yaml
 # contract.yaml - Event channel configuration for a registration orchestrator
-metadata:
+meta:
   name: registration-orchestrator
   version: 1.0.0
   node_type: ORCHESTRATOR
 
-# event_channels is at top level, NOT under metadata
+# event_channels is at top level, NOT under meta
 event_channels:
   publishes:
     - topic: onex.registry.node.registered.v1
@@ -654,12 +654,12 @@ First, define the event channels in `contract.yaml`. The `event_type` field serv
 #
 # This contract defines topics for the RegistryEffectNode Python class below.
 # The event_type field is the lookup key used by the Python code.
-metadata:
+meta:
   name: registry-effect-node
   version: 1.0.0
   node_type: EFFECT
 
-# event_channels is at top level, NOT under metadata
+# event_channels is at top level, NOT under meta
 event_channels:
   # Topics this node publishes to
   # Python: publishes = {ch.event_type: ch.topic for ch in contract.event_channels.publishes}

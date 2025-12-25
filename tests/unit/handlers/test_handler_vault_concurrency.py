@@ -115,12 +115,18 @@ class TestVaultAdapterConcurrency:
                 When using a callable for side_effect, mock does NOT automatically
                 raise exceptions - it returns them as values. We must explicitly
                 raise Exception items from the cycle.
+
+                The entire response retrieval, type check, and return/raise must
+                be atomic to prevent race conditions during concurrent access from
+                the ThreadPoolExecutor. While response is a local variable after
+                next(), keeping all operations in the critical section ensures
+                deterministic behavior and makes thread safety obvious.
                 """
                 with cycle_lock:
                     response = next(response_cycle)
-                if isinstance(response, Exception):
-                    raise response
-                return response
+                    if isinstance(response, Exception):
+                        raise response
+                    return response
 
             mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
                 get_response

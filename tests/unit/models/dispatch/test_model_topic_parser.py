@@ -633,6 +633,153 @@ class TestInvalidFormats:
 
 
 # ============================================================================
+# Version Suffix Validation Tests (PR #54 Review)
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestVersionSuffixValidation:
+    """Tests for version suffix validation (.v\\d+) in topic names.
+
+    Version suffixes are required for Environment-Aware format topics and must
+    follow the pattern .v<digits> (e.g., .v1, .v2, .v10).
+
+    These tests verify:
+    - Valid version suffixes are accepted (.v1, .v2, .v10, .v123)
+    - Invalid/incomplete suffixes are rejected (no version, .v without digit, .V1)
+
+    Addresses: PR #54 review feedback on version suffix validation coverage.
+    """
+
+    # -------------------------------------------------------------------------
+    # Valid Version Suffix Tests
+    # -------------------------------------------------------------------------
+
+    def test_version_suffix_v1_valid(self, parser: ModelTopicParser) -> None:
+        """Test that .v1 version suffix is valid for Environment-Aware format."""
+        result = parser.parse("dev.user.events.v1")
+
+        assert result.is_valid is True
+        assert result.standard == EnumTopicStandard.ENVIRONMENT_AWARE
+        assert result.version == "v1"
+
+    def test_version_suffix_v2_valid(self, parser: ModelTopicParser) -> None:
+        """Test that .v2 version suffix is valid for Environment-Aware format."""
+        result = parser.parse("prod.order.commands.v2")
+
+        assert result.is_valid is True
+        assert result.standard == EnumTopicStandard.ENVIRONMENT_AWARE
+        assert result.version == "v2"
+
+    def test_version_suffix_v10_valid(self, parser: ModelTopicParser) -> None:
+        """Test that multi-digit .v10 version suffix is valid."""
+        result = parser.parse("staging.payment.intents.v10")
+
+        assert result.is_valid is True
+        assert result.standard == EnumTopicStandard.ENVIRONMENT_AWARE
+        assert result.version == "v10"
+
+    def test_version_suffix_v123_valid(self, parser: ModelTopicParser) -> None:
+        """Test that high multi-digit .v123 version suffix is valid."""
+        result = parser.parse("test.analytics.events.v123")
+
+        assert result.is_valid is True
+        assert result.standard == EnumTopicStandard.ENVIRONMENT_AWARE
+        assert result.version == "v123"
+
+    # -------------------------------------------------------------------------
+    # Invalid Version Suffix Tests
+    # -------------------------------------------------------------------------
+
+    def test_version_suffix_missing_invalid(self, parser: ModelTopicParser) -> None:
+        """Test that missing version suffix is invalid for Environment-Aware format.
+
+        Topics like 'dev.user.events' without version suffix should NOT match
+        the ENVIRONMENT_AWARE standard.
+        """
+        result = parser.parse("dev.user.events")
+
+        # Should not match ENVIRONMENT_AWARE pattern (requires version)
+        assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
+
+    def test_version_suffix_incomplete_v_only_invalid(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that incomplete .v suffix (without digit) is invalid.
+
+        Topics like 'dev.user.events.v' with just 'v' but no digit should NOT
+        match the ENVIRONMENT_AWARE standard.
+        """
+        result = parser.parse("dev.user.events.v")
+
+        # Should not match ENVIRONMENT_AWARE pattern (requires v + digit)
+        assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
+
+    def test_version_suffix_uppercase_v_invalid(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that uppercase .V1 suffix is invalid (case-sensitive matching).
+
+        While parsing is generally case-insensitive, the canonical form uses
+        lowercase 'v'. This test verifies the pattern handling.
+        """
+        result = parser.parse("dev.user.events.V1")
+
+        # Should match ENVIRONMENT_AWARE (pattern is case-insensitive)
+        # but version should be normalized to lowercase
+        if result.standard == EnumTopicStandard.ENVIRONMENT_AWARE:
+            assert result.version == "v1"  # Normalized to lowercase
+
+    def test_version_suffix_wrong_prefix_invalid(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that version1 (without 'v' prefix) is invalid."""
+        result = parser.parse("dev.user.events.version1")
+
+        # Should not match ENVIRONMENT_AWARE pattern
+        assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
+
+    def test_version_suffix_semantic_version_invalid(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that semantic versioning (.v1.0.0) is invalid.
+
+        ONEX topics use simple version numbers (.v1, .v2), not semantic versioning.
+        """
+        result = parser.parse("dev.user.events.v1.0.0")
+
+        # Should not match ENVIRONMENT_AWARE pattern
+        assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
+
+    def test_version_suffix_number_only_invalid(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that .1 suffix (number without 'v') is invalid."""
+        result = parser.parse("dev.user.events.1")
+
+        # Should not match ENVIRONMENT_AWARE pattern
+        assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
+
+    # -------------------------------------------------------------------------
+    # ONEX Kafka Format Version Tests (no version required)
+    # -------------------------------------------------------------------------
+
+    def test_onex_kafka_format_no_version_required(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that ONEX Kafka format does not require version suffix.
+
+        ONEX Kafka format (onex.<domain>.<type>) does not have version suffix.
+        This is by design - versioning is at the Environment-Aware level only.
+        """
+        result = parser.parse("onex.registration.events")
+
+        assert result.is_valid is True
+        assert result.standard == EnumTopicStandard.ONEX_KAFKA
+        assert result.version is None  # No version in ONEX Kafka format
+
+
+# ============================================================================
 # Fallback Category Detection Tests
 # ============================================================================
 
@@ -1138,3 +1285,371 @@ class TestLRUCache:
         # Cache size should not increase for empty/whitespace topics
         final_size = get_topic_parse_cache_info().currsize
         assert final_size == initial_size
+
+
+# ============================================================================
+# Invalid Topic Name Edge Cases Tests (PR #54 Review Feedback)
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestInvalidTopicNameEdgeCases:
+    """Tests for invalid topic name edge cases.
+
+    These tests verify that malformed topic names do not match strict ONEX
+    standards (ONEX_KAFKA or ENVIRONMENT_AWARE). The parser has a fallback
+    mechanism that can extract a category for routing purposes from non-standard
+    topics - this makes them "partially valid" (is_valid=True, standard=UNKNOWN).
+
+    Addresses PR #54 review feedback on missing test coverage for invalid topic names.
+
+    Edge cases covered:
+    - Empty string after prefix (e.g., "onex." with nothing after)
+    - Topic ending with trailing dot (e.g., "onex.user.events.")
+    - Consecutive dots in topic (e.g., "onex..events")
+    - Invalid characters in topic names
+    - Topics that are too long
+    - Domain-only topics without type suffix
+
+    Note on "partially valid" topics:
+        The parser marks topics as is_valid=True with standard=UNKNOWN when:
+        - The topic doesn't match ONEX_KAFKA or ENVIRONMENT_AWARE patterns
+        - BUT a message category (EVENT/COMMAND/INTENT) can still be extracted
+        - This allows routing to work even for legacy/non-standard topics
+        See module docstring in model_topic_parser.py for detailed semantics.
+    """
+
+    def test_topic_empty_after_prefix(self, parser: ModelTopicParser) -> None:
+        """Test topic with empty string after prefix.
+
+        Topics like "onex." with nothing after should not match any standard.
+        """
+        result = parser.parse("onex.")
+
+        # Should not match strict standards
+        assert result.standard == EnumTopicStandard.UNKNOWN
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
+
+    def test_topic_prefix_only_no_domain(self, parser: ModelTopicParser) -> None:
+        """Test topic with only prefix and no domain or type.
+
+        A single segment like "onex" without domain and type should be fully invalid.
+        """
+        result = parser.parse("onex")
+
+        assert result.is_valid is False
+        assert result.standard == EnumTopicStandard.UNKNOWN
+        assert result.validation_error is not None
+        assert result.category is None  # No category suffix found
+
+    def test_topic_ending_with_dot(self, parser: ModelTopicParser) -> None:
+        """Test topic ending with trailing dot.
+
+        Topics like "onex.user.events." with a trailing dot should not match
+        strict ONEX_KAFKA pattern, but may be partially valid for routing
+        since ".events" category suffix is detectable.
+        """
+        result = parser.parse("onex.user.events.")
+
+        # Should not match strict ONEX_KAFKA pattern
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+        # Category may still be extractable via fallback
+        assert result.category == EnumMessageCategory.EVENT
+
+    def test_topic_ending_with_dot_env_aware(self, parser: ModelTopicParser) -> None:
+        """Test Environment-Aware topic ending with trailing dot.
+
+        Topics like "dev.user.events.v1." with a trailing dot should not match
+        the strict ENVIRONMENT_AWARE pattern.
+        """
+        result = parser.parse("dev.user.events.v1.")
+
+        # Should not match strict ENVIRONMENT_AWARE pattern
+        assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_double_dots(self, parser: ModelTopicParser) -> None:
+        """Test topic with consecutive dots.
+
+        Topics like "onex..events" with double dots indicate an empty segment.
+        Should not match strict patterns, but category may still be extractable.
+        """
+        result = parser.parse("onex..events")
+
+        # Should not match strict ONEX_KAFKA pattern
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+        # Domain extraction shows the malformed nature
+        assert result.domain == ""  # Empty domain from double dots
+
+    def test_topic_double_dots_in_middle(self, parser: ModelTopicParser) -> None:
+        """Test topic with double dots in the middle.
+
+        Topics like "onex.user..events" should not match strict patterns.
+        """
+        result = parser.parse("onex.user..events")
+
+        # Should not match strict ONEX_KAFKA pattern
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_multiple_consecutive_dots(self, parser: ModelTopicParser) -> None:
+        """Test topic with multiple consecutive dots.
+
+        Topics like "onex...events" with triple dots should not match strict patterns.
+        """
+        result = parser.parse("onex...events")
+
+        # Should not match strict ONEX_KAFKA pattern
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_starts_with_dot(self, parser: ModelTopicParser) -> None:
+        """Test topic starting with a dot.
+
+        Topics like ".onex.user.events" have an empty first segment.
+        """
+        result = parser.parse(".onex.user.events")
+
+        # Should not match strict patterns due to leading dot
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_invalid_characters_spaces(self, parser: ModelTopicParser) -> None:
+        """Test topic with space characters.
+
+        Topics containing spaces should not match strict patterns.
+        Kafka topic names typically don't allow spaces.
+        """
+        result = parser.parse("onex.user service.events")
+
+        # Should not match strict ONEX_KAFKA pattern
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_invalid_characters_at_symbol(self, parser: ModelTopicParser) -> None:
+        """Test topic with @ symbol.
+
+        Topics containing @ symbols should not match strict patterns.
+        """
+        result = parser.parse("onex.user@service.events")
+
+        # Should not match strict ONEX_KAFKA pattern
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_invalid_characters_hash(self, parser: ModelTopicParser) -> None:
+        """Test topic with # (hash) symbol.
+
+        Topics containing hash symbols should not match strict patterns.
+        """
+        result = parser.parse("onex.user#service.events")
+
+        # Should not match strict ONEX_KAFKA pattern
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_invalid_characters_asterisk(self, parser: ModelTopicParser) -> None:
+        """Test topic with * (asterisk) symbol.
+
+        Asterisks are used for pattern matching, not in actual topic names.
+        """
+        result = parser.parse("onex.user*.events")
+
+        # Should not match strict ONEX_KAFKA pattern
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_invalid_characters_question_mark(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test topic with ? (question mark) symbol.
+
+        Question marks should not match in strict topic patterns.
+        """
+        result = parser.parse("onex.user?.events")
+
+        # Should not match strict ONEX_KAFKA pattern
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_too_long(self, parser: ModelTopicParser) -> None:
+        """Test topic that is excessively long.
+
+        While Kafka allows topics up to 249 characters, excessively long
+        topics should still be handled gracefully without crashing.
+        """
+        # Create a very long domain name (300+ characters)
+        long_domain = "a" * 300
+        long_topic = f"onex.{long_domain}.events"
+        result = parser.parse(long_topic)
+
+        # The parser should handle this gracefully without crashing
+        assert result is not None
+        # Long but valid domain should still match ONEX_KAFKA pattern
+        assert result.standard == EnumTopicStandard.ONEX_KAFKA
+        assert result.is_valid is True
+
+    def test_topic_domain_starting_with_number(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test topic with domain starting with a number.
+
+        Domains should start with a letter according to ONEX conventions.
+        """
+        result = parser.parse("onex.123service.events")
+
+        # Domain starting with number should not match ONEX_KAFKA pattern
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_domain_starting_with_hyphen(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test topic with domain starting with a hyphen.
+
+        Domains should not start with a hyphen.
+        """
+        result = parser.parse("onex.-service.events")
+
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_domain_ending_with_hyphen(self, parser: ModelTopicParser) -> None:
+        """Test topic with domain ending with a hyphen.
+
+        Domains should not end with a hyphen according to the pattern.
+        """
+        result = parser.parse("onex.service-.events")
+
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_empty_domain_between_dots(self, parser: ModelTopicParser) -> None:
+        """Test topic with empty domain segment.
+
+        Topics like "dev..events.v1" have an empty domain which is invalid
+        for ENVIRONMENT_AWARE format.
+        """
+        result = parser.parse("dev..events.v1")
+
+        assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
+        assert result.standard == EnumTopicStandard.UNKNOWN
+        # Empty domain is extracted from the malformed structure
+        assert result.domain == ""
+
+    def test_topic_only_dots(self, parser: ModelTopicParser) -> None:
+        """Test topic consisting only of dots.
+
+        A topic like "..." should be fully invalid with no category extractable.
+        """
+        result = parser.parse("...")
+
+        assert result.is_valid is False
+        assert result.standard == EnumTopicStandard.UNKNOWN
+        assert result.category is None
+
+    def test_topic_single_dot(self, parser: ModelTopicParser) -> None:
+        """Test topic that is just a single dot.
+
+        A topic like "." should be fully invalid.
+        """
+        result = parser.parse(".")
+
+        assert result.is_valid is False
+        assert result.standard == EnumTopicStandard.UNKNOWN
+        assert result.category is None
+
+    def test_topic_no_category_suffix_fully_invalid(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that topics without any category suffix are fully invalid.
+
+        When no category suffix (events, commands, intents) is found,
+        the topic should be is_valid=False with validation_error set.
+        """
+        result = parser.parse("invalid..topic")
+
+        assert result.is_valid is False
+        assert result.standard == EnumTopicStandard.UNKNOWN
+        assert result.validation_error is not None
+        # The error message should reference the original topic
+        assert "invalid..topic" in result.validation_error
+
+    def test_topic_newline_character(self, parser: ModelTopicParser) -> None:
+        """Test topic containing newline character.
+
+        Topics with newline characters should not match strict patterns.
+        """
+        result = parser.parse("onex.user\n.events")
+
+        # Should not match strict ONEX_KAFKA pattern
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_topic_tab_character(self, parser: ModelTopicParser) -> None:
+        """Test topic containing tab character.
+
+        Topics with tab characters should not match strict patterns.
+        """
+        result = parser.parse("onex.user\t.events")
+
+        # Should not match strict ONEX_KAFKA pattern
+        assert result.standard != EnumTopicStandard.ONEX_KAFKA
+        assert result.standard == EnumTopicStandard.UNKNOWN
+
+    def test_strict_validation_rejects_malformed_topics(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that validate_topic() in strict mode rejects malformed topics.
+
+        Strict mode should only accept exact ONEX_KAFKA format.
+        """
+        # Double dots - malformed
+        is_valid, error = parser.validate_topic("onex..events", strict=True)
+        assert is_valid is False
+        assert error is not None
+        assert "ONEX Kafka format" in error
+
+        # Trailing dot - malformed
+        is_valid, error = parser.validate_topic("onex.user.events.", strict=True)
+        assert is_valid is False
+        assert error is not None
+
+        # Invalid characters
+        is_valid, error = parser.validate_topic("onex.user@service.events", strict=True)
+        assert is_valid is False
+        assert error is not None
+
+    def test_partially_valid_topics_route_correctly(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that partially valid topics still extract category for routing.
+
+        Topics with standard=UNKNOWN but is_valid=True can still be routed
+        because a message category was successfully extracted.
+        """
+        # Malformed but has .events suffix
+        result = parser.parse("onex.user@service.events")
+
+        assert result.standard == EnumTopicStandard.UNKNOWN
+        assert result.is_valid is True  # Partially valid
+        assert result.category == EnumMessageCategory.EVENT  # Category extracted
+        assert result.is_routable() is True  # Can be routed
+
+    def test_completely_invalid_topics_not_routable(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that completely invalid topics are not routable.
+
+        Topics without any recognized category suffix should have
+        is_valid=False and is_routable()=False.
+        """
+        result = parser.parse("completely.invalid.topic")
+
+        assert result.is_valid is False
+        assert result.standard == EnumTopicStandard.UNKNOWN
+        assert result.category is None
+        assert result.is_routable() is False

@@ -164,7 +164,7 @@ import inspect
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
@@ -273,7 +273,8 @@ class IntrospectionCacheDict(TypedDict):
     """TypedDict representing the JSON-serialized ModelNodeIntrospectionEvent.
 
     This type matches the output of ModelNodeIntrospectionEvent.model_dump(mode="json"),
-    enabling proper type checking for cache operations without requiring type: ignore comments.
+    enabling proper type checking for cache operations without requiring
+    type: ignore comments.
 
     Note:
         The capabilities field uses CapabilitiesTypedDict for type safety.
@@ -373,7 +374,8 @@ class MixinNodeIntrospection:
         This mixin is designed for **single-threaded asyncio usage** and does NOT
         provide internal thread synchronization.
 
-        **Instance-Level Cache** (``_introspection_cache``, ``_introspection_cached_at``):
+        **Instance-Level Cache** (``_introspection_cache``,
+        ``_introspection_cached_at``):
 
         - Cache operations are **synchronous** (no async locking)
         - Safe for cooperative asyncio concurrency (single event loop)
@@ -484,6 +486,11 @@ class MixinNodeIntrospection:
     # Capability discovery configuration
     _introspection_operation_keywords: set[str]
     _introspection_exclude_prefixes: set[str]
+
+    # Topic configuration attributes (per-instance, set from config)
+    _introspection_topic: str
+    _heartbeat_topic: str
+    _request_introspection_topic: str
 
     # Registry listener callback error tracking (instance-level)
     # Used for rate-limiting error logging to prevent log spam during
@@ -1448,6 +1455,20 @@ class MixinNodeIntrospection:
         contract_topics = getattr(self, "_contract_topics", None)
         if contract_topics is None:
             # No contract topics defined - skip validation for backwards compatibility
+            return
+
+        # Defensive check: ensure contract_topics is mapping-like before using .get()
+        # This handles cases where _contract_topics may be set to an unexpected type
+        if not isinstance(contract_topics, Mapping):
+            logger.warning(
+                f"_contract_topics is not a mapping for {self._introspection_node_id}, "
+                "skipping topic validation",
+                extra={
+                    "node_id": str(self._introspection_node_id),
+                    "operation": operation,
+                    "contract_topics_type": type(contract_topics).__name__,
+                },
+            )
             return
 
         # Get declared publishes topics from contract

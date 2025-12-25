@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, TypedDict
 from uuid import UUID, uuid4
 
 import pytest
@@ -58,6 +58,18 @@ LISTENER_SUBSCRIBE_WAIT = 0.1  # Time for listener to subscribe
 # =============================================================================
 
 
+class PublishedEventRecord(TypedDict):
+    """Type for a published event record in MockEventBus.
+
+    Represents the structure of events stored when using the publish() fallback method.
+    The value is JSON-decoded from the serialized event payload.
+    """
+
+    topic: str
+    key: bytes | None
+    value: dict[str, object]
+
+
 class MockEventBus:
     """Mock event bus for testing introspection publishing without Kafka."""
 
@@ -66,7 +78,7 @@ class MockEventBus:
         self.published_envelopes: list[
             tuple[ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent, str]
         ] = []
-        self.published_events: list[dict[str, Any]] = []
+        self.published_events: list[PublishedEventRecord] = []
         self.subscribed_topics: list[str] = []
         self.subscribed_groups: list[str] = []
 
@@ -840,14 +852,36 @@ class TestContractIntegrationPerformance:
         assert metrics1.get_capabilities_ms >= 0
         assert metrics1.method_count > 0
 
-        # Second call - cache hit
+        # Second call - cache hit (returns cached data without re-introspecting)
         await node.get_introspection_data()
         metrics2 = node.get_performance_metrics()
 
         assert metrics2 is not None
         assert metrics2.cache_hit is True
-        # Cache hit should be reasonably fast - allow up to 2x variance to avoid CI flakiness
-        assert metrics2.total_introspection_ms <= metrics1.total_introspection_ms * 2
+
+        # Cache hit performance assertion:
+        # A cache hit should be faster than a cache miss because it skips the
+        # expensive reflection operations (inspect.getmembers, signature analysis).
+        #
+        # However, in CI environments with variable load, timing can be noisy.
+        # We use a robust comparison that passes if EITHER:
+        # 1. Cache hit is faster than cache miss (expected behavior), OR
+        # 2. Both are very fast (< 1ms), meaning timing noise dominates
+        #
+        # This avoids flakiness while still catching regressions where cache
+        # hits become slower than cache misses (which would indicate a bug).
+        cache_hit_faster = (
+            metrics2.total_introspection_ms <= metrics1.total_introspection_ms
+        )
+        both_very_fast = (
+            metrics1.total_introspection_ms < 1.0
+            and metrics2.total_introspection_ms < 1.0
+        )
+        assert cache_hit_faster or both_very_fast, (
+            f"Cache hit should be faster than cache miss. "
+            f"Cache miss: {metrics1.total_introspection_ms:.3f}ms, "
+            f"Cache hit: {metrics2.total_introspection_ms:.3f}ms"
+        )
 
 
 # =============================================================================
@@ -900,7 +934,8 @@ class TestTopicValidation:
     async def test_empty_topic_suffix_rejected(self) -> None:
         """Verify topic ending with a dot is rejected."""
         # Topic "onex." fails pattern validation because it ends with a dot
-        with pytest.raises(ValueError, match="must start with a lowercase letter"):
+        # (pattern requires ending with alphanumeric character)
+        with pytest.raises(ValueError, match="only lowercase alphanumeric"):
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type="EFFECT",

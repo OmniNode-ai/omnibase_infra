@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `cache_ttl`: Cache time-to-live in seconds (default: `300.0`)
   - `operation_keywords`: Optional set of keywords to identify operation methods (if None, uses DEFAULT_OPERATION_KEYWORDS)
   - `exclude_prefixes`: Optional set of prefixes to exclude from capability discovery (if None, uses DEFAULT_EXCLUDE_PREFIXES)
+  - `introspection_topic`: Custom topic name for introspection events (default: `"node.introspection"`)
+  - `heartbeat_topic`: Custom topic name for heartbeat events (default: `"node.heartbeat"`)
+  - `request_introspection_topic`: Custom topic name for request introspection events (default: `"node.request_introspection"`)
 - **Performance Metrics Tracking**: Added `IntrospectionPerformanceMetrics` dataclass and `get_performance_metrics()` method for monitoring introspection operation timing and threshold violations
 
 #### Handlers
