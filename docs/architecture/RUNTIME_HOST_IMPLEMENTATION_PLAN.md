@@ -1656,7 +1656,7 @@ from omnibase_core.models.runtime.model_onex_envelope import ModelOnexEnvelope
 from omnibase_core.protocols.protocol_handler import ProtocolHandler
 
 
-class VaultAdapter(ProtocolHandler):
+class VaultHandler(ProtocolHandler):
     """Vault secrets management protocol handler.
 
     Handles secret read/write operations via HashiCorp Vault.
@@ -1841,7 +1841,7 @@ from omnibase_core.runtime.handlers.local_handler import LocalHandler
 
 from omnibase_infra.handlers.http_handler import HttpHandler
 from omnibase_infra.handlers.db_handler import DbHandler
-from omnibase_infra.handlers.handler_vault import VaultAdapter
+from omnibase_infra.handlers.handler_vault import VaultHandler
 
 if TYPE_CHECKING:
     from omnibase_core.protocols.protocol_handler import ProtocolHandler
@@ -1853,7 +1853,7 @@ HANDLER_REGISTRY: dict[EnumHandlerType, type["ProtocolHandler"]] = {
     EnumHandlerType.LOCAL: LocalHandler,  # Dev/test only
     EnumHandlerType.HTTP: HttpHandler,
     EnumHandlerType.DB: DbHandler,
-    EnumHandlerType.VAULT: VaultAdapter,
+    EnumHandlerType.VAULT: VaultHandler,
     # EnumHandlerType.CONSUL: ConsulHandler,  # TODO: implement
     # EnumHandlerType.LLM: LlmHandler,  # TODO: implement
 }
@@ -2115,7 +2115,7 @@ shutdown_timeout_seconds: 30
 
 - [ ] HttpHandler with `EnumHandlerType.HTTP` return type
 - [ ] DbHandler with `EnumHandlerType.DB` return type
-- [ ] VaultAdapter with `EnumHandlerType.VAULT` return type
+- [ ] VaultHandler with `EnumHandlerType.VAULT` return type
 - [ ] KafkaEventBus implements `ProtocolEventBus` (NOT ProtocolHandler)
 - [ ] `wiring.py` is single source of truth for handler registration
 - [ ] RuntimeHostProcess uses `wiring.py` (no duplicate handler map)
@@ -2135,7 +2135,7 @@ shutdown_timeout_seconds: 30
 1. **LocalHandler echo** (dev/test validation)
 2. **HttpHandler external call** (real HTTP request)
 3. **DbHandler query** (real database query)
-4. **VaultAdapter secret** (real Vault operation)
+4. **VaultHandler secret** (real Vault operation)
 5. **Event bus → NodeRuntime → handler flow** (full integration)
 6. **Multi-node routing** (envelope routing to correct node)
 

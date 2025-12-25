@@ -831,7 +831,7 @@ class TestHttpRestHandlerHealthCheck:
 
         assert "healthy" in health
         assert "initialized" in health
-        assert "adapter_type" in health
+        assert "handler_type" in health
         assert "timeout_seconds" in health
 
         await handler.shutdown()
@@ -847,7 +847,7 @@ class TestHttpRestHandlerHealthCheck:
 
         assert health["healthy"] is True
         assert health["initialized"] is True
-        assert health["adapter_type"] == "http"
+        assert health["handler_type"] == "http"
         assert health["timeout_seconds"] == 30.0
 
         await handler.shutdown()
@@ -888,7 +888,7 @@ class TestHttpRestHandlerDescribe:
         """Test describe returns correct handler metadata."""
         description = handler.describe()
 
-        assert description["adapter_type"] == "http"
+        assert description["handler_type"] == "http"
         assert description["timeout_seconds"] == 30.0
         assert description["version"] == "0.1.0-mvp"
         assert description["initialized"] is False

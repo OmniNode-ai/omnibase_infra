@@ -29,7 +29,7 @@ from omnibase_infra.errors import (
     SecretResolutionError,
 )
 from omnibase_infra.handlers.handler_vault import VaultHandler
-from omnibase_infra.handlers.model_vault_adapter_config import ModelVaultAdapterConfig
+from omnibase_infra.handlers.model_vault_handler_config import ModelVaultHandlerConfig
 
 # Type alias for vault config dict values (str, int, float, bool, dict)
 VaultConfigValue = str | int | float | bool | dict[str, str | int | float | bool]
@@ -98,26 +98,38 @@ class TestVaultHandlerInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_missing_url(self) -> None:
-        """Test initialization fails with missing URL."""
+        """Test initialization fails with missing URL.
+
+        Missing URL is a configuration validation error, so ProtocolConfigurationError
+        is raised (not RuntimeHostError). This follows ONEX error patterns where
+        configuration issues use ProtocolConfigurationError.
+        """
         handler = VaultHandler()
         config: dict[str, VaultConfigValue] = {"token": "s.test1234"}
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.initialize(config)
 
         # Pydantic ValidationError contains "url" in the error details
         assert "vault configuration" in str(exc_info.value).lower()
+        assert exc_info.value.model.error_code.name == "INVALID_CONFIGURATION"
 
     @pytest.mark.asyncio
     async def test_initialize_missing_token(self) -> None:
-        """Test initialization fails with missing token."""
+        """Test initialization fails with missing token.
+
+        Missing token is a configuration validation error, so ProtocolConfigurationError
+        is raised (not RuntimeHostError). This follows ONEX error patterns where
+        configuration issues use ProtocolConfigurationError.
+        """
         handler = VaultHandler()
         config: dict[str, VaultConfigValue] = {"url": "https://vault.example.com:8200"}
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.initialize(config)
 
         assert "token" in str(exc_info.value).lower()
+        assert exc_info.value.model.error_code.name == "INVALID_CONFIGURATION"
 
     @pytest.mark.asyncio
     async def test_initialize_authentication_failure(
@@ -159,7 +171,7 @@ class TestVaultHandlerInitialization:
     async def test_config_model_validation(self) -> None:
         """Test Pydantic config model validation."""
         # Valid config
-        config = ModelVaultAdapterConfig(
+        config = ModelVaultHandlerConfig(
             url="https://vault.example.com:8200",
             token=SecretStr("s.test1234"),
             timeout_seconds=30.0,
@@ -169,7 +181,7 @@ class TestVaultHandlerInitialization:
 
         # Invalid timeout (too high)
         with pytest.raises(ValidationError) as exc_info:
-            ModelVaultAdapterConfig(
+            ModelVaultHandlerConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 timeout_seconds=400.0,  # Max is 300.0
@@ -179,7 +191,7 @@ class TestVaultHandlerInitialization:
     @pytest.mark.asyncio
     async def test_secretstr_prevents_token_logging(self) -> None:
         """Test SecretStr prevents token from being logged."""
-        config = ModelVaultAdapterConfig(
+        config = ModelVaultHandlerConfig(
             url="https://vault.example.com:8200",
             token=SecretStr("s.sensitive_token_12345"),
         )
@@ -1071,12 +1083,12 @@ class TestVaultHandlerThreadPool:
     @pytest.mark.asyncio
     async def test_config_validates_thread_pool_bounds(self) -> None:
         """Test config validation enforces thread pool size bounds."""
-        from omnibase_infra.handlers.model_vault_adapter_config import (
-            ModelVaultAdapterConfig,
+        from omnibase_infra.handlers.model_vault_handler_config import (
+            ModelVaultHandlerConfig,
         )
 
         # Valid: within bounds (1-100)
-        config = ModelVaultAdapterConfig(
+        config = ModelVaultHandlerConfig(
             url="https://vault.example.com:8200",
             token=SecretStr("s.test1234"),
             max_concurrent_operations=50,
@@ -1085,7 +1097,7 @@ class TestVaultHandlerThreadPool:
 
         # Invalid: below minimum (< 1)
         with pytest.raises(ValidationError) as exc_info:
-            ModelVaultAdapterConfig(
+            ModelVaultHandlerConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 max_concurrent_operations=0,
@@ -1094,7 +1106,7 @@ class TestVaultHandlerThreadPool:
 
         # Invalid: above maximum (> 100)
         with pytest.raises(ValidationError) as exc_info:
-            ModelVaultAdapterConfig(
+            ModelVaultHandlerConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 max_concurrent_operations=150,
@@ -1445,12 +1457,12 @@ class TestVaultHandlerCircuitBreaker:
     @pytest.mark.asyncio
     async def test_config_validates_circuit_breaker_bounds(self) -> None:
         """Test config validation enforces circuit breaker parameter bounds."""
-        from omnibase_infra.handlers.model_vault_adapter_config import (
-            ModelVaultAdapterConfig,
+        from omnibase_infra.handlers.model_vault_handler_config import (
+            ModelVaultHandlerConfig,
         )
 
         # Valid: within bounds
-        config = ModelVaultAdapterConfig(
+        config = ModelVaultHandlerConfig(
             url="https://vault.example.com:8200",
             token=SecretStr("s.test1234"),
             circuit_breaker_failure_threshold=10,
@@ -1461,7 +1473,7 @@ class TestVaultHandlerCircuitBreaker:
 
         # Invalid: threshold below minimum (< 1)
         with pytest.raises(ValidationError) as exc_info:
-            ModelVaultAdapterConfig(
+            ModelVaultHandlerConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 circuit_breaker_failure_threshold=0,
@@ -1470,7 +1482,7 @@ class TestVaultHandlerCircuitBreaker:
 
         # Invalid: threshold above maximum (> 20)
         with pytest.raises(ValidationError) as exc_info:
-            ModelVaultAdapterConfig(
+            ModelVaultHandlerConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 circuit_breaker_failure_threshold=25,
@@ -1479,7 +1491,7 @@ class TestVaultHandlerCircuitBreaker:
 
         # Invalid: timeout below minimum (< 1.0)
         with pytest.raises(ValidationError) as exc_info:
-            ModelVaultAdapterConfig(
+            ModelVaultHandlerConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 circuit_breaker_reset_timeout_seconds=0.5,
@@ -1488,7 +1500,7 @@ class TestVaultHandlerCircuitBreaker:
 
         # Invalid: timeout above maximum (> 300.0)
         with pytest.raises(ValidationError) as exc_info:
-            ModelVaultAdapterConfig(
+            ModelVaultHandlerConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 circuit_breaker_reset_timeout_seconds=400.0,
@@ -1659,12 +1671,12 @@ class TestVaultHandlerBoundedQueue:
     @pytest.mark.asyncio
     async def test_config_validates_queue_multiplier_bounds(self) -> None:
         """Test config validation enforces queue multiplier bounds."""
-        from omnibase_infra.handlers.model_vault_adapter_config import (
-            ModelVaultAdapterConfig,
+        from omnibase_infra.handlers.model_vault_handler_config import (
+            ModelVaultHandlerConfig,
         )
 
         # Valid: within bounds (1-10)
-        config = ModelVaultAdapterConfig(
+        config = ModelVaultHandlerConfig(
             url="https://vault.example.com:8200",
             token=SecretStr("s.test1234"),
             max_queue_size_multiplier=5,
@@ -1673,7 +1685,7 @@ class TestVaultHandlerBoundedQueue:
 
         # Invalid: below minimum (< 1)
         with pytest.raises(ValidationError) as exc_info:
-            ModelVaultAdapterConfig(
+            ModelVaultHandlerConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 max_queue_size_multiplier=0,
@@ -1682,7 +1694,7 @@ class TestVaultHandlerBoundedQueue:
 
         # Invalid: above maximum (> 10)
         with pytest.raises(ValidationError) as exc_info:
-            ModelVaultAdapterConfig(
+            ModelVaultHandlerConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 max_queue_size_multiplier=15,
@@ -2099,3 +2111,230 @@ class TestVaultHandlerErrorCodeValidation:
             f"Not all error types were verified. "
             f"Expected: {expected_errors}, Got: {verified_errors}"
         )
+
+
+class TestVaultHandlerURLValidation:
+    """Test VaultHandler URL validation error scenarios.
+
+    These tests verify that URL-related configuration issues raise the correct
+    error types per ONEX error handling patterns:
+
+    - Missing/empty/malformed URL -> ProtocolConfigurationError (config validation)
+    - Valid URL but unreachable -> InfraConnectionError (runtime connectivity)
+    - Valid URL, reachable, auth fails -> InfraAuthenticationError (auth issue)
+
+    Reference: CLAUDE.md "Error Class Selection" and "Error Type Decision Guide"
+    """
+
+    @pytest.mark.asyncio
+    async def test_empty_url_raises_protocol_configuration_error(self) -> None:
+        """Test empty URL string raises ProtocolConfigurationError.
+
+        Empty URL is a configuration validation failure (field_validator catches it),
+        not a runtime connectivity issue.
+        """
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        handler = VaultHandler()
+        config: dict[str, VaultConfigValue] = {
+            "url": "",  # Empty string
+            "token": "s.test1234",
+        }
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(config)
+
+        error = exc_info.value
+        assert error.model.error_code == EnumCoreErrorCode.INVALID_CONFIGURATION
+        # Error message should mention URL validation failure
+        assert "url" in str(error).lower() or "empty" in str(error).lower()
+
+    @pytest.mark.asyncio
+    async def test_url_missing_scheme_raises_protocol_configuration_error(self) -> None:
+        """Test URL without scheme raises ProtocolConfigurationError.
+
+        URL must start with http:// or https:// - missing scheme is a
+        configuration validation failure.
+        """
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        handler = VaultHandler()
+        config: dict[str, VaultConfigValue] = {
+            "url": "vault.example.com:8200",  # Missing http:// or https://
+            "token": "s.test1234",
+        }
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(config)
+
+        error = exc_info.value
+        assert error.model.error_code == EnumCoreErrorCode.INVALID_CONFIGURATION
+        # Error message should mention scheme requirement
+        assert "http" in str(error).lower()
+
+    @pytest.mark.asyncio
+    async def test_url_invalid_scheme_raises_protocol_configuration_error(self) -> None:
+        """Test URL with invalid scheme raises ProtocolConfigurationError.
+
+        Only http:// and https:// schemes are valid for Vault URLs.
+        """
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        handler = VaultHandler()
+        config: dict[str, VaultConfigValue] = {
+            "url": "ftp://vault.example.com:8200",  # Invalid scheme
+            "token": "s.test1234",
+        }
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(config)
+
+        error = exc_info.value
+        assert error.model.error_code == EnumCoreErrorCode.INVALID_CONFIGURATION
+        assert "http" in str(error).lower()
+
+    @pytest.mark.asyncio
+    async def test_url_scheme_only_raises_protocol_configuration_error(self) -> None:
+        """Test URL with scheme only (no host) raises ProtocolConfigurationError.
+
+        URL must have format: scheme://host[:port] - scheme-only is invalid.
+        """
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        handler = VaultHandler()
+        config: dict[str, VaultConfigValue] = {
+            "url": "https://",  # Scheme only, no host
+            "token": "s.test1234",
+        }
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(config)
+
+        error = exc_info.value
+        assert error.model.error_code == EnumCoreErrorCode.INVALID_CONFIGURATION
+
+    @pytest.mark.asyncio
+    async def test_valid_url_unreachable_raises_infra_connection_error(
+        self,
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test valid URL but unreachable server raises InfraConnectionError.
+
+        When the URL format is valid but the Vault server cannot be reached
+        (network/DNS issues), InfraConnectionError is raised.
+        """
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        handler = VaultHandler()
+        config: dict[str, VaultConfigValue] = {
+            "url": "https://unreachable-vault.example.com:8200",  # Valid format
+            "token": "s.test1234",
+        }
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            # Simulate connection failure
+            MockClient.side_effect = hvac.exceptions.VaultError("Connection refused")
+
+            with pytest.raises(InfraConnectionError) as exc_info:
+                await handler.initialize(config)
+
+            error = exc_info.value
+            assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
+            assert "connect" in str(error).lower()
+
+    @pytest.mark.asyncio
+    async def test_valid_url_reachable_auth_fails_raises_infra_authentication_error(
+        self,
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test valid URL, reachable server, but auth fails raises InfraAuthenticationError.
+
+        When the URL is valid and the server is reachable but the token is rejected,
+        InfraAuthenticationError is raised.
+        """
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        handler = VaultHandler()
+        config: dict[str, VaultConfigValue] = {
+            "url": "https://vault.example.com:8200",
+            "token": "s.invalid_token",
+        }
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            # Simulate authentication failure
+            mock_hvac_client.is_authenticated.return_value = False
+
+            with pytest.raises(InfraAuthenticationError) as exc_info:
+                await handler.initialize(config)
+
+            error = exc_info.value
+            assert error.model.error_code == EnumCoreErrorCode.AUTHENTICATION_ERROR
+            assert "authentication" in str(error).lower()
+
+    @pytest.mark.asyncio
+    async def test_url_error_includes_correlation_id(self) -> None:
+        """Test URL validation errors include correlation_id for tracing.
+
+        All infrastructure errors should include correlation_id at the model level
+        for distributed tracing. The correlation_id is a top-level field in the
+        error model, not inside the context dictionary.
+        """
+        handler = VaultHandler()
+        config: dict[str, VaultConfigValue] = {
+            "url": "invalid-url",  # No scheme
+            "token": "s.test1234",
+        }
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(config)
+
+        error = exc_info.value
+        # Verify correlation_id is present at model level (not in context)
+        # This is the correct location per ONEX error model structure
+        assert error.model.correlation_id is not None
+        # Also verify context is present
+        assert error.model.context is not None
+        assert isinstance(error.model.context, dict)
+
+    @pytest.mark.asyncio
+    async def test_url_error_context_includes_transport_type(self) -> None:
+        """Test URL validation errors include transport_type in context.
+
+        Error context should identify the transport type for debugging.
+        """
+        handler = VaultHandler()
+        config: dict[str, VaultConfigValue] = {
+            "url": "",  # Empty URL
+            "token": "s.test1234",
+        }
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(config)
+
+        error = exc_info.value
+        # Verify transport_type is in error context
+        assert error.model.context is not None
+        assert isinstance(error.model.context, dict)
+        assert error.model.context.get("transport_type") == "vault"
+
+    @pytest.mark.asyncio
+    async def test_url_error_context_includes_operation(self) -> None:
+        """Test URL validation errors include operation name in context.
+
+        Error context should identify the operation for debugging.
+        """
+        handler = VaultHandler()
+        config: dict[str, VaultConfigValue] = {
+            "url": "not-a-url",  # Invalid format
+            "token": "s.test1234",
+        }
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(config)
+
+        error = exc_info.value
+        # Verify operation is in error context
+        assert error.model.context is not None
+        assert isinstance(error.model.context, dict)
+        assert error.model.context.get("operation") == "initialize"

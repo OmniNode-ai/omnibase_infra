@@ -36,12 +36,15 @@ Test Categories
 Environment Variables
 =====================
 
-    VAULT_ADDR: Vault server URL (default: http://192.168.86.200:8200)
+    VAULT_ADDR: Vault server URL (required - skip if not set)
+        Example: http://localhost:8200 or http://${REMOTE_INFRA_HOST}:8200
     VAULT_TOKEN: Vault authentication token (required - skip if not set)
     VAULT_NAMESPACE: Optional Vault namespace (for Enterprise)
 
-Remote Infrastructure (from CLAUDE.md):
-    Vault is available at 192.168.86.200:8200 on the remote infrastructure server.
+Remote Infrastructure:
+    Vault is available on the ONEX development infrastructure server.
+    See tests/infrastructure_config.py for the default REMOTE_INFRA_HOST value.
+    The server IP can be overridden via the REMOTE_INFRA_HOST environment variable.
 
 Test Isolation
 ==============
@@ -113,6 +116,17 @@ async def cleanup_secret(
     Yields the unique_secret_path and ensures cleanup after test,
     regardless of test outcome.
 
+    Cleanup Behavior:
+        - Deletes the secret at unique_secret_path after test
+        - Idempotent: safe if secret doesn't exist (test may not have created it)
+        - Runs after test completion (success or failure)
+        - Ignores cleanup errors to prevent test pollution
+
+    Test Isolation:
+        This fixture enables test isolation by ensuring secrets created
+        during tests are cleaned up. Combined with unique_secret_path,
+        this guarantees no secret path conflicts between tests.
+
     Args:
         vault_handler: Initialized VaultHandler fixture.
         unique_secret_path: Unique secret path fixture.
@@ -123,6 +137,7 @@ async def cleanup_secret(
     yield unique_secret_path
 
     # Cleanup: delete the test secret
+    # Idempotent: succeeds even if secret doesn't exist
     try:
         envelope: dict[str, JsonValue] = {
             "operation": "vault.delete_secret",
@@ -134,7 +149,7 @@ async def cleanup_secret(
         }
         await vault_handler.execute(envelope)
     except Exception:
-        pass  # Ignore cleanup errors (secret may not exist)
+        pass  # Ignore cleanup errors - secret may not exist or was already deleted
 
 
 # =============================================================================

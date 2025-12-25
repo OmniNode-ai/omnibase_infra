@@ -20,7 +20,7 @@ class ModelDbHealthResponse(BaseModel):
     Attributes:
         healthy: Whether the handler can successfully connect to database
         initialized: Whether the handler has been initialized
-        adapter_type: Type of handler (e.g., "db")
+        handler_type: Type of handler (e.g., "database")
         pool_size: Connection pool size
         timeout_seconds: Query timeout in seconds
 
@@ -28,7 +28,7 @@ class ModelDbHealthResponse(BaseModel):
         >>> health = ModelDbHealthResponse(
         ...     healthy=True,
         ...     initialized=True,
-        ...     adapter_type="db",
+        ...     handler_type="database",
         ...     pool_size=5,
         ...     timeout_seconds=30.0,
         ... )
@@ -49,8 +49,8 @@ class ModelDbHealthResponse(BaseModel):
     initialized: bool = Field(
         description="Whether the handler has been initialized",
     )
-    adapter_type: str = Field(
-        description="Type of handler (e.g., 'db')",
+    handler_type: str = Field(
+        description="Type of handler (e.g., 'database')",
     )
     pool_size: int = Field(
         ge=1,

@@ -6,9 +6,10 @@
 """Integration tests for DbHandler against remote PostgreSQL infrastructure.
 
 These tests validate DbHandler behavior against actual PostgreSQL infrastructure
-running on the remote server (192.168.86.200:5436). They require proper
-database credentials and will be skipped gracefully if the database is
-not available.
+running on the remote infrastructure server. They require proper database
+credentials and will be skipped gracefully if the database is not available.
+
+See tests/infrastructure_config.py for the default REMOTE_INFRA_HOST value.
 
 CI/CD Graceful Skip Behavior
 ============================
@@ -34,14 +35,38 @@ Test Categories
 - Execute Tests: Verify INSERT/UPDATE/DELETE and DDL operations
 - Error Handling Tests: Validate proper error responses for invalid inputs
 
+Single-Statement SQL Design
+===========================
+
+DbHandler only supports **single SQL statements per call** due to asyncpg's
+``execute()`` and ``fetch()`` methods. Multi-statement SQL (statements
+separated by semicolons) will raise an error.
+
+Tests that require multiple SQL operations (e.g., CREATE TABLE then INSERT)
+must use separate ``execute()`` calls for each statement. This is intentional
+and documented in the handler module docstring.
+
+Example pattern used in these tests::
+
+    # Step 1: Create table (separate call)
+    create_envelope = {"operation": "db.execute", "payload": {"sql": "CREATE TABLE..."}}
+    await handler.execute(create_envelope)
+
+    # Step 2: Insert data (separate call)
+    insert_envelope = {"operation": "db.execute", "payload": {"sql": "INSERT INTO..."}}
+    await handler.execute(insert_envelope)
+
 Environment Variables
 =====================
 
-    POSTGRES_HOST: PostgreSQL server hostname (default: 192.168.86.200)
-    POSTGRES_PORT: PostgreSQL server port (default: 5436)
+    POSTGRES_HOST: PostgreSQL server hostname (required - skip if not set)
+        Example: localhost or ${REMOTE_INFRA_HOST}
+    POSTGRES_PORT: PostgreSQL server port (default: 5432)
     POSTGRES_DATABASE: Database name (default: omninode_bridge)
     POSTGRES_USER: Database username (default: postgres)
     POSTGRES_PASSWORD: Database password (required - tests skip if not set)
+
+    See tests/infrastructure_config.py for REMOTE_INFRA_HOST default.
 
 Related Ticket: OMN-816 - Create handler integration tests
 """
@@ -107,7 +132,7 @@ class TestDbHandlerConnection:
             # Verify health response structure
             assert health.healthy is True, "Handler should report healthy"
             assert health.initialized is True, "Handler should be initialized"
-            assert health.adapter_type == "database", (
+            assert health.handler_type == "database", (
                 "Handler type should be 'database'"
             )
             assert health.pool_size == DB_HANDLER_DEFAULT_POOL_SIZE, (
@@ -142,7 +167,7 @@ class TestDbHandlerConnection:
         try:
             description = handler.describe()
 
-            assert description.adapter_type == "database"
+            assert description.handler_type == "database"
             assert "db.query" in description.supported_operations
             assert "db.execute" in description.supported_operations
             assert description.pool_size == DB_HANDLER_DEFAULT_POOL_SIZE
@@ -445,8 +470,13 @@ class TestDbHandlerExecute:
         initialized_db_handler: DbHandler,
         unique_table_name: str,
     ) -> None:
-        """Verify UPDATE operation modifies existing rows."""
-        # Create table (separate statement - handler may not support multi-statement SQL)
+        """Verify UPDATE operation modifies existing rows.
+
+        Note: This test uses separate execute() calls for CREATE TABLE and INSERT
+        because DbHandler only supports single-statement SQL per call (asyncpg
+        limitation). See module docstring "Single-Statement SQL Design" for details.
+        """
+        # Step 1: Create table (asyncpg requires single statement per execute call)
         create_envelope = {
             "operation": "db.execute",
             "payload": {
@@ -461,7 +491,7 @@ class TestDbHandlerExecute:
         }
         await initialized_db_handler.execute(create_envelope)
 
-        # Insert initial data (separate statement)
+        # Step 2: Insert initial data (asyncpg requires single statement per execute call)
         insert_envelope = {
             "operation": "db.execute",
             "payload": {
@@ -530,8 +560,13 @@ class TestDbHandlerExecute:
         initialized_db_handler: DbHandler,
         unique_table_name: str,
     ) -> None:
-        """Verify DELETE operation removes rows."""
-        # Create table (separate statement - handler may not support multi-statement SQL)
+        """Verify DELETE operation removes rows.
+
+        Note: This test uses separate execute() calls for CREATE TABLE and INSERT
+        because DbHandler only supports single-statement SQL per call (asyncpg
+        limitation). See module docstring "Single-Statement SQL Design" for details.
+        """
+        # Step 1: Create table (asyncpg requires single statement per execute call)
         create_envelope = {
             "operation": "db.execute",
             "payload": {
@@ -546,7 +581,7 @@ class TestDbHandlerExecute:
         }
         await initialized_db_handler.execute(create_envelope)
 
-        # Insert initial data (separate statement)
+        # Step 2: Insert initial data (asyncpg requires single statement per execute call)
         insert_envelope = {
             "operation": "db.execute",
             "payload": {

@@ -18,7 +18,7 @@ class ModelDbDescribeResponse(BaseModel):
     configuration, and version information.
 
     Attributes:
-        adapter_type: Type of handler (e.g., "db")
+        handler_type: Type of handler (e.g., "database")
         supported_operations: List of supported operation types
         pool_size: Connection pool size
         timeout_seconds: Query timeout in seconds
@@ -27,7 +27,7 @@ class ModelDbDescribeResponse(BaseModel):
 
     Example:
         >>> describe = ModelDbDescribeResponse(
-        ...     adapter_type="db",
+        ...     handler_type="database",
         ...     supported_operations=["db.query", "db.execute"],
         ...     pool_size=5,
         ...     timeout_seconds=30.0,
@@ -45,8 +45,8 @@ class ModelDbDescribeResponse(BaseModel):
         from_attributes=True,  # Support pytest-xdist compatibility
     )
 
-    adapter_type: str = Field(
-        description="Type of handler (e.g., 'db')",
+    handler_type: str = Field(
+        description="Type of handler (e.g., 'database')",
     )
     supported_operations: list[str] = Field(
         description="List of supported operation types",

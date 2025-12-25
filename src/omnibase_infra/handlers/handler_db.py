@@ -6,6 +6,52 @@ Supports query and execute operations with fixed pool size (5).
 Transaction support deferred to Beta. Configurable pool size deferred to Beta.
 
 All queries MUST use parameterized statements for SQL injection protection.
+
+Single-Statement SQL Limitation
+===============================
+
+This handler uses asyncpg's ``execute()`` and ``fetch()`` methods, which only
+support **single SQL statements per call**. Multi-statement SQL (statements
+separated by semicolons) is NOT supported and will raise an error.
+
+**Example - Incorrect (will fail):**
+
+.. code-block:: python
+
+    # This will fail - multiple statements in one call
+    envelope = {
+        "operation": "db.execute",
+        "payload": {
+            "sql": "CREATE TABLE foo (id INT); INSERT INTO foo VALUES (1);",
+            "parameters": [],
+        },
+    }
+
+**Example - Correct (split into separate calls):**
+
+.. code-block:: python
+
+    # Execute each statement separately
+    create_envelope = {
+        "operation": "db.execute",
+        "payload": {"sql": "CREATE TABLE foo (id INT)", "parameters": []},
+    }
+    await handler.execute(create_envelope)
+
+    insert_envelope = {
+        "operation": "db.execute",
+        "payload": {"sql": "INSERT INTO foo VALUES (1)", "parameters": []},
+    }
+    await handler.execute(insert_envelope)
+
+This is a deliberate design choice for security and clarity:
+1. Prevents SQL injection through statement concatenation
+2. Provides clear error attribution per statement
+3. Enables proper row count tracking per operation
+4. Aligns with asyncpg's native API design
+
+For multi-statement operations requiring atomicity, use the ``db.transaction``
+operation (planned for Beta release).
 """
 
 from __future__ import annotations
@@ -115,7 +161,7 @@ class DbHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
@@ -153,7 +199,7 @@ class DbHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=init_correlation_id,
             )
             raise InfraAuthenticationError(
@@ -163,7 +209,7 @@ class DbHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
@@ -173,7 +219,7 @@ class DbHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=init_correlation_id,
             )
             raise InfraConnectionError(
@@ -183,7 +229,7 @@ class DbHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
@@ -229,7 +275,7 @@ class DbHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="execute",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -241,7 +287,7 @@ class DbHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="execute",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -252,7 +298,7 @@ class DbHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation=operation,
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -265,7 +311,7 @@ class DbHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation=operation,
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -277,7 +323,7 @@ class DbHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation=operation,
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError("Missing or invalid 'sql' in payload", context=ctx)
@@ -333,7 +379,7 @@ class DbHandler(MixinEnvelopeExtraction):
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation=operation,
-            target_name="db_adapter",
+            target_name="db_handler",
             correlation_id=correlation_id,
         )
         raise RuntimeHostError(
@@ -352,7 +398,7 @@ class DbHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="db.query",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -362,7 +408,7 @@ class DbHandler(MixinEnvelopeExtraction):
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="db.query",
-            target_name="db_adapter",
+            target_name="db_handler",
             correlation_id=correlation_id,
         )
 
@@ -408,7 +454,7 @@ class DbHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="db.execute",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -418,7 +464,7 @@ class DbHandler(MixinEnvelopeExtraction):
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="db.execute",
-            target_name="db_adapter",
+            target_name="db_handler",
             correlation_id=correlation_id,
         )
 
@@ -521,7 +567,7 @@ class DbHandler(MixinEnvelopeExtraction):
         return ModelDbHealthResponse(
             healthy=healthy,
             initialized=self._initialized,
-            adapter_type=self.handler_type.value,
+            handler_type=self.handler_type.value,
             pool_size=self._pool_size,
             timeout_seconds=self._timeout,
         )
@@ -529,7 +575,7 @@ class DbHandler(MixinEnvelopeExtraction):
     def describe(self) -> ModelDbDescribeResponse:
         """Return handler metadata and capabilities."""
         return ModelDbDescribeResponse(
-            adapter_type=self.handler_type.value,
+            handler_type=self.handler_type.value,
             supported_operations=sorted(_SUPPORTED_OPERATIONS),
             pool_size=self._pool_size,
             timeout_seconds=self._timeout,

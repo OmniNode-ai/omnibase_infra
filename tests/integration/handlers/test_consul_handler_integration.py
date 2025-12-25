@@ -3,8 +3,10 @@
 """Integration tests for ConsulHandler against remote Consul infrastructure.
 
 These tests validate ConsulHandler behavior against actual Consul infrastructure
-running on the remote server (192.168.86.200). They require Consul to be available
+running on the remote infrastructure server. They require Consul to be available
 and will be skipped gracefully if Consul is not reachable.
+
+See tests/infrastructure_config.py for the default REMOTE_INFRA_HOST value.
 
 CI/CD Graceful Skip Behavior
 ============================
@@ -32,10 +34,13 @@ Test Categories
 Environment Variables
 =====================
 
-    CONSUL_HOST: Consul server hostname (default: 192.168.86.200)
-    CONSUL_PORT: Consul server port (default: 28500)
+    CONSUL_HOST: Consul server hostname (required - skip if not set)
+        Example: localhost or ${REMOTE_INFRA_HOST}
+    CONSUL_PORT: Consul server port (default: 8500)
     CONSUL_SCHEME: HTTP scheme (default: http)
     CONSUL_TOKEN: Optional ACL token for authentication
+
+    See tests/infrastructure_config.py for REMOTE_INFRA_HOST default.
 
 Related Ticket: OMN-816
 """

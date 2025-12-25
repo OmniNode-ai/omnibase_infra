@@ -181,7 +181,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="initialize",
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=init_correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -222,7 +222,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="execute",
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -234,7 +234,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="execute",
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -245,7 +245,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -258,7 +258,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -270,7 +270,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -383,7 +383,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="validate_request_size",
-                target_name="http_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise InfraUnavailableError(
@@ -724,7 +724,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         return {
             "healthy": self._initialized and self._client is not None,
             "initialized": self._initialized,
-            "adapter_type": self.handler_type.value,
+            "handler_type": self.handler_type.value,
             "timeout_seconds": self._timeout,
             "max_request_size": self._max_request_size,
             "max_response_size": self._max_response_size,
@@ -734,7 +734,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
     def describe(self) -> dict[str, JsonValue]:
         """Return handler metadata and capabilities."""
         return {
-            "adapter_type": self.handler_type.value,
+            "handler_type": self.handler_type.value,
             "supported_operations": sorted(_SUPPORTED_OPERATIONS),
             "timeout_seconds": self._timeout,
             "max_request_size": self._max_request_size,

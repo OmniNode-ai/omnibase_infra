@@ -113,7 +113,7 @@ class TestVaultHandlerConcurrency:
             ]
             response_cycle = cycle(responses_pattern)
 
-            # Lock for thread-safe cycle access - VaultAdapter.execute() runs hvac
+            # Lock for thread-safe cycle access - VaultHandler.execute() runs hvac
             # client calls in a ThreadPoolExecutor, so multiple threads may
             # concurrently call get_response() which accesses the shared iterator
             cycle_lock = threading.Lock()

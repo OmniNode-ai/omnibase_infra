@@ -25,18 +25,21 @@ infrastructure services. The tests ensure that handlers correctly:
 
 - **Python 3.11+**
 - **Poetry** for dependency management
-- **Access to remote infrastructure** at `192.168.86.200` (for DB, Consul, Vault tests)
+- **Access to remote infrastructure** (for DB, Consul, Vault tests) - see `tests/infrastructure_config.py`
 - **pytest-httpserver** (installed via poetry, for HTTP tests only)
 
 ### Infrastructure Services
 
 The following services must be available for full test coverage:
 
-| Service | Default Host | Default Port | Required For |
-|---------|--------------|--------------|--------------|
-| PostgreSQL | 192.168.86.200 | 5436 | DbHandler tests |
-| Consul | 192.168.86.200 | 28500 | ConsulHandler tests |
-| Vault | 192.168.86.200 | 8200 | VaultHandler tests |
+| Service | Environment Variable | Default Port | Required For |
+|---------|---------------------|--------------|--------------|
+| PostgreSQL | `POSTGRES_HOST` | 5432 | DbHandler tests |
+| Consul | `CONSUL_HOST` | 8500 | ConsulHandler tests |
+| Vault | `VAULT_ADDR` | 8200 | VaultHandler tests |
+
+The default infrastructure server IP is defined in `tests/infrastructure_config.py`.
+You can override it by setting the `REMOTE_INFRA_HOST` environment variable.
 
 **Note**: HTTP handler tests use `pytest-httpserver` to create a local mock server and do
 not require external infrastructure.
@@ -51,15 +54,22 @@ cp .env.example .env
 
 2. Configure the required environment variables in `.env`:
 
+### Remote Infrastructure Host (Optional)
+
+```bash
+# Override the default infrastructure server IP (see tests/infrastructure_config.py)
+REMOTE_INFRA_HOST=192.168.86.200  # or localhost for local development
+```
+
 ### PostgreSQL (DbHandler)
 
 ```bash
 # Required
-POSTGRES_HOST=192.168.86.200
+POSTGRES_HOST=${REMOTE_INFRA_HOST}  # or localhost, or specific IP
 POSTGRES_PASSWORD=your_secure_password
 
 # Optional (defaults shown)
-POSTGRES_PORT=5436
+POSTGRES_PORT=5432
 POSTGRES_DATABASE=omninode_bridge
 POSTGRES_USER=postgres
 ```
@@ -68,10 +78,10 @@ POSTGRES_USER=postgres
 
 ```bash
 # Required
-CONSUL_HOST=192.168.86.200
+CONSUL_HOST=${REMOTE_INFRA_HOST}  # or localhost, or specific IP
 
 # Optional (defaults shown)
-CONSUL_PORT=28500
+CONSUL_PORT=8500
 CONSUL_SCHEME=http
 CONSUL_TOKEN=  # Only if ACLs are enabled
 ```
@@ -80,7 +90,7 @@ CONSUL_TOKEN=  # Only if ACLs are enabled
 
 ```bash
 # Required
-VAULT_ADDR=http://192.168.86.200:8200
+VAULT_ADDR=http://${REMOTE_INFRA_HOST}:8200  # or http://localhost:8200
 VAULT_TOKEN=your_vault_token
 
 # Optional
@@ -152,12 +162,18 @@ SKIPPED [1] tests/integration/handlers/test_consul_handler_integration.py:43:
 
 ### Remote Infrastructure Server
 
-The ONEX development/staging infrastructure runs at `192.168.86.200`. This server hosts:
+The ONEX development/staging infrastructure server hosts:
 
 - **PostgreSQL** on port 5436 (external) / 5432 (internal)
 - **Consul** on port 28500
 - **Vault** on port 8200
 - **Redpanda (Kafka)** on port 29092
+
+The default server IP is configured in `tests/infrastructure_config.py`. To override:
+
+```bash
+export REMOTE_INFRA_HOST=your-server-ip
+```
 
 See the root `CLAUDE.md` for complete infrastructure topology documentation.
 
@@ -230,7 +246,7 @@ async def cleanup_table(initialized_db_handler):
 
 1. Verify `.env` file exists and contains required variables
 2. Source the environment: `source .env`
-3. Check connectivity: `ping 192.168.86.200`
+3. Check connectivity: `ping $REMOTE_INFRA_HOST` (or your infrastructure server IP)
 4. Test service directly:
    ```bash
    # PostgreSQL
@@ -246,7 +262,7 @@ async def cleanup_table(initialized_db_handler):
 ### Connection Timeouts
 
 - Default timeout is 30 seconds for all handlers
-- Check network connectivity to 192.168.86.200
+- Check network connectivity to your infrastructure server
 - Verify no firewall blocking the ports
 
 ### Authentication Errors
@@ -258,6 +274,7 @@ async def cleanup_table(initialized_db_handler):
 ## Related Documentation
 
 - `conftest.py` - Fixture definitions and environment configuration
+- `../../infrastructure_config.py` - Central infrastructure configuration and REMOTE_INFRA_HOST
 - `../../.env.example` - Complete environment variable reference
 - `../../../CLAUDE.md` - Infrastructure topology and service details
 - `../../../docs/patterns/error_handling_patterns.md` - Error handling conventions

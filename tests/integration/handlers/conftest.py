@@ -44,8 +44,8 @@ Example CI/CD Behavior::
     tests/.../test_consul_handler_integration.py::TestConsulHandlerHealthCheck::test_consul_health_check SKIPPED
     tests/.../test_http_handler_integration.py::TestHttpRestHandlerIntegration::test_simple_get_request PASSED
 
-    # With infrastructure access (using REMOTE_INFRASTRUCTURE_IP server):
-    $ export POSTGRES_HOST=$REMOTE_INFRASTRUCTURE_IP POSTGRES_PASSWORD=xxx ...
+    # With infrastructure access (using REMOTE_INFRA_HOST server):
+    $ export POSTGRES_HOST=$REMOTE_INFRA_HOST POSTGRES_PASSWORD=xxx ...
     $ pytest tests/integration/handlers/ -v
     tests/.../test_db_handler_integration.py::TestDbHandlerConnection::test_db_health_check PASSED
 
@@ -119,20 +119,27 @@ if TYPE_CHECKING:
 # - Vault (port 8200)
 # - Kafka/Redpanda (port 29092)
 #
-# This server (192.168.86.200) provides a shared development environment
-# for integration testing against real infrastructure components.
+# This server provides a shared development environment for integration testing
+# against real infrastructure components. The default IP is configured in
+# tests/infrastructure_config.py and can be overridden via REMOTE_INFRA_HOST.
 #
 # For local development or CI/CD environments without access to the remote
 # infrastructure, set individual *_HOST environment variables to override
 # with localhost or Docker container hostnames. Tests will gracefully skip
 # if the required infrastructure is unavailable.
 #
-# Usage in tests:
+# Environment Variable Overrides:
+#   - Set REMOTE_INFRA_HOST to override the infrastructure server IP
 #   - Set POSTGRES_HOST=localhost for local PostgreSQL
 #   - Set CONSUL_HOST=localhost for local Consul
 #   - Set VAULT_ADDR=http://localhost:8200 for local Vault
 #   - Leave unset to skip infrastructure-dependent tests in CI
-REMOTE_INFRASTRUCTURE_IP = "192.168.86.200"
+#
+# See tests/infrastructure_config.py for full documentation.
+from tests.infrastructure_config import REMOTE_INFRA_HOST
+
+# Backwards compatibility alias (deprecated - use REMOTE_INFRA_HOST instead)
+REMOTE_INFRASTRUCTURE_IP = REMOTE_INFRA_HOST
 
 
 # =============================================================================
@@ -170,17 +177,20 @@ POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
-# Defensive check: warn if POSTGRES_PASSWORD is missing to avoid silent failures
-if not POSTGRES_PASSWORD:
+# Defensive check: warn if POSTGRES_PASSWORD is missing or empty to avoid silent failures
+# Handles None, empty string, and whitespace-only values
+if not POSTGRES_PASSWORD or not POSTGRES_PASSWORD.strip():
     import warnings
 
     warnings.warn(
-        "POSTGRES_PASSWORD environment variable not set - database integration tests "
-        "will be skipped. Set POSTGRES_PASSWORD in your .env file or environment to "
-        "enable database tests.",
+        "POSTGRES_PASSWORD environment variable not set or empty - database integration "
+        "tests will be skipped. Set POSTGRES_PASSWORD in your .env file or environment "
+        "to enable database tests.",
         UserWarning,
         stacklevel=1,
     )
+    # Normalize to None for consistent availability check
+    POSTGRES_PASSWORD = None
 
 # Check if PostgreSQL is available based on host and password being set
 POSTGRES_AVAILABLE = POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None
@@ -290,10 +300,16 @@ def unique_table_name() -> str:
 async def initialized_db_handler(
     db_config: dict[str, JsonValue],
 ) -> AsyncGenerator[DbHandler, None]:
-    """Provide an initialized DbHandler instance.
+    """Provide an initialized DbHandler instance with automatic cleanup.
 
     Creates a DbHandler, initializes it with the test configuration,
     yields it for the test, then ensures proper cleanup via shutdown().
+
+    Cleanup Behavior:
+        - Calls handler.shutdown() after test completion
+        - Shutdown is idempotent (safe to call multiple times)
+        - Ignores any cleanup errors to prevent test pollution
+        - Closes connection pool and releases all resources
 
     Yields:
         Initialized DbHandler ready for database operations.
@@ -301,6 +317,13 @@ async def initialized_db_handler(
     Note:
         This fixture handles cleanup automatically. Tests should not
         call shutdown() manually unless testing shutdown behavior.
+        If a test calls shutdown(), the fixture's cleanup will simply
+        detect the handler is already shut down and complete gracefully.
+
+    Example:
+        >>> async def test_with_db(initialized_db_handler):
+        ...     result = await initialized_db_handler.execute(envelope)
+        ...     # No need to call shutdown - fixture handles it
     """
     from omnibase_infra.handlers import DbHandler
 
@@ -310,20 +333,32 @@ async def initialized_db_handler(
     yield handler
 
     # Cleanup: ensure handler is properly shut down
+    # Idempotent: safe even if test already called shutdown()
     try:
         await handler.shutdown()
     except Exception:
-        pass  # Ignore cleanup errors
+        pass  # Ignore cleanup errors - handler may already be shut down
 
 
 @pytest.fixture
 async def cleanup_table(
     initialized_db_handler: DbHandler,
 ) -> AsyncGenerator[list[str], None]:
-    """Fixture to track and cleanup test tables.
+    """Fixture to track and cleanup test tables with idempotent deletion.
 
     Yields a list where tests can append table names they create.
     After the test completes, all listed tables are dropped.
+
+    Cleanup Behavior:
+        - Uses DROP TABLE IF EXISTS (idempotent - safe if table doesn't exist)
+        - Iterates through all tracked tables regardless of individual failures
+        - Ignores cleanup errors to prevent test pollution
+        - Runs after test completion (success or failure)
+
+    Test Isolation:
+        This fixture enables test isolation by ensuring each test's tables
+        are cleaned up, preventing data leakage between tests. Combined
+        with unique_table_name fixture, this guarantees no table conflicts.
 
     Yields:
         List to which tests can append table names for cleanup.
@@ -333,13 +368,14 @@ async def cleanup_table(
         ...     table = "test_my_table"
         ...     cleanup_table.append(table)
         ...     await initialized_db_handler.execute(...)
-        ...     # Table will be dropped after test
+        ...     # Table will be dropped after test, even if test fails
     """
     tables_to_cleanup: list[str] = []
 
     yield tables_to_cleanup
 
     # Cleanup: drop all tables that were tracked
+    # Idempotent: DROP TABLE IF EXISTS succeeds even for non-existent tables
     for table in tables_to_cleanup:
         try:
             envelope = {
@@ -351,7 +387,7 @@ async def cleanup_table(
             }
             await initialized_db_handler.execute(envelope)
         except Exception:
-            pass  # Ignore cleanup errors
+            pass  # Ignore cleanup errors - table may not exist or handler shut down
 
 
 # =============================================================================
@@ -362,6 +398,21 @@ async def cleanup_table(
 VAULT_ADDR = os.getenv("VAULT_ADDR")
 VAULT_TOKEN = os.getenv("VAULT_TOKEN")
 VAULT_NAMESPACE = os.getenv("VAULT_NAMESPACE")
+
+# Defensive check: warn if VAULT_TOKEN is missing or empty to avoid silent failures
+# Handles None, empty string, and whitespace-only values
+if not VAULT_TOKEN or not VAULT_TOKEN.strip():
+    import warnings
+
+    warnings.warn(
+        "VAULT_TOKEN environment variable not set or empty - Vault integration tests "
+        "will be skipped. Set VAULT_TOKEN in your .env file or environment to enable "
+        "Vault tests.",
+        UserWarning,
+        stacklevel=1,
+    )
+    # Normalize to None for consistent availability check
+    VAULT_TOKEN = None
 
 # Vault is available if address and token are set
 VAULT_AVAILABLE = VAULT_ADDR is not None and VAULT_TOKEN is not None
@@ -475,15 +526,25 @@ def vault_config() -> dict[str, JsonValue]:
 async def vault_handler(
     vault_config: dict[str, JsonValue],
 ) -> AsyncGenerator[VaultHandler, None]:
-    """Create and initialize VaultHandler for integration testing.
+    """Create and initialize VaultHandler for integration testing with automatic cleanup.
 
     Yields an initialized VaultHandler instance and ensures proper cleanup.
+
+    Cleanup Behavior:
+        - Calls handler.shutdown() after test completion
+        - Closes HTTP client connections to Vault
+        - Idempotent: safe to call shutdown() multiple times
+        - Ignores cleanup errors to prevent test pollution
 
     Args:
         vault_config: Vault configuration fixture.
 
     Yields:
         Initialized VaultHandler instance.
+
+    Note:
+        This fixture handles cleanup automatically. Tests should not
+        call shutdown() manually unless testing shutdown behavior.
     """
     from omnibase_infra.handlers import VaultHandler
 
@@ -493,10 +554,11 @@ async def vault_handler(
     yield handler
 
     # Cleanup: ensure handler is shutdown
+    # Idempotent: safe even if test already called shutdown()
     try:
         await handler.shutdown()
     except Exception:
-        pass  # Ignore cleanup errors
+        pass  # Ignore cleanup errors - handler may already be shut down
 
 
 # =============================================================================
@@ -619,10 +681,22 @@ def unique_service_name() -> str:
 async def initialized_consul_handler(
     consul_config: dict[str, JsonValue],
 ) -> AsyncGenerator[ConsulHandler, None]:
-    """Provide an initialized ConsulHandler instance.
+    """Provide an initialized ConsulHandler instance with automatic cleanup.
 
     Creates a ConsulHandler, initializes it with the test configuration,
     yields it for the test, then ensures proper cleanup via shutdown().
+
+    Cleanup Behavior:
+        - Calls handler.shutdown() after test completion
+        - Closes HTTP client connections to Consul
+        - Idempotent: safe to call shutdown() multiple times
+        - Ignores cleanup errors to prevent test pollution
+
+    Note:
+        This fixture does NOT clean up KV keys or registered services.
+        Use unique_kv_key and unique_service_name fixtures for test data
+        that needs cleanup, and handle cleanup in individual tests or
+        use dedicated cleanup fixtures.
 
     Args:
         consul_config: Consul configuration fixture.
@@ -638,7 +712,8 @@ async def initialized_consul_handler(
     yield handler
 
     # Cleanup: ensure handler is properly shut down
+    # Idempotent: safe even if test already called shutdown()
     try:
         await handler.shutdown()
     except Exception:
-        pass  # Ignore cleanup errors
+        pass  # Ignore cleanup errors - handler may already be shut down

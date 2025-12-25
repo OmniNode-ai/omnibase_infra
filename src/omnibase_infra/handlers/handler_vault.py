@@ -51,7 +51,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
     SecretResolutionError,
 )
-from omnibase_infra.handlers.model_vault_adapter_config import ModelVaultAdapterConfig
+from omnibase_infra.handlers.model_vault_handler_config import ModelVaultHandlerConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 logger = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         is called there with the actual config values.
         """
         self._client: hvac.Client | None = None
-        self._config: ModelVaultAdapterConfig | None = None
+        self._config: ModelVaultHandlerConfig | None = None
         self._initialized: bool = False
         self._token_expires_at: float = 0.0
         self._executor: ThreadPoolExecutor | None = None
@@ -164,32 +164,54 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 - retry: Optional retry configuration dict
 
         Raises:
-            ProtocolConfigurationError: If configuration fails Pydantic validation.
-                This includes invalid URL format (e.g., missing scheme, invalid characters).
+            ProtocolConfigurationError: If configuration validation fails. This includes:
+                - Missing URL: URL is a required field (Pydantic validation)
+                - Empty URL: URL cannot be empty string (field_validator)
+                - Invalid URL format: Must start with http:// or https:// (field_validator)
+                - Missing token: Token is a required field (post-Pydantic defensive check)
+                - Other Pydantic validation failures (e.g., timeout out of range)
+
+                All URL-related configuration errors raise ProtocolConfigurationError because
+                they represent invalid configuration, not runtime connectivity issues.
                 Error message will contain Pydantic validation details.
-            RuntimeHostError: If URL is empty/None after validation, or token is missing,
-                or client initialization fails for non-auth/non-connection reasons.
-                - Empty URL: "Missing 'url' in config - Vault server URL required"
-                - Missing token: "Missing 'token' in config - Vault authentication token required"
+
+            RuntimeHostError: If client initialization fails for non-auth/non-connection
+                reasons (e.g., unexpected exception during hvac.Client creation).
+
             InfraAuthenticationError: If token authentication fails (token rejected by Vault).
                 This occurs when the Vault server is reachable but rejects the provided token.
+
             InfraConnectionError: If connection to Vault server fails (network/DNS issues).
                 This occurs when the Vault server is unreachable at the specified URL.
+                Use this error type when the URL format is valid but the server cannot be reached.
+
+        Error Type Decision Guide:
+            - URL missing/empty/malformed -> ProtocolConfigurationError (config validation)
+            - URL valid but server unreachable -> InfraConnectionError (runtime connectivity)
+            - URL valid, server reachable, auth fails -> InfraAuthenticationError (auth issue)
 
         Security:
             Token must be provided via environment variable, not hardcoded in config.
             Use SecretStr for token to prevent accidental logging.
 
         Example Error Scenarios:
-            >>> # Missing URL - raises RuntimeHostError
+            >>> # Missing URL - raises ProtocolConfigurationError
             >>> await handler.initialize({"token": "s.xxx"})
-            RuntimeHostError: Missing 'url' in config - Vault server URL required
+            ProtocolConfigurationError: Invalid Vault configuration: ... url ... required
+
+            >>> # Empty URL - raises ProtocolConfigurationError
+            >>> await handler.initialize({"url": "", "token": "s.xxx"})
+            ProtocolConfigurationError: Invalid Vault configuration: ... URL cannot be empty
 
             >>> # Invalid URL format - raises ProtocolConfigurationError
             >>> await handler.initialize({"url": "not-a-valid-url", "token": "s.xxx"})
-            ProtocolConfigurationError: Invalid Vault configuration: ...
+            ProtocolConfigurationError: Invalid Vault configuration: ... must start with http://
 
-            >>> # Invalid token - raises InfraAuthenticationError
+            >>> # Valid URL but server unreachable - raises InfraConnectionError
+            >>> await handler.initialize({"url": "http://unreachable:8200", "token": "s.xxx"})
+            InfraConnectionError: Failed to connect to Vault: VaultError
+
+            >>> # Valid URL, server reachable, invalid token - raises InfraAuthenticationError
             >>> await handler.initialize({"url": "http://localhost:8200", "token": "bad"})
             InfraAuthenticationError: Vault authentication failed - check token validity
         """
@@ -213,7 +235,7 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 config["token"] = SecretStr(token_raw)
 
             # Type ignore for dict unpacking - Pydantic handles validation
-            self._config = ModelVaultAdapterConfig(**config)  # type: ignore[arg-type]
+            self._config = ModelVaultHandlerConfig(**config)  # type: ignore[arg-type]
         except ValidationError as e:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
@@ -239,7 +261,12 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 context=ctx,
             ) from e
 
-        # Validate required fields
+        # Defensive validation for required fields
+        # Note: These checks are defensive programming since Pydantic validation
+        # should catch missing/empty URL and missing token. However, we keep them
+        # to ensure consistent error handling if the Pydantic model changes.
+        # All configuration validation errors use ProtocolConfigurationError per
+        # ONEX error handling patterns (config issues != runtime connectivity issues).
         if not self._config.url:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
@@ -248,7 +275,7 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 correlation_id=init_correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
-            raise RuntimeHostError(
+            raise ProtocolConfigurationError(
                 "Missing 'url' in config - Vault server URL required",
                 context=ctx,
             )
@@ -261,7 +288,7 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 correlation_id=init_correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
-            raise RuntimeHostError(
+            raise ProtocolConfigurationError(
                 "Missing 'token' in config - Vault authentication token required",
                 context=ctx,
             )
