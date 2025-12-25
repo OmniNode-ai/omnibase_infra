@@ -41,6 +41,8 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import KafkaConnectionError, KafkaError
 from pydantic import BaseModel, Field, field_validator
 
+from omnibase_infra.enums import EnumNonRetryableErrorCategory
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -356,17 +358,11 @@ class ModelReplayResult(BaseModel):
 # Non-Retryable Error Types
 # =============================================================================
 
-NON_RETRYABLE_ERRORS = frozenset(
-    {
-        # Authentication/authorization errors (omnibase_infra.errors)
-        "InfraAuthenticationError",
-        # Configuration errors (omnibase_infra.errors)
-        "ProtocolConfigurationError",
-        "SecretResolutionError",
-        # Schema validation errors (pydantic)
-        "ValidationError",
-    }
-)
+# Use centralized enum for non-retryable error types.
+# This ensures consistency with kafka_event_bus.py and other retry logic.
+# See: src/omnibase_infra/enums/enum_non_retryable_error_category.py
+# Related: OMN-1032
+NON_RETRYABLE_ERRORS = EnumNonRetryableErrorCategory.get_all_values()
 
 
 # =============================================================================
