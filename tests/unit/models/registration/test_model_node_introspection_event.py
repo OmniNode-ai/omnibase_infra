@@ -405,7 +405,8 @@ class TestModelNodeIntrospectionEventImmutability:
             correlation_id=uuid4(),
         )
         with pytest.raises(ValidationError):
-            event.capabilities = {"modified": True}  # type: ignore[misc]
+            # Intentional: assigning dict to ModelNodeCapabilities to test frozen rejection
+            event.capabilities = {"modified": True}  # type: ignore[misc, assignment]
 
     def test_frozen_model_cannot_modify_correlation_id(self) -> None:
         """Test that correlation_id cannot be modified after creation."""

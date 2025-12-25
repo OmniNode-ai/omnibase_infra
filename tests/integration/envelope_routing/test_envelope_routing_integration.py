@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -133,7 +132,7 @@ class TestEnvelopeRoutingE2E:
         """
         await event_bus.start()
 
-        received_envelopes: list[dict[str, Any]] = []
+        received_envelopes: list[dict[str, object]] = []
         envelope_received = asyncio.Event()
 
         async def envelope_handler(msg: ModelEventMessage) -> None:
@@ -367,7 +366,7 @@ class TestEnvelopePayloadExtraction:
         """
         await event_bus.start()
 
-        extracted_payloads: list[dict[str, Any]] = []
+        extracted_payloads: list[dict[str, object]] = []
         all_extracted = asyncio.Event()
         expected_count = 3
 
@@ -464,7 +463,7 @@ class TestEnvelopePayloadExtraction:
         """
         await event_bus.start()
 
-        received_payload: dict[str, Any] | None = None
+        received_payload: dict[str, object] | None = None
         payload_received = asyncio.Event()
 
         async def nested_payload_handler(msg: ModelEventMessage) -> None:
@@ -1045,7 +1044,7 @@ class TestEnvelopeRoutingEdgeCases:
         """
         await event_bus.start()
 
-        received_payload: dict[str, Any] | None = None
+        received_payload: dict[str, object] | None = None
         payload_received = asyncio.Event()
 
         async def none_handler(msg: ModelEventMessage) -> None:

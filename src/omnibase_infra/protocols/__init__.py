@@ -8,6 +8,7 @@ components in the ONEX ecosystem.
 Protocols:
     - ProtocolIdempotencyStore: Interface for idempotency checking and deduplication
     - ProtocolPluginCompute: Interface for deterministic compute plugins
+    - ProtocolRegistryMetrics: Interface for registry metrics collection (optional)
     - ProtocolSnapshotPublisher: Interface for snapshot publishing services (F2)
 
 Architecture:
@@ -20,6 +21,7 @@ Usage:
     from omnibase_infra.protocols import (
         ProtocolIdempotencyStore,
         ProtocolPluginCompute,
+        ProtocolRegistryMetrics,
         ProtocolSnapshotPublisher,
     )
 
@@ -46,6 +48,7 @@ from omnibase_infra.protocols.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
 from omnibase_infra.protocols.protocol_plugin_compute import ProtocolPluginCompute
+from omnibase_infra.protocols.protocol_registry_metrics import ProtocolRegistryMetrics
 from omnibase_infra.protocols.protocol_snapshot_publisher import (
     ProtocolSnapshotPublisher,
 )
@@ -53,5 +56,6 @@ from omnibase_infra.protocols.protocol_snapshot_publisher import (
 __all__ = [
     "ProtocolIdempotencyStore",
     "ProtocolPluginCompute",
+    "ProtocolRegistryMetrics",
     "ProtocolSnapshotPublisher",
 ]

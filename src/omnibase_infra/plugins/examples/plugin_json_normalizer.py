@@ -82,7 +82,7 @@ class PluginJsonNormalizer(PluginComputeBase):
                 json_data, _max_depth=effective_max_depth
             )
             output: JsonNormalizerOutput = {"normalized": normalized}
-            return output
+            return cast(PluginOutputData, output)
 
         except RecursionError as e:
             raise OnexError(

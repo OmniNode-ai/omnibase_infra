@@ -2655,11 +2655,11 @@ except ImportError:
 
     # Provide dummy decorators when hypothesis is not available
     from collections.abc import Callable
-    from typing import Any, TypeVar
+    from typing import TypeVar
 
-    _F = TypeVar("_F", bound=Callable[..., Any])
+    _F = TypeVar("_F", bound=Callable[..., object])
 
-    def given(*args: Any, **kwargs: Any) -> Callable[[_F], _F]:  # type: ignore[no-redef]
+    def given(*args: object, **kwargs: object) -> Callable[[_F], _F]:  # type: ignore[no-redef]
         def decorator(func: _F) -> _F:
             return pytest.mark.skip(  # type: ignore[no-any-return]
                 reason="hypothesis not installed - add to dev dependencies"
@@ -2667,7 +2667,7 @@ except ImportError:
 
         return decorator
 
-    def settings(*args: Any, **kwargs: Any) -> Callable[[_F], _F]:  # type: ignore[no-redef]
+    def settings(*args: object, **kwargs: object) -> Callable[[_F], _F]:  # type: ignore[no-redef]
         def decorator(func: _F) -> _F:
             return func
 
@@ -2677,11 +2677,11 @@ except ImportError:
         """Stub for hypothesis.strategies when Hypothesis is not installed."""
 
         @staticmethod
-        def sampled_from(values: Any) -> Any:
+        def sampled_from(values: object) -> object:
             return values
 
         @staticmethod
-        def text(*_args: Any, **_kwargs: Any) -> None:
+        def text(*_args: object, **_kwargs: object) -> None:
             return None
 
         @staticmethod
@@ -2689,7 +2689,7 @@ except ImportError:
             return None
 
         @staticmethod
-        def integers(*_args: Any, **_kwargs: Any) -> None:
+        def integers(*_args: object, **_kwargs: object) -> None:
             return None
 
         @staticmethod
@@ -2697,7 +2697,7 @@ except ImportError:
             return None
 
         @staticmethod
-        def dictionaries(*_args: Any, **_kwargs: Any) -> None:
+        def dictionaries(*_args: object, **_kwargs: object) -> None:
             return None
 
     st = StrategiesStub  # type: ignore[no-redef, assignment]  # Alias for compatibility
