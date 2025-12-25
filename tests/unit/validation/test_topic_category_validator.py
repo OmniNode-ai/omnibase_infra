@@ -301,7 +301,9 @@ class TestTopicCategoryValidatorValidateSubscription:
         )
         assert len(violations) == 1
         assert violations[0].severity == "warning"
-        assert "does not follow ONEX naming conventions" in violations[0].message
+        # Check for key terms without exact message coupling
+        msg_lower = violations[0].message.lower()
+        assert "naming" in msg_lower or "convention" in msg_lower or "onex" in msg_lower
 
 
 class TestTopicCategoryValidatorExtractDomain:

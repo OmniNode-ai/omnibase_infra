@@ -62,6 +62,7 @@ class ModelRegistrationProjection(BaseModel):
         capabilities: Node capabilities snapshot at registration time
         ack_deadline: Deadline for node acknowledgment (nullable)
         liveness_deadline: Deadline for next heartbeat (nullable)
+        last_heartbeat_at: Timestamp of last received heartbeat (None if never received)
         ack_timeout_emitted_at: Marker for ack timeout event deduplication (C2)
         liveness_timeout_emitted_at: Marker for liveness timeout deduplication (C2)
         last_applied_event_id: message_id of last applied event (idempotency)
@@ -133,6 +134,12 @@ class ModelRegistrationProjection(BaseModel):
     liveness_deadline: datetime | None = Field(
         default=None,
         description="Deadline for next heartbeat (nullable)",
+    )
+
+    # Heartbeat Tracking
+    last_heartbeat_at: datetime | None = Field(
+        default=None,
+        description="Timestamp of the last received heartbeat (None if never received)",
     )
 
     # Timeout Emission Markers (for C2 deduplication)

@@ -8,6 +8,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
+    ModelIntrospectionPerformanceMetrics,
+)
+
 
 class CapabilitiesTypedDict(TypedDict, total=False):
     """Type-safe structure for node capabilities discovered via reflection.
@@ -72,11 +76,21 @@ class ModelNodeIntrospectionEvent(BaseModel):
         reason: Reason for the introspection event (startup, shutdown, request).
         correlation_id: Required correlation ID for distributed tracing and idempotency.
         timestamp: UTC timestamp when the introspection was generated.
+        performance_metrics: Optional performance metrics from the introspection operation.
+            Contains timing data, cache hit/miss info, and threshold violation tracking.
+            None when metrics were not captured or are unavailable.
 
     Example:
         ```python
+        from datetime import UTC, datetime
         from uuid import uuid4
 
+        from omnibase_infra.models.discovery import (
+            ModelIntrospectionPerformanceMetrics,
+            ModelNodeIntrospectionEvent,
+        )
+
+        # Basic event without performance metrics
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
             node_type="EFFECT",
@@ -93,6 +107,25 @@ class ModelNodeIntrospectionEvent(BaseModel):
             version="1.0.0",
             reason="startup",
             correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+        )
+
+        # Event with performance metrics attached
+        event_with_metrics = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            capabilities={"operations": ["execute"], "protocols": [], "has_fsm": False},
+            endpoints={"health": "/health"},
+            version="1.0.0",
+            reason="request",
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            performance_metrics=ModelIntrospectionPerformanceMetrics(
+                get_capabilities_ms=15.2,
+                total_introspection_ms=18.5,
+                cache_hit=True,
+                method_count=5,
+            ),
         )
         ```
     """
@@ -163,6 +196,14 @@ class ModelNodeIntrospectionEvent(BaseModel):
         description="UTC timestamp of introspection generation (must be explicitly provided)",
     )
 
+    # Optional performance metrics from introspection operation
+    performance_metrics: ModelIntrospectionPerformanceMetrics | None = Field(
+        default=None,
+        description="Optional performance metrics captured during introspection. "
+        "Includes timing data, cache hit/miss info, and threshold violation tracking. "
+        "None when metrics were not captured or are unavailable.",
+    )
+
     @field_validator("timestamp")
     @classmethod
     def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
@@ -211,10 +252,47 @@ class ModelNodeIntrospectionEvent(BaseModel):
                     "reason": "startup",
                     "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
                     "timestamp": "2025-01-15T10:30:00Z",
-                }
+                    "performance_metrics": None,
+                },
+                {
+                    "node_id": "550e8400-e29b-41d4-a716-446655440002",
+                    "node_type": "COMPUTE",
+                    "capabilities": {
+                        "operations": ["process", "transform"],
+                        "protocols": ["ProtocolComputeNode"],
+                        "has_fsm": False,
+                        "method_signatures": {
+                            "process": "(data: bytes) -> bytes",
+                        },
+                    },
+                    "endpoints": {
+                        "health": "http://localhost:8081/health",
+                    },
+                    "current_state": None,
+                    "version": "2.1.0",
+                    "reason": "request",
+                    "correlation_id": "550e8400-e29b-41d4-a716-446655440003",
+                    "timestamp": "2025-01-15T10:31:00Z",
+                    "performance_metrics": {
+                        "get_capabilities_ms": 12.5,
+                        "discover_capabilities_ms": 8.2,
+                        "get_endpoints_ms": 0.5,
+                        "get_current_state_ms": 0.1,
+                        "total_introspection_ms": 21.3,
+                        "cache_hit": False,
+                        "method_count": 15,
+                        "threshold_exceeded": False,
+                        "slow_operations": [],
+                        "captured_at": "2025-01-15T10:31:00Z",
+                    },
+                },
             ]
         },
     )
 
 
-__all__ = ["CapabilitiesTypedDict", "ModelNodeIntrospectionEvent"]
+__all__ = [
+    "CapabilitiesTypedDict",
+    "ModelIntrospectionPerformanceMetrics",
+    "ModelNodeIntrospectionEvent",
+]

@@ -1166,8 +1166,64 @@ capabilities = node.get_capabilities()
 5. Monitor introspection topic consumer groups for unexpected consumers
 6. Use network segmentation to isolate introspection traffic if required
 
+**Cache Operations**:
+The mixin manages introspection cache with TTL-based invalidation:
+
+- **Cache Variables**: `_introspection_cache`, `_introspection_cached_at`, `_introspection_cache_ttl`
+- **Cache Methods**:
+  - `get_introspection_data()` - Returns cached data if TTL not expired, otherwise refreshes
+  - `invalidate_introspection_cache()` - Clears cache to force refresh on next call (synchronous)
+
+**Thread Safety Considerations**:
+
+The `MixinNodeIntrospection` is designed for **single-threaded asyncio usage** and does NOT provide internal thread synchronization. Cache operations require understanding the concurrency model for safe usage.
+
+**Instance-Level Cache** (`_introspection_cache`, `_introspection_cached_at`):
+- Cache operations are **synchronous** (no async locking)
+- Safe for cooperative asyncio concurrency (single event loop)
+- **NOT safe** for multi-threaded access without external synchronization
+- `invalidate_introspection_cache()` does not acquire any locks
+- If called concurrently with `get_introspection_data()`, cache state may be inconsistent
+
+**Class-Level Cache** (`_class_method_cache`):
+- Shared `ClassVar` across all instances of the same class
+- Population uses check-then-set pattern (not atomic)
+- **Benign race condition**: Multiple threads may populate the cache simultaneously, but all produce identical results since method signatures are immutable after class definition
+- Use `_invalidate_class_method_cache()` to clear if dynamic method registration occurs
+
+**Background Tasks** (heartbeat loop, registry listener):
+- Run as asyncio tasks within the event loop
+- Designed for cooperative async concurrency
+- Share access to instance state without locking
+- **NOT safe** to call task methods from multiple threads
+
+**Multi-Threaded Usage Pattern**:
+
+If using this mixin in a multi-threaded application (e.g., with `concurrent.futures.ThreadPoolExecutor`), external synchronization is required:
+
+```python
+import threading
+
+class ThreadSafeNode(MixinNodeIntrospection):
+    def __init__(self, config):
+        self._introspection_lock = threading.Lock()
+        self.initialize_introspection(...)
+
+    def invalidate_introspection_cache(self) -> None:
+        with self._introspection_lock:
+            super().invalidate_introspection_cache()
+
+    async def get_introspection_data(self):
+        # Note: async lock needed for async methods
+        # Consider asyncio.Lock() for async coordination
+        return await super().get_introspection_data()
+```
+
+**Recommendation**: For high-concurrency async environments, prefer using a single asyncio event loop with cooperative multitasking rather than multi-threading.
+
 **Related**:
 - Implementation: `src/omnibase_infra/mixins/mixin_node_introspection.py`
+- Thread Safety Pattern: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md` (similar pattern)
 - Ticket: OMN-893
 - See `MixinNodeIntrospection.get_capabilities()` for filtering logic details
 

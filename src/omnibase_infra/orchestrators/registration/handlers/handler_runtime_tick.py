@@ -82,6 +82,18 @@ class HandlerRuntimeTick:
         _projection_reader: Reader for registration projection state.
 
     Example:
+        >>> from datetime import datetime, timezone
+        >>> from uuid import uuid4
+        >>> from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
+        >>> runtime_tick = ModelRuntimeTick(
+        ...     now=datetime.now(timezone.utc),
+        ...     tick_id=uuid4(),
+        ...     sequence_number=1,
+        ...     scheduled_at=datetime.now(timezone.utc),
+        ...     correlation_id=uuid4(),
+        ...     scheduler_id="runtime-001",
+        ...     tick_interval_ms=1000,
+        ... )
         >>> handler = HandlerRuntimeTick(projection_reader)
         >>> events = await handler.handle(
         ...     tick=runtime_tick,
@@ -258,27 +270,16 @@ class HandlerRuntimeTick:
             if not projection.needs_liveness_timeout_event(now):
                 continue
 
-            # Determine last heartbeat time for the event.
-            #
-            # Semantic Note (per ModelNodeLivenessExpired contract):
-            #   - last_heartbeat_at should be None if no heartbeats were ever received
-            #   - This is semantically different from registration time
-            #   - Using registered_at as fallback would falsely imply a heartbeat
-            #     was received at registration, which is incorrect
-            #
-            # When ModelRegistrationProjection adds last_heartbeat_at field, this code
-            # will automatically use it. Until then, None indicates no heartbeat.
-            last_heartbeat_at: datetime | None = getattr(
-                projection, "last_heartbeat_at", None
-            )
-
+            # last_heartbeat_at semantic: None if no heartbeats were ever received.
+            # This is intentionally different from registered_at - registration is
+            # not a heartbeat. The projection tracks this field explicitly.
             event = ModelNodeLivenessExpired(
                 entity_id=projection.entity_id,
                 node_id=projection.entity_id,
                 correlation_id=correlation_id,
                 causation_id=tick.tick_id,  # Link to triggering tick
                 emitted_at=now,
-                last_heartbeat_at=last_heartbeat_at,
+                last_heartbeat_at=projection.last_heartbeat_at,
             )
             events.append(event)
 

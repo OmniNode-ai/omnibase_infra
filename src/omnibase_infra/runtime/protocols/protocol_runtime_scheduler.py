@@ -74,11 +74,12 @@ Example:
 
             async def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
                 # Lock ensures consistent snapshot of all metrics
+                from omnibase_infra.runtime.enums import EnumSchedulerStatus
                 async with self._state_lock:
                     return ModelRuntimeSchedulerMetrics(
                         scheduler_id=self._scheduler_id,
+                        status=EnumSchedulerStatus.RUNNING if self._running else EnumSchedulerStatus.STOPPED,
                         ticks_emitted=self._sequence,
-                        is_running=self._running,
                     )
 
         # Protocol conformance check via duck typing (per ONEX conventions)
@@ -425,12 +426,12 @@ class ProtocolRuntimeScheduler(Protocol):
 
         The metrics model typically includes:
             - scheduler_id: Scheduler identifier
-            - is_running: Current running state
+            - status: Current scheduler status (EnumSchedulerStatus)
             - ticks_emitted: Total ticks emitted since start
-            - current_sequence: Current sequence number
-            - last_tick_time: Timestamp of last tick (if any)
-            - interval_seconds: Configured tick interval
-            - errors_count: Number of tick emission errors
+            - ticks_failed: Number of failed tick emissions
+            - current_sequence_number: Current sequence number
+            - last_tick_at: Timestamp of last tick (if any)
+            - consecutive_failures: Number of consecutive tick failures
 
         Returns:
             ModelRuntimeSchedulerMetrics: Current metrics snapshot.
@@ -444,21 +445,23 @@ class ProtocolRuntimeScheduler(Protocol):
         Example:
             .. code-block:: python
 
+                from omnibase_infra.runtime.enums import EnumSchedulerStatus
+
                 async def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
                     async with self._state_lock:
                         return ModelRuntimeSchedulerMetrics(
                             scheduler_id=self._scheduler_id,
-                            is_running=self._running,
+                            status=EnumSchedulerStatus.RUNNING if self._running else EnumSchedulerStatus.STOPPED,
                             ticks_emitted=self._total_ticks_emitted,
-                            current_sequence=self._sequence_number,
-                            last_tick_time=self._last_tick_time,
-                            interval_seconds=self._interval,
-                            errors_count=self._error_count,
+                            ticks_failed=self._ticks_failed,
+                            current_sequence_number=self._sequence_number,
+                            last_tick_at=self._last_tick_time,
+                            consecutive_failures=self._consecutive_failures,
                         )
 
                 # Usage in monitoring
                 metrics = await scheduler.get_metrics()
-                if not metrics.is_running:
+                if metrics.status != EnumSchedulerStatus.RUNNING:
                     alert("Scheduler is not running!")
         """
         ...

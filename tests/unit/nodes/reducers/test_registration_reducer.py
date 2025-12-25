@@ -1520,7 +1520,6 @@ class TestEdgeCases:
         from unittest.mock import MagicMock
 
         node_id = uuid4()
-        timestamp = datetime.now(UTC)
 
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = node_id
@@ -1530,7 +1529,7 @@ class TestEdgeCases:
         mock_event.capabilities = ModelNodeCapabilities()
         mock_event.metadata = ModelNodeMetadata()
         mock_event.correlation_id = None  # Force deterministic derivation
-        mock_event.timestamp = timestamp
+        mock_event.timestamp = TEST_TIMESTAMP
 
         output = reducer.reduce(initial_state, mock_event)
 
@@ -1595,7 +1594,7 @@ class TestEdgeCases:
             network_id="prod-network",
             deployment_id="deploy-123",
             epoch=42,
-            timestamp=datetime.now(UTC),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -2860,7 +2859,6 @@ class TestDeterminismProperty:
 
         reducer = RegistrationReducer()
         node_id = uuid4()
-        fixed_timestamp = datetime.now(UTC)
 
         # Create mock event without correlation_id (forces derivation)
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
@@ -2871,7 +2869,7 @@ class TestDeterminismProperty:
         mock_event.capabilities = ModelNodeCapabilities()
         mock_event.metadata = ModelNodeMetadata()
         mock_event.correlation_id = None  # Force deterministic derivation
-        mock_event.timestamp = fixed_timestamp
+        mock_event.timestamp = TEST_TIMESTAMP
 
         # Derive event ID multiple times
         derived_id_1 = reducer._derive_deterministic_event_id(mock_event)
@@ -3322,7 +3320,6 @@ class TestEdgeCasesComprehensive:
         """
         from unittest.mock import MagicMock
 
-        fixed_timestamp = datetime.now(UTC)
         node_id1 = uuid4()
         node_id2 = uuid4()
 
@@ -3336,7 +3333,7 @@ class TestEdgeCasesComprehensive:
         mock_event1.capabilities = ModelNodeCapabilities()
         mock_event1.metadata = ModelNodeMetadata()
         mock_event1.correlation_id = None
-        mock_event1.timestamp = fixed_timestamp
+        mock_event1.timestamp = TEST_TIMESTAMP
 
         mock_event2 = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event2.node_id = node_id2
@@ -3346,7 +3343,7 @@ class TestEdgeCasesComprehensive:
         mock_event2.capabilities = ModelNodeCapabilities()
         mock_event2.metadata = ModelNodeMetadata()
         mock_event2.correlation_id = None
-        mock_event2.timestamp = fixed_timestamp
+        mock_event2.timestamp = TEST_TIMESTAMP
 
         output1 = reducer.reduce(initial_state, mock_event1)
         output2 = reducer.reduce(initial_state, mock_event2)
@@ -4433,7 +4430,6 @@ class TestEventReplayDeterminism:
         from unittest.mock import MagicMock
 
         # Create a mock event without correlation_id to force ID derivation
-        fixed_timestamp = datetime.now(UTC)
         node_id = uuid4()
 
         def create_mock_event() -> MagicMock:
@@ -4446,7 +4442,7 @@ class TestEventReplayDeterminism:
             mock.capabilities = ModelNodeCapabilities()
             mock.metadata = ModelNodeMetadata()
             mock.correlation_id = None  # Forces deterministic derivation
-            mock.timestamp = fixed_timestamp
+            mock.timestamp = TEST_TIMESTAMP
             return mock
 
         # Derive ID multiple times from same event

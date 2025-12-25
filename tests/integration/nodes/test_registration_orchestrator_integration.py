@@ -33,7 +33,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import yaml
@@ -1095,15 +1095,11 @@ class TestWorkflowExecutionWithMocks:
     @pytest.fixture
     def correlation_id(self) -> UUID:
         """Create a fixed correlation ID for testing propagation."""
-        from uuid import uuid4
-
         return uuid4()
 
     @pytest.fixture
     def node_id(self) -> UUID:
         """Create a fixed node ID for testing."""
-        from uuid import uuid4
-
         return uuid4()
 
     @pytest.fixture

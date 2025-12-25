@@ -42,6 +42,8 @@ from omnibase_infra.projectors.projector_registration import ProjectorRegistrati
 from omnibase_infra.services.timeout_scanner import TimeoutScanner
 
 if TYPE_CHECKING:
+    # Import protocols inside TYPE_CHECKING to avoid circular imports.
+    # ProtocolEventBus is used only for type annotations.
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
 
     # Import models inside TYPE_CHECKING to avoid circular import.
@@ -617,13 +619,13 @@ class TimeoutEmitter:
         )
 
         # 1. Create event
-        # Note: last_heartbeat_at is not currently tracked in projection,
-        # so we pass None. Future enhancement could track this.
+        # last_heartbeat_at: None if no heartbeats were ever received.
+        # The projection tracks this field explicitly.
         event = ModelNodeLivenessExpired(
             node_id=projection.entity_id,
             liveness_deadline=projection.liveness_deadline,
             detected_at=detected_at,
-            last_heartbeat_at=None,
+            last_heartbeat_at=projection.last_heartbeat_at,
             correlation_id=correlation_id,
             causation_id=tick_id,
         )
