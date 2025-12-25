@@ -600,9 +600,12 @@ class MixinNodeIntrospection:
 
         # Configuration - extract from config model
         self._introspection_node_id = config.node_id
-        # Convert string node_type to EnumNodeKind, handling both uppercase (legacy)
-        # and lowercase formats for backwards compatibility
-        self._introspection_node_type = EnumNodeKind(config.node_type.lower())
+        # Convert string node_type to EnumNodeKind if needed, handling both
+        # EnumNodeKind instances and string formats (uppercase legacy, lowercase)
+        if isinstance(config.node_type, EnumNodeKind):
+            self._introspection_node_type = config.node_type
+        else:
+            self._introspection_node_type = EnumNodeKind(config.node_type.lower())
         self._introspection_event_bus = config.event_bus
         self._introspection_version = config.version
         self._introspection_cache_ttl = config.cache_ttl

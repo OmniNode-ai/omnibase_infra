@@ -703,7 +703,7 @@ class TestA6Observability:
         # Create event with standard endpoints (not containing secrets)
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_version="1.0.0",
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
