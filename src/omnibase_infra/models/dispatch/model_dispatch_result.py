@@ -203,9 +203,9 @@ class ModelDispatchResult(BaseModel):
     )
 
     # ---- Tracing Context ----
-    correlation_id: UUID | None = Field(
-        default=None,
-        description="Correlation ID from the original message.",
+    correlation_id: UUID = Field(
+        default_factory=uuid4,
+        description="Correlation ID from the original message (auto-generated if not provided).",
     )
     trace_id: UUID | None = Field(
         default=None,

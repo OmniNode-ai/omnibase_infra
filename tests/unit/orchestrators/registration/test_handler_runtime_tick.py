@@ -295,9 +295,11 @@ class TestHandlerRuntimeTickLivenessExpiry:
         assert liveness_event.correlation_id == tick.correlation_id
         assert liveness_event.causation_id == tick.tick_id
         assert liveness_event.emitted_at == TEST_NOW
-        # last_heartbeat_at is None because projection doesn't track heartbeat timestamps
+        # last_heartbeat_at falls back to registered_at when no heartbeat has been received.
+        # This represents "last known activity" - registration is the earliest evidence
+        # of node activity when heartbeat tracking hasn't started yet.
         # (see handler_runtime_tick.py for semantic correctness explanation)
-        assert liveness_event.last_heartbeat_at is None
+        assert liveness_event.last_heartbeat_at == overdue_projection.registered_at
 
     @pytest.mark.asyncio
     async def test_no_duplicate_liveness_expiry_when_already_emitted(self) -> None:
@@ -398,9 +400,9 @@ class TestHandlerRuntimeTickMultipleTimeouts:
         assert isinstance(events[0], ModelNodeRegistrationAckTimedOut)
         # Second event is liveness expiry
         assert isinstance(events[1], ModelNodeLivenessExpired)
-        assert (
-            events[1].last_heartbeat_at is None
-        )  # Projection doesn't track heartbeats
+        # last_heartbeat_at falls back to registered_at when no heartbeat received.
+        # registered_at represents the earliest "last known activity" for the node.
+        assert events[1].last_heartbeat_at == liveness_overdue.registered_at
 
 
 class TestHandlerRuntimeTickNoTimeouts:

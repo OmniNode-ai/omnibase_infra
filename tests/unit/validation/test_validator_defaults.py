@@ -53,12 +53,13 @@ class TestInfraValidatorConstants:
         - 580 (2025-12-23): OMN-888 + PR #57 + OMN-954 merge
         - 585 (2025-12-25): OMN-811 ComputeRegistry + node registration orchestrator unions
         - 586 (2025-12-25): OMN-932 durable timeouts + introspection config migration
+        - 600 (2025-12-25): OMN-952 PR #79 merge with main (OMN-811 compute registry + models)
 
-        Threshold: 586 (buffer above ~584 baseline for codebase growth)
+        Threshold: 600 (buffer above ~596 baseline for codebase growth)
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 586, (
-            "INFRA_MAX_UNIONS should be 586 (OMN-932 durable timeouts)"
+        assert INFRA_MAX_UNIONS == 600, (
+            "INFRA_MAX_UNIONS should be 600 (OMN-952 PR #79 merge)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
