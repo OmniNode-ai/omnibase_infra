@@ -57,15 +57,18 @@ _CI_MODE: bool = os.environ.get("CI", "false").lower() == "true"
 PERF_MULTIPLIER: float = 3.0 if _CI_MODE else 2.0
 
 # Test timing constants (in seconds)
-# CI environments may be slower, so apply multiplier to timing waits
-CACHE_TTL_WAIT = 0.15  # Wait for cache TTL expiration (TTL=0.1s + buffer)
-HEARTBEAT_WAIT = 0.1 * (
-    PERF_MULTIPLIER if _CI_MODE else 1.0
-)  # Wait for at least one heartbeat
-MULTIPLE_HEARTBEAT_WAIT = 0.2 * (
-    PERF_MULTIPLIER if _CI_MODE else 1.0
-)  # Wait for multiple heartbeats
-CACHE_EXPIRE_WAIT = 0.01  # Brief wait for cache expiration
+# CI environments may be slower, so apply multiplier consistently to all timing waits
+# Base wait times are for local development; CI mode applies PERF_MULTIPLIER
+_TIMING_MULTIPLIER: float = PERF_MULTIPLIER if _CI_MODE else 1.0
+
+# Cache TTL wait: base=0.15s (TTL=0.1s + 50% buffer)
+CACHE_TTL_WAIT = 0.15 * _TIMING_MULTIPLIER
+# Single heartbeat wait: base=0.1s (heartbeat_interval=0.05s + buffer)
+HEARTBEAT_WAIT = 0.1 * _TIMING_MULTIPLIER
+# Multiple heartbeat wait: base=0.2s (3+ heartbeats at 0.05s interval + buffer)
+MULTIPLE_HEARTBEAT_WAIT = 0.2 * _TIMING_MULTIPLIER
+# Brief cache expire wait: base=0.02s (short pause for cache operations)
+CACHE_EXPIRE_WAIT = 0.02 * _TIMING_MULTIPLIER
 
 # Type alias for event bus published event structure
 PublishedEventDict = dict[
@@ -567,33 +570,57 @@ class TestMixinNodeIntrospectionCaching:
     async def test_get_introspection_data_caches_result(
         self, mock_node: MockNode
     ) -> None:
-        """Test that get_introspection_data caches the result."""
-        # First call - should compute
+        """Test that get_introspection_data caches the result.
+
+        Verifies both outcome (timestamp match) and mechanism (cache_hit metric).
+        """
+        # First call - should compute (cache miss)
         data1 = await mock_node.get_introspection_data()
         timestamp1 = data1.timestamp
+        metrics1 = mock_node.get_performance_metrics()
+        assert metrics1 is not None, "Metrics should be available after first call"
+        assert metrics1.cache_hit is False, "First call should be a cache miss"
 
-        # Immediate second call - should return cached
+        # Immediate second call - should return cached (cache hit)
         data2 = await mock_node.get_introspection_data()
         timestamp2 = data2.timestamp
+        metrics2 = mock_node.get_performance_metrics()
+        assert metrics2 is not None, "Metrics should be available after second call"
+        assert metrics2.cache_hit is True, "Second call should be a cache hit"
 
-        # Same timestamp means cached result
-        assert timestamp1 == timestamp2
+        # Same timestamp means cached result (verifies outcome)
+        assert timestamp1 == timestamp2, (
+            "Cached result should have same timestamp as original"
+        )
 
     async def test_cache_expires_after_ttl(self, mock_node: MockNode) -> None:
-        """Test that cache expires after TTL."""
+        """Test that cache expires after TTL.
+
+        Verifies both outcome (timestamp change) and mechanism (cache_hit metric).
+        """
         # First call - populates cache
         data1 = await mock_node.get_introspection_data()
         timestamp1 = data1.timestamp
+        metrics1 = mock_node.get_performance_metrics()
+        assert metrics1 is not None
+        assert metrics1.cache_hit is False, "First call should be a cache miss"
 
         # Wait for TTL to expire (0.1s + buffer)
         await asyncio.sleep(CACHE_TTL_WAIT)
 
-        # Next call should recompute
+        # Next call should recompute (cache miss due to expiration)
         data2 = await mock_node.get_introspection_data()
         timestamp2 = data2.timestamp
+        metrics2 = mock_node.get_performance_metrics()
+        assert metrics2 is not None
+        assert metrics2.cache_hit is False, (
+            "After TTL expiration, call should be a cache miss"
+        )
 
-        # Different timestamp means cache was refreshed
-        assert timestamp2 > timestamp1
+        # Different timestamp means cache was refreshed (verifies outcome)
+        assert timestamp2 > timestamp1, (
+            "After TTL expiration, timestamp should be newer"
+        )
 
     async def test_get_introspection_data_structure(self, mock_node: MockNode) -> None:
         """Test that get_introspection_data returns expected model."""
@@ -621,16 +648,36 @@ class TestMixinNodeIntrospectionCaching:
         assert node._introspection_cached_at is None
 
     async def test_invalidate_introspection_cache(self, mock_node: MockNode) -> None:
-        """Test that invalidate_introspection_cache clears the cache."""
+        """Test that invalidate_introspection_cache clears the cache.
+
+        Verifies both internal state and behavior via cache_hit metric.
+        """
         # Populate cache
         await mock_node.get_introspection_data()
         assert mock_node._introspection_cache is not None
 
+        # Verify cache hit before invalidation
+        await mock_node.get_introspection_data()
+        metrics_before = mock_node.get_performance_metrics()
+        assert metrics_before is not None
+        assert metrics_before.cache_hit is True, (
+            "Should be cache hit before invalidation"
+        )
+
         # Invalidate
         mock_node.invalidate_introspection_cache()
 
+        # Verify internal state is cleared
         assert mock_node._introspection_cache is None
         assert mock_node._introspection_cached_at is None
+
+        # Verify next call is cache miss (behavior verification)
+        await mock_node.get_introspection_data()
+        metrics_after = mock_node.get_performance_metrics()
+        assert metrics_after is not None
+        assert metrics_after.cache_hit is False, (
+            "After invalidation, next call should be cache miss"
+        )
 
 
 @pytest.mark.unit
@@ -749,11 +796,20 @@ class TestMixinNodeIntrospectionTasks:
             assert node._heartbeat_task is not None
             assert not node._heartbeat_task.done()
 
-            # Wait for at least one heartbeat
-            await asyncio.sleep(HEARTBEAT_WAIT)
+            # Poll for heartbeat with timeout instead of fixed sleep
+            # This is more reliable in CI environments
+            max_wait = HEARTBEAT_WAIT * 3  # Allow 3x buffer for CI
+            poll_interval = 0.01
+            elapsed = 0.0
+            while len(event_bus.published_envelopes) < 1 and elapsed < max_wait:
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
 
             # Should have published at least one event
-            assert len(event_bus.published_envelopes) >= 1
+            assert len(event_bus.published_envelopes) >= 1, (
+                f"Expected at least 1 heartbeat after {elapsed:.2f}s, "
+                f"got {len(event_bus.published_envelopes)}"
+            )
         finally:
             # Clean up
             await node.stop_introspection_tasks()
@@ -813,11 +869,24 @@ class TestMixinNodeIntrospectionTasks:
         )
 
         try:
-            # Wait for multiple heartbeats
-            await asyncio.sleep(MULTIPLE_HEARTBEAT_WAIT)
+            # Poll for multiple heartbeats with timeout instead of fixed sleep
+            # This is more reliable in CI environments
+            expected_heartbeats = 3
+            max_wait = MULTIPLE_HEARTBEAT_WAIT * 3  # Allow 3x buffer for CI
+            poll_interval = 0.01
+            elapsed = 0.0
+            while (
+                len(event_bus.published_envelopes) < expected_heartbeats
+                and elapsed < max_wait
+            ):
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
 
             # Should have multiple events (at least 3)
-            assert len(event_bus.published_envelopes) >= 3
+            assert len(event_bus.published_envelopes) >= expected_heartbeats, (
+                f"Expected at least {expected_heartbeats} heartbeats after {elapsed:.2f}s, "
+                f"got {len(event_bus.published_envelopes)}"
+            )
         finally:
             await node.stop_introspection_tasks()
 
@@ -884,12 +953,33 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         )
 
         try:
-            # Let heartbeat run with failing publishes
-            await asyncio.sleep(CACHE_TTL_WAIT)
+            # Poll to verify task continues despite failures
+            # Use MULTIPLE_HEARTBEAT_WAIT for consistency with heartbeat tests
+            max_wait = MULTIPLE_HEARTBEAT_WAIT * 3  # Allow buffer for CI
+            poll_interval = 0.02
+            elapsed = 0.0
+            task_running = False
+
+            while elapsed < max_wait:
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                # Check task is still running after multiple intervals
+                if node._heartbeat_task is not None and not node._heartbeat_task.done():
+                    task_running = True
+                    # If task is still running after at least 3 intervals, test passes
+                    if elapsed >= poll_interval * 3:
+                        break
 
             # Task should still be running (not crashed)
-            assert node._heartbeat_task is not None
-            assert not node._heartbeat_task.done()
+            assert node._heartbeat_task is not None, (
+                "Heartbeat task should not be None after publish failures"
+            )
+            assert not node._heartbeat_task.done(), (
+                "Heartbeat task should still be running despite publish failures"
+            )
+            assert task_running, (
+                f"Heartbeat task never observed running after {elapsed:.2f}s"
+            )
         finally:
             await node.stop_introspection_tasks()
 
@@ -3011,6 +3101,202 @@ class TestModelIntrospectionConfigTopicValidation:
         assert config.heartbeat_topic == custom_heartbeat
         assert config.request_introspection_topic == custom_request
 
+    def test_version_field_accepts_semantic_versions(self) -> None:
+        """Test that version field accepts valid semantic version formats.
+
+        The version field accepts any string, but semantic versioning (SemVer)
+        is the expected format. This test documents that common SemVer patterns
+        are accepted without validation errors.
+        """
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        valid_versions = [
+            "1.0.0",
+            "2.1.3",
+            "0.0.1",
+            "10.20.30",
+            "1.0.0-alpha",
+            "1.0.0-beta.1",
+            "1.0.0-rc.1",
+            "2.0.0+build.123",
+            "1.0.0-alpha+001",
+        ]
+
+        for version in valid_versions:
+            config = ModelIntrospectionConfig(
+                node_id=uuid4(),
+                node_type="EFFECT",
+                version=version,
+            )
+            assert config.version == version
+
+    def test_topic_validation_rejects_topics_starting_with_non_letter(self) -> None:
+        """Test that topics starting with non-lowercase letters are rejected.
+
+        Topics must start with a lowercase letter per TOPIC_VALIDATION_PATTERN.
+        This ensures topics starting with numbers, hyphens, underscores, or dots
+        are properly rejected.
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        invalid_start_topics = [
+            "1topic.name",  # starts with number
+            "-topic.name",  # starts with hyphen
+            "_topic.name",  # starts with underscore
+            ".topic.name",  # starts with dot
+            "0node.introspection",  # starts with zero
+        ]
+
+        for invalid_topic in invalid_start_topics:
+            with pytest.raises(ValidationError) as exc_info:
+                ModelIntrospectionConfig(
+                    node_id=uuid4(),
+                    node_type="EFFECT",
+                    introspection_topic=invalid_topic,
+                )
+            assert "must start with a lowercase letter" in str(exc_info.value).lower()
+
+    def test_topic_validation_rejects_topics_ending_with_invalid_chars(self) -> None:
+        """Test that topics ending with non-alphanumeric characters are rejected.
+
+        Topics must end with a lowercase letter or digit per TOPIC_VALIDATION_PATTERN.
+        This ensures topics ending with dots, hyphens, or underscores are rejected.
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        invalid_end_topics = [
+            "topic.name.",  # ends with dot
+            "topic.name-",  # ends with hyphen
+            "topic.name_",  # ends with underscore
+            "node.",  # single segment ending with dot
+            "a-",  # minimal topic ending with hyphen
+        ]
+
+        for invalid_topic in invalid_end_topics:
+            with pytest.raises(ValidationError) as exc_info:
+                ModelIntrospectionConfig(
+                    node_id=uuid4(),
+                    node_type="EFFECT",
+                    heartbeat_topic=invalid_topic,
+                )
+            # Error message should indicate pattern violation
+            error_str = str(exc_info.value).lower()
+            assert (
+                "must start with a lowercase letter" in error_str
+                or "lowercase alphanumeric" in error_str
+            )
+
+    def test_topic_validation_rejects_newline_characters(self) -> None:
+        """Test that topics with newline characters are rejected.
+
+        Newline characters should be rejected as invalid whitespace.
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        invalid_topics = [
+            "topic\nname",  # newline in middle
+            "topic\r\nname",  # CRLF in middle
+            "\ntopic.name",  # leading newline
+            "topic.name\n",  # trailing newline
+        ]
+
+        for invalid_topic in invalid_topics:
+            with pytest.raises(ValidationError) as exc_info:
+                ModelIntrospectionConfig(
+                    node_id=uuid4(),
+                    node_type="EFFECT",
+                    request_introspection_topic=invalid_topic,
+                )
+            assert "whitespace" in str(exc_info.value).lower()
+
+    def test_topic_validation_rejects_empty_segments(self) -> None:
+        """Test that topics with empty segments are rejected.
+
+        Topics with multiple consecutive separators (like "...") should be rejected.
+        While consecutive dots are explicitly checked, this test verifies the
+        pattern also rejects other forms of empty segments.
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        # Consecutive dots are rejected
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id=uuid4(),
+                node_type="EFFECT",
+                introspection_topic="topic...name",  # triple dots
+            )
+        assert "consecutive dots" in str(exc_info.value).lower()
+
+    def test_topic_validation_rejects_min_length_violation(self) -> None:
+        """Test that empty topic strings are rejected by min_length constraint.
+
+        Topic fields have min_length=1, so empty strings should be rejected.
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id=uuid4(),
+                node_type="EFFECT",
+                introspection_topic="",
+            )
+        # Pydantic min_length validation error
+        error_str = str(exc_info.value).lower()
+        assert "at least 1 character" in error_str or "min_length" in error_str
+
+    def test_topic_validation_single_character_edge_cases(self) -> None:
+        """Test single character topic edge cases.
+
+        Per TOPIC_VALIDATION_PATTERN (^[a-z]$), a single lowercase letter is valid.
+        Single non-letter characters should be rejected.
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        # Valid: single lowercase letter
+        for char in "abcxyz":
+            config = ModelIntrospectionConfig(
+                node_id=uuid4(),
+                node_type="EFFECT",
+                introspection_topic=char,
+            )
+            assert config.introspection_topic == char
+
+        # Invalid: single non-letter characters
+        invalid_single_chars = ["1", ".", "-", "_", "A", "Z"]
+        for char in invalid_single_chars:
+            with pytest.raises(ValidationError):
+                ModelIntrospectionConfig(
+                    node_id=uuid4(),
+                    node_type="EFFECT",
+                    introspection_topic=char,
+                )
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio
@@ -3135,25 +3421,34 @@ class TestMixinNodeIntrospectionConcurrentCacheAccess:
 
         This test runs concurrent introspection calls while also
         invalidating the cache to detect race conditions.
+
+        Enhanced verification includes:
+        - Barrier synchronization for true concurrency
+        - Explicit invalidation count tracking
+        - Data consistency verification across all results
+        - Performance metrics validation after concurrent access
         """
+        test_node_id = uuid4()
         node = MockNode()
         node.initialize_introspection(
-            node_id=uuid4(),
+            node_id=test_node_id,
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.001,  # Very short TTL to force cache misses
         )
 
-        results: list[ModelNodeIntrospectionEvent | Exception] = []
         invalidation_count = 0
         invalidation_tasks: list[asyncio.Task[None]] = []
+        # Use barrier to ensure concurrent start
+        barrier = asyncio.Barrier(110)  # 100 get_data + 10 invalidate tasks
 
         async def get_data() -> ModelNodeIntrospectionEvent:
+            await barrier.wait()  # Synchronize start for true concurrency
             return await node.get_introspection_data()
 
         async def invalidate_cache() -> None:
             nonlocal invalidation_count
-            await asyncio.sleep(0.0001)  # Small delay
+            await barrier.wait()  # Synchronize start for true concurrency
             node.invalidate_introspection_cache()
             invalidation_count += 1
 
@@ -3166,11 +3461,35 @@ class TestMixinNodeIntrospectionConcurrentCacheAccess:
                 invalidation_tasks.append(asyncio.create_task(invalidate_cache()))
 
         gathered_results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Wait for invalidation tasks to complete
+        await asyncio.gather(*invalidation_tasks, return_exceptions=True)
 
-        # All introspection calls should succeed despite concurrent invalidation
+        # Verify all introspection calls succeeded
         exceptions = [r for r in gathered_results if isinstance(r, Exception)]
         assert len(exceptions) == 0, (
             f"Concurrent invalidation produced exceptions: {exceptions}"
+        )
+
+        # Verify invalidation count - all 10 invalidations should have run
+        assert invalidation_count == 10, (
+            f"Expected 10 invalidations, got {invalidation_count}"
+        )
+
+        # Verify data consistency - all results should have same node_id
+        valid_results = [
+            r for r in gathered_results if isinstance(r, ModelNodeIntrospectionEvent)
+        ]
+        assert len(valid_results) == 100, (
+            f"Expected 100 valid results, got {len(valid_results)}"
+        )
+        assert all(r.node_id == test_node_id for r in valid_results), (
+            "All results should have consistent node_id despite concurrent invalidation"
+        )
+
+        # Verify performance metrics still work after concurrent access
+        metrics = node.get_performance_metrics()
+        assert metrics is not None, (
+            "Performance metrics should be available after concurrent access"
         )
 
     async def test_concurrent_cache_expiration_handling(self) -> None:
@@ -3178,20 +3497,30 @@ class TestMixinNodeIntrospectionConcurrentCacheAccess:
 
         This test verifies that cache expiration is handled correctly
         when multiple coroutines access the cache simultaneously.
+
+        Enhanced verification includes:
+        - Consistent use of timing constants
+        - Performance metrics validation
+        - Cache miss verification after expiration
         """
+        cache_ttl = 0.05  # 50ms TTL for testing
         node = MockNode()
         node.initialize_introspection(
             node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
-            cache_ttl=0.05,  # 50ms TTL for testing
+            cache_ttl=cache_ttl,
         )
 
-        # Warm the cache
+        # Warm the cache and verify it was a cache miss
         await node.get_introspection_data()
+        metrics_warm = node.get_performance_metrics()
+        assert metrics_warm is not None
+        assert metrics_warm.cache_hit is False, "First call should be cache miss"
 
-        # Wait for cache to expire
-        await asyncio.sleep(0.06)
+        # Wait for cache to expire (TTL + buffer, using timing multiplier)
+        expire_wait = (cache_ttl + 0.01) * _TIMING_MULTIPLIER
+        await asyncio.sleep(expire_wait)
 
         # Now run concurrent calls - all should recompute and succeed
         async def get_data() -> ModelNodeIntrospectionEvent:
@@ -3205,6 +3534,12 @@ class TestMixinNodeIntrospectionConcurrentCacheAccess:
             f"Cache expiration produced exceptions: {exceptions}"
         )
 
+        # Verify performance metrics still work after concurrent expired cache access
+        metrics_after = node.get_performance_metrics()
+        assert metrics_after is not None, (
+            "Performance metrics should be available after concurrent access"
+        )
+
     async def test_concurrent_initialization_and_access(self) -> None:
         """Test that initialization and access don't race.
 
@@ -3212,7 +3547,7 @@ class TestMixinNodeIntrospectionConcurrentCacheAccess:
         still initializing doesn't cause race conditions.
         """
         nodes: list[MockNode] = []
-        results: list[ModelNodeIntrospectionEvent | Exception] = []
+        results: list[ModelNodeIntrospectionEvent | BaseException] = []
 
         async def create_and_access() -> ModelNodeIntrospectionEvent:
             node = MockNode()

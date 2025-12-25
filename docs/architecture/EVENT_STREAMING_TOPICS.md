@@ -659,6 +659,7 @@ metadata:
   version: 1.0.0
   node_type: EFFECT
 
+# event_channels is at top level, NOT under metadata
 event_channels:
   # Topics this node publishes to
   # Python: publishes = {ch.event_type: ch.topic for ch in contract.event_channels.publishes}

@@ -10,6 +10,7 @@ and concurrent operation handling under production load scenarios.
 from __future__ import annotations
 
 import asyncio
+from itertools import cycle
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -90,15 +91,33 @@ class TestVaultAdapterConcurrency:
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
 
-            # Mix of failures and successes - create a predictable pattern
-            responses = [
+            # Mix of failures and successes - create a predictable cycling pattern
+            # Use cycle() to prevent StopIteration when concurrent requests with
+            # retries exhaust a finite list (Python 3.12+ raises TypeError when
+            # StopIteration is raised into an async Future context)
+            responses_pattern = [
                 Exception("Connection error"),
                 {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}},
                 Exception("Connection error"),
                 {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}},
-            ] * 5
+            ]
+            response_cycle = cycle(responses_pattern)
 
-            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = responses
+            def get_response(*args: object, **kwargs: object) -> dict[str, object]:
+                """Return next response from cycle - raises exceptions, returns dicts.
+
+                When using a callable for side_effect, mock does NOT automatically
+                raise exceptions - it returns them as values. We must explicitly
+                raise Exception items from the cycle.
+                """
+                response = next(response_cycle)
+                if isinstance(response, Exception):
+                    raise response
+                return response
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
+                get_response
+            )
 
             await handler.initialize(vault_config)
 
