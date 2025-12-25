@@ -20,9 +20,13 @@ from __future__ import annotations
 import logging
 import re
 import warnings
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+if TYPE_CHECKING:
+    from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +57,7 @@ class ModelIntrospectionConfig(BaseModel):
         node_type: Node type classification (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
             Cannot be empty.
         event_bus: Optional event bus for publishing introspection events.
-            Must have ``publish_envelope()`` method if provided.
+            Must implement ``ProtocolEventBus`` protocol.
         version: Node version string. Defaults to "1.0.0".
         cache_ttl: Cache time-to-live in seconds. Defaults to 300.0 (5 minutes).
         operation_keywords: Optional set of keywords to identify operation methods.
@@ -116,13 +120,14 @@ class ModelIntrospectionConfig(BaseModel):
         description="Node type classification (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)",
     )
 
-    # Duck-typed event bus - accepts any object with publish_envelope() method.
-    # Type annotation uses object for Pydantic runtime compatibility while
-    # allowing static type checkers to infer ProtocolEventBus via duck typing.
+    # Event bus for publishing introspection events.
+    # Uses `object | None` for runtime type since ProtocolEventBus is only available
+    # during TYPE_CHECKING. Duck typing is enforced by the mixin at initialization.
+    # The model config has arbitrary_types_allowed=True to support arbitrary objects.
     event_bus: object | None = Field(
         default=None,
         description="Optional event bus for publishing introspection events. "
-        "Must have publish_envelope() method if provided.",
+        "Must implement ProtocolEventBus protocol (duck typed).",
     )
 
     version: str = Field(

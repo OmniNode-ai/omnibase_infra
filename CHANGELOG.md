@@ -95,20 +95,23 @@ class MyNode(MixinNodeIntrospection):
 - **ModelIntrospectionConfig**: Configuration model for `MixinNodeIntrospection` that provides typed configuration
   - `node_id` (required): Unique identifier for this node instance (UUID)
   - `node_type` (required): Type of node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR). Cannot be empty (min_length=1).
-  - `event_bus`: Optional event bus for publishing introspection and heartbeat events. Must have `publish_envelope()` method if provided. Uses duck typing (`object | None`).
+  - `event_bus`: Optional event bus for publishing introspection and heartbeat events. Uses duck typing (`object | None`) to accept any object implementing `ProtocolEventBus` protocol.
   - `version`: Node version string (default: `"1.0.0"`)
   - `cache_ttl`: Cache time-to-live in seconds (default: `300.0`, minimum: `0.0`)
   - `operation_keywords`: Optional set of keywords to identify operation methods. If None, uses `MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS`.
   - `exclude_prefixes`: Optional set of prefixes to exclude from capability discovery. If None, uses `MixinNodeIntrospection.DEFAULT_EXCLUDE_PREFIXES`.
+  - `introspection_topic`: Topic for publishing introspection events (default: `"node.introspection"`). ONEX topics (starting with `onex.`) require version suffix (e.g., `.v1`).
+  - `heartbeat_topic`: Topic for publishing heartbeat events (default: `"node.heartbeat"`). ONEX topics require version suffix.
+  - `request_introspection_topic`: Topic for receiving introspection requests (default: `"node.request_introspection"`). ONEX topics require version suffix.
   - Model is frozen and forbids extra fields for immutability and strict validation.
 - **Performance Metrics Tracking**:
   - Added `IntrospectionPerformanceMetrics` dataclass (internal) and `ModelIntrospectionPerformanceMetrics` Pydantic model (for event payloads)
   - Added `get_performance_metrics()` method for monitoring introspection operation timing and threshold violations
   - Performance thresholds: `get_capabilities` <50ms, `discover_capabilities` <30ms, `total_introspection` <50ms, `cache_hit` <1ms
-- **Topic Constants**: Introspection events use fixed topic names (not configurable via ModelIntrospectionConfig):
-  - `INTROSPECTION_TOPIC = "node.introspection"`
-  - `HEARTBEAT_TOPIC = "node.heartbeat"`
-  - `REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"`
+- **Topic Default Constants**: Exported constants for default topic names:
+  - `DEFAULT_INTROSPECTION_TOPIC = "node.introspection"`
+  - `DEFAULT_HEARTBEAT_TOPIC = "node.heartbeat"`
+  - `DEFAULT_REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"`
 
 #### Handlers
 - **HttpHandler** (OMN-237, PR #26): HTTP REST protocol handler for MVP

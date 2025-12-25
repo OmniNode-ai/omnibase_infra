@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID, uuid4
 
 import pytest
@@ -49,10 +49,6 @@ pytestmark = [
 
 # Test timing constants (in seconds)
 CACHE_TTL_WAIT = 0.15  # Wait for cache TTL expiration (TTL=0.1s + buffer)
-HEARTBEAT_INTERVAL = 0.05  # Default heartbeat interval for tests
-HEARTBEAT_WAIT = 0.1  # Wait for at least one heartbeat
-MULTIPLE_HEARTBEAT_WAIT = 0.2  # Wait for multiple heartbeats
-CACHE_EXPIRE_WAIT = 0.01  # Brief wait for cache expiration
 LISTENER_SUBSCRIBE_WAIT = 0.1  # Time for listener to subscribe
 
 
@@ -157,7 +153,7 @@ class ContractDrivenEffectNode(MixinNodeIntrospection):
 
     def __init__(
         self,
-        contract_data: dict[str, Any],
+        contract_data: dict[str, object],
         event_bus: MockEventBus | None = None,
     ) -> None:
         """Initialize node from contract data.
@@ -186,7 +182,7 @@ class ContractDrivenEffectNode(MixinNodeIntrospection):
         self._contract_node_name = metadata.get("name", "unknown-node")
 
         # Build config kwargs, only including topics that are explicitly defined
-        config_kwargs: dict[str, Any] = {
+        config_kwargs: dict[str, object] = {
             "node_id": uuid4(),  # Generate unique UUID for each node instance
             "node_type": metadata.get("node_type", "EFFECT"),
             "event_bus": event_bus,
@@ -209,8 +205,8 @@ class ContractDrivenEffectNode(MixinNodeIntrospection):
         self.initialize_introspection_from_config(config)
 
     async def execute_effect(
-        self, operation: str, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, operation: str, payload: dict[str, object]
+    ) -> dict[str, object]:
         """Mock execute method for EFFECT node.
 
         Args:
@@ -255,7 +251,7 @@ class ComputeNodeWithCustomTopics(MixinNodeIntrospection):
 
         self.initialize_introspection_from_config(config)
 
-    async def process_data(self, data: dict[str, Any]) -> dict[str, Any]:
+    async def process_data(self, data: dict[str, object]) -> dict[str, object]:
         """Mock compute processing.
 
         Args:
@@ -499,7 +495,10 @@ class TestEndToEndIntrospectionWorkflow:
         assert data.current_state == "initialized"
 
     async def test_heartbeat_uses_contract_topic(self) -> None:
-        """Verify heartbeat publishing uses topic from contract."""
+        """Verify heartbeat publishing uses topic from contract.
+
+        Uses polling with retry instead of fixed sleep for CI robustness.
+        """
         event_bus = MockEventBus()
 
         contract_data = {
@@ -524,13 +523,26 @@ class TestEndToEndIntrospectionWorkflow:
         # Start heartbeat tasks with very short interval
         await node.start_introspection_tasks(
             enable_heartbeat=True,
-            heartbeat_interval_seconds=0.05,  # 50ms for fast test
+            heartbeat_interval_seconds=0.02,  # 20ms for fast test
             enable_registry_listener=False,
         )
 
         try:
-            # Wait for at least one heartbeat
-            await asyncio.sleep(CACHE_TTL_WAIT)
+            # Poll for heartbeat events instead of fixed sleep (CI robustness)
+            max_wait_seconds = 0.5
+            poll_interval = 0.05
+            elapsed = 0.0
+
+            while elapsed < max_wait_seconds:
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                heartbeat_topics = [
+                    topic
+                    for _, topic in event_bus.published_envelopes
+                    if "heartbeat" in topic.lower()
+                ]
+                if len(heartbeat_topics) >= 1:
+                    break
 
             # Verify heartbeat was published to correct topic
             heartbeat_topics = [
@@ -538,7 +550,10 @@ class TestEndToEndIntrospectionWorkflow:
                 for _, topic in event_bus.published_envelopes
                 if "heartbeat" in topic.lower()
             ]
-            assert len(heartbeat_topics) >= 1
+            assert len(heartbeat_topics) >= 1, (
+                f"Expected at least 1 heartbeat, got {len(heartbeat_topics)} "
+                f"after {elapsed:.2f}s"
+            )
             assert all(t == "onex.custom.heartbeat.topic.v1" for t in heartbeat_topics)
         finally:
             await node.stop_introspection_tasks()
@@ -1000,7 +1015,7 @@ class TestSubclassTopicOverrides:
                 """Initialize with optional topic override."""
                 self._state = "ready"
                 # Build config with optional topic override
-                config_kwargs: dict[str, Any] = {
+                config_kwargs: dict[str, object] = {
                     "node_id": node_id,
                     "node_type": "EFFECT",
                 }

@@ -715,9 +715,7 @@ class TestVersionSuffixValidation:
         # Should not match ENVIRONMENT_AWARE pattern (requires v + digit)
         assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
 
-    def test_version_suffix_uppercase_v_invalid(
-        self, parser: ModelTopicParser
-    ) -> None:
+    def test_version_suffix_uppercase_v_invalid(self, parser: ModelTopicParser) -> None:
         """Test that uppercase .V1 suffix is invalid (case-sensitive matching).
 
         While parsing is generally case-insensitive, the canonical form uses
@@ -751,14 +749,83 @@ class TestVersionSuffixValidation:
         # Should not match ENVIRONMENT_AWARE pattern
         assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
 
-    def test_version_suffix_number_only_invalid(
-        self, parser: ModelTopicParser
-    ) -> None:
+    def test_version_suffix_number_only_invalid(self, parser: ModelTopicParser) -> None:
         """Test that .1 suffix (number without 'v') is invalid."""
         result = parser.parse("dev.user.events.1")
 
         # Should not match ENVIRONMENT_AWARE pattern
         assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
+
+    def test_version_suffix_letter_after_v_invalid(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that .va suffix (letter instead of digit) is invalid.
+
+        Version suffix must be v followed by digits only. Letters after 'v'
+        (like 'va', 'vb', 'vX') should NOT match the ENVIRONMENT_AWARE pattern.
+        """
+        result = parser.parse("dev.user.events.va")
+
+        # Should not match ENVIRONMENT_AWARE pattern (requires v + digits)
+        assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
+
+    def test_version_suffix_mixed_alphanumeric_invalid(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that .v1a suffix (mixed alphanumeric) is invalid.
+
+        Version suffix must be v followed by digits only. Mixed patterns
+        like 'v1a', 'v2beta' should NOT match the ENVIRONMENT_AWARE pattern.
+        """
+        result = parser.parse("dev.user.events.v1a")
+
+        # Should not match ENVIRONMENT_AWARE pattern
+        assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
+
+    def test_version_suffix_v0_valid(self, parser: ModelTopicParser) -> None:
+        """Test that .v0 version suffix is valid per the v\\d+ pattern.
+
+        The version pattern v\\d+ matches any v followed by one or more digits,
+        including v0. While semantically v0 may be unusual for an API version,
+        the pattern technically allows it. This test documents current behavior.
+
+        Note: If business rules require version >= 1, this should be enforced
+        at a higher layer (e.g., schema validation), not in topic parsing.
+        """
+        result = parser.parse("dev.user.events.v0")
+
+        # v0 matches the v\d+ pattern, so should be valid ENVIRONMENT_AWARE
+        assert result.is_valid is True
+        assert result.standard == EnumTopicStandard.ENVIRONMENT_AWARE
+        assert result.version == "v0"
+
+    def test_version_suffix_missing_dot_separator_invalid(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that version without dot separator is invalid.
+
+        Topics like 'dev.user.eventsv1' (missing dot before version) should
+        NOT match the ENVIRONMENT_AWARE pattern since the structure requires
+        dots between all segments: <env>.<domain>.<category>.<version>
+        """
+        result = parser.parse("dev.user.eventsv1")
+
+        # Missing dot before version - should not match ENVIRONMENT_AWARE
+        assert result.standard != EnumTopicStandard.ENVIRONMENT_AWARE
+
+    def test_version_suffix_leading_zero_valid(self, parser: ModelTopicParser) -> None:
+        """Test that version with leading zeros (e.g., .v01) is valid.
+
+        The v\\d+ pattern matches v followed by any digits, including
+        versions with leading zeros like v01, v001. This test documents
+        that such patterns are accepted by the topic parser.
+        """
+        result = parser.parse("dev.user.events.v01")
+
+        # v01 matches v\d+ pattern
+        assert result.is_valid is True
+        assert result.standard == EnumTopicStandard.ENVIRONMENT_AWARE
+        assert result.version == "v01"
 
     # -------------------------------------------------------------------------
     # ONEX Kafka Format Version Tests (no version required)
@@ -1492,9 +1559,7 @@ class TestInvalidTopicNameEdgeCases:
         assert result.standard == EnumTopicStandard.ONEX_KAFKA
         assert result.is_valid is True
 
-    def test_topic_domain_starting_with_number(
-        self, parser: ModelTopicParser
-    ) -> None:
+    def test_topic_domain_starting_with_number(self, parser: ModelTopicParser) -> None:
         """Test topic with domain starting with a number.
 
         Domains should start with a letter according to ONEX conventions.
@@ -1505,9 +1570,7 @@ class TestInvalidTopicNameEdgeCases:
         assert result.standard != EnumTopicStandard.ONEX_KAFKA
         assert result.standard == EnumTopicStandard.UNKNOWN
 
-    def test_topic_domain_starting_with_hyphen(
-        self, parser: ModelTopicParser
-    ) -> None:
+    def test_topic_domain_starting_with_hyphen(self, parser: ModelTopicParser) -> None:
         """Test topic with domain starting with a hyphen.
 
         Domains should not start with a hyphen.
