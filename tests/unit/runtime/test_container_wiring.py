@@ -23,15 +23,16 @@ class TestWireInfrastructureServices:
     async def test_wire_infrastructure_services_registers_policy_registry(
         self, mock_container: MagicMock
     ) -> None:
-        """Test that wire_infrastructure_services registers PolicyRegistry."""
+        """Test that wire_infrastructure_services registers all infrastructure services."""
         summary = await wire_infrastructure_services(mock_container)
 
-        # Verify both PolicyRegistry and ProtocolBindingRegistry were registered
+        # Verify PolicyRegistry, ProtocolBindingRegistry, and RegistryCompute were registered
         assert "PolicyRegistry" in summary["services"]
         assert "ProtocolBindingRegistry" in summary["services"]
+        assert "RegistryCompute" in summary["services"]
 
-        # Verify register_instance was called twice (once for each registry)
-        assert mock_container.service_registry.register_instance.call_count == 2
+        # Verify register_instance was called three times (once for each registry)
+        assert mock_container.service_registry.register_instance.call_count == 3
 
     async def test_wire_infrastructure_services_returns_summary(
         self, mock_container: MagicMock
@@ -42,8 +43,8 @@ class TestWireInfrastructureServices:
         assert "services" in summary
         assert isinstance(summary["services"], list)
         assert (
-            len(summary["services"]) >= 2
-        )  # At least PolicyRegistry and ProtocolBindingRegistry
+            len(summary["services"]) >= 3
+        )  # PolicyRegistry, ProtocolBindingRegistry, and RegistryCompute
 
 
 class TestGetPolicyRegistryFromContainer:

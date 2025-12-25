@@ -19,7 +19,11 @@ from omnibase_infra.utils.util_error_sanitization import (
     SENSITIVE_PATTERNS,
     sanitize_error_message,
 )
-from omnibase_infra.utils.util_semver import SEMVER_PATTERN, validate_semver
+from omnibase_infra.utils.util_semver import (
+    SEMVER_PATTERN,
+    validate_semver,
+    validate_version_lenient,
+)
 
 __all__: list[str] = [
     "generate_correlation_id",
@@ -31,4 +35,5 @@ __all__: list[str] = [
     "sanitize_error_message",
     "SEMVER_PATTERN",
     "validate_semver",
+    "validate_version_lenient",
 ]

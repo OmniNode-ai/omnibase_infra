@@ -9,17 +9,14 @@ node_version: "1.0.0"
 name: "node_registration_orchestrator"
 node_type: "ORCHESTRATOR"
 description: "Registration workflow orchestrator that coordinates node lifecycle by calling reducer for intents and effect for execution."
-
 input_model:
   name: "ModelOrchestratorInput"
   module: "omnibase_infra.nodes.node_registration_orchestrator.models"
   description: "Input containing introspection event and workflow configuration."
-
 output_model:
   name: "ModelOrchestratorOutput"
   module: "omnibase_infra.nodes.node_registration_orchestrator.models"
   description: "Output containing dual registration outcome and workflow status."
-
 # OMN-973: Time injection context for timeout evaluation
 # Implemented in omnibase_infra#66. The DispatchContextEnforcer injects `now`
 # timestamps from RuntimeTick events into orchestrator dispatch context, enabling
@@ -30,7 +27,6 @@ time_injection:
   source: "RuntimeTick"
   field: "now"
   description: "Use injected timestamp from RuntimeTick for timeout evaluation"
-
 # OMN-930: Projection reader integration for state decisions
 # Implemented in omnibase_spi#44. ProtocolProjectionReader is now defined in
 # omnibase_spi.protocols, enabling dependency injection of projection readers.
@@ -43,7 +39,6 @@ projection_reader:
   projections:
     - name: "node_registration_state"
       description: "Current registration state for all nodes"
-
 # Workflow Coordination Configuration
 # ====================================
 # Design Decision: Single Source of Truth for Coordination Settings
@@ -85,7 +80,6 @@ workflow_coordination:
         minor: 0
         patch: 0
       description: "Registers nodes with Consul and PostgreSQL based on introspection events"
-
     execution_graph:
       nodes:
         - node_id: "receive_introspection"
@@ -93,7 +87,6 @@ workflow_coordination:
           description: "Receive introspection or tick event"
           step_config:
             event_pattern: ["node-introspection.*", "registry-request-introspection.*", "runtime-tick.*"]
-
         # OMN-930: Reads current registration state via ProtocolProjectionReader.
         # Uses ProjectionReaderRegistration to query node_registration_state.
         - node_id: "read_projection"
@@ -104,7 +97,6 @@ workflow_coordination:
             protocol: "ProtocolProjectionReader"
             operation: "read_projection"
             projection_name: "node_registration_state"
-
         # OMN-973: Evaluates timeout using injected `now` from dispatch context.
         # The DispatchContextEnforcer injects time from RuntimeTick events.
         - node_id: "evaluate_timeout"
@@ -114,7 +106,6 @@ workflow_coordination:
           step_config:
             time_injection: true
             timeout_evaluation: true
-
         - node_id: "compute_intents"
           node_type: reducer
           description: "Compute registration intents from introspection event"
@@ -122,7 +113,6 @@ workflow_coordination:
           step_config:
             reducer_protocol: "ProtocolReducer"
             output_type: "list[ModelRegistrationIntent]"
-
         - node_id: "execute_consul_registration"
           node_type: effect
           description: "Execute Consul registration intent"
@@ -130,7 +120,6 @@ workflow_coordination:
           step_config:
             effect_node: "node_registry_effect"
             intent_filter: "consul.*"
-
         - node_id: "execute_postgres_registration"
           node_type: effect
           description: "Execute PostgreSQL registration intent"
@@ -138,21 +127,18 @@ workflow_coordination:
           step_config:
             effect_node: "node_registry_effect"
             intent_filter: "postgres.*"
-
         - node_id: "aggregate_results"
           node_type: compute
           description: "Aggregate registration results"
           depends_on: ["execute_consul_registration", "execute_postgres_registration"]
           step_config:
             aggregation_strategy: "all_or_partial"
-
         - node_id: "publish_outcome"
           node_type: effect
           description: "Publish registration outcome event"
           depends_on: ["aggregate_results"]
           step_config:
             event_type: "NodeRegistrationResultEvent"
-
     # ┌─────────────────────────────────────────────────────────────────────────┐
     # │ COORDINATION RULES (Single Source of Truth - See header comments)        │
     # ├─────────────────────────────────────────────────────────────────────────┤
@@ -181,7 +167,6 @@ workflow_coordination:
       execution_mode: parallel
       parallel_execution_allowed: true
       max_parallel_branches: 2
-
       # ┌─────────────────────────────────────────────────────────────────────┐
       # │ WORKFLOW STEP RETRIES (coordination_rules.max_retries)              │
       # ├─────────────────────────────────────────────────────────────────────┤
@@ -201,20 +186,16 @@ workflow_coordination:
       # │ error-level retry configuration.                                    │
       # └─────────────────────────────────────────────────────────────────────┘
       failure_recovery_strategy: retry
-      max_retries: 3  # Workflow step retry count (see box above)
+      max_retries: 3 # Workflow step retry count (see box above)
       recovery_enabled: true
-
       # Timeout configuration
       timeout_ms: 30000
-
       # Checkpoint and state persistence
       checkpoint_enabled: true
       checkpoint_interval_ms: 5000
       state_persistence_enabled: true
-
       # Rollback configuration
       rollback_enabled: true
-
 consumed_events:
   - topic: "{env}.{namespace}.onex.evt.node-introspection.v1"
     event_type: "NodeIntrospectionEvent"
@@ -224,7 +205,6 @@ consumed_events:
     event_type: "RuntimeTick"
     internal: true
     description: "Internal tick for timeout evaluation"
-
 published_events:
   - topic: "{env}.{namespace}.onex.evt.node-registration-result.v1"
     event_type: "NodeRegistrationResultEvent"
@@ -242,7 +222,6 @@ published_events:
     event_type: "NodeBecameActive"
   - topic: "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
     event_type: "NodeLivenessExpired"
-
 intent_consumption:
   subscribed_intents:
     - "consul.register"
@@ -252,7 +231,6 @@ intent_consumption:
     "consul.register": "node_registry_effect"
     "consul.deregister": "node_registry_effect"
     "postgres.upsert_registration": "node_registry_effect"
-
 dependencies:
   - name: "reducer_protocol"
     type: "protocol"
@@ -266,7 +244,6 @@ dependencies:
     type: "protocol"
     module: "omnibase_spi.protocols"
     description: "Protocol for reading projection state."
-
 # Error Handling Configuration
 # =============================
 # ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -296,7 +273,7 @@ dependencies:
 # └─────────────────────────────────────────────────────────────────────────────┘
 error_handling:
   retry_policy:
-    max_retries: 3  # Error-level retry count (see box above)
+    max_retries: 3 # Error-level retry count (see box above)
     initial_delay_ms: 100
     max_delay_ms: 5000
     exponential_base: 2
@@ -304,12 +281,10 @@ error_handling:
       - "EffectExecutionError"
       - "ConnectionError"
       - "TimeoutError"
-
   circuit_breaker:
     enabled: true
     failure_threshold: 5
     reset_timeout_ms: 60000
-
   error_types:
     - name: "ReducerError"
       description: "Error from reducer during intent generation"
@@ -323,12 +298,10 @@ error_handling:
       description: "Error during result aggregation"
       recoverable: false
       retry_strategy: "none"
-
 health_check:
   enabled: true
   endpoint: "/health"
   interval_seconds: 30
-
 metadata:
   author: "OmniNode Team"
   created: "2025-12-18"

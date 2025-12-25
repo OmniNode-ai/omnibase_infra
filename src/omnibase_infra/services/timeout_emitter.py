@@ -43,6 +43,8 @@ from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.services.timeout_scanner import TimeoutScanner
 
 if TYPE_CHECKING:
+    from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
+
     # Import models inside TYPE_CHECKING to avoid circular import.
     # The circular import occurs because:
     # 1. services/__init__.py imports timeout_emitter
@@ -247,7 +249,7 @@ class TimeoutEmitter:
     def __init__(
         self,
         timeout_query: TimeoutScanner,
-        event_bus: ProtocolEventBusLike,
+        event_bus: ProtocolEventBus,
         projector: ProjectorRegistration,
         config: ModelTimeoutEmissionConfig | None = None,
     ) -> None:
@@ -257,7 +259,7 @@ class TimeoutEmitter:
             timeout_query: Scanner for querying overdue entities.
                 Must be initialized with a ProjectionReaderRegistration.
             event_bus: Event bus for publishing timeout events.
-                Must implement ProtocolEventBusLike (publish_envelope method).
+                Must implement ProtocolEventBus (publish_envelope method).
             projector: Projector for updating emission markers.
                 Must be initialized with an asyncpg connection pool.
             config: Configuration for environment and namespace.

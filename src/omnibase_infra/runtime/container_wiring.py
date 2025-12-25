@@ -15,6 +15,7 @@ Design Principles:
 Service Keys:
 - PolicyRegistry: Registered as interface=PolicyRegistry
 - ProtocolBindingRegistry: Registered as interface=ProtocolBindingRegistry
+- RegistryCompute: Registered as interface=RegistryCompute
 
 Example Usage:
     ```python
@@ -44,7 +45,7 @@ Integration Notes:
 - Uses ModelONEXContainer.service_registry for registration
 - Services registered as global scope (singleton per container)
 - Type-safe resolution via interface types
-- Compatible with omnibase_core 0.4.x API
+- Compatible with omnibase_core v0.5.6 and later (async service registry)
 """
 
 from __future__ import annotations
@@ -52,8 +53,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from omnibase_infra.models.model_semver import SEMVER_DEFAULT
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
+from omnibase_infra.runtime.registry_compute import RegistryCompute
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -66,12 +69,12 @@ async def wire_infrastructure_services(
 ) -> dict[str, list[str]]:
     """Register infrastructure services with the container.
 
-    Registers PolicyRegistry and ProtocolBindingRegistry as global singleton
-    services in the container. Uses ModelONEXContainer.service_registry.register_instance()
+    Registers PolicyRegistry, ProtocolBindingRegistry, and RegistryCompute as global
+    singleton services in the container. Uses ModelONEXContainer.service_registry.register_instance()
     with the respective class as the interface type.
 
     Note: This function is async because ModelONEXContainer.service_registry.register_instance()
-    is async in omnibase_core 0.4.x+.
+    is async in omnibase_core v0.5.6 and later (see omnibase_core.container.ModelONEXContainer).
 
     Args:
         container: ONEX container instance to register services in.
@@ -88,13 +91,16 @@ async def wire_infrastructure_services(
         >>> container = ModelONEXContainer()
         >>> summary = await wire_infrastructure_services(container)
         >>> print(summary)
-        {'services': ['PolicyRegistry', 'ProtocolBindingRegistry']}
+        {'services': ['PolicyRegistry', 'ProtocolBindingRegistry', 'RegistryCompute']}
         >>> policy_reg = await container.service_registry.resolve_service(PolicyRegistry)
         >>> handler_reg = await container.service_registry.resolve_service(ProtocolBindingRegistry)
+        >>> compute_reg = await container.service_registry.resolve_service(RegistryCompute)
         >>> # Verify via duck typing (per ONEX conventions)
         >>> hasattr(policy_reg, 'register_policy') and callable(policy_reg.register_policy)
         True
         >>> hasattr(handler_reg, 'register') and callable(handler_reg.register)
+        True
+        >>> hasattr(compute_reg, 'register_plugin') and callable(compute_reg.register_plugin)
         True
     """
     services_registered: list[str] = []
@@ -110,7 +116,7 @@ async def wire_infrastructure_services(
             scope="global",
             metadata={
                 "description": "ONEX policy plugin registry",
-                "version": "1.0.0",
+                "version": str(SEMVER_DEFAULT),
             },
         )
 
@@ -127,12 +133,29 @@ async def wire_infrastructure_services(
             scope="global",
             metadata={
                 "description": "ONEX protocol handler binding registry",
-                "version": "1.0.0",
+                "version": str(SEMVER_DEFAULT),
             },
         )
 
         services_registered.append("ProtocolBindingRegistry")
         logger.debug("Registered ProtocolBindingRegistry in container (global scope)")
+
+        # Create RegistryCompute instance
+        compute_registry = RegistryCompute()
+
+        # Register with container using type interface (global scope = singleton)
+        await container.service_registry.register_instance(
+            interface=RegistryCompute,
+            instance=compute_registry,
+            scope="global",
+            metadata={
+                "description": "ONEX compute plugin registry",
+                "version": str(SEMVER_DEFAULT),
+            },
+        )
+
+        services_registered.append("RegistryCompute")
+        logger.debug("Registered RegistryCompute in container (global scope)")
 
     except AttributeError as e:
         # Container missing service_registry or registration method
@@ -147,7 +170,7 @@ async def wire_infrastructure_services(
         elif "register_instance" in error_str:
             hint = (
                 "Container.service_registry missing 'register_instance' method. "
-                "Check omnibase_core version compatibility (requires 0.4.x+)."
+                "Check omnibase_core version compatibility (requires v0.5.6 or later)."
             )
         else:
             hint = f"Missing attribute: '{missing_attr}'"
@@ -246,7 +269,7 @@ async def get_policy_registry_from_container(
     This is the preferred method for accessing PolicyRegistry in container-based code.
 
     Note: This function is async because ModelONEXContainer.service_registry.resolve_service()
-    is async in omnibase_core 0.4.x+.
+    is async in omnibase_core v0.5.6 and later (see omnibase_core.container.ModelONEXContainer).
 
     Args:
         container: ONEX container instance with registered PolicyRegistry.
@@ -285,7 +308,7 @@ async def get_policy_registry_from_container(
         elif "resolve_service" in error_str:
             hint = (
                 "Container.service_registry missing 'resolve_service' method. "
-                "Check omnibase_core version compatibility (requires 0.4.x+)."
+                "Check omnibase_core version compatibility (requires v0.5.6 or later)."
             )
         else:
             hint = f"Missing attribute in resolution chain: {e}"
@@ -335,7 +358,7 @@ async def get_or_create_policy_registry(
     wire_infrastructure_services() yet or when lazy initialization is desired.
 
     Note: This function is async because ModelONEXContainer.service_registry methods
-    (resolve_service and register_instance) are async in omnibase_core 0.4.x+.
+    (resolve_service and register_instance) are async in omnibase_core v0.5.6 and later.
 
     Args:
         container: ONEX container instance.
@@ -377,7 +400,7 @@ async def get_or_create_policy_registry(
                 scope="global",
                 metadata={
                     "description": "ONEX policy plugin registry (auto-registered)",
-                    "version": "1.0.0",
+                    "version": str(SEMVER_DEFAULT),
                     "auto_registered": True,
                 },
             )
@@ -403,7 +426,7 @@ async def get_handler_registry_from_container(
     This is the preferred method for accessing ProtocolBindingRegistry in container-based code.
 
     Note: This function is async because ModelONEXContainer.service_registry.resolve_service()
-    is async in omnibase_core 0.4.x+.
+    is async in omnibase_core v0.5.6 and later (see omnibase_core.container.ModelONEXContainer).
 
     Args:
         container: ONEX container instance with registered ProtocolBindingRegistry.
@@ -442,7 +465,7 @@ async def get_handler_registry_from_container(
         elif "resolve_service" in error_str:
             hint = (
                 "Container.service_registry missing 'resolve_service' method. "
-                "Check omnibase_core version compatibility (requires 0.4.x+)."
+                "Check omnibase_core version compatibility (requires v0.5.6 or later)."
             )
         else:
             hint = f"Missing attribute in resolution chain: {e}"
@@ -479,9 +502,168 @@ async def get_handler_registry_from_container(
         ) from e
 
 
+async def get_compute_registry_from_container(
+    container: ModelONEXContainer,
+) -> RegistryCompute:
+    """Get RegistryCompute from container.
+
+    Resolves RegistryCompute using ModelONEXContainer.service_registry.resolve_service().
+    This is the preferred method for accessing RegistryCompute in container-based code.
+
+    Note: This function is async because ModelONEXContainer.service_registry.resolve_service()
+    is async in omnibase_core v0.5.6 and later (see omnibase_core.container.ModelONEXContainer).
+
+    Args:
+        container: ONEX container instance with registered RegistryCompute.
+
+    Returns:
+        RegistryCompute instance from container.
+
+    Raises:
+        RuntimeError: If RegistryCompute not registered in container.
+
+    Example:
+        >>> from omnibase_core.container import ModelONEXContainer
+        >>> container = ModelONEXContainer()
+        >>> await wire_infrastructure_services(container)
+        >>> registry = await get_compute_registry_from_container(container)
+        >>> isinstance(registry, RegistryCompute)
+        True
+
+    Note:
+        This function assumes RegistryCompute was registered via
+        wire_infrastructure_services(). If not, it will raise RuntimeError.
+        For auto-registration, use get_or_create_compute_registry() instead.
+    """
+    try:
+        registry: RegistryCompute = await container.service_registry.resolve_service(
+            RegistryCompute
+        )
+        return registry
+    except AttributeError as e:
+        error_str = str(e)
+        if "service_registry" in error_str:
+            hint = (
+                "Container missing 'service_registry' attribute. "
+                "Expected ModelONEXContainer from omnibase_core."
+            )
+        elif "resolve_service" in error_str:
+            hint = (
+                "Container.service_registry missing 'resolve_service' method. "
+                "Check omnibase_core version compatibility (requires v0.5.6 or later)."
+            )
+        else:
+            hint = f"Missing attribute in resolution chain: {e}"
+
+        logger.exception(
+            "Failed to resolve RegistryCompute from container",
+            extra={
+                "error": error_str,
+                "error_type": "AttributeError",
+                "service_type": "RegistryCompute",
+                "hint": hint,
+            },
+        )
+        raise RuntimeError(
+            f"Failed to resolve RegistryCompute - {hint}\n"
+            f"Required API: container.service_registry.resolve_service(RegistryCompute)\n"
+            f"Original error: {e}"
+        ) from e
+    except Exception as e:
+        logger.exception(
+            "Failed to resolve RegistryCompute from container",
+            extra={
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "service_type": "RegistryCompute",
+            },
+        )
+        raise RuntimeError(
+            f"RegistryCompute not registered in container.\n"
+            f"Service type requested: RegistryCompute\n"
+            f"Resolution method: container.service_registry.resolve_service(RegistryCompute)\n"
+            f"Fix: Call wire_infrastructure_services(container) first.\n"
+            f"Original error: {e}"
+        ) from e
+
+
+async def get_or_create_compute_registry(
+    container: ModelONEXContainer,
+) -> RegistryCompute:
+    """Get RegistryCompute from container, creating if not registered.
+
+    Convenience function that provides lazy initialization semantics.
+    Attempts to resolve RegistryCompute from container, and if not found,
+    creates and registers a new instance.
+
+    This function is useful when code paths may not have called
+    wire_infrastructure_services() yet or when lazy initialization is desired.
+
+    Note: This function is async because ModelONEXContainer.service_registry methods
+    (resolve_service and register_instance) are async in omnibase_core v0.5.6 and later.
+
+    Args:
+        container: ONEX container instance.
+
+    Returns:
+        RegistryCompute instance from container (existing or newly created).
+
+    Example:
+        >>> container = ModelONEXContainer()
+        >>> # No wiring yet, but this still works
+        >>> registry = await get_or_create_compute_registry(container)
+        >>> isinstance(registry, RegistryCompute)
+        True
+        >>> # Second call returns same instance
+        >>> registry2 = await get_or_create_compute_registry(container)
+        >>> registry is registry2
+        True
+
+    Note:
+        While this function provides convenience, prefer explicit wiring via
+        wire_infrastructure_services() for production code to ensure proper
+        initialization order and error handling.
+    """
+    try:
+        # Try to resolve existing RegistryCompute
+        registry: RegistryCompute = await container.service_registry.resolve_service(
+            RegistryCompute
+        )
+        return registry
+    except Exception:
+        # RegistryCompute not registered, create and register it
+        logger.debug("RegistryCompute not found in container, auto-registering")
+
+        try:
+            compute_registry = RegistryCompute()
+            await container.service_registry.register_instance(
+                interface=RegistryCompute,
+                instance=compute_registry,
+                scope="global",
+                metadata={
+                    "description": "ONEX compute plugin registry (auto-registered)",
+                    "version": str(SEMVER_DEFAULT),
+                    "auto_registered": True,
+                },
+            )
+            logger.debug("Auto-registered RegistryCompute in container (lazy init)")
+            return compute_registry
+
+        except Exception as e:
+            logger.exception(
+                "Failed to auto-register RegistryCompute",
+                extra={"error": str(e), "error_type": type(e).__name__},
+            )
+            raise RuntimeError(
+                f"Failed to create and register RegistryCompute: {e}"
+            ) from e
+
+
 __all__: list[str] = [
     "wire_infrastructure_services",
     "get_policy_registry_from_container",
     "get_handler_registry_from_container",
     "get_or_create_policy_registry",
+    "get_compute_registry_from_container",
+    "get_or_create_compute_registry",
 ]
