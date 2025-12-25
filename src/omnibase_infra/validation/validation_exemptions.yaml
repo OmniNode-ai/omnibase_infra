@@ -632,6 +632,18 @@ pattern_exemptions:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
       - docs/design/ADR_DISPATCHER_TYPE_SAFETY.md
     ticket: OMN-1002
+  # ==========================================================================
+  # Union Reduction Phase 3 Result Model Exemptions (OMN-1003)
+  # ==========================================================================
+  # Result models use comprehensive APIs with factory methods, computed properties,
+  # and convenience methods for developer ergonomics.
+  - file_pattern: 'model_execution_shape_validation_result\.py'
+    class_pattern: "Class 'ModelExecutionShapeValidationResult'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Result model with comprehensive API: computed properties (has_blocking, violation_count, blocking_count, warning_count), factory methods (from_violations, success, from_legacy_result), utility methods (to_legacy_result, format_for_ci), and dunder methods (__bool__, __str__). This is intentional API design for CI integration and developer ergonomics.
+
+    ticket: OMN-1003
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
