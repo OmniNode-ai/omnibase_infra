@@ -3,7 +3,7 @@
 """Models for the registration orchestrator node.
 
 This module exports all models used by the NodeRegistrationOrchestrator,
-including configuration, input, output, and intent models.
+including configuration, input, output, intent, and timeout event models.
 """
 
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_intent_payload import (
@@ -14,6 +14,12 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_reg
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_intent_execution_result import (
     ModelIntentExecutionResult,
+)
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_node_liveness_expired import (
+    ModelNodeLivenessExpired,
+)
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_node_registration_ack_timed_out import (
+    ModelNodeRegistrationAckTimedOut,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_orchestrator_config import (
     ModelOrchestratorConfig,
@@ -43,6 +49,8 @@ __all__ = [
     "ModelConsulIntentPayload",
     "ModelConsulRegistrationIntent",
     "ModelIntentExecutionResult",
+    "ModelNodeLivenessExpired",
+    "ModelNodeRegistrationAckTimedOut",
     "ModelOrchestratorConfig",
     "ModelOrchestratorInput",
     "ModelOrchestratorOutput",

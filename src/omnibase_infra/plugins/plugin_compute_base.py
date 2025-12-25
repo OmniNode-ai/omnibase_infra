@@ -240,7 +240,7 @@ class PluginComputeBase(ABC):
 
                 # Validate types
                 value = input_data.get("required_field")
-                if not isinstance(value, (int, float)):
+                if not isinstance(value, int | float):
                     raise TypeError(f"Expected numeric value, got {type(value).__name__}")
 
                 # Deterministic computation
@@ -253,7 +253,7 @@ class PluginComputeBase(ABC):
                     raise ValueError("Missing required_field")
 
                 # Validate types
-                if not isinstance(input_data["required_field"], (int, float)):
+                if not isinstance(input_data["required_field"], int | float):
                     raise TypeError("required_field must be numeric")
         ```
     """
@@ -381,7 +381,7 @@ class PluginComputeBase(ABC):
                     return {"result": 0, "count": 0}
 
                 # Edge Case 4: Validate types
-                if not all(isinstance(v, (int, float)) for v in values):
+                if not all(isinstance(v, int | float) for v in values):
                     raise TypeError("All values must be numeric")
 
                 # Edge Case 6: Handle NaN/Infinity

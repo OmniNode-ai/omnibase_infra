@@ -337,18 +337,15 @@ class TestProtocolLifecycleExecutorShutdown:
         """Test successful handler shutdown returns success tuple."""
         handler = MockHandler(handler_type="test")
 
-        (
-            handler_type,
-            success,
-            error_msg,
-        ) = await protocol_lifecycle_executor.shutdown_handler(
+        result = await protocol_lifecycle_executor.shutdown_handler(
             "test",
             handler,  # type: ignore[arg-type]
         )
 
-        assert handler_type == "test"
-        assert success is True
-        assert error_msg is None
+        assert result.handler_type == "test"
+        assert result.success is True
+        assert result.has_error is False
+        assert result.error_message == ""
         assert handler.shutdown_called is True
 
     @pytest.mark.asyncio
@@ -359,18 +356,15 @@ class TestProtocolLifecycleExecutorShutdown:
         """Test shutdown of handler without shutdown method succeeds."""
         handler = MockHandlerWithoutShutdown(handler_type="no_shutdown")
 
-        (
-            handler_type,
-            success,
-            error_msg,
-        ) = await protocol_lifecycle_executor.shutdown_handler(
+        result = await protocol_lifecycle_executor.shutdown_handler(
             "no_shutdown",
             handler,  # type: ignore[arg-type]
         )
 
-        assert handler_type == "no_shutdown"
-        assert success is True
-        assert error_msg is None
+        assert result.handler_type == "no_shutdown"
+        assert result.success is True
+        assert result.has_error is False
+        assert result.error_message == ""
 
     @pytest.mark.asyncio
     async def test_shutdown_handler_error_returns_failure(
@@ -380,19 +374,15 @@ class TestProtocolLifecycleExecutorShutdown:
         """Test that handler shutdown error returns failure tuple."""
         handler = MockHandlerWithFailingShutdown(handler_type="failing")
 
-        (
-            handler_type,
-            success,
-            error_msg,
-        ) = await protocol_lifecycle_executor.shutdown_handler(
+        result = await protocol_lifecycle_executor.shutdown_handler(
             "failing",
             handler,  # type: ignore[arg-type]
         )
 
-        assert handler_type == "failing"
-        assert success is False
-        assert error_msg is not None
-        assert "Shutdown failed" in error_msg
+        assert result.handler_type == "failing"
+        assert result.success is False
+        assert result.has_error
+        assert "Shutdown failed" in result.error_message
         assert handler.shutdown_called is True
 
 
@@ -412,17 +402,14 @@ class TestProtocolLifecycleExecutorHealthCheck:
         """Test successful health check returns handler's health status."""
         handler = MockHandler(handler_type="test")
 
-        (
-            handler_type,
-            health_result,
-        ) = await protocol_lifecycle_executor.check_handler_health(
+        result = await protocol_lifecycle_executor.check_handler_health(
             "test",
             handler,  # type: ignore[arg-type]
         )
 
-        assert handler_type == "test"
-        assert health_result["healthy"] is True
-        assert health_result["handler_type"] == "test"
+        assert result.handler_type == "test"
+        assert result.healthy is True
+        assert result.details.get("healthy") is True
 
     @pytest.mark.asyncio
     async def test_check_handler_health_timeout(
@@ -435,18 +422,15 @@ class TestProtocolLifecycleExecutorHealthCheck:
         )
 
         # Use a very short timeout to trigger timeout quickly
-        (
-            handler_type,
-            health_result,
-        ) = await protocol_lifecycle_executor.check_handler_health(
+        result = await protocol_lifecycle_executor.check_handler_health(
             "slow",
             handler,  # type: ignore[arg-type]
             timeout_seconds=0.1,
         )
 
-        assert handler_type == "slow"
-        assert health_result["healthy"] is False
-        error_msg = health_result.get("error", "")
+        assert result.handler_type == "slow"
+        assert result.healthy is False
+        error_msg = result.details.get("error", "")
         assert isinstance(error_msg, str)
         assert "timeout" in error_msg.lower()
 
@@ -458,17 +442,14 @@ class TestProtocolLifecycleExecutorHealthCheck:
         """Test that health check error returns failure status."""
         handler = MockHandlerWithFailingHealthCheck(handler_type="failing")
 
-        (
-            handler_type,
-            health_result,
-        ) = await protocol_lifecycle_executor.check_handler_health(
+        result = await protocol_lifecycle_executor.check_handler_health(
             "failing",
             handler,  # type: ignore[arg-type]
         )
 
-        assert handler_type == "failing"
-        assert health_result["healthy"] is False
-        error_msg = health_result.get("error", "")
+        assert result.handler_type == "failing"
+        assert result.healthy is False
+        error_msg = result.details.get("error", "")
         assert isinstance(error_msg, str)
         assert "Health check failed" in error_msg
 
@@ -480,17 +461,14 @@ class TestProtocolLifecycleExecutorHealthCheck:
         """Test that handler without health_check method is assumed healthy."""
         handler = MockHandlerWithoutHealthCheck(handler_type="no_health")
 
-        (
-            handler_type,
-            health_result,
-        ) = await protocol_lifecycle_executor.check_handler_health(
+        result = await protocol_lifecycle_executor.check_handler_health(
             "no_health",
             handler,  # type: ignore[arg-type]
         )
 
-        assert handler_type == "no_health"
-        assert health_result["healthy"] is True
-        note_msg = health_result.get("note", "")
+        assert result.handler_type == "no_health"
+        assert result.healthy is True
+        note_msg = result.details.get("note", "")
         assert isinstance(note_msg, str)
         assert "no health_check method" in note_msg
 
@@ -509,16 +487,13 @@ class TestProtocolLifecycleExecutorHealthCheck:
         handler = MockHandler(handler_type="test")
 
         # Call without timeout_seconds - should use default
-        (
-            handler_type,
-            health_result,
-        ) = await protocol_lifecycle_executor_custom_timeout.check_handler_health(
+        result = await protocol_lifecycle_executor_custom_timeout.check_handler_health(
             "test",
             handler,  # type: ignore[arg-type]
         )
 
-        assert handler_type == "test"
-        assert health_result["healthy"] is True
+        assert result.handler_type == "test"
+        assert result.healthy is True
 
     @pytest.mark.asyncio
     async def test_check_handler_health_uses_provided_timeout(
@@ -531,17 +506,14 @@ class TestProtocolLifecycleExecutorHealthCheck:
         handler = MockHandlerWithSlowHealthCheck(handler_type="slow", delay_seconds=0.2)
 
         # Use a timeout that allows completion
-        (
-            handler_type,
-            health_result,
-        ) = await protocol_lifecycle_executor.check_handler_health(
+        result = await protocol_lifecycle_executor.check_handler_health(
             "slow",
             handler,  # type: ignore[arg-type]
             timeout_seconds=1.0,
         )
 
-        assert handler_type == "slow"
-        assert health_result["healthy"] is True
+        assert result.handler_type == "slow"
+        assert result.healthy is True
 
 
 # =============================================================================
@@ -708,9 +680,8 @@ class TestProtocolLifecycleExecutorShutdownByPriority:
 
         # Result should indicate success with empty results
         assert result is not None
-        succeeded, failed = result
-        assert succeeded == []
-        assert failed == []
+        assert result.succeeded_handlers == []
+        assert result.failed_handlers == []
 
     @pytest.mark.asyncio
     async def test_shutdown_handlers_continues_on_failure(
@@ -755,9 +726,8 @@ class TestProtocolLifecycleExecutorShutdownByPriority:
         assert "normal" in shutdown_order
 
         # Verify failure was tracked
-        succeeded, failed = result
-        assert "normal" in succeeded
-        assert any(f[0] == "failing" for f in failed)
+        assert "normal" in result.succeeded_handlers
+        assert any(f.handler_type == "failing" for f in result.failed_handlers)
 
     @pytest.mark.asyncio
     async def test_shutdown_handlers_logs_priority_groups(
@@ -829,18 +799,15 @@ class TestProtocolLifecycleExecutorEdgeCases:
         """Test health check with very short timeout still returns proper structure."""
         handler = MockHandlerWithSlowHealthCheck(handler_type="slow", delay_seconds=1.0)
 
-        (
-            handler_type,
-            health_result,
-        ) = await protocol_lifecycle_executor.check_handler_health(
+        result = await protocol_lifecycle_executor.check_handler_health(
             "slow",
             handler,  # type: ignore[arg-type]
             timeout_seconds=0.001,
         )
 
-        assert handler_type == "slow"
-        assert health_result["healthy"] is False
-        assert "error" in health_result
+        assert result.handler_type == "slow"
+        assert result.healthy is False
+        assert "error" in result.details
 
     @pytest.mark.asyncio
     async def test_shutdown_handlers_with_duplicate_priorities(

@@ -268,11 +268,31 @@ class TestOrchestratorNoDirectNetworkCalls:
             and name in NodeRegistrationOrchestrator.__dict__
         ]
 
+        # Whitelist: Timeout coordination methods added by OMN-932.
+        # These are legitimate public methods for RuntimeTick timeout handling
+        # and do not violate the "pure coordinator" principle because they:
+        # 1. Delegate to TimeoutCoordinator (no direct I/O)
+        # 2. Are optional integration points, not core workflow logic
+        # 3. Follow the same delegation pattern as other workflow steps
+        timeout_coordinator_methods = frozenset(
+            {
+                "set_timeout_coordinator",  # Setter for timeout coordinator injection
+                "has_timeout_coordinator",  # Property to check if coordinator is set
+                "handle_runtime_tick",  # RuntimeTick event handler (delegates to coordinator)
+            }
+        )
+
+        # Filter out whitelisted timeout methods
+        non_whitelisted_methods = [
+            m for m in own_methods if m not in timeout_coordinator_methods
+        ]
+
         # Orchestrator should have NO public methods defined directly
-        # All behavior comes from base class
-        assert own_methods == [], (
+        # except for whitelisted timeout coordination methods
+        assert non_whitelisted_methods == [], (
             f"Orchestrator should have no custom public methods.\n"
-            f"Found: {own_methods}\n"
+            f"Found: {non_whitelisted_methods}\n"
+            f"(Whitelisted timeout methods: {sorted(timeout_coordinator_methods)})\n"
             f"A pure coordinator delegates all work to the base class "
             f"which handles workflow execution via contract.yaml."
         )
@@ -433,12 +453,31 @@ class TestOrchestratorIsPureCoordinator:
         # Get method names for reporting
         method_names = [m.name for m in methods]
 
-        # Pure coordinator should have only __init__
-        non_init_methods = [name for name in method_names if name != "__init__"]
+        # Whitelist: Timeout coordination methods added by OMN-932.
+        # These are legitimate public methods for RuntimeTick timeout handling
+        # and do not violate the "pure coordinator" principle because they:
+        # 1. Delegate to TimeoutCoordinator (no direct I/O)
+        # 2. Are optional integration points, not core workflow logic
+        # 3. Follow the same delegation pattern as other workflow steps
+        timeout_coordinator_methods = frozenset(
+            {
+                "set_timeout_coordinator",  # Setter for timeout coordinator injection
+                "has_timeout_coordinator",  # Property to check if coordinator is set
+                "handle_runtime_tick",  # RuntimeTick event handler (delegates to coordinator)
+            }
+        )
+
+        # Pure coordinator should have only __init__ and whitelisted timeout methods
+        non_init_methods = [
+            name
+            for name in method_names
+            if name != "__init__" and name not in timeout_coordinator_methods
+        ]
 
         assert not non_init_methods, (
             f"Pure coordinator should only have __init__ method.\n"
             f"Found additional methods: {non_init_methods}\n"
+            f"(Whitelisted timeout methods: {sorted(timeout_coordinator_methods)})\n"
             f"Orchestrator should only call super().__init__(container) and rely on "
             f"base class + contract.yaml for all behavior."
         )

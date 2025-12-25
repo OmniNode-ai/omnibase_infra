@@ -351,10 +351,7 @@ pattern_exemptions:
   - file_pattern: 'model_consul_intent_payload\.py'
     violation_pattern: "Field 'service_name' might reference an entity"
     reason: >
-      service_name is the Consul service name to register in service discovery
-      (e.g., "node-effect-123"). This is Consul-specific configuration, not an
-      entity reference. The field specifies how the node appears in Consul's
-      service catalog.
+      service_name is the Consul service name to register in service discovery (e.g., "node-effect-123"). This is Consul-specific configuration, not an entity reference. The field specifies how the node appears in Consul's service catalog.
 
     ticket: OMN-888
   # ==========================================================================
@@ -424,6 +421,18 @@ pattern_exemptions:
       Model with multiple factory methods (none, single, multiple, from_legacy_output) and convenience properties (is_empty, has_topics, single_topic, has_single_topic). Provides comprehensive API for handling dispatcher outputs.
 
     ticket: OMN-1002
+  # ==========================================================================
+  # Union Reduction Phase 3 Result Model Exemptions (OMN-1003)
+  # ==========================================================================
+  # Result models use comprehensive APIs with factory methods, computed properties,
+  # and convenience methods for developer ergonomics.
+  - file_pattern: 'model_execution_shape_validation_result\.py'
+    class_pattern: "Class 'ModelExecutionShapeValidationResult'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Result model with comprehensive API: computed properties (has_blocking, violation_count, blocking_count, warning_count), factory methods (from_violations, success, from_legacy_result), utility methods (to_legacy_result, format_for_ci), and dunder methods (__bool__, __str__). This is intentional API design for CI integration and developer ergonomics.
+
+    ticket: OMN-1003
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
@@ -436,17 +445,14 @@ architecture_exemptions:
   - file_pattern: 'validation/contract_linter\.py'
     violation_pattern: '\d+ models in one file'
     reason: >
-      Domain-grouped validation result models for contract linting.
-      ModelContractViolation and ModelContractLintResult define the complete
-      interface for contract validation results. Per CLAUDE.md domain-grouping
-      convention for cohesive models that are always used together.
+      Domain-grouped validation result models for contract linting. ModelContractViolation and ModelContractLintResult define the complete interface for contract validation results. Per CLAUDE.md domain-grouping convention for cohesive models that are always used together.
+
     ticket: PR-57
   - file_pattern: 'validation/contract_linter\.py'
     violation_pattern: 'Mixed types in one file'
     reason: >
-      Contract linter module contains cohesive types (enum + models) for
-      validation results. EnumContractViolationSeverity is tightly coupled
-      with ModelContractViolation and ModelContractLintResult.
+      Contract linter module contains cohesive types (enum + models) for validation results. EnumContractViolationSeverity is tightly coupled with ModelContractViolation and ModelContractLintResult.
+
     ticket: PR-57
   # ==========================================================================
   # Domain-Grouped Protocol Exemptions (CLAUDE.md Convention)
@@ -457,23 +463,31 @@ architecture_exemptions:
   - file_pattern: 'nodes/node_registration_orchestrator/protocols\.py'
     violation_pattern: '\d+ protocols in one file'
     reason: >
-      Domain-grouped protocols for registration orchestrator workflow.
-      ProtocolReducer and ProtocolEffect define the complete interface for the
-      reducer-effect pattern in node registration. Per CLAUDE.md convention.
+      Domain-grouped protocols for registration orchestrator workflow. ProtocolReducer and ProtocolEffect define the complete interface for the reducer-effect pattern in node registration. Per CLAUDE.md convention.
 
-      Architectural documentation included in module:
-      - Thread safety requirements (lines 13-24): Implementations MUST be thread-safe
-      - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors
-      - Protocol contracts with examples in docstrings
+      Architectural documentation included in module: - Thread safety requirements (lines 13-24): Implementations MUST be thread-safe - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors - Protocol contracts with examples in docstrings
 
-      Full architectural documentation:
-      - Node architecture: docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
-      - Protocol design: docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
-      - Node README: src/omnibase_infra/nodes/node_registration_orchestrator/README.md
+      Full architectural documentation: - Node architecture: docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md - Protocol design: docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md - Node README: src/omnibase_infra/nodes/node_registration_orchestrator/README.md
+
     documentation:
       - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
       - docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
     ticket: OMN-888
+  # ==========================================================================
+  # TimeoutEmitter Models Exemption (OMN-932)
+  # ==========================================================================
+  # timeout_emitter.py contains domain-grouped models for timeout emission:
+  # - ModelTimeoutEmissionResult: Result of timeout emission processing
+  # - ModelTimeoutEmissionConfig: Configuration for the emitter
+  # These are tightly coupled and always used together.
+  - file_pattern: 'services/timeout_emitter\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      Domain-grouped models for timeout emission. ModelTimeoutEmissionResult
+      and ModelTimeoutEmissionConfig define the complete interface for the
+      TimeoutEmitter. Per CLAUDE.md domain-grouping convention for cohesive
+      models that are always used together.
+    ticket: OMN-932
 # Union usage validator exemptions
 # These handle complex union type violations
 union_exemptions:
