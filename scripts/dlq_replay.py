@@ -604,6 +604,8 @@ class DLQProducer:
             RuntimeError: If producer has not been started
             KafkaError: If unable to publish to Kafka
         """
+        # TODO(OMN-1032): Integrate with PostgreSQL tracking for replay state persistence.
+        # Currently stores replay state in memory only; state is lost on script restart.
         if not self._started or self._producer is None:
             raise RuntimeError("Producer not started")
 
