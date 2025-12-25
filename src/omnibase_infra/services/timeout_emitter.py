@@ -619,13 +619,11 @@ class TimeoutEmitter:
         )
 
         # 1. Create event
-        # Note: last_heartbeat_at is not currently tracked in projection,
-        # so we pass None. Future enhancement could track this.
         event = ModelNodeLivenessExpired(
             node_id=projection.entity_id,
             liveness_deadline=projection.liveness_deadline,
             detected_at=detected_at,
-            last_heartbeat_at=None,
+            last_heartbeat_at=projection.last_heartbeat_at,
             correlation_id=correlation_id,
             causation_id=tick_id,
         )

@@ -55,12 +55,13 @@ class TestInfraValidatorConstants:
         - 586 (2025-12-25): OMN-932 durable timeouts + introspection config migration
         - 588 (2025-12-25): OMN-881 Kafka integration test fixes + typing updates
         - 589 (2025-12-25): OMN-881 PR review fixes - _EventBusType conditional alias
+        - 600 (2025-12-25): OMN-1006 heartbeat handler + projector update_heartbeat
 
-        Threshold: 589 (buffer above ~588 baseline for codebase growth)
+        Threshold: 600 (buffer above ~595 baseline for codebase growth)
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 589, (
-            "INFRA_MAX_UNIONS should be 589 (OMN-881 PR review fixes)"
+        assert INFRA_MAX_UNIONS == 600, (
+            "INFRA_MAX_UNIONS should be 600 (OMN-1006 heartbeat handler)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

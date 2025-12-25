@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS registration_projections (
     -- Timeout Deadlines (for durable timeout handling per C2)
     ack_deadline TIMESTAMPTZ,
     liveness_deadline TIMESTAMPTZ,
+    last_heartbeat_at TIMESTAMPTZ,
 
     -- Timeout Emission Markers (for deduplication per C2)
     -- These prevent emitting duplicate timeout events during replay
@@ -170,6 +171,9 @@ COMMENT ON COLUMN registration_projections.ack_deadline IS
 
 COMMENT ON COLUMN registration_projections.liveness_deadline IS
     'Deadline for next heartbeat. Orchestrator emits liveness expired event when passed.';
+
+COMMENT ON COLUMN registration_projections.last_heartbeat_at IS
+    'Timestamp of last received heartbeat from the node. Updated on each HeartbeatReceived event.';
 
 COMMENT ON COLUMN registration_projections.ack_timeout_emitted_at IS
     'Marker indicating ack timeout event was already emitted. Prevents duplicates during replay.';
