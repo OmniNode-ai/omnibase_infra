@@ -7,6 +7,7 @@ Tests validate:
 - Orchestrator uses injected `now` parameter (not system clock)
 - Proper routing to handlers based on payload type
 - Correlation ID handling
+- Container injection for dependency resolution
 
 G2 Acceptance Criteria:
     1. test_orchestrator_emits_events_only_no_io
@@ -62,6 +63,30 @@ def create_mock_projection_reader() -> AsyncMock:
     return mock
 
 
+def create_mock_container(mock_reader: AsyncMock) -> MagicMock:
+    """Create a mock ModelONEXContainer with projection reader registered.
+
+    The container follows ONEX container injection patterns, providing the
+    ProjectionReaderRegistration through its service registry.
+
+    Args:
+        mock_reader: The mock projection reader to register.
+
+    Returns:
+        MagicMock configured as ModelONEXContainer with service registry.
+    """
+    container = MagicMock()
+
+    # Store projection reader directly for resolution
+    container._projection_reader = mock_reader
+
+    # Also set up service_registry for more realistic container behavior
+    container.service_registry = MagicMock()
+    container.service_registry.resolve = MagicMock(return_value=mock_reader)
+
+    return container
+
+
 def create_mock_envelope(payload: object) -> MagicMock:
     """Create a mock event envelope with given payload."""
     envelope = MagicMock()
@@ -102,7 +127,7 @@ class TestOrchestratorEmitsEventsOnlyNoIO:
 
     @pytest.mark.asyncio
     async def test_orchestrator_emits_events_only_no_io_introspection(self) -> None:
-        """Given orchestrator with mock projection reader,
+        """Given orchestrator with container injection,
         When processing introspection event with injected `now`,
         Then output contains ONLY events (no intents, no projections),
         And no I/O operations performed (verified via mock).
@@ -110,8 +135,9 @@ class TestOrchestratorEmitsEventsOnlyNoIO:
         # Arrange
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None  # New node
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         node_id = uuid4()
         introspection_event = ModelNodeIntrospectionEvent(
@@ -153,8 +179,9 @@ class TestOrchestratorEmitsEventsOnlyNoIO:
         )
         mock_reader.get_overdue_ack_registrations.return_value = [overdue_projection]
         mock_reader.get_overdue_liveness_registrations.return_value = []
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         tick = ModelRuntimeTick(
             now=TEST_NOW,
@@ -192,8 +219,9 @@ class TestOrchestratorEmitsEventsOnlyNoIO:
             state=EnumRegistrationState.AWAITING_ACK,
         )
         mock_reader.get_entity_state.return_value = awaiting_projection
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         ack_command = ModelNodeRegistrationAcked(
             node_id=node_id,
@@ -220,7 +248,7 @@ class TestOrchestratorUsesInjectedNow:
 
     @pytest.mark.asyncio
     async def test_orchestrator_uses_injected_now_not_system_clock(self) -> None:
-        """Given orchestrator with mocked projection reader,
+        """Given orchestrator with container injection,
         And injected `now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)`,
         When processing RuntimeTick event,
         Then all timeout calculations use injected `now`,
@@ -230,8 +258,9 @@ class TestOrchestratorUsesInjectedNow:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_overdue_ack_registrations.return_value = []
         mock_reader.get_overdue_liveness_registrations.return_value = []
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         tick = ModelRuntimeTick(
             now=TEST_NOW,
@@ -280,8 +309,9 @@ class TestOrchestratorUsesInjectedNow:
             state=EnumRegistrationState.AWAITING_ACK,
         )
         mock_reader.get_entity_state.return_value = awaiting_projection
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         ack_command = ModelNodeRegistrationAcked(
             node_id=node_id,
@@ -314,8 +344,9 @@ class TestOrchestratorRoutesPayloads:
         """Test introspection event routes to HandlerNodeIntrospected."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         introspection_event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
@@ -340,8 +371,9 @@ class TestOrchestratorRoutesPayloads:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_overdue_ack_registrations.return_value = []
         mock_reader.get_overdue_liveness_registrations.return_value = []
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         tick = ModelRuntimeTick(
             now=TEST_NOW,
@@ -372,8 +404,9 @@ class TestOrchestratorRoutesPayloads:
             entity_id=node_id,
             state=EnumRegistrationState.AWAITING_ACK,
         )
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         ack_command = ModelNodeRegistrationAcked(
             node_id=node_id,
@@ -396,7 +429,8 @@ class TestOrchestratorRoutesPayloads:
     async def test_raises_for_unknown_payload_type(self) -> None:
         """Test that unknown payload type raises ValueError."""
         mock_reader = create_mock_projection_reader()
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        container = create_mock_container(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         # Create envelope with unsupported payload type
         unknown_payload = MagicMock()
@@ -421,8 +455,9 @@ class TestOrchestratorCorrelationIdHandling:
         """Test that provided correlation_id is used."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         provided_corr_id = uuid4()
         introspection_event = ModelNodeIntrospectionEvent(
@@ -447,8 +482,9 @@ class TestOrchestratorCorrelationIdHandling:
         """Test that envelope correlation_id is used when not provided."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         envelope_corr_id = uuid4()
         introspection_event = ModelNodeIntrospectionEvent(
@@ -478,8 +514,9 @@ class TestOrchestratorConvenienceMethods:
         """Test direct introspection handler method."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         introspection_event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
@@ -503,8 +540,9 @@ class TestOrchestratorConvenienceMethods:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_overdue_ack_registrations.return_value = []
         mock_reader.get_overdue_liveness_registrations.return_value = []
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         tick = ModelRuntimeTick(
             now=TEST_NOW,
@@ -533,8 +571,9 @@ class TestOrchestratorConvenienceMethods:
             entity_id=node_id,
             state=EnumRegistrationState.AWAITING_ACK,
         )
+        container = create_mock_container(mock_reader)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_reader)
+        orchestrator = NodeRegistrationOrchestrator(container)
 
         ack_command = ModelNodeRegistrationAcked(
             node_id=node_id,

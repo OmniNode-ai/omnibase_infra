@@ -10,7 +10,24 @@ Architectural Constraints:
     - Returns EVENTS ONLY (no intents, no projections)
     - Performs NO I/O (projection reads are read-only database lookups)
     - Uses `now` parameter for all time decisions (never datetime.now())
-    - Uses projection reader for all state queries
+    - Uses container injection for dependency resolution
+
+Container Injection:
+    The orchestrator uses ModelONEXContainer for dependency injection. The
+    container must have ProjectionReaderRegistration registered before
+    instantiation. Use wire_infrastructure_services() or manual registration.
+
+    Example:
+        >>> from omnibase_core.container import ModelONEXContainer
+        >>> container = ModelONEXContainer()
+        >>> # Register projection reader
+        >>> await container.service_registry.register_instance(
+        ...     interface=ProjectionReaderRegistration,
+        ...     instance=projection_reader,
+        ...     scope="global",
+        ... )
+        >>> # Create orchestrator
+        >>> orchestrator = NodeRegistrationOrchestrator(container)
 
 Event Flow:
     Input Events:
@@ -42,9 +59,15 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
+
 from omnibase_infra.models.registration.commands.model_node_registration_acked import (
     ModelNodeRegistrationAcked,
 )
+
+if TYPE_CHECKING:
+    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
@@ -90,18 +113,27 @@ def _resolve_correlation_id(
     return explicit or getattr(envelope, "correlation_id", None) or uuid4()
 
 
-class NodeRegistrationOrchestrator:
-    """Registration orchestrator - emits EVENTS only, no I/O.
+class NodeRegistrationOrchestrator(NodeOrchestrator):
+    """Registration orchestrator - extends NodeOrchestrator with container injection.
 
     The Registration Orchestrator is the first orchestrator node in omnibase_infra.
     It receives registration workflow events and makes decisions based on
-    the current projection state.
+    the current projection state. Extends NodeOrchestrator for workflow-driven
+    coordination with contract.yaml configuration.
+
+    Container Injection:
+        This orchestrator uses ModelONEXContainer for dependency injection.
+        The container should have ProjectionReaderRegistration registered.
+        If not registered, use set_projection_reader() after instantiation.
 
     Handler Routing:
         Events are routed to specialized handlers based on their type:
         - ModelNodeIntrospectionEvent -> HandlerNodeIntrospected
         - ModelRuntimeTick -> HandlerRuntimeTick
         - ModelNodeRegistrationAcked -> HandlerNodeRegistrationAcked
+
+        The base NodeOrchestrator class also provides workflow_coordination
+        support via contract.yaml for declarative handler routing.
 
     Projection Queries:
         All state queries are performed via ProjectionReaderRegistration,
@@ -113,10 +145,15 @@ class NodeRegistrationOrchestrator:
         This ensures deterministic behavior and supports testing.
 
     Example:
-        >>> from asyncpg import create_pool
-        >>> pool = await create_pool(dsn)
-        >>> reader = ProjectionReaderRegistration(pool)
-        >>> orchestrator = NodeRegistrationOrchestrator(reader)
+        >>> from omnibase_core.models.container import ModelONEXContainer
+        >>> container = ModelONEXContainer()
+        >>> # Register projection reader in container
+        >>> await container.service_registry.register_instance(
+        ...     interface=ProjectionReaderRegistration,
+        ...     instance=projection_reader,
+        ...     scope="global",
+        ... )
+        >>> orchestrator = NodeRegistrationOrchestrator(container)
         >>>
         >>> # Handle an introspection event
         >>> events = await orchestrator.handle(
@@ -127,30 +164,137 @@ class NodeRegistrationOrchestrator:
         >>> # events contains ModelNodeRegistrationInitiated if new registration
 
     Attributes:
-        _projection_reader: Reader for registration projection state.
-        _handlers: Mapping of event types to handler instances.
+        _projection_reader: Reader for registration projection state (resolved from container).
     """
 
-    def __init__(self, projection_reader: ProjectionReaderRegistration) -> None:
-        """Initialize the orchestrator with a projection reader.
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize the orchestrator with container injection.
+
+        Extends NodeOrchestrator and resolves ProjectionReaderRegistration
+        from the container's service registry. If the projection reader is
+        not registered in the container, it can be set later using
+        set_projection_reader().
+
+        Args:
+            container: ONEX dependency injection container. Should have
+                      ProjectionReaderRegistration registered, but this
+                      is not strictly required at construction time.
+        """
+        super().__init__(container)
+
+        # Resolve projection reader from container (optional at init time)
+        # If not available, caller must use set_projection_reader()
+        self._projection_reader: ProjectionReaderRegistration | None = (
+            self._resolve_projection_reader(container)
+        )
+
+        # Initialize handlers lazily when projection reader is available
+        self._handler_introspected: HandlerNodeIntrospected | None = None
+        self._handler_runtime_tick: HandlerRuntimeTick | None = None
+        self._handler_registration_acked: HandlerNodeRegistrationAcked | None = None
+
+        # Wire handlers if projection reader was resolved
+        if self._projection_reader is not None:
+            self._wire_handlers(self._projection_reader)
+
+    def _resolve_projection_reader(
+        self, container: ModelONEXContainer
+    ) -> ProjectionReaderRegistration | None:
+        """Resolve ProjectionReaderRegistration from container.
+
+        Uses the container's service registry to resolve the projection reader.
+        Supports both mock containers (for testing) and real containers.
+
+        Args:
+            container: ONEX container with service registry.
+
+        Returns:
+            ProjectionReaderRegistration instance from container, or None if
+            not registered. Caller should use set_projection_reader() if None.
+        """
+        try:
+            # Support mock containers with direct _projection_reader attribute
+            if hasattr(container, "_projection_reader"):
+                reader = container._projection_reader
+                if isinstance(reader, ProjectionReaderRegistration):
+                    return reader
+                return None
+
+            # Try get_service_optional from container (returns None if not found)
+            if hasattr(container, "get_service_optional"):
+                result = container.get_service_optional(
+                    ProjectionReaderRegistration,
+                    service_name="projection_reader.registration",
+                )
+                if isinstance(result, ProjectionReaderRegistration):
+                    return result
+
+            # Support mock containers with resolve method that returns sync
+            if hasattr(container, "service_registry"):
+                registry = container.service_registry
+                if registry is not None and hasattr(registry, "resolve"):
+                    # Mock containers may have sync resolve
+                    result = registry.resolve(ProjectionReaderRegistration)
+                    if isinstance(result, ProjectionReaderRegistration):
+                        return result
+
+            # Not found - caller should use set_projection_reader()
+            return None
+        except Exception:
+            # Resolution failed - caller should use set_projection_reader()
+            return None
+
+    def _wire_handlers(self, projection_reader: ProjectionReaderRegistration) -> None:
+        """Wire handlers with the projection reader.
 
         Args:
             projection_reader: Reader for registration projection state.
-                              Used by handlers to query current entity state.
         """
-        self._projection_reader = projection_reader
-
-        # Initialize handlers
         self._handler_introspected = HandlerNodeIntrospected(projection_reader)
         self._handler_runtime_tick = HandlerRuntimeTick(projection_reader)
         self._handler_registration_acked = HandlerNodeRegistrationAcked(
             projection_reader
         )
 
+    def set_projection_reader(self, reader: ProjectionReaderRegistration) -> None:
+        """Set the projection reader for state queries.
+
+        Use this method when the projection reader is not registered in
+        the container at construction time. This is required before calling
+        handle() or any handler methods.
+
+        Args:
+            reader: ProjectionReaderRegistration instance.
+
+        Example:
+            >>> pool = await asyncpg.create_pool(dsn)
+            >>> reader = ProjectionReaderRegistration(pool)
+            >>> orchestrator.set_projection_reader(reader)
+        """
+        self._projection_reader = reader
+        self._wire_handlers(reader)
+
     @property
-    def projection_reader(self) -> ProjectionReaderRegistration:
+    def has_projection_reader(self) -> bool:
+        """Check if projection reader is configured."""
+        return self._projection_reader is not None
+
+    @property
+    def projection_reader(self) -> ProjectionReaderRegistration | None:
         """Get the projection reader (for testing/introspection)."""
         return self._projection_reader
+
+    def _ensure_handlers_configured(self) -> None:
+        """Ensure handlers are configured before use.
+
+        Raises:
+            RuntimeError: If projection reader is not configured.
+        """
+        if self._projection_reader is None or self._handler_introspected is None:
+            raise RuntimeError(
+                "Projection reader not configured. "
+                "Call set_projection_reader() before handling events."
+            )
 
     async def handle(
         self,
@@ -179,6 +323,7 @@ class NodeRegistrationOrchestrator:
             domain events module.
 
         Raises:
+            RuntimeError: If projection reader is not configured.
             ValueError: If the envelope payload type is not supported.
             RuntimeHostError: If projection queries fail (propagated from reader).
 
@@ -191,6 +336,9 @@ class NodeRegistrationOrchestrator:
             >>> for event in events:
             ...     await event_bus.publish(event)
         """
+        # Ensure handlers are configured
+        self._ensure_handlers_configured()
+
         # Resolve correlation ID
         corr_id = _resolve_correlation_id(correlation_id, envelope)
 
@@ -203,6 +351,7 @@ class NodeRegistrationOrchestrator:
                 "Routing to HandlerNodeIntrospected",
                 extra={"node_id": str(payload.node_id), "correlation_id": str(corr_id)},
             )
+            assert self._handler_introspected is not None  # Checked above
             return await self._handler_introspected.handle(
                 event=payload,
                 now=now,
@@ -217,6 +366,7 @@ class NodeRegistrationOrchestrator:
                     "correlation_id": str(corr_id),
                 },
             )
+            assert self._handler_runtime_tick is not None  # Checked above
             return await self._handler_runtime_tick.handle(
                 tick=payload,
                 now=now,
@@ -231,6 +381,7 @@ class NodeRegistrationOrchestrator:
                     "correlation_id": str(corr_id),
                 },
             )
+            assert self._handler_registration_acked is not None  # Checked above
             return await self._handler_registration_acked.handle(
                 command=payload,
                 now=now,
@@ -262,7 +413,12 @@ class NodeRegistrationOrchestrator:
 
         Returns:
             List of events to emit (e.g., ModelNodeRegistrationInitiated).
+
+        Raises:
+            RuntimeError: If projection reader is not configured.
         """
+        self._ensure_handlers_configured()
+        assert self._handler_introspected is not None  # Checked above
         corr_id = correlation_id or event.correlation_id
         return await self._handler_introspected.handle(
             event=event,
@@ -290,7 +446,12 @@ class NodeRegistrationOrchestrator:
 
         Returns:
             List of timeout events (ack timeout or liveness expired).
+
+        Raises:
+            RuntimeError: If projection reader is not configured.
         """
+        self._ensure_handlers_configured()
+        assert self._handler_runtime_tick is not None  # Checked above
         effective_now = now if now is not None else tick.now
         corr_id = correlation_id or tick.correlation_id
         return await self._handler_runtime_tick.handle(
@@ -319,7 +480,12 @@ class NodeRegistrationOrchestrator:
 
         Returns:
             List of events (ack received, became active) or empty if invalid state.
+
+        Raises:
+            RuntimeError: If projection reader is not configured.
         """
+        self._ensure_handlers_configured()
+        assert self._handler_registration_acked is not None  # Checked above
         corr_id = correlation_id or command.correlation_id
         return await self._handler_registration_acked.handle(
             command=command,

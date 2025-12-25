@@ -57,11 +57,11 @@ class TestInfraValidatorConstants:
         - 589 (2025-12-25): OMN-881 PR review fixes - _EventBusType conditional alias
         - 600 (2025-12-25): OMN-952 PR #79 merge with main (OMN-811 compute registry + models)
 
-        Threshold: 600 (buffer above ~596 baseline for codebase growth)
+        Threshold: 610 (buffer above ~603 baseline for codebase growth)
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 600, (
-            "INFRA_MAX_UNIONS should be 600 (OMN-952 PR #79 merge)"
+        assert INFRA_MAX_UNIONS == 610, (
+            "INFRA_MAX_UNIONS should be 610 (OMN-952 declarative orchestrator refactor)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

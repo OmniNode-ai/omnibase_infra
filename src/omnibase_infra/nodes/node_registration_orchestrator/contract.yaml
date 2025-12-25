@@ -84,9 +84,9 @@ workflow_coordination:
       nodes:
         - node_id: "receive_introspection"
           node_type: effect
-          description: "Receive introspection or tick event"
+          description: "Receive introspection, tick, or ack events"
           step_config:
-            event_pattern: ["node-introspection.*", "registry-request-introspection.*", "runtime-tick.*"]
+            event_pattern: ["node-introspection.*", "registry-request-introspection.*", "runtime-tick.*", "node-registration-acked.*"]
         # OMN-930: Reads current registration state via ProtocolProjectionReader.
         # Uses ProjectionReaderRegistration to query node_registration_state.
         - node_id: "read_projection"
@@ -205,6 +205,119 @@ consumed_events:
     event_type: "RuntimeTick"
     internal: true
     description: "Internal tick for timeout evaluation"
+  - topic: "{env}.{namespace}.onex.cmd.node-registration-acked.v1"
+    event_type: "NodeRegistrationAcked"
+    message_category: "COMMAND"
+    description: "Node acknowledges registration acceptance"
+# Handler Routing Configuration
+# ==============================
+# Declarative mapping of consumed events to handler implementations.
+# This section defines the event-to-handler routing that the orchestrator
+# performs at runtime. Each handler is stateless and returns EVENTS only.
+#
+# Handler Pattern (from omnibase_infra/orchestrators/registration/handlers/):
+#   async def handle(event, now, correlation_id) -> list[BaseModel]
+#
+# All handlers:
+#   - Receive `now` parameter for deterministic time-based decisions
+#   - Query projection state via ProjectionReaderRegistration (read-only)
+#   - Return a list of event models (never intents or projections)
+#   - Are thread-safe for concurrent calls with different event instances
+handler_routing:
+  # Handler routing is keyed by the model class name of the event payload.
+  # The orchestrator extracts the payload from ModelEventEnvelope and routes
+  # based on isinstance() checks in the order specified below.
+  routing_strategy: "payload_type_match"
+  handlers:
+    # ModelNodeIntrospectionEvent -> HandlerNodeIntrospected
+    # Canonical registration trigger - node announces itself to the cluster.
+    # Queries projection state and emits NodeRegistrationInitiated if:
+    #   - Node is new (no projection exists)
+    #   - Node is in retriable state (LIVENESS_EXPIRED, REJECTED, ACK_TIMED_OUT)
+    - event_model:
+        name: "ModelNodeIntrospectionEvent"
+        module: "omnibase_infra.models.registration.model_node_introspection_event"
+      handler:
+        name: "HandlerNodeIntrospected"
+        module: "omnibase_infra.orchestrators.registration.handlers.handler_node_introspected"
+      output_events:
+        - "ModelNodeRegistrationInitiated"
+      state_decision_matrix:
+        - current_state: null
+          action: "emit_registration_initiated"
+          description: "New node - initiate registration"
+        - current_state: "LIVENESS_EXPIRED"
+          action: "emit_registration_initiated"
+          description: "Re-registration after liveness expiry"
+        - current_state: "REJECTED"
+          action: "emit_registration_initiated"
+          description: "Retry after rejection"
+        - current_state: "ACK_TIMED_OUT"
+          action: "emit_registration_initiated"
+          description: "Retry after ack timeout"
+        - current_state: "PENDING_REGISTRATION"
+          action: "no_op"
+          description: "Already processing"
+        - current_state: "ACCEPTED"
+          action: "no_op"
+          description: "Waiting for ack"
+        - current_state: "AWAITING_ACK"
+          action: "no_op"
+          description: "Waiting for ack"
+        - current_state: "ACK_RECEIVED"
+          action: "no_op"
+          description: "Transitioning to active"
+        - current_state: "ACTIVE"
+          action: "no_op"
+          description: "Already active - use heartbeat"
+    # ModelRuntimeTick -> HandlerRuntimeTick
+    # Periodic timeout detection - evaluates pending registrations for timeouts.
+    # Queries all entities in timeout-eligible states and emits:
+    #   - NodeRegistrationAckTimedOut for expired ack deadlines
+    #   - NodeLivenessExpired for expired liveness deadlines
+    - event_model:
+        name: "ModelRuntimeTick"
+        module: "omnibase_infra.runtime.models.model_runtime_tick"
+      handler:
+        name: "HandlerRuntimeTick"
+        module: "omnibase_infra.orchestrators.registration.handlers.handler_runtime_tick"
+      output_events:
+        - "ModelNodeRegistrationAckTimedOut"
+        - "ModelNodeLivenessExpired"
+      timeout_evaluation:
+        uses_injected_now: true
+        queries_pending_entities: true
+        state_filters:
+          - "AWAITING_ACK"
+          - "ACTIVE"
+    # ModelNodeRegistrationAcked -> HandlerNodeRegistrationAcked
+    # Acknowledgment processing - node confirms it received registration acceptance.
+    # Validates state transition and emits:
+    #   - NodeRegistrationAckReceived for successful acknowledgment
+    #   - NodeBecameActive when transitioning to active state
+    - event_model:
+        name: "ModelNodeRegistrationAcked"
+        module: "omnibase_infra.models.registration.commands.model_node_registration_acked"
+      handler:
+        name: "HandlerNodeRegistrationAcked"
+        module: "omnibase_infra.orchestrators.registration.handlers.handler_node_registration_acked"
+      message_category: "COMMAND"
+      output_events:
+        - "ModelNodeRegistrationAckReceived"
+        - "ModelNodeBecameActive"
+      state_transition:
+        valid_from_states:
+          - "AWAITING_ACK"
+        target_state: "ACTIVE"
+  # Handler initialization configuration
+  # All handlers share the same projection reader dependency
+  handler_dependencies:
+    projection_reader:
+      protocol: "ProtocolProjectionReader"
+      implementation: "ProjectionReaderRegistration"
+      module: "omnibase_infra.projectors.projection_reader_registration"
+      shared: true
+      description: "Shared projection reader for all handlers"
 published_events:
   - topic: "{env}.{namespace}.onex.evt.node-registration-result.v1"
     event_type: "NodeRegistrationResultEvent"
