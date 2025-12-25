@@ -156,14 +156,14 @@ class TestDeclarativeOrchestratorPattern:
             and name in NodeRegistrationOrchestrator.__dict__
         ]
 
-        # Expected methods for timeout handling (OMN-932)
-        # These are intentional extensions for RuntimeTick processing
+        # Expected methods for timeout handling (OMN-932) and heartbeat handling (OMN-1006)
+        # These are intentional extensions for RuntimeTick and heartbeat processing
         expected_timeout_methods = {"set_timeout_coordinator", "handle_runtime_tick"}
+        expected_heartbeat_methods = {"set_heartbeat_handler", "handle_heartbeat"}
 
-        # Filter out expected timeout methods
-        unexpected_methods = [
-            m for m in own_methods if m not in expected_timeout_methods
-        ]
+        # Filter out expected timeout and heartbeat methods
+        allowed_methods = expected_timeout_methods | expected_heartbeat_methods
+        unexpected_methods = [m for m in own_methods if m not in allowed_methods]
 
         # Should have no unexpected public methods defined directly on the class
         # (all other behavior inherited from NodeOrchestrator)
@@ -174,6 +174,13 @@ class TestDeclarativeOrchestratorPattern:
         assert present_timeout_methods == expected_timeout_methods, (
             f"Missing timeout methods. Expected: {expected_timeout_methods}, "
             f"Found: {present_timeout_methods}"
+        )
+
+        # Verify the heartbeat methods are present (OMN-1006 requirement)
+        present_heartbeat_methods = set(own_methods) & expected_heartbeat_methods
+        assert present_heartbeat_methods == expected_heartbeat_methods, (
+            f"Missing heartbeat methods. Expected: {expected_heartbeat_methods}, "
+            f"Found: {present_heartbeat_methods}"
         )
 
 
