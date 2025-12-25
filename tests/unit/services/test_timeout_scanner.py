@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Comprehensive unit tests for ServiceTimeoutQuery.
+"""Comprehensive unit tests for TimeoutScanner.
 
 This test suite validates:
-- Service instantiation with projection reader
+- Processor instantiation with projection reader
 - Combined timeout query (find_overdue_entities)
 - Separate ack timeout query (find_ack_timeouts)
 - Separate liveness expiration query (find_liveness_expirations)
@@ -14,15 +14,15 @@ This test suite validates:
 - Query timing accuracy
 
 Test Organization:
-    - TestServiceTimeoutQueryBasics: Instantiation and configuration
-    - TestServiceTimeoutQueryFindOverdue: Combined query tests
-    - TestServiceTimeoutQueryAckTimeouts: Ack-specific query tests
-    - TestServiceTimeoutQueryLivenessExpirations: Liveness-specific query tests
+    - TestTimeoutScannerBasics: Instantiation and configuration
+    - TestTimeoutScannerFindOverdue: Combined query tests
+    - TestTimeoutScannerAckTimeouts: Ack-specific query tests
+    - TestTimeoutScannerLivenessExpirations: Liveness-specific query tests
     - TestModelTimeoutQueryResult: Result model tests
-    - TestServiceTimeoutQueryErrorHandling: Error scenarios
+    - TestTimeoutScannerErrorHandling: Error scenarios
 
 Coverage Goals:
-    - >90% code coverage for service
+    - >90% code coverage for processor
     - All query paths tested
     - Error handling validated
     - Timing metadata verified
@@ -52,8 +52,23 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 )
 from omnibase_infra.services import (
     ModelTimeoutQueryResult,
-    ServiceTimeoutQuery,
+    TimeoutScanner,
 )
+
+# =============================================================================
+# Test Constants
+# =============================================================================
+
+# Time offsets for deadline scenarios
+ACK_TIMEOUT_OFFSET = timedelta(minutes=5)
+"""Offset for creating past/overdue ack deadlines in tests."""
+
+LIVENESS_TIMEOUT_OFFSET = timedelta(minutes=10)
+"""Offset for creating past/overdue liveness deadlines in tests."""
+
+# Query duration bounds for validation
+MAX_REASONABLE_QUERY_DURATION_MS = 10000.0
+"""Maximum reasonable query duration in milliseconds (10 seconds)."""
 
 
 def create_mock_projection(
@@ -93,27 +108,27 @@ def mock_reader() -> AsyncMock:
 
 
 @pytest.fixture
-def service(mock_reader: AsyncMock) -> ServiceTimeoutQuery:
-    """Create a ServiceTimeoutQuery instance with mocked reader."""
-    return ServiceTimeoutQuery(projection_reader=mock_reader)
+def service(mock_reader: AsyncMock) -> TimeoutScanner:
+    """Create a TimeoutScanner instance with mocked reader."""
+    return TimeoutScanner(projection_reader=mock_reader)
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutQueryBasics:
+class TestTimeoutScannerBasics:
     """Test basic service instantiation and configuration."""
 
     async def test_service_instantiation(self, mock_reader: AsyncMock) -> None:
         """Test that service initializes correctly with reader."""
-        service = ServiceTimeoutQuery(projection_reader=mock_reader)
+        service = TimeoutScanner(projection_reader=mock_reader)
 
         assert service._reader is mock_reader
-        assert service.batch_size == ServiceTimeoutQuery.DEFAULT_BATCH_SIZE
+        assert service.batch_size == TimeoutScanner.DEFAULT_BATCH_SIZE
 
     async def test_service_custom_batch_size(self, mock_reader: AsyncMock) -> None:
         """Test that service accepts custom batch size."""
         custom_batch = 50
-        service = ServiceTimeoutQuery(
+        service = TimeoutScanner(
             projection_reader=mock_reader,
             batch_size=custom_batch,
         )
@@ -122,21 +137,21 @@ class TestServiceTimeoutQueryBasics:
 
     async def test_service_default_batch_size_constant(self) -> None:
         """Test that default batch size constant is 100."""
-        assert ServiceTimeoutQuery.DEFAULT_BATCH_SIZE == 100
+        assert TimeoutScanner.DEFAULT_BATCH_SIZE == 100
 
-    async def test_batch_size_property(self, service: ServiceTimeoutQuery) -> None:
+    async def test_batch_size_property(self, service: TimeoutScanner) -> None:
         """Test batch_size property returns configured value."""
-        assert service.batch_size == ServiceTimeoutQuery.DEFAULT_BATCH_SIZE
+        assert service.batch_size == TimeoutScanner.DEFAULT_BATCH_SIZE
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutQueryFindOverdue:
+class TestTimeoutScannerFindOverdue:
     """Test combined find_overdue_entities query."""
 
     async def test_find_overdue_entities_empty_results(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_overdue_entities returns empty result when no overdue."""
@@ -154,12 +169,12 @@ class TestServiceTimeoutQueryFindOverdue:
 
     async def test_find_overdue_entities_with_ack_timeouts(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_overdue_entities returns ack timeouts."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
 
         ack_projections = [
             create_mock_projection(
@@ -182,12 +197,12 @@ class TestServiceTimeoutQueryFindOverdue:
 
     async def test_find_overdue_entities_with_liveness_expirations(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_overdue_entities returns liveness expirations."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - LIVENESS_TIMEOUT_OFFSET
 
         liveness_projections = [
             create_mock_projection(
@@ -196,7 +211,9 @@ class TestServiceTimeoutQueryFindOverdue:
             ),
         ]
         mock_reader.get_overdue_ack_registrations.return_value = []
-        mock_reader.get_overdue_liveness_registrations.return_value = liveness_projections
+        mock_reader.get_overdue_liveness_registrations.return_value = (
+            liveness_projections
+        )
 
         result = await service.find_overdue_entities(now=now)
 
@@ -206,12 +223,12 @@ class TestServiceTimeoutQueryFindOverdue:
 
     async def test_find_overdue_entities_with_both_types(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_overdue_entities returns both timeout types."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
 
         ack_projections = [
             create_mock_projection(
@@ -230,7 +247,9 @@ class TestServiceTimeoutQueryFindOverdue:
             ),
         ]
         mock_reader.get_overdue_ack_registrations.return_value = ack_projections
-        mock_reader.get_overdue_liveness_registrations.return_value = liveness_projections
+        mock_reader.get_overdue_liveness_registrations.return_value = (
+            liveness_projections
+        )
 
         result = await service.find_overdue_entities(now=now)
 
@@ -241,7 +260,7 @@ class TestServiceTimeoutQueryFindOverdue:
 
     async def test_find_overdue_entities_passes_correct_parameters(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_overdue_entities passes parameters to reader correctly."""
@@ -271,7 +290,7 @@ class TestServiceTimeoutQueryFindOverdue:
 
     async def test_find_overdue_entities_generates_correlation_id(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_overdue_entities generates correlation ID if not provided."""
@@ -286,11 +305,13 @@ class TestServiceTimeoutQueryFindOverdue:
         assert ack_call.kwargs["correlation_id"] is not None
         assert liveness_call.kwargs["correlation_id"] is not None
         # Both should use the same correlation ID
-        assert ack_call.kwargs["correlation_id"] == liveness_call.kwargs["correlation_id"]
+        assert (
+            ack_call.kwargs["correlation_id"] == liveness_call.kwargs["correlation_id"]
+        )
 
     async def test_find_overdue_entities_tracks_query_duration(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_overdue_entities tracks query duration."""
@@ -301,22 +322,22 @@ class TestServiceTimeoutQueryFindOverdue:
         # Duration should be a positive number (even if very small)
         assert result.query_duration_ms >= 0.0
         # Should be a reasonable value (less than 10 seconds)
-        assert result.query_duration_ms < 10000.0
+        assert result.query_duration_ms < MAX_REASONABLE_QUERY_DURATION_MS
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutQueryAckTimeouts:
+class TestTimeoutScannerAckTimeouts:
     """Test ack-specific timeout query."""
 
     async def test_find_ack_timeouts_delegates_to_reader(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_ack_timeouts delegates to reader correctly."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
 
         ack_projections = [
             create_mock_projection(
@@ -333,7 +354,7 @@ class TestServiceTimeoutQueryAckTimeouts:
 
     async def test_find_ack_timeouts_passes_parameters(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_ack_timeouts passes all parameters correctly."""
@@ -355,7 +376,7 @@ class TestServiceTimeoutQueryAckTimeouts:
 
     async def test_find_ack_timeouts_empty_result(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_ack_timeouts returns empty list when no timeouts."""
@@ -367,7 +388,7 @@ class TestServiceTimeoutQueryAckTimeouts:
 
     async def test_find_ack_timeouts_generates_correlation_id(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_ack_timeouts generates correlation ID if not provided."""
@@ -379,17 +400,17 @@ class TestServiceTimeoutQueryAckTimeouts:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutQueryLivenessExpirations:
+class TestTimeoutScannerLivenessExpirations:
     """Test liveness-specific expiration query."""
 
     async def test_find_liveness_expirations_delegates_to_reader(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_liveness_expirations delegates to reader correctly."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - LIVENESS_TIMEOUT_OFFSET
 
         liveness_projections = [
             create_mock_projection(
@@ -397,7 +418,9 @@ class TestServiceTimeoutQueryLivenessExpirations:
                 liveness_deadline=past_deadline,
             ),
         ]
-        mock_reader.get_overdue_liveness_registrations.return_value = liveness_projections
+        mock_reader.get_overdue_liveness_registrations.return_value = (
+            liveness_projections
+        )
 
         result = await service.find_liveness_expirations(now=now)
 
@@ -406,7 +429,7 @@ class TestServiceTimeoutQueryLivenessExpirations:
 
     async def test_find_liveness_expirations_passes_parameters(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_liveness_expirations passes all parameters correctly."""
@@ -428,7 +451,7 @@ class TestServiceTimeoutQueryLivenessExpirations:
 
     async def test_find_liveness_expirations_empty_result(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_liveness_expirations returns empty list when no expirations."""
@@ -440,7 +463,7 @@ class TestServiceTimeoutQueryLivenessExpirations:
 
     async def test_find_liveness_expirations_generates_correlation_id(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_liveness_expirations generates correlation ID if not provided."""
@@ -563,12 +586,12 @@ class TestModelTimeoutQueryResult:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutQueryErrorHandling:
+class TestTimeoutScannerErrorHandling:
     """Test error handling for service operations."""
 
     async def test_find_overdue_entities_propagates_connection_error(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_overdue_entities propagates connection errors."""
@@ -581,7 +604,7 @@ class TestServiceTimeoutQueryErrorHandling:
 
     async def test_find_overdue_entities_propagates_timeout_error(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_overdue_entities propagates timeout errors."""
@@ -594,7 +617,7 @@ class TestServiceTimeoutQueryErrorHandling:
 
     async def test_find_overdue_entities_propagates_circuit_breaker_error(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_overdue_entities propagates circuit breaker errors."""
@@ -607,7 +630,7 @@ class TestServiceTimeoutQueryErrorHandling:
 
     async def test_find_ack_timeouts_propagates_errors(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_ack_timeouts propagates reader errors."""
@@ -620,12 +643,12 @@ class TestServiceTimeoutQueryErrorHandling:
 
     async def test_find_liveness_expirations_propagates_errors(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test find_liveness_expirations propagates reader errors."""
-        mock_reader.get_overdue_liveness_registrations.side_effect = InfraConnectionError(
-            "Connection refused"
+        mock_reader.get_overdue_liveness_registrations.side_effect = (
+            InfraConnectionError("Connection refused")
         )
 
         with pytest.raises(InfraConnectionError):
@@ -633,7 +656,7 @@ class TestServiceTimeoutQueryErrorHandling:
 
     async def test_liveness_error_after_successful_ack_query(
         self,
-        service: ServiceTimeoutQuery,
+        service: TimeoutScanner,
         mock_reader: AsyncMock,
     ) -> None:
         """Test error handling when liveness query fails after ack succeeds."""
@@ -650,7 +673,7 @@ class TestServiceTimeoutQueryErrorHandling:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutQueryBatchSize:
+class TestTimeoutScannerBatchSize:
     """Test batch size configuration and usage."""
 
     async def test_custom_batch_size_used_in_queries(
@@ -659,7 +682,7 @@ class TestServiceTimeoutQueryBatchSize:
     ) -> None:
         """Test custom batch size is passed to reader queries."""
         custom_batch = 25
-        service = ServiceTimeoutQuery(
+        service = TimeoutScanner(
             projection_reader=mock_reader,
             batch_size=custom_batch,
         )
@@ -678,9 +701,9 @@ class TestServiceTimeoutQueryBatchSize:
         mock_reader: AsyncMock,
     ) -> None:
         """Test None batch size uses default."""
-        service = ServiceTimeoutQuery(
+        service = TimeoutScanner(
             projection_reader=mock_reader,
             batch_size=None,
         )
 
-        assert service.batch_size == ServiceTimeoutQuery.DEFAULT_BATCH_SIZE
+        assert service.batch_size == TimeoutScanner.DEFAULT_BATCH_SIZE

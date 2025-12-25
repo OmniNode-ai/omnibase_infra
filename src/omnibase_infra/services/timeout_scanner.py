@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Timeout Query Service for querying overdue registration entities.
+"""Timeout Scanner for querying overdue registration entities.
 
-This service queries the registration projection for nodes that have:
+This scanner queries the registration projection for nodes that have:
 - Passed their ack_deadline (for ack timeout detection)
 - Passed their liveness_deadline (for liveness expiry detection)
 - Not yet had a timeout event emitted (emission marker is NULL)
 
-The service is used by the orchestrator during RuntimeTick processing
+The scanner is used by the orchestrator during RuntimeTick processing
 to identify nodes requiring timeout decision events.
 
 Thread Safety:
-    This service is stateless and delegates all database operations to the
+    This scanner is stateless and delegates all database operations to the
     ProjectionReaderRegistration, which handles thread safety and circuit
     breaker protection.
 
@@ -60,7 +60,7 @@ class ModelTimeoutQueryResult(BaseModel):
             Useful for performance monitoring and alerting.
 
     Example:
-        >>> result = await service.find_overdue_entities(now=tick.now)
+        >>> result = await scanner.find_overdue_entities(now=tick.now)
         >>> for proj in result.ack_timeouts:
         ...     emit_ack_timeout_event(proj.entity_id)
         >>> for proj in result.liveness_expirations:
@@ -101,14 +101,14 @@ class ModelTimeoutQueryResult(BaseModel):
         return self.total_overdue_count > 0
 
 
-class ServiceTimeoutQuery:
-    """Service for querying registration projections for timeout candidates.
+class TimeoutScanner:
+    """Scanner for querying registration projections for timeout candidates.
 
-    This service provides a high-level interface for the orchestrator to
+    This scanner provides a high-level interface for the orchestrator to
     query for nodes requiring timeout events. It delegates to the
     ProjectionReaderRegistration for actual database queries.
 
-    The service inherits circuit breaker protection from the projection
+    The scanner inherits circuit breaker protection from the projection
     reader - when the reader's circuit breaker opens, queries will raise
     InfraUnavailableError.
 
@@ -125,8 +125,8 @@ class ServiceTimeoutQuery:
 
     Usage:
         >>> reader = ProjectionReaderRegistration(pool)
-        >>> service = ServiceTimeoutQuery(reader)
-        >>> result = await service.find_overdue_entities(now=tick.now)
+        >>> scanner = TimeoutScanner(reader)
+        >>> result = await scanner.find_overdue_entities(now=tick.now)
         >>>
         >>> for projection in result.ack_timeouts:
         ...     # Emit NodeRegistrationAckTimedOut event
@@ -165,7 +165,7 @@ class ServiceTimeoutQuery:
         Example:
             >>> pool = await asyncpg.create_pool(dsn)
             >>> reader = ProjectionReaderRegistration(pool)
-            >>> service = ServiceTimeoutQuery(reader)
+            >>> scanner = TimeoutScanner(reader)
         """
         self._reader = projection_reader
         self._batch_size = batch_size or self.DEFAULT_BATCH_SIZE
@@ -207,7 +207,7 @@ class ServiceTimeoutQuery:
 
         Example:
             >>> now = datetime.now(UTC)  # In production, use tick.now
-            >>> result = await service.find_overdue_entities(now=now)
+            >>> result = await scanner.find_overdue_entities(now=now)
             >>> print(f"Found {result.total_overdue_count} overdue entities")
             >>> print(f"Query took {result.query_duration_ms:.2f}ms")
         """
@@ -252,6 +252,25 @@ class ServiceTimeoutQuery:
             },
         )
 
+        # Warn operators when batch limit is reached, indicating more entities may be pending.
+        # This helps operators understand when the system is under high load and may need
+        # multiple ticks to process all overdue entities.
+        ack_at_limit = len(ack_timeouts) >= self._batch_size
+        liveness_at_limit = len(liveness_expirations) >= self._batch_size
+
+        if ack_at_limit or liveness_at_limit:
+            logger.warning(
+                "Batch size limit reached - additional overdue entities may be pending",
+                extra={
+                    "batch_size": self._batch_size,
+                    "ack_timeout_count": len(ack_timeouts),
+                    "ack_at_limit": ack_at_limit,
+                    "liveness_expiration_count": len(liveness_expirations),
+                    "liveness_at_limit": liveness_at_limit,
+                    "correlation_id": str(corr_id),
+                },
+            )
+
         return ModelTimeoutQueryResult(
             ack_timeouts=ack_timeouts,
             liveness_expirations=liveness_expirations,
@@ -290,7 +309,7 @@ class ServiceTimeoutQuery:
             RuntimeHostError: For other database errors
 
         Example:
-            >>> overdue = await service.find_ack_timeouts(now=tick.now)
+            >>> overdue = await scanner.find_ack_timeouts(now=tick.now)
             >>> for proj in overdue:
             ...     print(f"Node {proj.entity_id} missed ack deadline")
         """
@@ -343,7 +362,7 @@ class ServiceTimeoutQuery:
             RuntimeHostError: For other database errors
 
         Example:
-            >>> expired = await service.find_liveness_expirations(now=tick.now)
+            >>> expired = await scanner.find_liveness_expirations(now=tick.now)
             >>> for proj in expired:
             ...     print(f"Node {proj.entity_id} missed liveness deadline")
         """
@@ -366,4 +385,4 @@ class ServiceTimeoutQuery:
         )
 
 
-__all__: list[str] = ["ModelTimeoutQueryResult", "ServiceTimeoutQuery"]
+__all__: list[str] = ["ModelTimeoutQueryResult", "TimeoutScanner"]

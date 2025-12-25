@@ -18,8 +18,8 @@ Fixture Categories:
         - runtime_tick_factory: Creates ModelRuntimeTick with controlled time
 
     Services:
-        - timeout_query_service: ServiceTimeoutQuery with mock reader
-        - timeout_emission_service: ServiceTimeoutEmission with mocks
+        - timeout_query_service: TimeoutScanner with mock reader
+        - timeout_emission_service: TimeoutEmitter with mocks
 
 Design Notes:
     These fixtures enable testing restart-safe behavior by allowing:

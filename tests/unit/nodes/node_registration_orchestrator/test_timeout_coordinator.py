@@ -1,23 +1,23 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Comprehensive unit tests for HandlerTimeout.
+"""Comprehensive unit tests for TimeoutCoordinator.
 
 This test suite validates:
-- Handler instantiation with required dependencies
-- RuntimeTick processing with injected time
+- Coordinator instantiation with required dependencies
+- RuntimeTick coordination with injected time
 - Correlation ID propagation from tick
 - Query and emission coordination
 - Error handling and result model
-- Processing time tracking
+- Coordination time tracking
 
 Test Organization:
-    - TestHandlerTimeoutBasics: Instantiation and configuration
-    - TestHandlerTimeoutHandle: Main handle() method tests
-    - TestHandlerTimeoutErrorHandling: Error scenarios
-    - TestModelTimeoutHandlerResult: Result model tests
+    - TestTimeoutCoordinatorBasics: Instantiation and configuration
+    - TestTimeoutCoordinatorCoordinate: Main coordinate() method tests
+    - TestTimeoutCoordinatorErrorHandling: Error scenarios
+    - TestModelTimeoutCoordinationResult: Result model tests
 
 Coverage Goals:
-    - >90% code coverage for handler
+    - >90% code coverage for coordinator
     - All code paths tested
     - Error handling validated
     - Timing metadata verified
@@ -45,9 +45,9 @@ from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
-from omnibase_infra.nodes.node_registration_orchestrator.handler_timeout import (
-    HandlerTimeout,
-    ModelTimeoutHandlerResult,
+from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
+    ModelTimeoutCoordinationResult,
+    TimeoutCoordinator,
 )
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.services import (
@@ -136,7 +136,7 @@ def create_mock_emission_result(
 
 @pytest.fixture
 def mock_timeout_query() -> AsyncMock:
-    """Create a mock ServiceTimeoutQuery."""
+    """Create a mock TimeoutScanner."""
     query = AsyncMock()
     query.find_overdue_entities = AsyncMock(
         return_value=create_mock_query_result(),
@@ -146,7 +146,7 @@ def mock_timeout_query() -> AsyncMock:
 
 @pytest.fixture
 def mock_timeout_emission() -> AsyncMock:
-    """Create a mock ServiceTimeoutEmission."""
+    """Create a mock TimeoutEmitter."""
     emission = AsyncMock()
     emission.process_timeouts = AsyncMock(
         return_value=create_mock_emission_result(),
@@ -155,63 +155,63 @@ def mock_timeout_emission() -> AsyncMock:
 
 
 @pytest.fixture
-def handler(
+def coordinator(
     mock_timeout_query: AsyncMock,
     mock_timeout_emission: AsyncMock,
-) -> HandlerTimeout:
-    """Create a HandlerTimeout instance with mocked dependencies."""
-    return HandlerTimeout(
+) -> TimeoutCoordinator:
+    """Create a TimeoutCoordinator instance with mocked dependencies."""
+    return TimeoutCoordinator(
         timeout_query=mock_timeout_query,
         timeout_emission=mock_timeout_emission,
     )
 
 
 @pytest.mark.unit
-class TestHandlerTimeoutBasics:
-    """Test basic handler instantiation and configuration."""
+class TestTimeoutCoordinatorBasics:
+    """Test basic coordinator instantiation and configuration."""
 
-    def test_handler_instantiation(
+    def test_coordinator_instantiation(
         self,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handler initializes correctly with dependencies."""
-        handler = HandlerTimeout(
+        """Test that coordinator initializes correctly with dependencies."""
+        coordinator = TimeoutCoordinator(
             timeout_query=mock_timeout_query,
             timeout_emission=mock_timeout_emission,
         )
 
-        assert handler._timeout_query is mock_timeout_query
-        assert handler._timeout_emission is mock_timeout_emission
+        assert coordinator._timeout_query is mock_timeout_query
+        assert coordinator._timeout_emission is mock_timeout_emission
 
-    def test_handler_stores_dependencies(
+    def test_coordinator_stores_dependencies(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handler stores dependencies correctly."""
-        assert handler._timeout_query is mock_timeout_query
-        assert handler._timeout_emission is mock_timeout_emission
+        """Test that coordinator stores dependencies correctly."""
+        assert coordinator._timeout_query is mock_timeout_query
+        assert coordinator._timeout_emission is mock_timeout_emission
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestHandlerTimeoutHandle:
-    """Test the main handle() method."""
+class TestTimeoutCoordinatorCoordinate:
+    """Test the main coordinate() method."""
 
-    async def test_handle_uses_tick_now(
+    async def test_coordinate_uses_tick_now(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() uses tick.now, not system clock."""
+        """Test that coordinate() uses tick.now, not system clock."""
         # Create a tick with a specific time in the past
         past_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
         tick = create_mock_tick(now=past_time)
 
-        await handler.handle(tick)
+        await coordinator.coordinate(tick)
 
         # Verify query was called with tick.now
         query_call = mock_timeout_query.find_overdue_entities.call_args
@@ -221,16 +221,16 @@ class TestHandlerTimeoutHandle:
         emission_call = mock_timeout_emission.process_timeouts.call_args
         assert emission_call.kwargs["now"] == past_time
 
-    async def test_handle_propagates_correlation_id(
+    async def test_coordinate_propagates_correlation_id(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() propagates correlation_id from tick."""
+        """Test that coordinate() propagates correlation_id from tick."""
         tick = create_mock_tick()
 
-        await handler.handle(tick)
+        await coordinator.coordinate(tick)
 
         # Verify correlation_id in query call
         query_call = mock_timeout_query.find_overdue_entities.call_args
@@ -240,32 +240,32 @@ class TestHandlerTimeoutHandle:
         emission_call = mock_timeout_emission.process_timeouts.call_args
         assert emission_call.kwargs["correlation_id"] == tick.correlation_id
 
-    async def test_handle_propagates_tick_id(
+    async def test_coordinate_propagates_tick_id(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() propagates tick_id to emission."""
+        """Test that coordinate() propagates tick_id to emission."""
         tick = create_mock_tick()
 
-        await handler.handle(tick)
+        await coordinator.coordinate(tick)
 
         # Verify tick_id in emission call
         emission_call = mock_timeout_emission.process_timeouts.call_args
         assert emission_call.kwargs["tick_id"] == tick.tick_id
 
-    async def test_handle_passes_domain_parameter(
+    async def test_coordinate_passes_domain_parameter(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() passes domain to both services."""
+        """Test that coordinate() passes domain to both services."""
         tick = create_mock_tick()
         custom_domain = "custom_domain"
 
-        await handler.handle(tick, domain=custom_domain)
+        await coordinator.coordinate(tick, domain=custom_domain)
 
         # Verify domain in query call
         query_call = mock_timeout_query.find_overdue_entities.call_args
@@ -275,30 +275,30 @@ class TestHandlerTimeoutHandle:
         emission_call = mock_timeout_emission.process_timeouts.call_args
         assert emission_call.kwargs["domain"] == custom_domain
 
-    async def test_handle_returns_success_result(
+    async def test_coordinate_returns_success_result(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() returns success result on normal execution."""
+        """Test that coordinate() returns success result on normal execution."""
         tick = create_mock_tick()
 
-        result = await handler.handle(tick)
+        result = await coordinator.coordinate(tick)
 
-        assert isinstance(result, ModelTimeoutHandlerResult)
+        assert isinstance(result, ModelTimeoutCoordinationResult)
         assert result.success is True
         assert result.error is None
         assert result.tick_id == tick.tick_id
         assert result.tick_now == tick.now
 
-    async def test_handle_returns_correct_counts(
+    async def test_coordinate_returns_correct_counts(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() returns correct counts from query and emission."""
+        """Test that coordinate() returns correct counts from query and emission."""
         now = datetime.now(UTC)
         past_deadline = now - timedelta(minutes=5)
 
@@ -311,21 +311,25 @@ class TestHandlerTimeoutHandle:
             state=EnumRegistrationState.ACTIVE,
             liveness_deadline=past_deadline,
         )
-        mock_timeout_query.find_overdue_entities.return_value = create_mock_query_result(
-            ack_timeouts=[ack_projection],
-            liveness_expirations=[liveness_projection, liveness_projection],
-            query_time=now,
+        mock_timeout_query.find_overdue_entities.return_value = (
+            create_mock_query_result(
+                ack_timeouts=[ack_projection],
+                liveness_expirations=[liveness_projection, liveness_projection],
+                query_time=now,
+            )
         )
 
         # Set up emission result
-        mock_timeout_emission.process_timeouts.return_value = create_mock_emission_result(
-            ack_emitted=1,
-            liveness_emitted=2,
-            markers_updated=3,
+        mock_timeout_emission.process_timeouts.return_value = (
+            create_mock_emission_result(
+                ack_emitted=1,
+                liveness_emitted=2,
+                markers_updated=3,
+            )
         )
 
         tick = create_mock_tick(now=now)
-        result = await handler.handle(tick)
+        result = await coordinator.coordinate(tick)
 
         # Verify counts from query
         assert result.ack_timeouts_found == 1
@@ -338,53 +342,55 @@ class TestHandlerTimeoutHandle:
         assert result.total_emitted == 3
         assert result.markers_updated == 3
 
-    async def test_handle_tracks_processing_time(
+    async def test_coordinate_tracks_coordination_time(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() tracks processing time."""
+        """Test that coordinate() tracks coordination time."""
         tick = create_mock_tick()
 
-        result = await handler.handle(tick)
+        result = await coordinator.coordinate(tick)
 
-        # Processing time should be a positive number
-        assert result.processing_time_ms >= 0.0
+        # Coordination time should be a positive number
+        assert result.coordination_time_ms >= 0.0
         assert result.query_time_ms >= 0.0
         assert result.emission_time_ms >= 0.0
 
-    async def test_handle_captures_emission_errors(
+    async def test_coordinate_captures_emission_errors(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() captures non-fatal errors from emission."""
+        """Test that coordinate() captures non-fatal errors from emission."""
         # Set up emission result with errors
-        mock_timeout_emission.process_timeouts.return_value = create_mock_emission_result(
-            ack_emitted=0,
-            errors=["Error 1", "Error 2"],
+        mock_timeout_emission.process_timeouts.return_value = (
+            create_mock_emission_result(
+                ack_emitted=0,
+                errors=["Error 1", "Error 2"],
+            )
         )
 
         tick = create_mock_tick()
-        result = await handler.handle(tick)
+        result = await coordinator.coordinate(tick)
 
         # Result should still be success but with errors captured
         assert result.success is True
         assert result.errors == ["Error 1", "Error 2"]
         assert result.has_errors is True
 
-    async def test_handle_empty_results(
+    async def test_coordinate_empty_results(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test handle() with no overdue entities."""
+        """Test coordinate() with no overdue entities."""
         tick = create_mock_tick()
 
-        result = await handler.handle(tick)
+        result = await coordinator.coordinate(tick)
 
         assert result.ack_timeouts_found == 0
         assert result.liveness_expirations_found == 0
@@ -392,16 +398,16 @@ class TestHandlerTimeoutHandle:
         assert result.total_emitted == 0
         assert result.success is True
 
-    async def test_handle_default_domain(
+    async def test_coordinate_default_domain(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() uses default domain 'registration'."""
+        """Test that coordinate() uses default domain 'registration'."""
         tick = create_mock_tick()
 
-        await handler.handle(tick)
+        await coordinator.coordinate(tick)
 
         query_call = mock_timeout_query.find_overdue_entities.call_args
         assert query_call.kwargs["domain"] == "registration"
@@ -409,125 +415,125 @@ class TestHandlerTimeoutHandle:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestHandlerTimeoutErrorHandling:
-    """Test error handling for handler operations."""
+class TestTimeoutCoordinatorErrorHandling:
+    """Test error handling for coordinator operations."""
 
-    async def test_handle_catches_query_connection_error(
+    async def test_coordinate_catches_query_connection_error(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() catches and returns connection errors from query."""
+        """Test that coordinate() catches and returns connection errors from query."""
         mock_timeout_query.find_overdue_entities.side_effect = InfraConnectionError(
             "Connection refused"
         )
 
         tick = create_mock_tick()
-        result = await handler.handle(tick)
+        result = await coordinator.coordinate(tick)
 
         assert result.success is False
         assert result.error is not None
         assert "InfraConnectionError" in result.error
         assert result.tick_id == tick.tick_id
 
-    async def test_handle_catches_query_timeout_error(
+    async def test_coordinate_catches_query_timeout_error(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() catches and returns timeout errors from query."""
+        """Test that coordinate() catches and returns timeout errors from query."""
         mock_timeout_query.find_overdue_entities.side_effect = InfraTimeoutError(
             "Query timed out"
         )
 
         tick = create_mock_tick()
-        result = await handler.handle(tick)
+        result = await coordinator.coordinate(tick)
 
         assert result.success is False
         assert result.error is not None
         assert "InfraTimeoutError" in result.error
 
-    async def test_handle_catches_emission_circuit_breaker_error(
+    async def test_coordinate_catches_emission_circuit_breaker_error(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() catches circuit breaker errors from emission."""
+        """Test that coordinate() catches circuit breaker errors from emission."""
         mock_timeout_emission.process_timeouts.side_effect = InfraUnavailableError(
             "Circuit breaker is open"
         )
 
         tick = create_mock_tick()
-        result = await handler.handle(tick)
+        result = await coordinator.coordinate(tick)
 
         assert result.success is False
         assert result.error is not None
         assert "InfraUnavailableError" in result.error
 
-    async def test_handle_catches_generic_exception(
+    async def test_coordinate_catches_generic_exception(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() catches generic exceptions."""
+        """Test that coordinate() catches generic exceptions."""
         mock_timeout_query.find_overdue_entities.side_effect = RuntimeError(
             "Unexpected error"
         )
 
         tick = create_mock_tick()
-        result = await handler.handle(tick)
+        result = await coordinator.coordinate(tick)
 
         assert result.success is False
         assert result.error is not None
         assert "RuntimeError" in result.error
         assert "Unexpected error" in result.error
 
-    async def test_handle_tracks_processing_time_on_error(
+    async def test_coordinate_tracks_coordination_time_on_error(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test that handle() tracks processing time even on error."""
+        """Test that coordinate() tracks coordination time even on error."""
         mock_timeout_query.find_overdue_entities.side_effect = InfraConnectionError(
             "Connection refused"
         )
 
         tick = create_mock_tick()
-        result = await handler.handle(tick)
+        result = await coordinator.coordinate(tick)
 
-        assert result.processing_time_ms >= 0.0
+        assert result.coordination_time_ms >= 0.0
 
 
 @pytest.mark.unit
-class TestModelTimeoutHandlerResult:
-    """Test ModelTimeoutHandlerResult model."""
+class TestModelTimeoutCoordinationResult:
+    """Test ModelTimeoutCoordinationResult model."""
 
     def test_result_model_creation(self) -> None:
         """Test result model can be created with required fields."""
         tick_id = uuid4()
         now = datetime.now(UTC)
 
-        result = ModelTimeoutHandlerResult(
+        result = ModelTimeoutCoordinationResult(
             tick_id=tick_id,
             tick_now=now,
-            processing_time_ms=10.5,
+            coordination_time_ms=10.5,
         )
 
         assert result.tick_id == tick_id
         assert result.tick_now == now
-        assert result.processing_time_ms == 10.5
+        assert result.coordination_time_ms == 10.5
 
     def test_result_model_defaults(self) -> None:
         """Test result model has sensible defaults."""
-        result = ModelTimeoutHandlerResult(
+        result = ModelTimeoutCoordinationResult(
             tick_id=uuid4(),
             tick_now=datetime.now(UTC),
-            processing_time_ms=10.0,
+            coordination_time_ms=10.0,
         )
 
         assert result.ack_timeouts_found == 0
@@ -543,34 +549,34 @@ class TestModelTimeoutHandlerResult:
 
     def test_total_found_property(self) -> None:
         """Test total_found property calculation."""
-        result = ModelTimeoutHandlerResult(
+        result = ModelTimeoutCoordinationResult(
             tick_id=uuid4(),
             tick_now=datetime.now(UTC),
             ack_timeouts_found=2,
             liveness_expirations_found=3,
-            processing_time_ms=10.0,
+            coordination_time_ms=10.0,
         )
 
         assert result.total_found == 5
 
     def test_total_emitted_property(self) -> None:
         """Test total_emitted property calculation."""
-        result = ModelTimeoutHandlerResult(
+        result = ModelTimeoutCoordinationResult(
             tick_id=uuid4(),
             tick_now=datetime.now(UTC),
             ack_timeouts_emitted=1,
             liveness_expirations_emitted=2,
-            processing_time_ms=10.0,
+            coordination_time_ms=10.0,
         )
 
         assert result.total_emitted == 3
 
     def test_has_errors_with_error(self) -> None:
         """Test has_errors property when error is set."""
-        result = ModelTimeoutHandlerResult(
+        result = ModelTimeoutCoordinationResult(
             tick_id=uuid4(),
             tick_now=datetime.now(UTC),
-            processing_time_ms=10.0,
+            coordination_time_ms=10.0,
             success=False,
             error="Some error",
         )
@@ -579,10 +585,10 @@ class TestModelTimeoutHandlerResult:
 
     def test_has_errors_with_errors_list(self) -> None:
         """Test has_errors property when errors list is populated."""
-        result = ModelTimeoutHandlerResult(
+        result = ModelTimeoutCoordinationResult(
             tick_id=uuid4(),
             tick_now=datetime.now(UTC),
-            processing_time_ms=10.0,
+            coordination_time_ms=10.0,
             errors=["Error 1"],
         )
 
@@ -590,57 +596,57 @@ class TestModelTimeoutHandlerResult:
 
     def test_has_errors_false(self) -> None:
         """Test has_errors property returns False when no errors."""
-        result = ModelTimeoutHandlerResult(
+        result = ModelTimeoutCoordinationResult(
             tick_id=uuid4(),
             tick_now=datetime.now(UTC),
-            processing_time_ms=10.0,
+            coordination_time_ms=10.0,
         )
 
         assert result.has_errors is False
 
     def test_result_model_is_frozen(self) -> None:
         """Test result model is immutable."""
-        result = ModelTimeoutHandlerResult(
+        result = ModelTimeoutCoordinationResult(
             tick_id=uuid4(),
             tick_now=datetime.now(UTC),
-            processing_time_ms=10.0,
+            coordination_time_ms=10.0,
         )
 
         with pytest.raises(Exception):  # Pydantic validation error
-            result.processing_time_ms = 999.0  # type: ignore[misc]
+            result.coordination_time_ms = 999.0  # type: ignore[misc]
 
     def test_result_model_rejects_negative_counts(self) -> None:
         """Test result model rejects negative count values."""
         with pytest.raises(Exception):  # Pydantic validation error
-            ModelTimeoutHandlerResult(
+            ModelTimeoutCoordinationResult(
                 tick_id=uuid4(),
                 tick_now=datetime.now(UTC),
                 ack_timeouts_found=-1,
-                processing_time_ms=10.0,
+                coordination_time_ms=10.0,
             )
 
-    def test_result_model_rejects_negative_processing_time(self) -> None:
-        """Test result model rejects negative processing time."""
+    def test_result_model_rejects_negative_coordination_time(self) -> None:
+        """Test result model rejects negative coordination time."""
         with pytest.raises(Exception):  # Pydantic validation error
-            ModelTimeoutHandlerResult(
+            ModelTimeoutCoordinationResult(
                 tick_id=uuid4(),
                 tick_now=datetime.now(UTC),
-                processing_time_ms=-1.0,
+                coordination_time_ms=-1.0,
             )
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestHandlerTimeoutIntegration:
-    """Integration tests for HandlerTimeout with services."""
+class TestTimeoutCoordinatorIntegration:
+    """Integration tests for TimeoutCoordinator with services."""
 
-    async def test_full_timeout_processing_flow(
+    async def test_full_timeout_coordination_flow(
         self,
-        handler: HandlerTimeout,
+        coordinator: TimeoutCoordinator,
         mock_timeout_query: AsyncMock,
         mock_timeout_emission: AsyncMock,
     ) -> None:
-        """Test complete timeout processing flow."""
+        """Test complete timeout coordination flow."""
         now = datetime.now(UTC)
         past_deadline = now - timedelta(minutes=5)
 
@@ -649,19 +655,23 @@ class TestHandlerTimeoutIntegration:
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=past_deadline,
         )
-        mock_timeout_query.find_overdue_entities.return_value = create_mock_query_result(
-            ack_timeouts=[ack_projection],
-            query_time=now,
+        mock_timeout_query.find_overdue_entities.return_value = (
+            create_mock_query_result(
+                ack_timeouts=[ack_projection],
+                query_time=now,
+            )
         )
 
         # Set up emission result
-        mock_timeout_emission.process_timeouts.return_value = create_mock_emission_result(
-            ack_emitted=1,
-            markers_updated=1,
+        mock_timeout_emission.process_timeouts.return_value = (
+            create_mock_emission_result(
+                ack_emitted=1,
+                markers_updated=1,
+            )
         )
 
         tick = create_mock_tick(now=now)
-        result = await handler.handle(tick)
+        result = await coordinator.coordinate(tick)
 
         # Verify full flow
         assert result.success is True

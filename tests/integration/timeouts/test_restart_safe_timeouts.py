@@ -45,8 +45,9 @@ from omnibase_infra.models.projection import (
 )
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.services import (
-    ServiceTimeoutEmission,
-    ServiceTimeoutQuery,
+    ModelTimeoutEmissionConfig,
+    TimeoutEmitter,
+    TimeoutScanner,
 )
 
 if TYPE_CHECKING:
@@ -92,47 +93,50 @@ pytestmark = [
 def create_timeout_query_service(
     reader: InMemoryProjectionStore,
     batch_size: int = 100,
-) -> ServiceTimeoutQuery:
-    """Create ServiceTimeoutQuery with mock reader.
+) -> TimeoutScanner:
+    """Create TimeoutScanner with mock reader.
 
     Args:
         reader: In-memory projection store acting as reader
         batch_size: Maximum entities to return per query
 
     Returns:
-        ServiceTimeoutQuery configured with mock reader
+        TimeoutScanner configured with mock reader
     """
-    return ServiceTimeoutQuery(
+    return TimeoutScanner(
         projection_reader=reader,  # type: ignore[arg-type]
         batch_size=batch_size,
     )
 
 
 def create_timeout_emission_service(
-    query_service: ServiceTimeoutQuery,
+    query_service: TimeoutScanner,
     event_bus: MockEventBus,
     projector: MockProjector,
     environment: str = "test",
     namespace: str = "onex",
-) -> ServiceTimeoutEmission:
-    """Create ServiceTimeoutEmission with mock dependencies.
+) -> TimeoutEmitter:
+    """Create TimeoutEmitter with mock dependencies.
 
     Args:
-        query_service: Timeout query service
+        query_service: Timeout scanner
         event_bus: Mock event bus for capturing events
         projector: Mock projector for marker updates
         environment: Environment identifier
         namespace: Namespace for topic routing
 
     Returns:
-        ServiceTimeoutEmission configured with mocks
+        TimeoutEmitter configured with mocks
     """
-    return ServiceTimeoutEmission(
+    config = ModelTimeoutEmissionConfig(
+        environment=environment,
+        namespace=namespace,
+    )
+    return TimeoutEmitter(
         timeout_query=query_service,
         event_bus=event_bus,  # type: ignore[arg-type]
         projector=projector,  # type: ignore[arg-type]
-        environment=environment,
-        namespace=namespace,
+        config=config,
     )
 
 
@@ -502,7 +506,7 @@ class TestRestartSafeTimeouts:
 
 
 class TestTimeoutQuery:
-    """Tests for ServiceTimeoutQuery behavior."""
+    """Tests for TimeoutScanner behavior."""
 
     async def test_query_returns_only_overdue_entities(
         self,

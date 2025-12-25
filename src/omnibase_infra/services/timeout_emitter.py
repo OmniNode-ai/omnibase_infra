@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Timeout Emission Service for emitting timeout events and updating markers.
+"""Timeout Emitter for emitting timeout events and updating markers.
 
-This service handles the emission of timeout decision events and updates
+This emitter handles the emission of timeout decision events and updates
 the projection's emission markers to ensure exactly-once semantics.
 
 The pattern is:
-1. Query for overdue entities (via ServiceTimeoutQuery)
+1. Query for overdue entities (via TimeoutScanner)
 2. For each overdue entity:
    a. Emit the appropriate timeout event
    b. Update the emission marker in projection
@@ -15,7 +15,7 @@ The pattern is:
 This ensures restart-safe, exactly-once timeout event emission.
 
 Thread Safety:
-    This service is stateless and delegates thread safety to underlying
+    This emitter is stateless and delegates thread safety to underlying
     components (event_bus, projector). Multiple coroutines may call
     process_timeouts concurrently as long as underlying components
     support concurrent access.
@@ -38,15 +38,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_infra.mixins import ProtocolEventBusLike
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.projectors.projector_registration import ProjectorRegistration
-from omnibase_infra.services.service_timeout_query import ServiceTimeoutQuery
+from omnibase_infra.services.timeout_scanner import TimeoutScanner
 
 if TYPE_CHECKING:
     # Import models inside TYPE_CHECKING to avoid circular import.
     # The circular import occurs because:
-    # 1. services/__init__.py imports service_timeout_emission
-    # 2. service_timeout_emission imports from node_registration_orchestrator.models
-    # 3. node_registration_orchestrator/__init__.py imports handler_timeout
-    # 4. handler_timeout imports from services (which is partially initialized)
+    # 1. services/__init__.py imports timeout_emitter
+    # 2. timeout_emitter imports from node_registration_orchestrator.models
+    # 3. node_registration_orchestrator/__init__.py imports timeout_coordinator
+    # 4. timeout_coordinator imports from services (which is partially initialized)
     #
     # Using TYPE_CHECKING defers the import until type-checking time only.
     # The actual model classes are imported at runtime inside the methods.
@@ -78,7 +78,7 @@ class ModelTimeoutEmissionResult(BaseModel):
         correlation_id: Correlation ID for distributed tracing.
 
     Example:
-        >>> result = await service.process_timeouts(now=tick.now, tick_id=tick.tick_id)
+        >>> result = await emitter.process_timeouts(now=tick.now, tick_id=tick.tick_id)
         >>> print(f"Emitted {result.ack_timeouts_emitted} ack timeouts")
         >>> if result.errors:
         ...     print(f"Errors: {result.errors}")
@@ -133,8 +133,31 @@ class ModelTimeoutEmissionResult(BaseModel):
         return len(self.errors) > 0
 
 
-class ServiceTimeoutEmission:
-    """Service for emitting timeout events and updating emission markers.
+class ModelTimeoutEmissionConfig(BaseModel):
+    """Configuration for TimeoutEmitter.
+
+    Encapsulates configuration parameters for timeout emission processing,
+    including environment and namespace for topic routing.
+
+    Attributes:
+        environment: Environment identifier for topic routing (e.g., "local", "dev", "prod").
+        namespace: Namespace for topic routing (e.g., "onex", "myapp").
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    environment: str = Field(
+        default="local",
+        description="Environment for topic routing",
+    )
+    namespace: str = Field(
+        default="onex",
+        description="Namespace for topic routing",
+    )
+
+
+class TimeoutEmitter:
+    """Emitter for timeout events with emission marker updates.
 
     Ensures restart-safe, exactly-once timeout event emission by:
     1. Only processing entities without emission markers
@@ -148,19 +171,18 @@ class ServiceTimeoutEmission:
     - If emit fails, marker stays NULL and will be retried on next tick
 
     Design Note:
-        This service does NOT implement circuit breaker - it delegates to
+        This emitter does NOT implement circuit breaker - it delegates to
         the underlying event_bus and projector which have their own circuit
         breaker implementations.
 
     Usage:
-        >>> service = ServiceTimeoutEmission(
-        ...     timeout_query=timeout_query_service,
+        >>> emitter = TimeoutEmitter(
+        ...     timeout_query=timeout_scanner,
         ...     event_bus=event_bus,
         ...     projector=projector,
-        ...     environment="dev",
-        ...     namespace="myapp",
+        ...     config=ModelTimeoutEmissionConfig(environment="dev", namespace="myapp"),
         ... )
-        >>> result = await service.process_timeouts(
+        >>> result = await emitter.process_timeouts(
         ...     now=tick.now,
         ...     tick_id=tick.tick_id,
         ...     correlation_id=tick.correlation_id,
@@ -180,54 +202,69 @@ class ServiceTimeoutEmission:
         "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
     )
 
+    # Error rate threshold for systemic issue detection.
+    # When more than 50% of emissions fail in a single batch, this indicates
+    # a likely systemic issue (e.g., Kafka unavailable, database down) rather
+    # than isolated entity-specific failures. This threshold was chosen because:
+    #
+    # 1. Low false positive rate: Individual entity failures (e.g., validation
+    #    errors) typically affect <10% of entities, so 50% clearly indicates
+    #    infrastructure problems.
+    #
+    # 2. Early detection: 50% is high enough to avoid noise but low enough to
+    #    catch issues before the entire batch fails.
+    #
+    # 3. Operator actionability: At 50%+, operators should investigate the
+    #    underlying infrastructure rather than individual entities.
+    #
+    # This threshold triggers an ERROR-level log for alerting and monitoring.
+    ERROR_RATE_THRESHOLD: float = 0.5
+
     def __init__(
         self,
-        timeout_query: ServiceTimeoutQuery,
+        timeout_query: TimeoutScanner,
         event_bus: ProtocolEventBusLike,
         projector: ProjectorRegistration,
-        environment: str = "local",
-        namespace: str = "onex",
+        config: ModelTimeoutEmissionConfig | None = None,
     ) -> None:
         """Initialize with required dependencies.
 
         Args:
-            timeout_query: Service for querying overdue entities.
+            timeout_query: Scanner for querying overdue entities.
                 Must be initialized with a ProjectionReaderRegistration.
             event_bus: Event bus for publishing timeout events.
                 Must implement ProtocolEventBusLike (publish_envelope method).
             projector: Projector for updating emission markers.
                 Must be initialized with an asyncpg connection pool.
-            environment: Environment identifier for topic routing.
-                Defaults to "local".
-            namespace: Namespace for topic routing. Defaults to "onex".
+            config: Configuration for environment and namespace.
+                Defaults to ModelTimeoutEmissionConfig() if not provided.
 
         Example:
             >>> reader = ProjectionReaderRegistration(pool)
-            >>> timeout_query = ServiceTimeoutQuery(reader)
+            >>> timeout_query = TimeoutScanner(reader)
             >>> bus = KafkaEventBus.default()
             >>> projector = ProjectorRegistration(pool)
-            >>> service = ServiceTimeoutEmission(
+            >>> emitter = TimeoutEmitter(
             ...     timeout_query=timeout_query,
             ...     event_bus=bus,
             ...     projector=projector,
-            ...     environment="dev",
+            ...     config=ModelTimeoutEmissionConfig(environment="dev"),
             ... )
         """
         self._timeout_query = timeout_query
         self._event_bus = event_bus
         self._projector = projector
-        self._environment = environment
-        self._namespace = namespace
+        self._config = config or ModelTimeoutEmissionConfig()
 
     @property
     def environment(self) -> str:
         """Return configured environment."""
-        return self._environment
+        return self._config.environment
 
     @property
     def namespace(self) -> str:
         """Return configured namespace."""
-        return self._namespace
+        return self._config.namespace
 
     def _build_topic(self, topic_pattern: str) -> str:
         """Build topic name from pattern with environment and namespace.
@@ -239,8 +276,8 @@ class ServiceTimeoutEmission:
             Fully qualified topic name.
         """
         return topic_pattern.format(
-            env=self._environment,
-            namespace=self._namespace,
+            env=self._config.environment,
+            namespace=self._config.namespace,
         )
 
     async def process_timeouts(
@@ -280,7 +317,7 @@ class ServiceTimeoutEmission:
             InfraUnavailableError: If circuit breaker is open
 
         Example:
-            >>> result = await service.process_timeouts(
+            >>> result = await emitter.process_timeouts(
             ...     now=datetime.now(UTC),
             ...     tick_id=uuid4(),
             ...     correlation_id=uuid4(),
@@ -371,17 +408,19 @@ class ServiceTimeoutEmission:
                     },
                 )
 
-        # Check error rate for circuit breaker trigger
+        # Check error rate for systemic issue detection.
+        # See ERROR_RATE_THRESHOLD documentation for threshold rationale.
         total_attempted = len(query_result.ack_timeouts) + len(
             query_result.liveness_expirations
         )
         if total_attempted > 0:
             error_rate = len(errors) / total_attempted
-            if error_rate > 0.5:  # More than 50% failed
+            if error_rate > self.ERROR_RATE_THRESHOLD:
                 logger.error(
                     "High timeout emission failure rate - possible systemic issue",
                     extra={
                         "error_rate": error_rate,
+                        "error_rate_threshold": self.ERROR_RATE_THRESHOLD,
                         "total_attempted": total_attempted,
                         "error_count": len(errors),
                         "correlation_id": str(correlation_id),
@@ -572,4 +611,19 @@ class ServiceTimeoutEmission:
         )
 
 
-__all__: list[str] = ["ModelTimeoutEmissionResult", "ServiceTimeoutEmission"]
+# Backwards compatibility aliases
+TimeoutEmissionProcessor = TimeoutEmitter
+"""Backwards compatibility alias for TimeoutEmitter."""
+
+ServiceTimeoutEmission = TimeoutEmitter
+"""Backwards compatibility alias for TimeoutEmitter."""
+
+
+__all__: list[str] = [
+    "ModelTimeoutEmissionConfig",
+    "ModelTimeoutEmissionResult",
+    "TimeoutEmitter",
+    # Backwards compatibility
+    "TimeoutEmissionProcessor",
+    "ServiceTimeoutEmission",
+]

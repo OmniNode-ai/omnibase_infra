@@ -7,27 +7,36 @@ use by orchestrators and runtime hosts. Services provide clean interfaces
 for common operations and encapsulate complexity.
 
 Exports:
+    ModelTimeoutEmissionConfig: Configuration for timeout emitter
     ModelTimeoutEmissionResult: Result model for timeout emission processing
     ModelTimeoutQueryResult: Result model for timeout queries
-    ServiceTimeoutEmission: Service for emitting timeout events with markers
-    ServiceTimeoutQuery: Service for querying overdue registration entities
+    TimeoutEmitter: Emitter for timeout events with markers
+    TimeoutEmissionProcessor: Backwards compatibility alias for TimeoutEmitter
+    ServiceTimeoutEmission: Backwards compatibility alias for TimeoutEmitter
+    TimeoutScanner: Scanner for querying overdue registration entities
 
 Related Tickets:
     - OMN-932 (C2): Durable Timeout Handling
 """
 
-from omnibase_infra.services.service_timeout_emission import (
+from omnibase_infra.services.timeout_emitter import (
+    ModelTimeoutEmissionConfig,
     ModelTimeoutEmissionResult,
     ServiceTimeoutEmission,
+    TimeoutEmissionProcessor,
+    TimeoutEmitter,
 )
-from omnibase_infra.services.service_timeout_query import (
+from omnibase_infra.services.timeout_scanner import (
     ModelTimeoutQueryResult,
-    ServiceTimeoutQuery,
+    TimeoutScanner,
 )
 
 __all__ = [
+    "ModelTimeoutEmissionConfig",
     "ModelTimeoutEmissionResult",
     "ModelTimeoutQueryResult",
     "ServiceTimeoutEmission",
-    "ServiceTimeoutQuery",
+    "TimeoutEmissionProcessor",
+    "TimeoutEmitter",
+    "TimeoutScanner",
 ]

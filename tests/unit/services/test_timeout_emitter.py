@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Comprehensive unit tests for ServiceTimeoutEmission.
+"""Comprehensive unit tests for TimeoutEmitter.
 
 This test suite validates:
-- Service instantiation with dependencies
+- Emitter instantiation with dependencies
 - Normal emission flow for ack timeouts
 - Normal emission flow for liveness expirations
 - Marker update after successful emit
@@ -13,18 +13,20 @@ This test suite validates:
 - Correlation and causation ID propagation
 - Topic building with environment and namespace
 - Result model properties
+- Config model usage
 
 Test Organization:
-    - TestServiceTimeoutEmissionBasics: Instantiation and configuration
-    - TestServiceTimeoutEmissionProcessTimeouts: Main processing flow
-    - TestServiceTimeoutEmissionAckTimeout: Ack-specific tests
-    - TestServiceTimeoutEmissionLivenessExpiration: Liveness-specific tests
-    - TestServiceTimeoutEmissionErrorHandling: Error scenarios
-    - TestServiceTimeoutEmissionExactlyOnce: Exactly-once semantics
+    - TestTimeoutEmitterBasics: Instantiation and configuration
+    - TestTimeoutEmitterProcessTimeouts: Main processing flow
+    - TestTimeoutEmitterAckTimeout: Ack-specific tests
+    - TestTimeoutEmitterLivenessExpiration: Liveness-specific tests
+    - TestTimeoutEmitterErrorHandling: Error scenarios
+    - TestTimeoutEmitterExactlyOnce: Exactly-once semantics
     - TestModelTimeoutEmissionResult: Result model tests
+    - TestModelTimeoutEmissionConfig: Config model tests
 
 Coverage Goals:
-    - >90% code coverage for service
+    - >90% code coverage for emitter
     - All emission paths tested
     - Error handling validated
     - Exactly-once semantics verified
@@ -53,10 +55,30 @@ from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from omnibase_infra.services import (
+    ModelTimeoutEmissionConfig,
     ModelTimeoutEmissionResult,
     ModelTimeoutQueryResult,
-    ServiceTimeoutEmission,
+    TimeoutEmitter,
 )
+
+# =============================================================================
+# Test Constants
+# =============================================================================
+
+# Time offsets for deadline scenarios
+ACK_TIMEOUT_OFFSET = timedelta(minutes=5)
+"""Offset for creating past/overdue ack deadlines in tests."""
+
+LIVENESS_TIMEOUT_OFFSET = timedelta(minutes=10)
+"""Offset for creating past/overdue liveness deadlines in tests."""
+
+# Query duration bounds for validation
+MAX_REASONABLE_QUERY_DURATION_MS = 10000.0
+"""Maximum reasonable query duration in milliseconds (10 seconds)."""
+
+# Default sequence values for test projections
+DEFAULT_TEST_OFFSET = 100
+"""Default offset/sequence value for test projections."""
 
 
 def create_mock_projection(
@@ -89,7 +111,7 @@ def create_mock_projection(
 
 @pytest.fixture
 def mock_timeout_query() -> AsyncMock:
-    """Create a mock timeout query service."""
+    """Create a mock timeout query processor."""
     query = AsyncMock()
     query.find_overdue_entities = AsyncMock(
         return_value=ModelTimeoutQueryResult(
@@ -122,92 +144,92 @@ def mock_projector() -> AsyncMock:
 
 
 @pytest.fixture
-def service(
+def processor(
     mock_timeout_query: AsyncMock,
     mock_event_bus: AsyncMock,
     mock_projector: AsyncMock,
-) -> ServiceTimeoutEmission:
-    """Create a ServiceTimeoutEmission instance with mocked dependencies."""
-    return ServiceTimeoutEmission(
+) -> TimeoutEmitter:
+    """Create a TimeoutEmitter instance with mocked dependencies."""
+    config = ModelTimeoutEmissionConfig(environment="test", namespace="omnitest")
+    return TimeoutEmitter(
         timeout_query=mock_timeout_query,
         event_bus=mock_event_bus,
         projector=mock_projector,
-        environment="test",
-        namespace="omnitest",
+        config=config,
     )
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutEmissionBasics:
-    """Test basic service instantiation and configuration."""
+class TestTimeoutEmitterBasics:
+    """Test basic processor instantiation and configuration."""
 
-    async def test_service_instantiation(
+    async def test_processor_instantiation(
         self,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
-        """Test that service initializes correctly with dependencies."""
-        service = ServiceTimeoutEmission(
+        """Test that processor initializes correctly with dependencies."""
+        processor = TimeoutEmitter(
             timeout_query=mock_timeout_query,
             event_bus=mock_event_bus,
             projector=mock_projector,
         )
 
-        assert service._timeout_query is mock_timeout_query
-        assert service._event_bus is mock_event_bus
-        assert service._projector is mock_projector
+        assert processor._timeout_query is mock_timeout_query
+        assert processor._event_bus is mock_event_bus
+        assert processor._projector is mock_projector
 
-    async def test_service_default_environment_and_namespace(
+    async def test_processor_default_environment_and_namespace(
         self,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
         """Test default environment and namespace values."""
-        service = ServiceTimeoutEmission(
+        processor = TimeoutEmitter(
             timeout_query=mock_timeout_query,
             event_bus=mock_event_bus,
             projector=mock_projector,
         )
 
-        assert service.environment == "local"
-        assert service.namespace == "onex"
+        assert processor.environment == "local"
+        assert processor.namespace == "onex"
 
-    async def test_service_custom_environment_and_namespace(
+    async def test_processor_custom_environment_and_namespace_via_config(
         self,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
-        """Test custom environment and namespace."""
-        service = ServiceTimeoutEmission(
+        """Test custom environment and namespace via config model."""
+        config = ModelTimeoutEmissionConfig(environment="prod", namespace="myapp")
+        processor = TimeoutEmitter(
             timeout_query=mock_timeout_query,
             event_bus=mock_event_bus,
             projector=mock_projector,
-            environment="prod",
-            namespace="myapp",
+            config=config,
         )
 
-        assert service.environment == "prod"
-        assert service.namespace == "myapp"
+        assert processor.environment == "prod"
+        assert processor.namespace == "myapp"
 
-    async def test_build_topic(self, service: ServiceTimeoutEmission) -> None:
+    async def test_build_topic(self, processor: TimeoutEmitter) -> None:
         """Test topic building with environment and namespace."""
-        topic = service._build_topic("{env}.{namespace}.test.topic.v1")
+        topic = processor._build_topic("{env}.{namespace}.test.topic.v1")
 
         assert topic == "test.omnitest.test.topic.v1"
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutEmissionProcessTimeouts:
+class TestTimeoutEmitterProcessTimeouts:
     """Test main process_timeouts flow."""
 
     async def test_process_timeouts_empty_results(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
@@ -217,7 +239,7 @@ class TestServiceTimeoutEmissionProcessTimeouts:
         tick_id = uuid4()
         correlation_id = uuid4()
 
-        result = await service.process_timeouts(
+        result = await processor.process_timeouts(
             now=now,
             tick_id=tick_id,
             correlation_id=correlation_id,
@@ -239,7 +261,7 @@ class TestServiceTimeoutEmissionProcessTimeouts:
 
     async def test_process_timeouts_with_ack_timeouts(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
@@ -248,7 +270,7 @@ class TestServiceTimeoutEmissionProcessTimeouts:
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
 
         ack_projections = [
             create_mock_projection(
@@ -264,7 +286,7 @@ class TestServiceTimeoutEmissionProcessTimeouts:
             query_duration_ms=1.0,
         )
 
-        result = await service.process_timeouts(
+        result = await processor.process_timeouts(
             now=now,
             tick_id=tick_id,
             correlation_id=correlation_id,
@@ -281,7 +303,7 @@ class TestServiceTimeoutEmissionProcessTimeouts:
 
     async def test_process_timeouts_with_liveness_expirations(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
@@ -290,7 +312,7 @@ class TestServiceTimeoutEmissionProcessTimeouts:
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - LIVENESS_TIMEOUT_OFFSET
 
         liveness_projections = [
             create_mock_projection(
@@ -306,7 +328,7 @@ class TestServiceTimeoutEmissionProcessTimeouts:
             query_duration_ms=1.0,
         )
 
-        result = await service.process_timeouts(
+        result = await processor.process_timeouts(
             now=now,
             tick_id=tick_id,
             correlation_id=correlation_id,
@@ -323,7 +345,7 @@ class TestServiceTimeoutEmissionProcessTimeouts:
 
     async def test_process_timeouts_with_both_types(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
@@ -332,7 +354,7 @@ class TestServiceTimeoutEmissionProcessTimeouts:
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
 
         ack_projections = [
             create_mock_projection(
@@ -358,7 +380,7 @@ class TestServiceTimeoutEmissionProcessTimeouts:
             query_duration_ms=1.0,
         )
 
-        result = await service.process_timeouts(
+        result = await processor.process_timeouts(
             now=now,
             tick_id=tick_id,
             correlation_id=correlation_id,
@@ -378,12 +400,12 @@ class TestServiceTimeoutEmissionProcessTimeouts:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutEmissionAckTimeout:
+class TestTimeoutEmitterAckTimeout:
     """Test ack-specific timeout emission."""
 
     async def test_emit_ack_timeout_publishes_correct_event(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
@@ -391,7 +413,7 @@ class TestServiceTimeoutEmissionAckTimeout:
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
         node_id = uuid4()
 
         projection = create_mock_projection(
@@ -400,7 +422,7 @@ class TestServiceTimeoutEmissionAckTimeout:
             entity_id=node_id,
         )
 
-        await service._emit_ack_timeout(
+        await processor._emit_ack_timeout(
             projection=projection,
             detected_at=now,
             tick_id=tick_id,
@@ -425,7 +447,7 @@ class TestServiceTimeoutEmissionAckTimeout:
 
     async def test_emit_ack_timeout_updates_marker(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
@@ -433,7 +455,7 @@ class TestServiceTimeoutEmissionAckTimeout:
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
         node_id = uuid4()
 
         projection = create_mock_projection(
@@ -442,7 +464,7 @@ class TestServiceTimeoutEmissionAckTimeout:
             entity_id=node_id,
         )
 
-        await service._emit_ack_timeout(
+        await processor._emit_ack_timeout(
             projection=projection,
             detected_at=now,
             tick_id=tick_id,
@@ -461,7 +483,7 @@ class TestServiceTimeoutEmissionAckTimeout:
 
     async def test_emit_ack_timeout_raises_on_missing_deadline(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_event_bus: AsyncMock,
     ) -> None:
         """Test _emit_ack_timeout raises when ack_deadline is None."""
@@ -471,7 +493,7 @@ class TestServiceTimeoutEmissionAckTimeout:
         )
 
         with pytest.raises(ValueError, match="ack_deadline is None"):
-            await service._emit_ack_timeout(
+            await processor._emit_ack_timeout(
                 projection=projection,
                 detected_at=datetime.now(UTC),
                 tick_id=uuid4(),
@@ -481,12 +503,12 @@ class TestServiceTimeoutEmissionAckTimeout:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutEmissionLivenessExpiration:
+class TestTimeoutEmitterLivenessExpiration:
     """Test liveness-specific expiration emission."""
 
     async def test_emit_liveness_expiration_publishes_correct_event(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
@@ -494,7 +516,7 @@ class TestServiceTimeoutEmissionLivenessExpiration:
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - LIVENESS_TIMEOUT_OFFSET
         node_id = uuid4()
 
         projection = create_mock_projection(
@@ -503,7 +525,7 @@ class TestServiceTimeoutEmissionLivenessExpiration:
             entity_id=node_id,
         )
 
-        await service._emit_liveness_expiration(
+        await processor._emit_liveness_expiration(
             projection=projection,
             detected_at=now,
             tick_id=tick_id,
@@ -527,7 +549,7 @@ class TestServiceTimeoutEmissionLivenessExpiration:
 
     async def test_emit_liveness_expiration_updates_marker(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
@@ -535,7 +557,7 @@ class TestServiceTimeoutEmissionLivenessExpiration:
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - LIVENESS_TIMEOUT_OFFSET
         node_id = uuid4()
 
         projection = create_mock_projection(
@@ -544,7 +566,7 @@ class TestServiceTimeoutEmissionLivenessExpiration:
             entity_id=node_id,
         )
 
-        await service._emit_liveness_expiration(
+        await processor._emit_liveness_expiration(
             projection=projection,
             detected_at=now,
             tick_id=tick_id,
@@ -563,7 +585,7 @@ class TestServiceTimeoutEmissionLivenessExpiration:
 
     async def test_emit_liveness_expiration_raises_on_missing_deadline(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_event_bus: AsyncMock,
     ) -> None:
         """Test _emit_liveness_expiration raises when liveness_deadline is None."""
@@ -573,7 +595,7 @@ class TestServiceTimeoutEmissionLivenessExpiration:
         )
 
         with pytest.raises(ValueError, match="liveness_deadline is None"):
-            await service._emit_liveness_expiration(
+            await processor._emit_liveness_expiration(
                 projection=projection,
                 detected_at=datetime.now(UTC),
                 tick_id=uuid4(),
@@ -583,12 +605,12 @@ class TestServiceTimeoutEmissionLivenessExpiration:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutEmissionErrorHandling:
+class TestTimeoutEmitterErrorHandling:
     """Test error handling for emission operations."""
 
     async def test_process_timeouts_captures_publish_errors(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
@@ -597,7 +619,7 @@ class TestServiceTimeoutEmissionErrorHandling:
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
 
         # Two projections - first will fail, second should succeed
         node1_id = uuid4()
@@ -628,7 +650,7 @@ class TestServiceTimeoutEmissionErrorHandling:
             None,  # Success
         ]
 
-        result = await service.process_timeouts(
+        result = await processor.process_timeouts(
             now=now,
             tick_id=tick_id,
             correlation_id=correlation_id,
@@ -636,12 +658,14 @@ class TestServiceTimeoutEmissionErrorHandling:
 
         # First failed, second succeeded
         assert result.ack_timeouts_emitted == 1
-        assert result.errors == [f"ack_timeout failed for node {node1_id}: InfraConnectionError"]
+        assert result.errors == [
+            f"ack_timeout failed for node {node1_id}: InfraConnectionError"
+        ]
         assert result.has_errors is True
 
     async def test_process_timeouts_marker_update_failure_not_counted(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
@@ -650,7 +674,7 @@ class TestServiceTimeoutEmissionErrorHandling:
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
         node_id = uuid4()
 
         ack_projections = [
@@ -674,7 +698,7 @@ class TestServiceTimeoutEmissionErrorHandling:
             "Marker update failed"
         )
 
-        result = await service.process_timeouts(
+        result = await processor.process_timeouts(
             now=now,
             tick_id=tick_id,
             correlation_id=correlation_id,
@@ -688,7 +712,7 @@ class TestServiceTimeoutEmissionErrorHandling:
 
     async def test_query_error_propagates(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_timeout_query: AsyncMock,
     ) -> None:
         """Test that query errors propagate (not captured)."""
@@ -697,7 +721,7 @@ class TestServiceTimeoutEmissionErrorHandling:
         )
 
         with pytest.raises(InfraUnavailableError):
-            await service.process_timeouts(
+            await processor.process_timeouts(
                 now=datetime.now(UTC),
                 tick_id=uuid4(),
                 correlation_id=uuid4(),
@@ -706,18 +730,18 @@ class TestServiceTimeoutEmissionErrorHandling:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutEmissionExactlyOnce:
+class TestTimeoutEmitterExactlyOnce:
     """Test exactly-once semantics for timeout emission."""
 
     async def test_marker_update_after_publish_success(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
         """Test marker is only updated AFTER successful publish."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
         node_id = uuid4()
 
         projection = create_mock_projection(
@@ -728,10 +752,14 @@ class TestServiceTimeoutEmissionExactlyOnce:
 
         # Track call order
         call_order: list[str] = []
-        mock_event_bus.publish_envelope.side_effect = lambda **kwargs: call_order.append("publish")
-        mock_projector.update_ack_timeout_marker.side_effect = lambda **kwargs: call_order.append("marker_update")
+        mock_event_bus.publish_envelope.side_effect = (
+            lambda **kwargs: call_order.append("publish")
+        )
+        mock_projector.update_ack_timeout_marker.side_effect = (
+            lambda **kwargs: call_order.append("marker_update")
+        )
 
-        await service._emit_ack_timeout(
+        await processor._emit_ack_timeout(
             projection=projection,
             detected_at=now,
             tick_id=uuid4(),
@@ -743,23 +771,25 @@ class TestServiceTimeoutEmissionExactlyOnce:
 
     async def test_marker_not_updated_on_publish_failure(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
         """Test marker is NOT updated when publish fails."""
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
 
         projection = create_mock_projection(
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=past_deadline,
         )
 
-        mock_event_bus.publish_envelope.side_effect = InfraTimeoutError("Publish timeout")
+        mock_event_bus.publish_envelope.side_effect = InfraTimeoutError(
+            "Publish timeout"
+        )
 
         with pytest.raises(InfraTimeoutError):
-            await service._emit_ack_timeout(
+            await processor._emit_ack_timeout(
                 projection=projection,
                 detected_at=now,
                 tick_id=uuid4(),
@@ -771,7 +801,7 @@ class TestServiceTimeoutEmissionExactlyOnce:
 
     async def test_restart_safe_only_unmarked_processed(
         self,
-        service: ServiceTimeoutEmission,
+        processor: TimeoutEmitter,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
@@ -779,13 +809,13 @@ class TestServiceTimeoutEmissionExactlyOnce:
         """Test that only entities without markers are processed.
 
         This test validates restart-safe behavior by simulating a scenario
-        where the query service returns only unmarked entities (as it should
+        where the query processor returns only unmarked entities (as it should
         based on the SQL WHERE clause filtering).
         """
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
 
         # Only one entity returned (already marked ones filtered by query)
         ack_projections = [
@@ -803,7 +833,7 @@ class TestServiceTimeoutEmissionExactlyOnce:
             query_duration_ms=1.0,
         )
 
-        result = await service.process_timeouts(
+        result = await processor.process_timeouts(
             now=now,
             tick_id=tick_id,
             correlation_id=correlation_id,
@@ -917,8 +947,37 @@ class TestModelTimeoutEmissionResult:
 
 
 @pytest.mark.unit
+class TestModelTimeoutEmissionConfig:
+    """Test ModelTimeoutEmissionConfig model."""
+
+    def test_config_defaults(self) -> None:
+        """Test config model defaults."""
+        config = ModelTimeoutEmissionConfig()
+
+        assert config.environment == "local"
+        assert config.namespace == "onex"
+
+    def test_config_custom_values(self) -> None:
+        """Test config model with custom values."""
+        config = ModelTimeoutEmissionConfig(
+            environment="prod",
+            namespace="myapp",
+        )
+
+        assert config.environment == "prod"
+        assert config.namespace == "myapp"
+
+    def test_config_is_frozen(self) -> None:
+        """Test config model is immutable."""
+        config = ModelTimeoutEmissionConfig()
+
+        with pytest.raises(Exception):  # Pydantic validation error
+            config.environment = "changed"  # type: ignore[misc]
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
-class TestServiceTimeoutEmissionTopicBuilding:
+class TestTimeoutEmitterTopicBuilding:
     """Test topic building functionality."""
 
     async def test_ack_timeout_topic_format(
@@ -928,23 +987,23 @@ class TestServiceTimeoutEmissionTopicBuilding:
         mock_projector: AsyncMock,
     ) -> None:
         """Test ack timeout topic is correctly formatted."""
-        service = ServiceTimeoutEmission(
+        config = ModelTimeoutEmissionConfig(environment="prod", namespace="myservice")
+        processor = TimeoutEmitter(
             timeout_query=mock_timeout_query,
             event_bus=mock_event_bus,
             projector=mock_projector,
-            environment="prod",
-            namespace="myservice",
+            config=config,
         )
 
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=5)
+        past_deadline = now - ACK_TIMEOUT_OFFSET
 
         projection = create_mock_projection(
             state=EnumRegistrationState.AWAITING_ACK,
             ack_deadline=past_deadline,
         )
 
-        await service._emit_ack_timeout(
+        await processor._emit_ack_timeout(
             projection=projection,
             detected_at=now,
             tick_id=uuid4(),
@@ -952,7 +1011,10 @@ class TestServiceTimeoutEmissionTopicBuilding:
         )
 
         call_args = mock_event_bus.publish_envelope.call_args
-        assert call_args.kwargs["topic"] == "prod.myservice.onex.evt.node-registration-ack-timed-out.v1"
+        assert (
+            call_args.kwargs["topic"]
+            == "prod.myservice.onex.evt.node-registration-ack-timed-out.v1"
+        )
 
     async def test_liveness_expired_topic_format(
         self,
@@ -961,23 +1023,23 @@ class TestServiceTimeoutEmissionTopicBuilding:
         mock_projector: AsyncMock,
     ) -> None:
         """Test liveness expired topic is correctly formatted."""
-        service = ServiceTimeoutEmission(
+        config = ModelTimeoutEmissionConfig(environment="staging", namespace="testapp")
+        processor = TimeoutEmitter(
             timeout_query=mock_timeout_query,
             event_bus=mock_event_bus,
             projector=mock_projector,
-            environment="staging",
-            namespace="testapp",
+            config=config,
         )
 
         now = datetime.now(UTC)
-        past_deadline = now - timedelta(minutes=10)
+        past_deadline = now - LIVENESS_TIMEOUT_OFFSET
 
         projection = create_mock_projection(
             state=EnumRegistrationState.ACTIVE,
             liveness_deadline=past_deadline,
         )
 
-        await service._emit_liveness_expiration(
+        await processor._emit_liveness_expiration(
             projection=projection,
             detected_at=now,
             tick_id=uuid4(),
@@ -985,4 +1047,7 @@ class TestServiceTimeoutEmissionTopicBuilding:
         )
 
         call_args = mock_event_bus.publish_envelope.call_args
-        assert call_args.kwargs["topic"] == "staging.testapp.onex.evt.node-liveness-expired.v1"
+        assert (
+            call_args.kwargs["topic"]
+            == "staging.testapp.onex.evt.node-liveness-expired.v1"
+        )

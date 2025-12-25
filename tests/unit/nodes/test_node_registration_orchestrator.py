@@ -157,10 +157,12 @@ class TestDeclarativeOrchestratorPattern:
 
         # Expected methods for timeout handling (OMN-932)
         # These are intentional extensions for RuntimeTick processing
-        expected_timeout_methods = {"set_timeout_handler", "handle_runtime_tick"}
+        expected_timeout_methods = {"set_timeout_coordinator", "handle_runtime_tick"}
 
         # Filter out expected timeout methods
-        unexpected_methods = [m for m in own_methods if m not in expected_timeout_methods]
+        unexpected_methods = [
+            m for m in own_methods if m not in expected_timeout_methods
+        ]
 
         # Should have no unexpected public methods defined directly on the class
         # (all other behavior inherited from NodeOrchestrator)
@@ -421,32 +423,32 @@ class TestNodeInstantiation:
 class TestTimeoutHandling:
     """Tests for RuntimeTick timeout handling (OMN-932)."""
 
-    def test_has_timeout_handler_initially_false(
+    def test_has_timeout_coordinator_initially_false(
         self, mock_container: MagicMock
     ) -> None:
-        """Test that has_timeout_handler is False initially."""
+        """Test that has_timeout_coordinator is False initially."""
         orchestrator = NodeRegistrationOrchestrator(mock_container)
 
-        assert orchestrator.has_timeout_handler is False
+        assert orchestrator.has_timeout_coordinator is False
 
-    def test_set_timeout_handler_updates_property(
+    def test_set_timeout_coordinator_updates_property(
         self, mock_container: MagicMock
     ) -> None:
-        """Test that set_timeout_handler updates has_timeout_handler."""
+        """Test that set_timeout_coordinator updates has_timeout_coordinator."""
         from unittest.mock import MagicMock as MM
 
         orchestrator = NodeRegistrationOrchestrator(mock_container)
-        mock_handler = MM()
+        mock_coordinator = MM()
 
-        orchestrator.set_timeout_handler(mock_handler)
+        orchestrator.set_timeout_coordinator(mock_coordinator)
 
-        assert orchestrator.has_timeout_handler is True
+        assert orchestrator.has_timeout_coordinator is True
 
     @pytest.mark.asyncio
-    async def test_handle_runtime_tick_raises_without_handler(
+    async def test_handle_runtime_tick_raises_without_coordinator(
         self, mock_container: MagicMock
     ) -> None:
-        """Test that handle_runtime_tick raises RuntimeError without handler."""
+        """Test that handle_runtime_tick raises RuntimeError without coordinator."""
         from datetime import UTC, datetime
         from unittest.mock import MagicMock as MM
         from uuid import uuid4
@@ -462,13 +464,13 @@ class TestTimeoutHandling:
         with pytest.raises(RuntimeError) as exc_info:
             await orchestrator.handle_runtime_tick(tick)
 
-        assert "Timeout handler not configured" in str(exc_info.value)
+        assert "Timeout coordinator not configured" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_handle_runtime_tick_delegates_to_handler(
+    async def test_handle_runtime_tick_delegates_to_coordinator(
         self, mock_container: MagicMock
     ) -> None:
-        """Test that handle_runtime_tick delegates to the configured handler."""
+        """Test that handle_runtime_tick delegates to the configured coordinator."""
         from datetime import UTC, datetime
         from unittest.mock import AsyncMock, MagicMock as MM
         from uuid import uuid4
@@ -479,24 +481,24 @@ class TestTimeoutHandling:
         tick.tick_id = uuid4()
         tick.correlation_id = uuid4()
 
-        # Create a mock handler with async handle method
-        mock_handler = MM()
+        # Create a mock coordinator with async coordinate method
+        mock_coordinator = MM()
         mock_result = MM()
-        mock_handler.handle = AsyncMock(return_value=mock_result)
+        mock_coordinator.coordinate = AsyncMock(return_value=mock_result)
 
         orchestrator = NodeRegistrationOrchestrator(mock_container)
-        orchestrator.set_timeout_handler(mock_handler)
+        orchestrator.set_timeout_coordinator(mock_coordinator)
 
         result = await orchestrator.handle_runtime_tick(tick)
 
-        mock_handler.handle.assert_called_once_with(tick, domain="registration")
+        mock_coordinator.coordinate.assert_called_once_with(tick, domain="registration")
         assert result is mock_result
 
     @pytest.mark.asyncio
     async def test_handle_runtime_tick_passes_custom_domain(
         self, mock_container: MagicMock
     ) -> None:
-        """Test that handle_runtime_tick passes custom domain to handler."""
+        """Test that handle_runtime_tick passes custom domain to coordinator."""
         from datetime import UTC, datetime
         from unittest.mock import AsyncMock, MagicMock as MM
         from uuid import uuid4
@@ -506,12 +508,14 @@ class TestTimeoutHandling:
         tick.tick_id = uuid4()
         tick.correlation_id = uuid4()
 
-        mock_handler = MM()
-        mock_handler.handle = AsyncMock(return_value=MM())
+        mock_coordinator = MM()
+        mock_coordinator.coordinate = AsyncMock(return_value=MM())
 
         orchestrator = NodeRegistrationOrchestrator(mock_container)
-        orchestrator.set_timeout_handler(mock_handler)
+        orchestrator.set_timeout_coordinator(mock_coordinator)
 
         await orchestrator.handle_runtime_tick(tick, domain="custom_domain")
 
-        mock_handler.handle.assert_called_once_with(tick, domain="custom_domain")
+        mock_coordinator.coordinate.assert_called_once_with(
+            tick, domain="custom_domain"
+        )

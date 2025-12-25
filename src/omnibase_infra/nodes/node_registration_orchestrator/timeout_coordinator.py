@@ -1,26 +1,26 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Timeout Handler for processing RuntimeTick events.
+"""Timeout Coordinator for coordinating RuntimeTick events.
 
-This handler is invoked when the orchestrator receives a RuntimeTick event.
+This coordinator is invoked when the orchestrator receives a RuntimeTick event.
 It coordinates timeout detection and emission using the injected 'now' time.
 
 Pattern:
     1. Receive RuntimeTick with injected 'now'
-    2. Query for overdue entities using ServiceTimeoutQuery
-    3. Emit timeout events using ServiceTimeoutEmission
+    2. Query for overdue entities using TimeoutScanner
+    3. Emit timeout events using TimeoutEmitter
     4. Return result for observability
 
 Design Decisions:
     - Uses tick.now for all time-based decisions (never system clock)
     - Propagates correlation_id from RuntimeTick for distributed tracing
     - Uses tick_id as causation_id for emitted events
-    - Delegates to ServiceTimeoutEmission for actual emission logic
+    - Delegates to TimeoutEmitter for actual emission logic
 
 Thread Safety:
-    This handler is stateless and thread-safe for concurrent calls.
-    Each call processes independently, delegating thread safety to
-    the underlying services (ServiceTimeoutQuery, ServiceTimeoutEmission).
+    This coordinator is stateless and thread-safe for concurrent calls.
+    Each call coordinates independently, delegating thread safety to
+    the underlying services (TimeoutScanner, TimeoutEmitter).
 
 Related Tickets:
     - OMN-932 (C2): Durable Timeout Handling
@@ -40,37 +40,37 @@ from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.services import (
     ModelTimeoutEmissionResult,
     ModelTimeoutQueryResult,
-    ServiceTimeoutEmission,
-    ServiceTimeoutQuery,
+    TimeoutEmitter,
+    TimeoutScanner,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class ModelTimeoutHandlerResult(BaseModel):
-    """Result from processing a RuntimeTick for timeouts.
+class ModelTimeoutCoordinationResult(BaseModel):
+    """Result from coordinating a RuntimeTick for timeouts.
 
-    Captures the complete result of timeout processing for a single
+    Captures the complete result of timeout coordination for a single
     RuntimeTick event. Used for observability, metrics, and error tracking.
 
     Attributes:
-        tick_id: ID of the processed RuntimeTick.
+        tick_id: ID of the coordinated RuntimeTick.
         tick_now: Injected 'now' from the tick (used for all time decisions).
         ack_timeouts_found: Number of ack timeout candidates found.
         liveness_expirations_found: Number of liveness expiration candidates found.
         ack_timeouts_emitted: Number of ack timeout events actually emitted.
         liveness_expirations_emitted: Number of liveness expiry events emitted.
         markers_updated: Number of projection markers updated.
-        processing_time_ms: Total handler processing time in milliseconds.
+        coordination_time_ms: Total coordinator coordination time in milliseconds.
         query_time_ms: Time spent querying for overdue entities.
         emission_time_ms: Time spent emitting events and updating markers.
-        success: Whether processing completed without errors.
-        error: Error message if processing failed.
-        errors: List of non-fatal errors encountered during processing.
+        success: Whether coordination completed without errors.
+        error: Error message if coordination failed.
+        errors: List of non-fatal errors encountered during coordination.
 
     Example:
-        >>> result = await handler.handle(tick)
-        >>> print(f"Processed tick {result.tick_id}")
+        >>> result = await coordinator.coordinate(tick)
+        >>> print(f"Coordinated tick {result.tick_id}")
         >>> print(f"Found {result.ack_timeouts_found} ack timeouts")
         >>> print(f"Emitted {result.ack_timeouts_emitted} events")
     """
@@ -82,7 +82,7 @@ class ModelTimeoutHandlerResult(BaseModel):
 
     tick_id: UUID = Field(
         ...,
-        description="ID of the processed RuntimeTick",
+        description="ID of the coordinated RuntimeTick",
     )
     tick_now: datetime = Field(
         ...,
@@ -113,10 +113,10 @@ class ModelTimeoutHandlerResult(BaseModel):
         ge=0,
         description="Number of projection markers updated",
     )
-    processing_time_ms: float = Field(
+    coordination_time_ms: float = Field(
         ...,
         ge=0.0,
-        description="Total handler processing time in milliseconds",
+        description="Total coordinator coordination time in milliseconds",
     )
     query_time_ms: float = Field(
         default=0.0,
@@ -130,11 +130,11 @@ class ModelTimeoutHandlerResult(BaseModel):
     )
     success: bool = Field(
         default=True,
-        description="Whether processing completed without errors",
+        description="Whether coordination completed without errors",
     )
     error: str | None = Field(
         default=None,
-        description="Error message if processing failed",
+        description="Error message if coordination failed",
     )
     errors: list[str] = Field(
         default_factory=list,
@@ -157,40 +157,40 @@ class ModelTimeoutHandlerResult(BaseModel):
         return self.error is not None or len(self.errors) > 0
 
 
-class HandlerTimeout:
-    """Handler for RuntimeTick-triggered timeout processing.
+class TimeoutCoordinator:
+    """Coordinator for RuntimeTick-triggered timeout coordination.
 
-    This handler:
+    This coordinator:
     1. Uses injected 'now' from RuntimeTick (never system clock)
-    2. Queries for overdue entities via ServiceTimeoutQuery
-    3. Emits timeout events via ServiceTimeoutEmission
-    4. Is restart-safe: only processes entities without emission markers
+    2. Queries for overdue entities via TimeoutScanner
+    3. Emits timeout events via TimeoutEmitter
+    4. Is restart-safe: only coordinates entities without emission markers
 
-    The handler is designed to be invoked by the orchestrator when it
+    The coordinator is designed to be invoked by the orchestrator when it
     receives a RuntimeTick event from the consumed events queue.
 
     Design Note:
-        The handler delegates all business logic to the underlying services:
-        - ServiceTimeoutQuery: Finds overdue entities
-        - ServiceTimeoutEmission: Emits events and updates markers
+        The coordinator delegates all business logic to the underlying services:
+        - TimeoutScanner: Finds overdue entities
+        - TimeoutEmitter: Emits events and updates markers
 
         This separation ensures testability and allows the services to be
         reused independently.
 
     Usage in orchestrator:
         >>> # Wire dependencies
-        >>> timeout_query = ServiceTimeoutQuery(projection_reader)
-        >>> timeout_emission = ServiceTimeoutEmission(
+        >>> timeout_query = TimeoutScanner(projection_reader)
+        >>> timeout_emission = TimeoutEmitter(
         ...     timeout_query=timeout_query,
         ...     event_bus=event_bus,
         ...     projector=projector,
         ... )
-        >>> handler = HandlerTimeout(timeout_query, timeout_emission)
+        >>> coordinator = TimeoutCoordinator(timeout_query, timeout_emission)
         >>>
-        >>> # Handle RuntimeTick
-        >>> result = await handler.handle(runtime_tick)
+        >>> # Coordinate RuntimeTick
+        >>> result = await coordinator.coordinate(runtime_tick)
         >>> if not result.success:
-        ...     log.error(f"Timeout processing failed: {result.error}")
+        ...     log.error(f"Timeout coordination failed: {result.error}")
 
     Raises:
         InfraConnectionError: If database/Kafka connection fails
@@ -200,32 +200,32 @@ class HandlerTimeout:
 
     def __init__(
         self,
-        timeout_query: ServiceTimeoutQuery,
-        timeout_emission: ServiceTimeoutEmission,
+        timeout_query: TimeoutScanner,
+        timeout_emission: TimeoutEmitter,
     ) -> None:
         """Initialize with required service dependencies.
 
         Args:
-            timeout_query: Service for querying overdue entities.
+            timeout_query: Scanner for querying overdue entities.
             timeout_emission: Service for emitting timeout events.
 
         Example:
             >>> reader = ProjectionReaderRegistration(pool)
-            >>> query = ServiceTimeoutQuery(reader)
-            >>> emission = ServiceTimeoutEmission(query, event_bus, projector)
-            >>> handler = HandlerTimeout(query, emission)
+            >>> query = TimeoutScanner(reader)
+            >>> emission = TimeoutEmitter(query, event_bus, projector)
+            >>> coordinator = TimeoutCoordinator(query, emission)
         """
         self._timeout_query = timeout_query
         self._timeout_emission = timeout_emission
 
-    async def handle(
+    async def coordinate(
         self,
         tick: ModelRuntimeTick,
         domain: str = "registration",
-    ) -> ModelTimeoutHandlerResult:
-        """Handle a RuntimeTick event for timeout processing.
+    ) -> ModelTimeoutCoordinationResult:
+        """Coordinate a RuntimeTick event for timeout coordination.
 
-        This is the main entry point for timeout processing. It:
+        This is the main entry point for timeout coordination. It:
         1. Uses tick.now for all time-based decisions (injected time)
         2. Queries for overdue entities
         3. Emits timeout events and updates markers
@@ -236,7 +236,7 @@ class HandlerTimeout:
             domain: Domain namespace for queries (default: "registration").
 
         Returns:
-            ModelTimeoutHandlerResult with processing details.
+            ModelTimeoutCoordinationResult with coordination details.
 
         Raises:
             InfraConnectionError: If database/Kafka connection fails
@@ -253,8 +253,8 @@ class HandlerTimeout:
             ...     scheduler_id="scheduler-001",
             ...     tick_interval_ms=1000,
             ... )
-            >>> result = await handler.handle(tick)
-            >>> print(f"Processed {result.total_found} timeout candidates")
+            >>> result = await coordinator.coordinate(tick)
+            >>> print(f"Coordinated {result.total_found} timeout candidates")
         """
         start_time = time.perf_counter()
 
@@ -263,7 +263,7 @@ class HandlerTimeout:
         correlation_id = tick.correlation_id
 
         logger.debug(
-            "Processing RuntimeTick for timeouts",
+            "Coordinating RuntimeTick for timeouts",
             extra={
                 "tick_id": str(tick.tick_id),
                 "now": now.isoformat(),
@@ -313,7 +313,7 @@ class HandlerTimeout:
             total_time_ms = (end_time - start_time) * 1000.0
 
             logger.info(
-                "RuntimeTick timeout processing completed",
+                "RuntimeTick timeout coordination completed",
                 extra={
                     "tick_id": str(tick.tick_id),
                     "ack_timeouts_found": ack_timeouts_found,
@@ -321,12 +321,12 @@ class HandlerTimeout:
                     "ack_timeouts_emitted": emission_result.ack_timeouts_emitted,
                     "liveness_expirations_emitted": emission_result.liveness_expirations_emitted,
                     "markers_updated": emission_result.markers_updated,
-                    "processing_time_ms": total_time_ms,
+                    "coordination_time_ms": total_time_ms,
                     "correlation_id": str(correlation_id),
                 },
             )
 
-            return ModelTimeoutHandlerResult(
+            return ModelTimeoutCoordinationResult(
                 tick_id=tick.tick_id,
                 tick_now=now,
                 ack_timeouts_found=ack_timeouts_found,
@@ -334,7 +334,7 @@ class HandlerTimeout:
                 ack_timeouts_emitted=emission_result.ack_timeouts_emitted,
                 liveness_expirations_emitted=emission_result.liveness_expirations_emitted,
                 markers_updated=emission_result.markers_updated,
-                processing_time_ms=total_time_ms,
+                coordination_time_ms=total_time_ms,
                 query_time_ms=query_time_ms,
                 emission_time_ms=emission_time_ms,
                 success=True,
@@ -346,23 +346,23 @@ class HandlerTimeout:
             total_time_ms = (end_time - start_time) * 1000.0
 
             logger.exception(
-                "RuntimeTick timeout processing failed",
+                "RuntimeTick timeout coordination failed",
                 extra={
                     "tick_id": str(tick.tick_id),
                     "error": str(e),
                     "error_type": type(e).__name__,
-                    "processing_time_ms": total_time_ms,
+                    "coordination_time_ms": total_time_ms,
                     "correlation_id": str(correlation_id),
                 },
             )
 
-            return ModelTimeoutHandlerResult(
+            return ModelTimeoutCoordinationResult(
                 tick_id=tick.tick_id,
                 tick_now=now,
-                processing_time_ms=total_time_ms,
+                coordination_time_ms=total_time_ms,
                 success=False,
                 error=f"{type(e).__name__}: {e!s}",
             )
 
 
-__all__: list[str] = ["HandlerTimeout", "ModelTimeoutHandlerResult"]
+__all__: list[str] = ["TimeoutCoordinator", "ModelTimeoutCoordinationResult"]
