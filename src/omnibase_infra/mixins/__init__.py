@@ -20,8 +20,7 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     IntrospectionPerformanceMetrics,
     MixinNodeIntrospection,
 )
-from omnibase_infra.mixins.model_introspection_config import ModelIntrospectionConfig
-from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
+from omnibase_infra.models.discovery import ModelIntrospectionConfig
 
 __all__ = [
     "CapabilitiesDict",
@@ -32,5 +31,4 @@ __all__ = [
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
     "ModelIntrospectionConfig",
-    "ProtocolEventBusLike",
 ]
