@@ -25,6 +25,14 @@ FORBIDDEN_IMPORTS=(
     "kafka"
     "httpx"
     "asyncpg"
+    "aiohttp"
+    "redis"
+    "psycopg"
+    "psycopg2"
+    "consul"
+    "hvac"
+    "aiokafka"
+    "confluent_kafka"
 )
 
 # File patterns to exclude from checking
@@ -136,9 +144,17 @@ OPTIONS:
     --no-color      Disable colored output
 
 FORBIDDEN IMPORTS:
-    - kafka     (Kafka client library - belongs in infra layer)
-    - httpx     (HTTP client library - belongs in infra layer)
-    - asyncpg   (PostgreSQL async driver - belongs in infra layer)
+    - kafka           (Kafka client library - belongs in infra layer)
+    - httpx           (HTTP client library - belongs in infra layer)
+    - asyncpg         (PostgreSQL async driver - belongs in infra layer)
+    - aiohttp         (Async HTTP client - belongs in infra layer)
+    - redis           (Redis client library - belongs in infra layer)
+    - psycopg         (PostgreSQL driver - belongs in infra layer)
+    - psycopg2        (PostgreSQL driver - belongs in infra layer)
+    - consul          (Consul client library - belongs in infra layer)
+    - hvac            (Vault client library - belongs in infra layer)
+    - aiokafka        (Async Kafka client - belongs in infra layer)
+    - confluent_kafka (Confluent Kafka client - belongs in infra layer)
 
 EXIT CODES:
     0   All checks passed - no violations found
