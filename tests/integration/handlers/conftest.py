@@ -2,37 +2,38 @@
 # Copyright (c) 2025 OmniNode Team
 """Pytest configuration and fixtures for handler integration tests.
 
-This module provides fixtures for testing infrastructure handlers:
+This module provides fixtures for testing infrastructure handlers.
+Environment variables should be set via docker-compose.yml or .env file.
 
 HTTP Handlers:
     Uses pytest-httpserver for local mock server testing without external dependencies.
     Requirements: pytest-httpserver must be installed: pip install pytest-httpserver
 
 Database Handlers:
-    Uses remote PostgreSQL infrastructure at 192.168.86.200:5436.
-    Environment Variables:
-        POSTGRES_HOST: PostgreSQL server hostname (default: 192.168.86.200)
-        POSTGRES_PORT: PostgreSQL server port (default: 5436)
+    Environment Variables (required):
+        POSTGRES_HOST: PostgreSQL hostname (required)
+        POSTGRES_PASSWORD: Database password (required)
+    Environment Variables (optional):
+        POSTGRES_PORT: PostgreSQL port (default: 5432)
         POSTGRES_DATABASE: Database name (default: omninode_bridge)
         POSTGRES_USER: Database username (default: postgres)
-        POSTGRES_PASSWORD: Database password (required - no default)
 
     DSN Format: postgresql://{user}:{password}@{host}:{port}/{database}
 
 Vault Handlers:
-    Uses remote Vault infrastructure at 192.168.86.200:8200.
-    Environment Variables:
-        VAULT_ADDR: Vault server URL (default: http://192.168.86.200:8200)
-        VAULT_TOKEN: Vault authentication token (required - no default)
-        VAULT_NAMESPACE: Optional Vault namespace (for Enterprise)
+    Environment Variables (required):
+        VAULT_ADDR: Vault server URL (required)
+        VAULT_TOKEN: Vault authentication token (required)
+    Environment Variables (optional):
+        VAULT_NAMESPACE: Vault namespace (for Enterprise)
 
 Consul Handlers:
-    Uses remote Consul infrastructure at 192.168.86.200:28500.
-    Environment Variables:
-        CONSUL_HOST: Consul server hostname (default: 192.168.86.200)
-        CONSUL_PORT: Consul server port (default: 28500)
+    Environment Variables (required):
+        CONSUL_HOST: Consul hostname (required)
+    Environment Variables (optional):
+        CONSUL_PORT: Consul port (default: 8500)
         CONSUL_SCHEME: HTTP scheme (default: http)
-        CONSUL_TOKEN: Optional ACL token for authentication
+        CONSUL_TOKEN: ACL token for authentication
 """
 
 from __future__ import annotations
@@ -55,15 +56,15 @@ if TYPE_CHECKING:
 # Database Environment Configuration
 # =============================================================================
 
-# Read configuration from environment variables with defaults from CLAUDE.md
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "192.168.86.200")
-POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5436")
+# Read configuration from environment variables (set via docker-compose or .env)
+POSTGRES_HOST = os.getenv("POSTGRES_HOST")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
-# Check if PostgreSQL is available based on password being set
-POSTGRES_AVAILABLE = POSTGRES_PASSWORD is not None
+# Check if PostgreSQL is available based on host and password being set
+POSTGRES_AVAILABLE = POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None
 
 
 def _build_postgres_dsn() -> str:
@@ -224,16 +225,13 @@ async def cleanup_table(
 # Vault Environment Configuration
 # =============================================================================
 
-# Default Vault URL (remote infrastructure)
-DEFAULT_VAULT_ADDR = "http://192.168.86.200:8200"
-
-# Get Vault configuration from environment
-VAULT_ADDR = os.getenv("VAULT_ADDR", DEFAULT_VAULT_ADDR)
+# Get Vault configuration from environment (set via docker-compose or .env)
+VAULT_ADDR = os.getenv("VAULT_ADDR")
 VAULT_TOKEN = os.getenv("VAULT_TOKEN")
 VAULT_NAMESPACE = os.getenv("VAULT_NAMESPACE")
 
-# Vault is available if token is set
-VAULT_AVAILABLE = VAULT_TOKEN is not None
+# Vault is available if address and token are set
+VAULT_AVAILABLE = VAULT_ADDR is not None and VAULT_TOKEN is not None
 
 
 def _check_vault_reachable() -> bool:
@@ -351,15 +349,10 @@ async def vault_handler(
 # Consul Environment Configuration
 # =============================================================================
 
-# Default Consul configuration (remote infrastructure from CLAUDE.md)
-DEFAULT_CONSUL_HOST = "192.168.86.200"
-DEFAULT_CONSUL_PORT = 28500  # External port for host access
-DEFAULT_CONSUL_SCHEME = "http"
-
-# Read Consul configuration from environment
-CONSUL_HOST = os.getenv("CONSUL_HOST", DEFAULT_CONSUL_HOST)
-CONSUL_PORT = int(os.getenv("CONSUL_PORT", str(DEFAULT_CONSUL_PORT)))
-CONSUL_SCHEME = os.getenv("CONSUL_SCHEME", DEFAULT_CONSUL_SCHEME)
+# Read Consul configuration from environment (set via docker-compose or .env)
+CONSUL_HOST = os.getenv("CONSUL_HOST")
+CONSUL_PORT = int(os.getenv("CONSUL_PORT", "8500"))
+CONSUL_SCHEME = os.getenv("CONSUL_SCHEME", "http")
 CONSUL_TOKEN = os.getenv("CONSUL_TOKEN")
 
 
@@ -371,6 +364,9 @@ def _check_consul_reachable() -> bool:
     Returns:
         bool: True if Consul is reachable, False otherwise.
     """
+    if CONSUL_HOST is None:
+        return False
+
     import socket
 
     try:

@@ -73,7 +73,8 @@ PublishedEventDict = dict[
 class MockEventBus:
     """Mock event bus for testing introspection publishing.
 
-    Implements ProtocolEventBusLike protocol for type safety.
+    Implements the event bus interface required by MixinNodeIntrospection.
+    The mixin uses duck typing to check for publish_envelope and publish methods.
     """
 
     def __init__(self, should_fail: bool = False) -> None:
@@ -874,7 +875,7 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         node = MockNode()
 
         # Create event bus that raises unexpected exception
-        # Must implement both methods from ProtocolEventBusLike
+        # Must implement publish_envelope and publish methods for duck typing
         class BrokenEventBus:
             async def publish_envelope(self, envelope: object, topic: str) -> None:
                 raise ValueError("Unexpected error")

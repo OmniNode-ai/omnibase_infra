@@ -368,11 +368,11 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 580 (2025-12-23): OMN-888 + PR #57 + OMN-954 merge (~36 additional unions combined)
 # - 585 (2025-12-25): OMN-811 ComputeRegistry + node registration orchestrator unions (~5 added)
 # - 586 (2025-12-25): OMN-932 durable timeouts + introspection config migration (~1 added)
-# - 587 (2025-12-25): OMN-816 restore ProtocolEventBusLike (bytes | None in publish method)
+# - 586 (2025-12-25): OMN-816 removed ProtocolEventBusLike (use ProtocolEventBus from core)
 #
-# Threshold: 587 (buffer above ~584 baseline for codebase growth)
+# Threshold: 586 (buffer above ~584 baseline for codebase growth)
 # Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
-INFRA_MAX_UNIONS = 587
+INFRA_MAX_UNIONS = 586
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
