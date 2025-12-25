@@ -67,9 +67,7 @@ Usage:
     ...     validate_execution_shapes_ci,
     ... )
     >>> violations = validate_execution_shapes(Path("src/handlers"))
-    >>> result = validate_execution_shapes_ci(Path("src/handlers"))
-    >>> if not result.passed:
-    ...     print(f"Found {result.blocking_count} blocking violations")
+    >>> passed, violations = validate_execution_shapes_ci(Path("src/handlers"))
 """
 
 from __future__ import annotations
@@ -87,9 +85,6 @@ from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.validation.model_execution_shape_rule import (
     ModelExecutionShapeRule,
-)
-from omnibase_infra.models.validation.model_execution_shape_validation_result import (
-    ModelExecutionShapeValidationResult,
 )
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
@@ -1107,35 +1102,34 @@ def validate_execution_shapes(
 
 def validate_execution_shapes_ci(
     directory: Path,
-) -> ModelExecutionShapeValidationResult:
-    """CI gate for execution shape validation.
+) -> tuple[bool, list[ModelExecutionShapeViolationResult]]:
+    """CI gate that returns (passed, violations).
 
-    This function is designed for CI pipeline integration. It returns a
-    structured result model containing the pass/fail status and all violations
-    for reporting.
+    This function is designed for CI pipeline integration. It returns a boolean
+    indicating whether the validation passed (no blocking violations) along with
+    the full list of violations for reporting.
 
     Args:
         directory: Path to the directory to validate.
 
     Returns:
-        ModelExecutionShapeValidationResult containing:
+        Tuple of (passed, violations) where:
             - passed: True if no error-severity violations found.
             - violations: Complete list of all violations for reporting.
-            - Convenience methods for formatting and inspection.
 
     Example:
-        >>> result = validate_execution_shapes_ci(Path("src/handlers"))
-        >>> if not result.passed:
-        ...     for line in result.format_for_ci():
-        ...         print(line)
+        >>> passed, violations = validate_execution_shapes_ci(Path("src/handlers"))
+        >>> if not passed:
+        ...     for v in violations:
+        ...         print(v.format_for_ci())
         ...     sys.exit(1)
-
-    .. versionchanged:: 0.6.0
-        Changed return type from ``tuple[bool, list[...]]`` to
-        ``ModelExecutionShapeValidationResult`` (OMN-1003).
     """
     violations = validate_execution_shapes(directory)
-    return ModelExecutionShapeValidationResult.from_violations(violations)
+
+    # Check if any blocking violations exist
+    has_blocking = any(v.is_blocking() for v in violations)
+
+    return (not has_blocking, violations)
 
 
 def get_execution_shape_rules() -> dict[EnumHandlerType, ModelExecutionShapeRule]:
@@ -1209,7 +1203,6 @@ _validator = ExecutionShapeValidator()
 __all__ = [
     "ExecutionShapeValidator",
     "HandlerInfo",
-    "ModelExecutionShapeValidationResult",
     "validate_execution_shapes",
     "validate_execution_shapes_ci",
     "get_execution_shape_rules",

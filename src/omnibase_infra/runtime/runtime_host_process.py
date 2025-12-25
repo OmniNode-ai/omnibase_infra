@@ -657,23 +657,22 @@ class RuntimeHostProcess:
         # - Grouping handlers by priority (higher priority first)
         # - Parallel shutdown within priority groups for performance
         if self._handlers:
-            shutdown_result = (
-                await self._lifecycle_executor.shutdown_handlers_by_priority(
-                    self._handlers
-                )
+            (
+                all_succeeded,
+                all_failed,
+            ) = await self._lifecycle_executor.shutdown_handlers_by_priority(
+                self._handlers
             )
 
             # Log summary (ProtocolLifecycleExecutor already logs detailed info)
             logger.info(
                 "Handler shutdown completed",
                 extra={
-                    "succeeded_handlers": shutdown_result.succeeded_handlers,
-                    "failed_handlers": [
-                        f.handler_type for f in shutdown_result.failed_handlers
-                    ],
-                    "total_handlers": shutdown_result.total_count,
-                    "success_count": shutdown_result.success_count,
-                    "failure_count": shutdown_result.failure_count,
+                    "succeeded_handlers": all_succeeded,
+                    "failed_handlers": [f[0] for f in all_failed],
+                    "total_handlers": len(all_succeeded) + len(all_failed),
+                    "success_count": len(all_succeeded),
+                    "failure_count": len(all_failed),
                 },
             )
 
@@ -1202,9 +1201,9 @@ class RuntimeHostProcess:
             results = await asyncio.gather(*health_check_tasks)
 
             # Process results and build the results dict
-            for health_result in results:
-                handler_health_results[health_result.handler_type] = health_result.details
-                if not health_result.healthy:
+            for handler_type, health_result in results:
+                handler_health_results[handler_type] = health_result
+                if not health_result.get("healthy", False):
                     handlers_all_healthy = False
 
         # Check for failed handlers - any failures indicate degraded state

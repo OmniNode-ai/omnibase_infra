@@ -12,7 +12,6 @@ Exports:
     ModelCoverageMetrics: Coverage metrics for routing validation
     ModelExecutionShapeRule: Rule defining handler type constraints
     ModelExecutionShapeValidation: Validates message category to node kind routing
-    ModelExecutionShapeValidationResult: Aggregate result of execution shape validation
     ModelExecutionShapeViolationResult: Result of violation detection
     ModelValidationOutcome: Generic validation result model
 """
@@ -27,9 +26,6 @@ from omnibase_infra.models.validation.model_execution_shape_rule import (
 from omnibase_infra.models.validation.model_execution_shape_validation import (
     ModelExecutionShapeValidation,
 )
-from omnibase_infra.models.validation.model_execution_shape_validation_result import (
-    ModelExecutionShapeValidationResult,
-)
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
@@ -42,7 +38,6 @@ __all__ = [
     "ModelCoverageMetrics",
     "ModelExecutionShapeRule",
     "ModelExecutionShapeValidation",
-    "ModelExecutionShapeValidationResult",
     "ModelExecutionShapeViolationResult",
     "ModelValidationOutcome",
 ]
