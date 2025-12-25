@@ -14,6 +14,38 @@ Workflow Pattern:
 All workflow logic, retry policies, and result aggregation are handled
 by the NodeOrchestrator base class using contract.yaml configuration.
 
+Timeout Coordination (OMN-932):
+    The orchestrator also handles RuntimeTick events for timeout detection.
+    When a RuntimeTick is received:
+    1. The timeout_coordinator queries for overdue entities
+    2. Emits timeout events (NodeRegistrationAckTimedOut, NodeLivenessExpired)
+    3. Updates projection markers to prevent duplicate emissions
+
+    To wire timeout coordination:
+    ```python
+    from omnibase_infra.nodes.node_registration_orchestrator import (
+        NodeRegistrationOrchestrator,
+        TimeoutCoordinator,
+    )
+    from omnibase_infra.services import TimeoutScanner, TimeoutEmitter
+
+    # Wire dependencies
+    timeout_query = TimeoutScanner(projection_reader)
+    timeout_emission = TimeoutEmitter(
+        timeout_query=timeout_query,
+        event_bus=event_bus,
+        projector=projector,
+    )
+    timeout_coordinator = TimeoutCoordinator(timeout_query, timeout_emission)
+
+    # Create orchestrator with timeout coordinator
+    orchestrator = NodeRegistrationOrchestrator(container)
+    orchestrator.set_timeout_coordinator(timeout_coordinator)
+
+    # Handle RuntimeTick
+    result = await orchestrator.handle_runtime_tick(tick)
+    ```
+
 Design Decisions:
     - 100% Contract-Driven: All workflow logic in YAML, not Python
     - Zero Custom Methods: Base class handles everything
@@ -38,6 +70,7 @@ Implemented Features:
 
 Related Modules:
     - contract.yaml: Workflow definition and execution graph
+    - timeout_coordinator.py: RuntimeTick timeout coordinator
     - models/: Input, output, and configuration models (kept for compatibility)
 """
 
@@ -50,6 +83,12 @@ from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
+    from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
+        ModelTimeoutCoordinationResult,
+        TimeoutCoordinator,
+    )
+    from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
+
 
 class NodeRegistrationOrchestrator(NodeOrchestrator):
     """Registration orchestrator - workflow driven by contract.yaml.
@@ -59,6 +98,11 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
     2. Calling reducer to compute intents (workflow_definition.execution_graph)
     3. Executing intents via effect (workflow_definition.execution_graph)
     4. Publishing result events (published_events in contract)
+
+    Additionally, handles RuntimeTick events for timeout coordination:
+    1. Queries for overdue entities (ack timeouts, liveness expirations)
+    2. Emits timeout events
+    3. Updates projection markers
 
     All workflow logic, retry policies, and result aggregation are handled
     by the NodeOrchestrator base class using contract.yaml configuration.
@@ -106,6 +150,15 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
         # Process input
         result = await orchestrator.process(input_data)
         ```
+
+    Timeout Coordination Usage:
+        ```python
+        # Wire timeout coordinator
+        orchestrator.set_timeout_coordinator(timeout_coordinator)
+
+        # Handle RuntimeTick events
+        result = await orchestrator.handle_runtime_tick(tick)
+        ```
     """
 
     def __init__(self, container: ModelONEXContainer) -> None:
@@ -115,6 +168,62 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
             container: ONEX dependency injection container
         """
         super().__init__(container)
+        self._timeout_coordinator: TimeoutCoordinator | None = None
+
+    def set_timeout_coordinator(self, coordinator: TimeoutCoordinator) -> None:
+        """Set the timeout coordinator for RuntimeTick coordination.
+
+        The timeout coordinator is used to coordinate RuntimeTick events for
+        detecting and emitting timeout events.
+
+        Args:
+            coordinator: Configured TimeoutCoordinator instance.
+
+        Example:
+            >>> timeout_coordinator = TimeoutCoordinator(timeout_query, timeout_emission)
+            >>> orchestrator.set_timeout_coordinator(timeout_coordinator)
+        """
+        self._timeout_coordinator = coordinator
+
+    @property
+    def has_timeout_coordinator(self) -> bool:
+        """Check if timeout coordinator is configured."""
+        return self._timeout_coordinator is not None
+
+    async def handle_runtime_tick(
+        self,
+        tick: ModelRuntimeTick,
+        domain: str = "registration",
+    ) -> ModelTimeoutCoordinationResult:
+        """Handle a RuntimeTick event for timeout coordination.
+
+        Delegates to the configured timeout coordinator to coordinate timeouts.
+        Uses tick.now for all time-based decisions (never system clock).
+
+        Args:
+            tick: The RuntimeTick event with injected 'now'.
+            domain: Domain namespace for queries (default: "registration").
+
+        Returns:
+            ModelTimeoutCoordinationResult with coordination details.
+
+        Raises:
+            RuntimeError: If no timeout coordinator is configured.
+            InfraConnectionError: If database/Kafka connection fails.
+            InfraTimeoutError: If operations time out.
+            InfraUnavailableError: If circuit breaker is open.
+
+        Example:
+            >>> result = await orchestrator.handle_runtime_tick(tick)
+            >>> print(f"Emitted {result.total_emitted} timeout events")
+        """
+        if self._timeout_coordinator is None:
+            raise RuntimeError(
+                "Timeout coordinator not configured. "
+                "Call set_timeout_coordinator() before handling RuntimeTick events."
+            )
+
+        return await self._timeout_coordinator.coordinate(tick, domain=domain)
 
 
 __all__ = ["NodeRegistrationOrchestrator"]

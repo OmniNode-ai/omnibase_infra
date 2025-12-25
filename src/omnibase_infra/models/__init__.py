@@ -20,6 +20,7 @@ from omnibase_infra.models.dispatch import (
 )
 from omnibase_infra.models.health import ModelHealthCheckResult
 from omnibase_infra.models.logging import ModelLogContext
+from omnibase_infra.models.model_semver import SEMVER_DEFAULT, ModelSemVer
 from omnibase_infra.models.projection import (
     ModelRegistrationProjection,
     ModelRegistrationSnapshot,
@@ -70,6 +71,9 @@ __all__ = [
     "ModelNodeIntrospectionEvent",
     "ModelNodeMetadata",
     "ModelNodeRegistration",
+    # SemVer models
+    "ModelSemVer",
+    "SEMVER_DEFAULT",
     # Validation models
     "ModelCoverageMetrics",
     "ModelExecutionShapeRule",

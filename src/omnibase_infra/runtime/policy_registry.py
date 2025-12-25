@@ -123,7 +123,7 @@ class PolicyRegistry:
         from omnibase_core.container import ModelONEXContainer
         from omnibase_infra.runtime.policy_registry import PolicyRegistry
 
-        # Resolve from container (preferred) - async in omnibase_core 0.4.x+
+        # Resolve from container (preferred) - async in omnibase_core v0.5.6+
         registry = await container.service_registry.resolve_service(PolicyRegistry)
 
         # Or use helper function (also async)
@@ -580,6 +580,64 @@ class PolicyRegistry:
 
         return policy_type
 
+    @staticmethod
+    def _normalize_version(version: str) -> str:
+        """Normalize version string for consistent lookups.
+
+        This method uses the same normalization logic as ModelPolicyKey.normalize_version
+        to ensure version strings are comparable during registry lookups.
+
+        Normalization rules:
+            1. Strip leading/trailing whitespace
+            2. Strip leading 'v' or 'V' prefix (e.g., "v1.0.0" -> "1.0.0")
+            3. Ensure three-part version (e.g., "1" -> "1.0.0", "1.2" -> "1.2.0")
+            4. Preserve prerelease suffixes (e.g., "1.0-beta" -> "1.0.0-beta")
+
+        Args:
+            version: The version string to normalize
+
+        Returns:
+            Normalized version string in "x.y.z" or "x.y.z-prerelease" format
+
+        Example:
+            >>> PolicyRegistry._normalize_version("1.0")
+            '1.0.0'
+            >>> PolicyRegistry._normalize_version("v2.1")
+            '2.1.0'
+        """
+        # Strip whitespace
+        normalized = version.strip()
+
+        # Don't normalize empty - let caller handle
+        if not normalized:
+            return version
+
+        # Strip leading 'v' or 'V' prefix
+        if normalized.startswith(("v", "V")):
+            normalized = normalized[1:]
+
+        # Split on first hyphen to handle prerelease suffix
+        parts = normalized.split("-", 1)
+        version_part = parts[0]
+        prerelease = parts[1] if len(parts) > 1 else ""
+
+        # Ensure three-part version (x.y.z)
+        # Only expand partial versions, don't truncate versions with >3 parts
+        version_nums = version_part.split(".")
+        if len(version_nums) <= 3:
+            while len(version_nums) < 3:
+                version_nums.append("0")
+            normalized = ".".join(version_nums)
+        else:
+            # Pass through as-is
+            normalized = version_part
+
+        # Re-add prerelease if present (even if empty)
+        if len(parts) > 1:
+            normalized = f"{normalized}-{prerelease}"
+
+        return normalized
+
     def register(
         self,
         registration: ModelPolicyRegistration,
@@ -669,6 +727,7 @@ class PolicyRegistry:
         Raises:
             PolicyRegistryError: If policy has async methods and
                                allow_async=False, or if policy_type is invalid
+            ProtocolConfigurationError: If version format is invalid
 
         Example:
             >>> registry = PolicyRegistry()
@@ -679,13 +738,28 @@ class PolicyRegistry:
             ...     version="1.0.0",
             ... )
         """
-        registration = ModelPolicyRegistration(
-            policy_id=policy_id,
-            policy_class=policy_class,
-            policy_type=policy_type,
-            version=version,
-            allow_async=allow_async,
-        )
+        from pydantic import ValidationError
+
+        try:
+            registration = ModelPolicyRegistration(
+                policy_id=policy_id,
+                policy_class=policy_class,
+                policy_type=policy_type,
+                version=version,
+                allow_async=allow_async,
+            )
+        except ValidationError as e:
+            # Extract version validation error and re-raise as ProtocolConfigurationError
+            # for backward compatibility with existing API
+            for error in e.errors():
+                if error.get("loc") == ("version",):
+                    raise ProtocolConfigurationError(
+                        f"Invalid version format: {error.get('msg', str(e))}",
+                        version=version,
+                    ) from e
+            # Re-raise other validation errors as-is
+            raise
+
         self.register(registration)
 
     def get(
@@ -733,6 +807,11 @@ class PolicyRegistry:
             self._normalize_policy_type(policy_type) if policy_type is not None else ""
         )
 
+        # Normalize version for consistent lookup (e.g., "1.0" matches "1.0.0")
+        normalized_version: str | None = None
+        if version is not None:
+            normalized_version = self._normalize_version(version)
+
         with self._lock:
             # Performance optimization: Use secondary index for O(1) lookup by policy_id
             # This avoids iterating through all registry entries (O(n) → O(1))
@@ -757,7 +836,7 @@ class PolicyRegistry:
 
             # Find matching entries from candidates (optimized to reduce allocations)
             # Fast path: no filtering needed (common case - just get latest version)
-            if not normalized_type and version is None:
+            if not normalized_type and normalized_version is None:
                 # Fast path optimization: avoid tuple allocation and batch dict lookups
                 # Only build the matches list if we have multiple versions
                 if len(candidate_keys) == 1:
@@ -777,7 +856,10 @@ class PolicyRegistry:
                 for key in candidate_keys:
                     if normalized_type and key.policy_type != normalized_type:
                         continue
-                    if version is not None and key.version != version:
+                    if (
+                        normalized_version is not None
+                        and key.version != normalized_version
+                    ):
                         continue
                     matches.append((key, self._registry[key]))
 
@@ -800,7 +882,7 @@ class PolicyRegistry:
 
                 # If version not specified and multiple matches, return latest
                 # (using cached semantic version comparison)
-                if version is None and len(matches) > 1:
+                if normalized_version is None and len(matches) > 1:
                     # Sort in-place to avoid allocating a new list
                     matches.sort(
                         key=lambda x: self._parse_semver(x[0].version), reverse=True
@@ -859,7 +941,26 @@ class PolicyRegistry:
         This should only be used in test fixtures to ensure test isolation.
 
         Thread Safety:
-            This method is thread-safe and uses the class-level lock.
+            This method is thread-safe and uses the class-level lock. The reset
+            operation is atomic - either the cache is fully reset or not at all.
+
+            In-flight Operations:
+                If other threads have already obtained a reference to the cache
+                via _get_semver_parser(), they will continue using the old cache
+                until they complete. This is safe because the old cache remains
+                a valid callable until garbage collected. New operations after
+                reset will get the new cache instance when created.
+
+            Memory Reclamation:
+                The old cache's internal LRU entries are explicitly cleared via
+                cache_clear() before the reference is released. This ensures
+                prompt memory reclamation rather than waiting for garbage
+                collection.
+
+            Concurrent Reset:
+                Multiple concurrent reset calls are safe. Each reset will clear
+                the current cache (if any) and set the reference to None. The
+                lock ensures only one reset executes at a time.
 
         Example:
             >>> # In test fixture
@@ -868,6 +969,15 @@ class PolicyRegistry:
             >>> # Now cache will be initialized with size 64 on next use
         """
         with cls._semver_cache_lock:
+            old_cache = cls._semver_cache
+            if old_cache is not None:
+                # Clear internal LRU cache entries before releasing reference.
+                # This ensures prompt memory reclamation rather than waiting
+                # for garbage collection of the orphaned function object.
+                # Note: cache_clear() is added by @lru_cache decorator but not
+                # reflected in Callable type annotation. This is a known mypy
+                # limitation with lru_cache wrappers.
+                old_cache.cache_clear()  # type: ignore[attr-defined]
             cls._semver_cache = None
 
     @classmethod
@@ -879,6 +989,9 @@ class PolicyRegistry:
 
         Thread Safety:
             Uses double-checked locking pattern for thread-safe lazy initialization.
+            The fast path stores the cache reference in a local variable to prevent
+            TOCTOU (time-of-check-time-of-use) race conditions where another thread
+            could call _reset_semver_cache() between the None check and the return.
 
         Returns:
             Cached semver parsing function that returns ModelSemVer instances.
@@ -888,8 +1001,12 @@ class PolicyRegistry:
             - Subsequent calls: Returns cached function reference (O(1))
         """
         # Fast path: cache already initialized
-        if cls._semver_cache is not None:
-            return cls._semver_cache
+        # CRITICAL: Store in local variable to prevent TOCTOU race condition.
+        # Without this, another thread could call _reset_semver_cache() between
+        # the None check and the return, causing this method to return None.
+        cache = cls._semver_cache
+        if cache is not None:
+            return cache
 
         # Slow path: initialize with lock
         with cls._semver_cache_lock:
@@ -1172,13 +1289,18 @@ class PolicyRegistry:
             except PolicyRegistryError:
                 return False
 
+        # Normalize version for consistent lookup (e.g., "1.0" matches "1.0.0")
+        normalized_version: str | None = None
+        if version is not None:
+            normalized_version = self._normalize_version(version)
+
         with self._lock:
             # Performance optimization: Use secondary index
             candidate_keys = self._policy_id_index.get(policy_id, [])
             for key in candidate_keys:
                 if normalized_type and key.policy_type != normalized_type:
                     continue
-                if version is not None and key.version != version:
+                if normalized_version is not None and key.version != normalized_version:
                     continue
                 return True
             return False
@@ -1220,6 +1342,11 @@ class PolicyRegistry:
             except PolicyRegistryError:
                 return 0
 
+        # Normalize version for consistent lookup (e.g., "1.0" matches "1.0.0")
+        normalized_version: str | None = None
+        if version is not None:
+            normalized_version = self._normalize_version(version)
+
         # Thread safety: Lock held during full unregister operation (write operation)
         with self._lock:
             # Performance optimization: Use secondary index
@@ -1229,7 +1356,7 @@ class PolicyRegistry:
             for key in candidate_keys:
                 if normalized_type and key.policy_type != normalized_type:
                     continue
-                if version is not None and key.version != version:
+                if normalized_version is not None and key.version != normalized_version:
                     continue
                 keys_to_remove.append(key)
 
