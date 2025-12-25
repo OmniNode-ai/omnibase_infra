@@ -8,13 +8,17 @@ mixin, consolidating initialization parameters into a single typed configuration
 
 from __future__ import annotations
 
+import logging
 import re
+import warnings
 from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
+
+logger = logging.getLogger(__name__)
 
 # Valid node types in the ONEX 4-node architecture
 # Accept both uppercase (used in tests/contracts) and lowercase (EnumHandlerType values)
@@ -44,6 +48,13 @@ DEFAULT_REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
 # Valid topics: lowercase alphanumeric with dots, hyphens, and underscores
 # Must start with a letter and not have consecutive dots
 TOPIC_VALIDATION_PATTERN = re.compile(r"^[a-z][a-z0-9._-]*[a-z0-9]$|^[a-z]$")
+
+# Version suffix validation pattern
+# Topics should end with .v followed by one or more digits (e.g., .v1, .v2, .v123)
+VERSION_SUFFIX_PATTERN = re.compile(r"\.v[0-9]+$")
+
+# ONEX topic prefix - topics starting with this prefix require version suffix
+ONEX_TOPIC_PREFIX = "onex."
 
 
 def _coerce_to_uuid(value: str | UUID) -> UUID:
@@ -218,6 +229,11 @@ class ModelIntrospectionConfig(BaseModel):
         - Not contain special characters (@, #, $, %, etc.)
         - Not contain whitespace
 
+        Additionally:
+        - ONEX topics (starting with 'onex.') MUST have version suffix (.v1, .v2, etc.)
+        - Legacy topics (not starting with 'onex.') are allowed without version suffix
+          but will log a warning suggesting version suffix adoption
+
         Args:
             v: Topic name after Pydantic's initial validation.
 
@@ -225,7 +241,8 @@ class ModelIntrospectionConfig(BaseModel):
             Validated topic name.
 
         Raises:
-            ValueError: If topic name contains invalid characters or format.
+            ValueError: If topic name contains invalid characters, format,
+                or if ONEX topic is missing required version suffix.
         """
         # Check for whitespace
         if " " in v or "\t" in v or "\n" in v:
@@ -250,6 +267,28 @@ class ModelIntrospectionConfig(BaseModel):
                 "only lowercase alphanumeric characters, dots, hyphens, and underscores"
             )
 
+        # Version suffix validation
+        has_version_suffix = VERSION_SUFFIX_PATTERN.search(v) is not None
+        is_onex_topic = v.startswith(ONEX_TOPIC_PREFIX)
+
+        if is_onex_topic and not has_version_suffix:
+            # ONEX topics MUST have version suffix
+            raise ValueError(
+                f"ONEX topic '{v}' must end with a version suffix (e.g., .v1, .v2). "
+                "ONEX topics require explicit versioning for schema evolution."
+            )
+
+        if not is_onex_topic and not has_version_suffix:
+            # Legacy topics: warn but allow (backwards compatibility)
+            # Use warnings module for Pydantic validator compatibility
+            # (logging in validators can be problematic during model construction)
+            warnings.warn(
+                f"Topic '{v}' does not have a version suffix (e.g., .v1). "
+                "Consider adding a version suffix for better schema evolution support.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         return v
 
 
@@ -261,4 +300,6 @@ __all__: list[str] = [
     "DEFAULT_HEARTBEAT_TOPIC",
     "DEFAULT_REQUEST_INTROSPECTION_TOPIC",
     "TOPIC_VALIDATION_PATTERN",
+    "VERSION_SUFFIX_PATTERN",
+    "ONEX_TOPIC_PREFIX",
 ]

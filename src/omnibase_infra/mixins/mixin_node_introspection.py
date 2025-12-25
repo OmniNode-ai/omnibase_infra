@@ -177,6 +177,9 @@ from omnibase_infra.mixins.model_introspection_config import (
 )
 from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
+from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
+    ModelIntrospectionPerformanceMetrics,
+)
 from omnibase_infra.models.discovery.model_node_introspection_event import (
     CapabilitiesTypedDict,
 )
@@ -269,6 +272,25 @@ class IntrospectionPerformanceMetrics:
         }
 
 
+class PerformanceMetricsCacheDict(TypedDict, total=False):
+    """TypedDict for JSON-serialized ModelIntrospectionPerformanceMetrics.
+
+    This matches the output of ModelIntrospectionPerformanceMetrics.model_dump(mode="json").
+    Using total=False since this is optional in the parent event.
+    """
+
+    get_capabilities_ms: float
+    discover_capabilities_ms: float
+    get_endpoints_ms: float
+    get_current_state_ms: float
+    total_introspection_ms: float
+    cache_hit: bool
+    method_count: int
+    threshold_exceeded: bool
+    slow_operations: list[str]
+    captured_at: str  # datetime serializes to ISO string in JSON mode
+
+
 class IntrospectionCacheDict(TypedDict):
     """TypedDict representing the JSON-serialized ModelNodeIntrospectionEvent.
 
@@ -294,6 +316,8 @@ class IntrospectionCacheDict(TypedDict):
     reason: str
     correlation_id: str | None  # UUID serializes to string in JSON mode
     timestamp: str  # datetime serializes to ISO string in JSON mode
+    # Performance metrics from introspection (optional, may be None)
+    performance_metrics: PerformanceMetricsCacheDict | None
 
 
 class MixinNodeIntrospection:
@@ -998,6 +1022,33 @@ class MixinNodeIntrospection:
         fsm_indicators = {"_state", "current_state", "_current_state", "state"}
         return any(hasattr(self, indicator) for indicator in fsm_indicators)
 
+    def _to_pydantic_metrics(
+        self, metrics: IntrospectionPerformanceMetrics
+    ) -> ModelIntrospectionPerformanceMetrics:
+        """Convert internal metrics dataclass to Pydantic model for event payload.
+
+        This method converts the internal ``IntrospectionPerformanceMetrics``
+        dataclass to a ``ModelIntrospectionPerformanceMetrics`` Pydantic model,
+        enabling inclusion in ``ModelNodeIntrospectionEvent`` payloads.
+
+        Args:
+            metrics: Internal performance metrics dataclass from introspection.
+
+        Returns:
+            Pydantic model suitable for event serialization.
+        """
+        return ModelIntrospectionPerformanceMetrics(
+            get_capabilities_ms=metrics.get_capabilities_ms,
+            discover_capabilities_ms=metrics.discover_capabilities_ms,
+            get_endpoints_ms=metrics.get_endpoints_ms,
+            get_current_state_ms=metrics.get_current_state_ms,
+            total_introspection_ms=metrics.total_introspection_ms,
+            cache_hit=metrics.cache_hit,
+            method_count=metrics.method_count,
+            threshold_exceeded=metrics.threshold_exceeded,
+            slow_operations=list(metrics.slow_operations),
+        )
+
     async def get_capabilities(self) -> CapabilitiesDict:
         """Extract node capabilities via reflection.
 
@@ -1350,31 +1401,13 @@ class MixinNodeIntrospection:
             )
             node_type = "unknown"
 
-        event = ModelNodeIntrospectionEvent(
-            node_id=node_id,
-            node_type=node_type,
-            capabilities=capabilities,
-            endpoints=endpoints,
-            current_state=current_state,
-            version=self._introspection_version,
-            reason="cache_refresh",
-            correlation_id=uuid4(),
-        )
-
-        # Update cache - cast the model_dump output to our typed dict since we know
-        # the structure matches (model_dump returns dict[str, Any] by default)
-        self._introspection_cache = cast(
-            IntrospectionCacheDict, event.model_dump(mode="json")
-        )
-        self._introspection_cached_at = current_time
-
         # Extract operations list with proper type narrowing
         operations_value = capabilities.get("operations", [])
         operations_count = (
             len(operations_value) if isinstance(operations_value, list) else 0
         )
 
-        # Finalize metrics
+        # Finalize metrics before creating event (so they can be included)
         metrics.total_introspection_ms = (time.perf_counter() - total_start) * 1000
         metrics.cache_hit = False
 
@@ -1390,6 +1423,26 @@ class MixinNodeIntrospection:
 
         # Store metrics for later retrieval
         self._introspection_last_metrics = metrics
+
+        # Create event with performance metrics included
+        event = ModelNodeIntrospectionEvent(
+            node_id=node_id,
+            node_type=node_type,
+            capabilities=capabilities,
+            endpoints=endpoints,
+            current_state=current_state,
+            version=self._introspection_version,
+            reason="cache_refresh",
+            correlation_id=uuid4(),
+            performance_metrics=self._to_pydantic_metrics(metrics),
+        )
+
+        # Update cache - cast the model_dump output to our typed dict since we know
+        # the structure matches (model_dump returns dict[str, Any] by default)
+        self._introspection_cache = cast(
+            IntrospectionCacheDict, event.model_dump(mode="json")
+        )
+        self._introspection_cached_at = current_time
 
         # Log if any threshold was exceeded
         if metrics.threshold_exceeded:
@@ -2267,6 +2320,8 @@ __all__ = [
     "CapabilitiesTypedDict",  # Re-export from model for convenience
     "IntrospectionCacheDict",
     "IntrospectionPerformanceMetrics",
+    "ModelIntrospectionPerformanceMetrics",  # Pydantic model for event payloads
+    "PerformanceMetricsCacheDict",  # TypedDict for JSON-serialized metrics
     "PERF_THRESHOLD_GET_CAPABILITIES_MS",
     "PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS",
     "PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS",

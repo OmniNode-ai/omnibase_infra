@@ -3295,6 +3295,169 @@ class TestModelIntrospectionConfigTopicValidation:
                     introspection_topic=char,
                 )
 
+    def test_onex_topic_requires_version_suffix(self) -> None:
+        """Test that ONEX topics (starting with 'onex.') require version suffix.
+
+        ONEX topics must end with a version suffix like .v1, .v2, .v10 for
+        explicit schema versioning. Topics without version suffix are rejected.
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        # ONEX topics without version suffix should be rejected
+        invalid_onex_topics = [
+            "onex.introspection",
+            "onex.heartbeat",
+            "onex.node.registration",
+            "onex.service.discovery.events",
+        ]
+
+        for invalid_topic in invalid_onex_topics:
+            with pytest.raises(ValidationError) as exc_info:
+                ModelIntrospectionConfig(
+                    node_id=uuid4(),
+                    node_type="EFFECT",
+                    introspection_topic=invalid_topic,
+                )
+            error_str = str(exc_info.value).lower()
+            assert "version suffix" in error_str
+            assert "onex topic" in error_str
+
+    def test_onex_topic_with_version_suffix_accepted(self) -> None:
+        """Test that ONEX topics with valid version suffix are accepted.
+
+        ONEX topics with proper version suffix (.v1, .v2, .v123) should pass
+        validation without errors.
+        """
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        valid_onex_topics = [
+            "onex.introspection.v1",
+            "onex.heartbeat.v2",
+            "onex.node.registration.v10",
+            "onex.service.discovery.events.v123",
+        ]
+
+        for topic in valid_onex_topics:
+            config = ModelIntrospectionConfig(
+                node_id=uuid4(),
+                node_type="EFFECT",
+                introspection_topic=topic,
+            )
+            assert config.introspection_topic == topic
+
+    def test_legacy_topic_without_version_suffix_warns(self) -> None:
+        """Test that legacy topics without version suffix emit a warning.
+
+        For backwards compatibility, legacy topics (not starting with 'onex.')
+        are allowed without version suffix, but a warning is emitted to
+        encourage adoption of versioned topics.
+        """
+        import warnings
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        legacy_topics = [
+            "node.introspection",
+            "node.heartbeat",
+            "custom.topic.name",
+            "dev.user.events",
+        ]
+
+        for topic in legacy_topics:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                config = ModelIntrospectionConfig(
+                    node_id=uuid4(),
+                    node_type="EFFECT",
+                    introspection_topic=topic,
+                )
+                assert config.introspection_topic == topic
+
+                # Should have emitted a warning
+                assert len(w) >= 1
+                warning_messages = [str(warning.message) for warning in w]
+                assert any(
+                    "version suffix" in msg.lower() for msg in warning_messages
+                ), f"Expected version suffix warning for topic '{topic}'"
+
+    def test_legacy_topic_with_version_suffix_no_warning(self) -> None:
+        """Test that legacy topics with version suffix don't emit warnings.
+
+        When legacy topics already have version suffix, no warning should be
+        emitted since they follow best practices.
+        """
+        import warnings
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        versioned_legacy_topics = [
+            "node.introspection.v1",
+            "node.heartbeat.v2",
+            "custom.topic.name.v10",
+            "dev.user.events.v1",
+        ]
+
+        for topic in versioned_legacy_topics:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                config = ModelIntrospectionConfig(
+                    node_id=uuid4(),
+                    node_type="EFFECT",
+                    introspection_topic=topic,
+                )
+                assert config.introspection_topic == topic
+
+                # Should NOT have emitted a version suffix warning
+                version_suffix_warnings = [
+                    warning
+                    for warning in w
+                    if "version suffix" in str(warning.message).lower()
+                ]
+                assert len(version_suffix_warnings) == 0, (
+                    f"Unexpected warning for versioned topic '{topic}'"
+                )
+
+    def test_version_suffix_pattern_constant_exported(self) -> None:
+        """Test that VERSION_SUFFIX_PATTERN constant is properly exported."""
+        # Verify it's a compiled regex pattern
+        import re
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            VERSION_SUFFIX_PATTERN,
+        )
+
+        assert isinstance(VERSION_SUFFIX_PATTERN, re.Pattern)
+
+        # Verify it matches expected patterns
+        assert VERSION_SUFFIX_PATTERN.search("topic.v1") is not None
+        assert VERSION_SUFFIX_PATTERN.search("topic.v123") is not None
+        assert VERSION_SUFFIX_PATTERN.search("onex.events.v2") is not None
+
+        # Verify it doesn't match invalid patterns
+        assert VERSION_SUFFIX_PATTERN.search("topic.V1") is None  # uppercase
+        assert VERSION_SUFFIX_PATTERN.search("topic.v") is None  # missing digit
+        assert VERSION_SUFFIX_PATTERN.search("topicv1") is None  # missing dot
+
+    def test_onex_topic_prefix_constant_exported(self) -> None:
+        """Test that ONEX_TOPIC_PREFIX constant is properly exported."""
+        from omnibase_infra.mixins.model_introspection_config import (
+            ONEX_TOPIC_PREFIX,
+        )
+
+        assert ONEX_TOPIC_PREFIX == "onex."
+        assert "onex.introspection.v1".startswith(ONEX_TOPIC_PREFIX)
+        assert not "node.introspection".startswith(ONEX_TOPIC_PREFIX)
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio
