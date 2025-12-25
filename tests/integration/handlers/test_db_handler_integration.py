@@ -10,20 +10,40 @@ running on the remote server (192.168.86.200:5436). They require proper
 database credentials and will be skipped gracefully if the database is
 not available.
 
-Test categories:
+CI/CD Graceful Skip Behavior
+============================
+
+These tests skip gracefully in CI/CD environments without database access:
+
+Skip Conditions:
+    - Skips if POSTGRES_HOST not set
+    - Skips if POSTGRES_PASSWORD not set
+    - Module-level ``pytestmark`` with ``pytest.mark.skipif`` used
+
+Example CI/CD Output::
+
+    $ pytest tests/integration/handlers/test_db_handler_integration.py -v
+    test_db_health_check SKIPPED (PostgreSQL not available - POSTGRES_PASSWORD not set)
+    test_db_query_simple SKIPPED (PostgreSQL not available - POSTGRES_PASSWORD not set)
+
+Test Categories
+===============
+
 - Connection Tests: Validate basic connectivity and health checks
 - Query Tests: Verify SELECT operations with various inputs
 - Execute Tests: Verify INSERT/UPDATE/DELETE and DDL operations
 - Error Handling Tests: Validate proper error responses for invalid inputs
 
-Environment Variables:
+Environment Variables
+=====================
+
     POSTGRES_HOST: PostgreSQL server hostname (default: 192.168.86.200)
     POSTGRES_PORT: PostgreSQL server port (default: 5436)
     POSTGRES_DATABASE: Database name (default: omninode_bridge)
     POSTGRES_USER: Database username (default: postgres)
     POSTGRES_PASSWORD: Database password (required - tests skip if not set)
 
-Related Ticket: OMN-816 - Create adapter integration tests
+Related Ticket: OMN-816 - Create handler integration tests
 """
 
 from __future__ import annotations
@@ -42,6 +62,12 @@ if TYPE_CHECKING:
 # =============================================================================
 # Test Configuration and Skip Conditions
 # =============================================================================
+
+# Handler default configuration values
+# These match the defaults in DbHandler and are tested to ensure consistency
+DB_HANDLER_DEFAULT_POOL_SIZE = 5
+DB_HANDLER_DEFAULT_TIMEOUT_SECONDS = 30.0
+DB_HANDLER_VERSION = "0.1.0-mvp"
 
 # Module-level markers - skip all tests if PostgreSQL is not available
 pytestmark = [
@@ -82,10 +108,14 @@ class TestDbHandlerConnection:
             assert health.healthy is True, "Handler should report healthy"
             assert health.initialized is True, "Handler should be initialized"
             assert health.adapter_type == "database", (
-                "Adapter type should be 'database'"
+                "Handler type should be 'database'"
             )
-            assert health.pool_size == 5, "Default pool size should be 5"
-            assert health.timeout_seconds == 30.0, "Timeout should match config"
+            assert health.pool_size == DB_HANDLER_DEFAULT_POOL_SIZE, (
+                f"Default pool size should be {DB_HANDLER_DEFAULT_POOL_SIZE}"
+            )
+            assert health.timeout_seconds == DB_HANDLER_DEFAULT_TIMEOUT_SECONDS, (
+                f"Timeout should match default of {DB_HANDLER_DEFAULT_TIMEOUT_SECONDS}s"
+            )
         finally:
             await handler.shutdown()
 
@@ -103,7 +133,7 @@ class TestDbHandlerConnection:
 
     @pytest.mark.asyncio
     async def test_db_describe(self, db_config: dict[str, JsonValue]) -> None:
-        """Verify describe() returns correct adapter metadata."""
+        """Verify describe() returns correct handler metadata."""
         from omnibase_infra.handlers import DbHandler
 
         handler = DbHandler()
@@ -115,9 +145,9 @@ class TestDbHandlerConnection:
             assert description.adapter_type == "database"
             assert "db.query" in description.supported_operations
             assert "db.execute" in description.supported_operations
-            assert description.pool_size == 5
+            assert description.pool_size == DB_HANDLER_DEFAULT_POOL_SIZE
             assert description.initialized is True
-            assert description.version == "0.1.0-mvp"
+            assert description.version == DB_HANDLER_VERSION
         finally:
             await handler.shutdown()
 
@@ -416,22 +446,33 @@ class TestDbHandlerExecute:
         unique_table_name: str,
     ) -> None:
         """Verify UPDATE operation modifies existing rows."""
-        # Create and populate table
-        setup_envelope = {
+        # Create table (separate statement - handler may not support multi-statement SQL)
+        create_envelope = {
             "operation": "db.execute",
             "payload": {
                 "sql": f"""
                     CREATE TABLE "{unique_table_name}" (
                         id SERIAL PRIMARY KEY,
                         status TEXT NOT NULL
-                    );
-                    INSERT INTO "{unique_table_name}" (status)
-                    VALUES ('pending'), ('pending'), ('done');
+                    )
                 """,
                 "parameters": [],
             },
         }
-        await initialized_db_handler.execute(setup_envelope)
+        await initialized_db_handler.execute(create_envelope)
+
+        # Insert initial data (separate statement)
+        insert_envelope = {
+            "operation": "db.execute",
+            "payload": {
+                "sql": f"""
+                    INSERT INTO "{unique_table_name}" (status)
+                    VALUES ('pending'), ('pending'), ('done')
+                """,
+                "parameters": [],
+            },
+        }
+        await initialized_db_handler.execute(insert_envelope)
 
         try:
             # Update rows
@@ -449,7 +490,8 @@ class TestDbHandlerExecute:
 
             update_result = await initialized_db_handler.execute(update_envelope)
             assert update_result.result.status == "success"
-            assert update_result.result.payload.row_count == 2  # 2 rows updated
+            # 2 rows updated: the two 'pending' rows from INSERT above changed to 'completed'
+            assert update_result.result.payload.row_count == 2
 
             # Verify update
             query_envelope = {
@@ -489,22 +531,33 @@ class TestDbHandlerExecute:
         unique_table_name: str,
     ) -> None:
         """Verify DELETE operation removes rows."""
-        # Create and populate table
-        setup_envelope = {
+        # Create table (separate statement - handler may not support multi-statement SQL)
+        create_envelope = {
             "operation": "db.execute",
             "payload": {
                 "sql": f"""
                     CREATE TABLE "{unique_table_name}" (
                         id SERIAL PRIMARY KEY,
                         keep BOOLEAN NOT NULL
-                    );
-                    INSERT INTO "{unique_table_name}" (keep)
-                    VALUES (TRUE), (FALSE), (FALSE), (TRUE);
+                    )
                 """,
                 "parameters": [],
             },
         }
-        await initialized_db_handler.execute(setup_envelope)
+        await initialized_db_handler.execute(create_envelope)
+
+        # Insert initial data (separate statement)
+        insert_envelope = {
+            "operation": "db.execute",
+            "payload": {
+                "sql": f"""
+                    INSERT INTO "{unique_table_name}" (keep)
+                    VALUES (TRUE), (FALSE), (FALSE), (TRUE)
+                """,
+                "parameters": [],
+            },
+        }
+        await initialized_db_handler.execute(insert_envelope)
 
         try:
             # Delete rows
@@ -521,7 +574,8 @@ class TestDbHandlerExecute:
 
             delete_result = await initialized_db_handler.execute(delete_envelope)
             assert delete_result.result.status == "success"
-            assert delete_result.result.payload.row_count == 2  # 2 rows deleted
+            # 2 rows deleted: the two FALSE rows from INSERT above (TRUE, FALSE, FALSE, TRUE)
+            assert delete_result.result.payload.row_count == 2
 
             # Verify delete
             query_envelope = {
@@ -533,7 +587,8 @@ class TestDbHandlerExecute:
             }
 
             query_result = await initialized_db_handler.execute(query_envelope)
-            assert query_result.result.payload.rows[0]["cnt"] == 2  # 2 rows remain
+            # 2 rows remain: the two TRUE rows from original INSERT (TRUE, FALSE, FALSE, TRUE)
+            assert query_result.result.payload.rows[0]["cnt"] == 2
 
         finally:
             # Cleanup

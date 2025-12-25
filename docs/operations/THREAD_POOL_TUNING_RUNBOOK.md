@@ -190,13 +190,13 @@ Example custom metrics collector:
 from prometheus_client import Gauge
 
 thread_pool_active = Gauge(
-    'vault_adapter_thread_pool_active_workers',
+    'vault_handler_thread_pool_active_workers',
     'Number of active worker threads',
     ['service']
 )
 
 thread_pool_max = Gauge(
-    'vault_adapter_thread_pool_max_workers',
+    'vault_handler_thread_pool_max_workers',
     'Maximum worker threads configured',
     ['service']
 )

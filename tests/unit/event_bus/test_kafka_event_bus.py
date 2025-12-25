@@ -613,7 +613,14 @@ class TestKafkaEventBusCircuitBreaker:
     async def test_circuit_breaker_half_open_state(
         self, mock_producer: AsyncMock
     ) -> None:
-        """Test circuit breaker transitions to half-open state."""
+        """Test circuit breaker full recovery cycle: CLOSED -> OPEN -> HALF_OPEN -> CLOSED.
+
+        This test validates the complete circuit breaker state machine:
+        1. CLOSED: Initial state, operations allowed
+        2. OPEN: After failure threshold reached, operations blocked
+        3. HALF_OPEN: After reset timeout, circuit allows test operations
+        4. CLOSED: After successful operation in HALF_OPEN, circuit fully recovers
+        """
 
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -625,19 +632,42 @@ class TestKafkaEventBusCircuitBreaker:
                 circuit_breaker_reset_timeout=0.1,  # Very short for testing
             )
 
-            # Open the circuit
+            # Step 1: Verify initial state is CLOSED
+            async with event_bus._circuit_breaker_lock:
+                assert event_bus._circuit_breaker_open is False
+                assert event_bus._circuit_breaker_failures == 0
+
+            # Step 2: Trigger failure to transition CLOSED -> OPEN
             async with event_bus._circuit_breaker_lock:
                 await event_bus._record_circuit_failure(operation="test")
                 assert event_bus._circuit_breaker_open is True
+                assert event_bus._circuit_breaker_failures == 1
 
-            # Wait for reset timeout
+            # Step 3: Wait for reset timeout to allow OPEN -> HALF_OPEN transition
             await asyncio.sleep(0.15)
 
-            # Check circuit breaker - should transition to half-open (circuit closes)
+            # Step 4: Check circuit breaker - should transition to HALF_OPEN
+            # In HALF_OPEN state, _circuit_breaker_open is False but circuit is testing recovery
             async with event_bus._circuit_breaker_lock:
                 await event_bus._check_circuit_breaker(operation="test")
-                # After timeout, circuit transitions from OPEN to HALF_OPEN, which sets _circuit_breaker_open = False
+                # After timeout, circuit transitions from OPEN to HALF_OPEN
                 assert event_bus._circuit_breaker_open is False
+                # Failures are reset when transitioning to HALF_OPEN
+                assert event_bus._circuit_breaker_failures == 0
+
+            # Step 5: Simulate successful operation to complete HALF_OPEN -> CLOSED transition
+            # In production, this would be a real operation succeeding after the check
+            async with event_bus._circuit_breaker_lock:
+                await event_bus._reset_circuit_breaker()
+                # Circuit is now fully CLOSED - verify recovery is complete
+                assert event_bus._circuit_breaker_open is False
+                assert event_bus._circuit_breaker_failures == 0
+                assert event_bus._circuit_breaker_open_until == 0.0
+
+            # Step 6: Verify circuit allows operations after full recovery
+            async with event_bus._circuit_breaker_lock:
+                # This should not raise - circuit is fully closed
+                await event_bus._check_circuit_breaker(operation="test_after_recovery")
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_blocks_when_open(

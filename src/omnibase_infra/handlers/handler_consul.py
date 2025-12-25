@@ -237,6 +237,15 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         """
         init_correlation_id = uuid4()
 
+        logger.info(
+            "Initializing %s",
+            self.__class__.__name__,
+            extra={
+                "handler": self.__class__.__name__,
+                "correlation_id": str(init_correlation_id),
+            },
+        )
+
         # Parse configuration using Pydantic model
         try:
             # Handle SecretStr token conversion
@@ -342,15 +351,19 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
             self._initialized = True
             logger.info(
-                "ConsulHandler initialized",
+                "%s initialized successfully",
+                self.__class__.__name__,
                 extra={
+                    "handler": self.__class__.__name__,
                     "host": self._config.host,
                     "port": self._config.port,
                     "scheme": self._config.scheme,
                     "datacenter": self._config.datacenter,
                     "timeout_seconds": self._config.timeout_seconds,
-                    "max_concurrent_operations": self._max_workers,
+                    "thread_pool_max_workers": self._max_workers,
+                    "thread_pool_max_queue_size": self._max_queue_size,
                     "circuit_breaker_enabled": self._circuit_breaker_initialized,
+                    "correlation_id": str(init_correlation_id),
                 },
             )
 

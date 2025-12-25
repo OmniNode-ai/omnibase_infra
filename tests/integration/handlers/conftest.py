@@ -5,35 +5,93 @@
 This module provides fixtures for testing infrastructure handlers.
 Environment variables should be set via docker-compose.yml or .env file.
 
-HTTP Handlers:
-    Uses pytest-httpserver for local mock server testing without external dependencies.
-    Requirements: pytest-httpserver must be installed: pip install pytest-httpserver
+CI/CD Graceful Skip Behavior
+============================
 
-Database Handlers:
-    Environment Variables (required):
-        POSTGRES_HOST: PostgreSQL hostname (required)
-        POSTGRES_PASSWORD: Database password (required)
-    Environment Variables (optional):
-        POSTGRES_PORT: PostgreSQL port (default: 5432)
-        POSTGRES_DATABASE: Database name (default: omninode_bridge)
-        POSTGRES_USER: Database username (default: postgres)
+These integration tests are designed to skip gracefully when infrastructure
+is unavailable, enabling CI/CD pipelines to run without hard failures. This
+allows the test suite to be run in environments without access to external
+infrastructure (e.g., GitHub Actions without VPN access to internal servers).
 
-    DSN Format: postgresql://{user}:{password}@{host}:{port}/{database}
+Skip Conditions by Handler:
 
-Vault Handlers:
-    Environment Variables (required):
-        VAULT_ADDR: Vault server URL (required)
-        VAULT_TOKEN: Vault authentication token (required)
-    Environment Variables (optional):
-        VAULT_NAMESPACE: Vault namespace (for Enterprise)
+    **PostgreSQL (DbHandler)**:
+        - Skips if POSTGRES_HOST not set
+        - Skips if POSTGRES_PASSWORD not set
+        - Tests use module-level ``pytestmark`` with ``pytest.mark.skipif``
 
-Consul Handlers:
-    Environment Variables (required):
-        CONSUL_HOST: Consul hostname (required)
-    Environment Variables (optional):
-        CONSUL_PORT: Consul port (default: 8500)
-        CONSUL_SCHEME: HTTP scheme (default: http)
-        CONSUL_TOKEN: ACL token for authentication
+    **Vault (VaultHandler)**:
+        - Skips if VAULT_ADDR not set (environment variable)
+        - Skips if VAULT_TOKEN not set
+        - Skips if Vault server is unreachable (health check fails)
+        - Two-phase skip: first checks env vars, then checks reachability
+
+    **Consul (ConsulHandler)**:
+        - Skips if CONSUL_HOST not set
+        - Skips if Consul server is unreachable (TCP connection fails)
+        - Uses socket-based reachability check at module import time
+
+    **HTTP (HttpRestHandler)**:
+        - No skip conditions - uses pytest-httpserver for local mock testing
+        - Always runs regardless of external infrastructure
+
+Example CI/CD Behavior::
+
+    # In CI without infrastructure access:
+    $ pytest tests/integration/handlers/ -v
+    tests/.../test_db_handler_integration.py::TestDbHandlerConnection::test_db_health_check SKIPPED
+    tests/.../test_vault_handler_integration.py::TestVaultHandlerConnection::test_vault_health_check SKIPPED
+    tests/.../test_consul_handler_integration.py::TestConsulHandlerHealthCheck::test_consul_health_check SKIPPED
+    tests/.../test_http_handler_integration.py::TestHttpRestHandlerIntegration::test_simple_get_request PASSED
+
+    # With infrastructure access (using REMOTE_INFRASTRUCTURE_IP server):
+    $ export POSTGRES_HOST=$REMOTE_INFRASTRUCTURE_IP POSTGRES_PASSWORD=xxx ...
+    $ pytest tests/integration/handlers/ -v
+    tests/.../test_db_handler_integration.py::TestDbHandlerConnection::test_db_health_check PASSED
+
+HTTP Handlers
+=============
+
+Uses pytest-httpserver for local mock server testing without external dependencies.
+Requirements: pytest-httpserver must be installed: pip install pytest-httpserver
+
+Database Handlers
+=================
+
+Environment Variables (required):
+    POSTGRES_HOST: PostgreSQL hostname (required)
+    POSTGRES_PASSWORD: Database password (required)
+Environment Variables (optional):
+    POSTGRES_PORT: PostgreSQL port (default: 5432)
+    POSTGRES_DATABASE: Database name (default: omninode_bridge)
+    POSTGRES_USER: Database username (default: postgres)
+
+DSN Format: postgresql://{user}:{password}@{host}:{port}/{database}
+
+Vault Handlers
+==============
+
+Environment Variables (required):
+    VAULT_ADDR: Vault server URL (required) - must be a valid URL (e.g., http://localhost:8200)
+    VAULT_TOKEN: Vault authentication token (required)
+Environment Variables (optional):
+    VAULT_NAMESPACE: Vault namespace (for Enterprise)
+
+Error Types for Missing/Invalid Configuration:
+    - Missing VAULT_ADDR: RuntimeHostError with message "Missing 'url' in config"
+    - Invalid VAULT_ADDR format: ProtocolConfigurationError from Pydantic validation
+    - Missing VAULT_TOKEN: RuntimeHostError with message "Missing 'token' in config"
+    - Invalid VAULT_TOKEN: InfraAuthenticationError when Vault rejects the token
+
+Consul Handlers
+===============
+
+Environment Variables (required):
+    CONSUL_HOST: Consul hostname (required)
+Environment Variables (optional):
+    CONSUL_PORT: Consul port (default: 8500)
+    CONSUL_SCHEME: HTTP scheme (default: http)
+    CONSUL_TOKEN: ACL token for authentication
 """
 
 from __future__ import annotations
@@ -53,6 +111,55 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
+# Remote Infrastructure Configuration
+# =============================================================================
+# The ONEX development infrastructure server hosts shared services:
+# - PostgreSQL (port 5436)
+# - Consul (port 28500)
+# - Vault (port 8200)
+# - Kafka/Redpanda (port 29092)
+#
+# This server (192.168.86.200) provides a shared development environment
+# for integration testing against real infrastructure components.
+#
+# For local development or CI/CD environments without access to the remote
+# infrastructure, set individual *_HOST environment variables to override
+# with localhost or Docker container hostnames. Tests will gracefully skip
+# if the required infrastructure is unavailable.
+#
+# Usage in tests:
+#   - Set POSTGRES_HOST=localhost for local PostgreSQL
+#   - Set CONSUL_HOST=localhost for local Consul
+#   - Set VAULT_ADDR=http://localhost:8200 for local Vault
+#   - Leave unset to skip infrastructure-dependent tests in CI
+REMOTE_INFRASTRUCTURE_IP = "192.168.86.200"
+
+
+# =============================================================================
+# Environment Variable Utilities
+# =============================================================================
+
+
+def _safe_int_env(name: str, default: int) -> int:
+    """Safely get integer environment variable with fallback.
+
+    Args:
+        name: Environment variable name.
+        default: Default value if env var is not set or invalid.
+
+    Returns:
+        Integer value from environment or default if not set/invalid.
+    """
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+# =============================================================================
 # Database Environment Configuration
 # =============================================================================
 
@@ -62,6 +169,18 @@ POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+
+# Defensive check: warn if POSTGRES_PASSWORD is missing to avoid silent failures
+if not POSTGRES_PASSWORD:
+    import warnings
+
+    warnings.warn(
+        "POSTGRES_PASSWORD environment variable not set - database integration tests "
+        "will be skipped. Set POSTGRES_PASSWORD in your .env file or environment to "
+        "enable database tests.",
+        UserWarning,
+        stacklevel=1,
+    )
 
 # Check if PostgreSQL is available based on host and password being set
 POSTGRES_AVAILABLE = POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None
@@ -123,12 +242,26 @@ def small_response_config() -> dict[str, object]:
 def db_config() -> dict[str, JsonValue]:
     """Provide database configuration for DbHandler.
 
+    This fixture enables graceful skip behavior for CI/CD environments
+    where database infrastructure may not be available.
+
+    Skip Conditions (CI/CD Graceful Degradation):
+        - Skips immediately if POSTGRES_PASSWORD environment variable is not set
+        - Combined with module-level pytestmark skipif for POSTGRES_HOST
+
     Returns:
         Configuration dict with 'dsn' key for DbHandler.initialize().
 
     Note:
         Tests using this fixture should also use @pytest.mark.skipif
-        or combine with POSTGRES_AVAILABLE check.
+        or combine with POSTGRES_AVAILABLE check at the module level.
+        The module-level skip is preferred for cleaner test output.
+
+    Example:
+        >>> # In CI without database access:
+        >>> # Test is skipped with message "POSTGRES_PASSWORD not set"
+        >>> # In development with database:
+        >>> config = db_config()  # Returns valid DSN configuration
     """
     if not POSTGRES_PASSWORD:
         pytest.skip("POSTGRES_PASSWORD not set")
@@ -279,12 +412,33 @@ VAULT_REACHABLE = _check_vault_reachable()
 def vault_available() -> bool:
     """Session-scoped fixture indicating Vault availability.
 
-    Returns True only if:
-    1. VAULT_TOKEN environment variable is set
-    2. Vault server is reachable at VAULT_ADDR
+    This fixture enables graceful skip behavior for CI/CD environments
+    where Vault infrastructure may not be available. Tests can use this
+    fixture to conditionally skip based on infrastructure availability.
+
+    Skip Conditions (Two-Phase Check):
+        Phase 1 - Environment Variables:
+            - Returns False if VAULT_ADDR not set
+            - Returns False if VAULT_TOKEN not set
+
+        Phase 2 - Reachability:
+            - Returns False if Vault health endpoint is unreachable
+            - Uses HTTP request to /v1/sys/health with 5-second timeout
+            - Accepts various status codes (200, 429, 472, 473, 501, 503)
+              as "reachable" since they indicate the server is responding
 
     Returns:
         bool: True if Vault is available for testing.
+
+    CI/CD Behavior:
+        In CI environments without Vault access, this returns False,
+        causing tests to be skipped gracefully without failures.
+
+    Example:
+        >>> @pytest.mark.skipif(not vault_available(), reason="Vault unavailable")
+        >>> async def test_vault_secret_read(vault_handler):
+        ...     # This test skips in CI without Vault
+        ...     pass
     """
     return VAULT_AVAILABLE and VAULT_REACHABLE
 
@@ -351,7 +505,7 @@ async def vault_handler(
 
 # Read Consul configuration from environment (set via docker-compose or .env)
 CONSUL_HOST = os.getenv("CONSUL_HOST")
-CONSUL_PORT = int(os.getenv("CONSUL_PORT", "8500"))
+CONSUL_PORT = _safe_int_env("CONSUL_PORT", 8500)
 CONSUL_SCHEME = os.getenv("CONSUL_SCHEME", "http")
 CONSUL_TOKEN = os.getenv("CONSUL_TOKEN")
 
@@ -391,10 +545,27 @@ CONSUL_AVAILABLE = _check_consul_reachable()
 def consul_available() -> bool:
     """Session-scoped fixture indicating Consul availability.
 
-    Returns True if Consul server is reachable at configured address.
+    This fixture enables graceful skip behavior for CI/CD environments
+    where Consul infrastructure may not be available. The check is
+    performed at module import time using a TCP socket connection.
+
+    Skip Conditions:
+        - Returns False if CONSUL_HOST environment variable not set
+        - Returns False if TCP connection to CONSUL_HOST:CONSUL_PORT fails
+        - Uses 5-second timeout for connection attempts
 
     Returns:
         bool: True if Consul is available for testing.
+
+    CI/CD Behavior:
+        In CI environments without Consul access, this returns False,
+        causing tests to be skipped gracefully without failures.
+
+    Example:
+        >>> @pytest.mark.skipif(not consul_available(), reason="Consul unavailable")
+        >>> async def test_consul_kv_put(consul_handler):
+        ...     # This test skips in CI without Consul
+        ...     pass
     """
     return CONSUL_AVAILABLE
 

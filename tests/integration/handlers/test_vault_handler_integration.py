@@ -6,12 +6,36 @@ These tests validate VaultHandler behavior against a real HashiCorp Vault server
 They require a running Vault instance and will be skipped gracefully if Vault
 is not available.
 
-Test categories:
+CI/CD Graceful Skip Behavior
+============================
+
+These tests skip gracefully in CI/CD environments without Vault access:
+
+Skip Conditions (Two-Phase):
+    Phase 1 - Environment Variables:
+        - Skips if VAULT_ADDR not set
+        - Skips if VAULT_TOKEN not set
+
+    Phase 2 - Reachability:
+        - Skips if Vault server health endpoint is unreachable
+        - Uses HTTP request to /v1/sys/health with 5-second timeout
+
+Example CI/CD Output::
+
+    $ pytest tests/integration/handlers/test_vault_handler_integration.py -v
+    test_vault_health_check SKIPPED (Vault not available - VAULT_TOKEN not set)
+    test_vault_write_and_read_secret SKIPPED (Vault not available - VAULT_TOKEN not set)
+
+Test Categories
+===============
+
 - Connection Tests: Validate basic connectivity and health checks
 - Secret CRUD Tests: Verify read/write/delete/list operations
 - Error Handling Tests: Test error handling for missing secrets
 
-Environment Variables:
+Environment Variables
+=====================
+
     VAULT_ADDR: Vault server URL (default: http://192.168.86.200:8200)
     VAULT_TOKEN: Vault authentication token (required - skip if not set)
     VAULT_NAMESPACE: Optional Vault namespace (for Enterprise)
@@ -19,7 +43,9 @@ Environment Variables:
 Remote Infrastructure (from CLAUDE.md):
     Vault is available at 192.168.86.200:8200 on the remote infrastructure server.
 
-Test Isolation:
+Test Isolation
+==============
+
     - Each test uses a unique secret path to prevent collisions
     - Cleanup fixtures ensure test secrets are deleted after each test
     - Tests use a dedicated mount point (default: "secret")

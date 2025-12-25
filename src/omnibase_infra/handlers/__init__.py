@@ -1,15 +1,15 @@
 """Handlers module for omnibase_infra.
 
-This module provides adapter implementations for various infrastructure
+This module provides handler implementations for various infrastructure
 communication patterns including HTTP REST and database operations.
 
-Adapters are responsible for:
+Handlers are responsible for:
 - Processing incoming requests and messages
 - Routing to appropriate services
 - Formatting and returning responses
 - Error handling and logging
 
-Available Adapters:
+Available Handlers:
 - HttpRestHandler: HTTP/REST protocol handler (MVP: GET, POST only)
 - DbHandler: PostgreSQL database handler (MVP: query, execute only)
 - VaultHandler: HashiCorp Vault secret management handler (MVP: KV v2 secrets)
@@ -19,7 +19,7 @@ Response Models:
 - ModelDbQueryPayload: Database query result payload
 - ModelDbQueryResponse: Database query response envelope
 - ModelDbHealthResponse: Database health check response
-- ModelDbDescribeResponse: Database adapter metadata
+- ModelDbDescribeResponse: Database handler metadata
 - ModelConsulHandlerPayload: Consul operation result payload
 - ModelConsulHandlerResponse: Consul handler response envelope
 """

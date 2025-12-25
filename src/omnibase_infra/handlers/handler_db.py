@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""PostgreSQL Database Adapter - MVP implementation using asyncpg async client.
+"""PostgreSQL Database Handler - MVP implementation using asyncpg async client.
 
 Supports query and execute operations with fixed pool size (5).
 Transaction support deferred to Beta. Configurable pool size deferred to Beta.
@@ -56,7 +56,7 @@ class DbHandler(MixinEnvelopeExtraction):
 
     Security Policy - DSN Handling:
         The database connection string (DSN) contains sensitive credentials and is
-        treated as a secret throughout this adapter. The following security measures
+        treated as a secret throughout this handler. The following security measures
         are enforced:
 
         1. DSN is stored internally in ``_dsn`` but NEVER logged or exposed in errors
@@ -101,6 +101,15 @@ class DbHandler(MixinEnvelopeExtraction):
         # Generate correlation_id for initialization tracing
         init_correlation_id = uuid4()
 
+        logger.info(
+            "Initializing %s",
+            self.__class__.__name__,
+            extra={
+                "handler": self.__class__.__name__,
+                "correlation_id": str(init_correlation_id),
+            },
+        )
+
         dsn = config.get("dsn")
         if not isinstance(dsn, str) or not dsn:
             ctx = ModelInfraErrorContext(
@@ -130,10 +139,14 @@ class DbHandler(MixinEnvelopeExtraction):
             # Use _sanitize_dsn() if DSN info ever needs to be logged.
             self._initialized = True
             logger.info(
-                "DbHandler initialized",
+                "%s initialized successfully",
+                self.__class__.__name__,
                 extra={
-                    "pool_size": self._pool_size,
+                    "handler": self.__class__.__name__,
+                    "pool_min_size": 1,
+                    "pool_max_size": self._pool_size,
                     "timeout_seconds": self._timeout,
+                    "correlation_id": str(init_correlation_id),
                 },
             )
         except asyncpg.InvalidPasswordError as e:
@@ -205,7 +218,7 @@ class DbHandler(MixinEnvelopeExtraction):
                 - handler_id: "db-handler"
 
         Raises:
-            RuntimeHostError: If adapter not initialized or invalid input.
+            RuntimeHostError: If handler not initialized or invalid input.
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If query times out.
         """
@@ -297,7 +310,7 @@ class DbHandler(MixinEnvelopeExtraction):
             Sanitized DSN with password replaced by '***'.
 
         Example:
-            >>> adapter._sanitize_dsn("postgresql://user:secret@host:5432/db")
+            >>> handler._sanitize_dsn("postgresql://user:secret@host:5432/db")
             'postgresql://user:***@host:5432/db'
 
         Note:
@@ -491,7 +504,7 @@ class DbHandler(MixinEnvelopeExtraction):
         )
 
     async def health_check(self) -> ModelDbHealthResponse:
-        """Return adapter health status."""
+        """Return handler health status."""
         healthy = False
         if self._initialized and self._pool is not None:
             try:
@@ -514,7 +527,7 @@ class DbHandler(MixinEnvelopeExtraction):
         )
 
     def describe(self) -> ModelDbDescribeResponse:
-        """Return adapter metadata and capabilities."""
+        """Return handler metadata and capabilities."""
         return ModelDbDescribeResponse(
             adapter_type=self.handler_type.value,
             supported_operations=sorted(_SUPPORTED_OPERATIONS),

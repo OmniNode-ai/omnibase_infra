@@ -119,6 +119,18 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             categories (small/medium/large/very_large) - exact sizes are not exposed
             in error messages to prevent attackers from probing limits.
         """
+        # Generate correlation_id for initialization tracing
+        init_correlation_id = uuid4()
+
+        logger.info(
+            "Initializing %s",
+            self.__class__.__name__,
+            extra={
+                "handler": self.__class__.__name__,
+                "correlation_id": str(init_correlation_id),
+            },
+        )
+
         try:
             self._timeout = _DEFAULT_TIMEOUT_SECONDS
 
@@ -155,34 +167,25 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             )
             self._initialized = True
             logger.info(
-                "HttpRestHandler initialized",
+                "%s initialized successfully",
+                self.__class__.__name__,
                 extra={
+                    "handler": self.__class__.__name__,
                     "timeout_seconds": self._timeout,
-                    "max_request_size": self._max_request_size,
-                    "max_response_size": self._max_response_size,
+                    "max_request_size_bytes": self._max_request_size,
+                    "max_response_size_bytes": self._max_response_size,
+                    "correlation_id": str(init_correlation_id),
                 },
             )
         except Exception as e:
-            # Extract correlation_id from config if provided, otherwise generate new
-            raw_correlation_id = config.get("correlation_id")
-            if isinstance(raw_correlation_id, UUID):
-                error_correlation_id = raw_correlation_id
-            elif isinstance(raw_correlation_id, str):
-                try:
-                    error_correlation_id = UUID(raw_correlation_id)
-                except ValueError:
-                    error_correlation_id = uuid4()
-            else:
-                error_correlation_id = uuid4()
-
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="initialize",
                 target_name="http_rest_adapter",
-                correlation_id=error_correlation_id,
+                correlation_id=init_correlation_id,
             )
             raise ProtocolConfigurationError(
-                "Failed to initialize HTTP adapter", context=ctx
+                "Failed to initialize HTTP handler", context=ctx
             ) from e
 
     async def shutdown(self) -> None:
@@ -716,7 +719,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         )
 
     async def health_check(self) -> dict[str, JsonValue]:
-        """Return adapter health status."""
+        """Return handler health status."""
         correlation_id = uuid4()
         return {
             "healthy": self._initialized and self._client is not None,
@@ -729,7 +732,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         }
 
     def describe(self) -> dict[str, JsonValue]:
-        """Return adapter metadata and capabilities."""
+        """Return handler metadata and capabilities."""
         return {
             "adapter_type": self.handler_type.value,
             "supported_operations": sorted(_SUPPORTED_OPERATIONS),

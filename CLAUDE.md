@@ -1190,7 +1190,7 @@ Infrastructure tools follow ONEX 4-node architecture:
 |---------|---------|
 | `consul_adapter` | Service discovery |
 | `kafka_adapter` | Event streaming |
-| `vault_adapter` | Secret management |
+| `vault_handler` | Secret management |
 | `postgres_adapter` | Database operations |
 
 ## 🤖 Agent Architecture

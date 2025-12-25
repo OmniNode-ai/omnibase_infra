@@ -6,12 +6,32 @@ These tests validate ConsulHandler behavior against actual Consul infrastructure
 running on the remote server (192.168.86.200). They require Consul to be available
 and will be skipped gracefully if Consul is not reachable.
 
-Test categories:
+CI/CD Graceful Skip Behavior
+============================
+
+These tests skip gracefully in CI/CD environments without Consul access:
+
+Skip Conditions:
+    - Skips if CONSUL_HOST not set
+    - Skips if TCP connection to CONSUL_HOST:CONSUL_PORT fails
+    - Reachability check performed at module import time with 5-second timeout
+
+Example CI/CD Output::
+
+    $ pytest tests/integration/handlers/test_consul_handler_integration.py -v
+    test_consul_health_check SKIPPED (Consul not available - cannot connect to remote infrastructure)
+    test_consul_kv_put_and_get SKIPPED (Consul not available - cannot connect to remote infrastructure)
+
+Test Categories
+===============
+
 - Health Check Tests: Validate connectivity and health reporting
 - KV Store Tests: Verify key-value store operations (put, get)
 - Service Registration Tests: Test service register/deregister
 
-Environment Variables:
+Environment Variables
+=====================
+
     CONSUL_HOST: Consul server hostname (default: 192.168.86.200)
     CONSUL_PORT: Consul server port (default: 28500)
     CONSUL_SCHEME: HTTP scheme (default: http)
@@ -37,6 +57,10 @@ if TYPE_CHECKING:
 # =============================================================================
 # Test Configuration and Skip Conditions
 # =============================================================================
+
+# Handler default configuration values
+# These match the defaults in ConsulHandler and are tested to ensure consistency
+CONSUL_HANDLER_DEFAULT_TIMEOUT_SECONDS = 30.0
 
 # Module-level markers - skip all tests if Consul is not available
 pytestmark = [
@@ -78,8 +102,8 @@ class TestConsulHandlerHealthCheck:
             assert result["healthy"] is True
             assert result["initialized"] is True
             assert result["handler_type"] == "consul"
-            assert result["timeout_seconds"] == 30.0
-            # Circuit breaker should be closed (healthy)
+            assert result["timeout_seconds"] == CONSUL_HANDLER_DEFAULT_TIMEOUT_SECONDS
+            # Circuit breaker should be closed (healthy) with no failures after fresh init
             assert result["circuit_breaker_state"] == "closed"
             assert result["circuit_breaker_failure_count"] == 0
         finally:

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Database Describe Response Model.
 
-This module provides the Pydantic model for database adapter metadata
+This module provides the Pydantic model for database handler metadata
 and capabilities responses.
 """
 
@@ -12,18 +12,18 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelDbDescribeResponse(BaseModel):
-    """Database adapter metadata and capabilities response.
+    """Database handler metadata and capabilities response.
 
-    Provides adapter metadata including supported operations,
+    Provides handler metadata including supported operations,
     configuration, and version information.
 
     Attributes:
-        adapter_type: Type of adapter (e.g., "db")
+        adapter_type: Type of handler (e.g., "db")
         supported_operations: List of supported operation types
         pool_size: Connection pool size
         timeout_seconds: Query timeout in seconds
-        initialized: Whether the adapter has been initialized
-        version: Adapter version string
+        initialized: Whether the handler has been initialized
+        version: Handler version string
 
     Example:
         >>> describe = ModelDbDescribeResponse(
@@ -46,7 +46,7 @@ class ModelDbDescribeResponse(BaseModel):
     )
 
     adapter_type: str = Field(
-        description="Type of adapter (e.g., 'db')",
+        description="Type of handler (e.g., 'db')",
     )
     supported_operations: list[str] = Field(
         description="List of supported operation types",
@@ -60,10 +60,10 @@ class ModelDbDescribeResponse(BaseModel):
         description="Query timeout in seconds",
     )
     initialized: bool = Field(
-        description="Whether the adapter has been initialized",
+        description="Whether the handler has been initialized",
     )
     version: str = Field(
-        description="Adapter version string",
+        description="Handler version string",
     )
 
 

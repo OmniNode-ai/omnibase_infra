@@ -19,7 +19,7 @@ from omnibase_infra.handlers.model_vault_retry_config import ModelVaultRetryConf
 
 
 class ModelVaultAdapterConfig(BaseModel):
-    """Configuration for HashiCorp Vault adapter.
+    """Configuration for HashiCorp Vault handler.
 
     Security Policy:
         - The token field uses SecretStr to prevent accidental logging
