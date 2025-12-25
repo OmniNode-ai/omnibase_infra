@@ -14,7 +14,11 @@ from omnibase_infra.utils.correlation import (
     get_correlation_id,
     set_correlation_id,
 )
-from omnibase_infra.utils.util_semver import SEMVER_PATTERN, validate_semver
+from omnibase_infra.utils.util_semver import (
+    SEMVER_PATTERN,
+    validate_semver,
+    validate_version_lenient,
+)
 
 __all__: list[str] = [
     "generate_correlation_id",
@@ -24,4 +28,5 @@ __all__: list[str] = [
     "CorrelationContext",
     "SEMVER_PATTERN",
     "validate_semver",
+    "validate_version_lenient",
 ]
