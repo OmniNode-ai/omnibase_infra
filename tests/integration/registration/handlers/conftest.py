@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from omnibase_infra.orchestrators import DEFAULT_LIVENESS_WINDOW_SECONDS
+
 # Import fixtures from projectors conftest (re-export for pytest discovery)
 from tests.integration.projectors.conftest import (
     DOCKER_AVAILABLE,
@@ -73,7 +75,7 @@ def heartbeat_handler(
 ) -> HandlerNodeHeartbeat:
     """Function-scoped HandlerNodeHeartbeat instance.
 
-    Creates a handler with the default liveness window (90 seconds).
+    Creates a handler with the default liveness window (DEFAULT_LIVENESS_WINDOW_SECONDS).
     Suitable for most integration tests.
 
     Args:
@@ -90,7 +92,7 @@ def heartbeat_handler(
     return HandlerNodeHeartbeat(
         projection_reader=reader,
         projector=projector,
-        liveness_window_seconds=90.0,
+        liveness_window_seconds=DEFAULT_LIVENESS_WINDOW_SECONDS,
     )
 
 

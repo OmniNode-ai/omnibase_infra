@@ -91,8 +91,22 @@ def create_mock_projection(
     ack_timeout_emitted_at: datetime | None = None,
     liveness_timeout_emitted_at: datetime | None = None,
     entity_id: UUID | None = None,
+    last_heartbeat_at: datetime | None = None,
 ) -> ModelRegistrationProjection:
-    """Create a mock projection with sensible defaults."""
+    """Create a mock projection with sensible defaults.
+
+    Args:
+        state: Registration state (default: ACTIVE)
+        ack_deadline: Optional ack deadline for timeout scenarios
+        liveness_deadline: Optional liveness deadline for expiry scenarios
+        ack_timeout_emitted_at: Marker for ack timeout emission
+        liveness_timeout_emitted_at: Marker for liveness expiry emission
+        entity_id: Node UUID (generated if not provided)
+        last_heartbeat_at: Optional last heartbeat timestamp (OMN-1006)
+
+    Returns:
+        ModelRegistrationProjection configured for testing
+    """
     now = datetime.now(UTC)
     return ModelRegistrationProjection(
         entity_id=entity_id or uuid4(),
@@ -105,6 +119,7 @@ def create_mock_projection(
         liveness_deadline=liveness_deadline,
         ack_timeout_emitted_at=ack_timeout_emitted_at,
         liveness_timeout_emitted_at=liveness_timeout_emitted_at,
+        last_heartbeat_at=last_heartbeat_at,
         last_applied_event_id=uuid4(),
         last_applied_offset=100,
         registered_at=now,
@@ -606,6 +621,99 @@ class TestTimeoutEmitterLivenessExpiration:
                 tick_id=uuid4(),
                 correlation_id=uuid4(),
             )
+
+    async def test_emit_liveness_expiration_includes_last_heartbeat_at(
+        self,
+        processor: TimeoutEmitter,
+        mock_event_bus: AsyncMock,
+        mock_projector: AsyncMock,
+    ) -> None:
+        """Test _emit_liveness_expiration includes accurate last_heartbeat_at.
+
+        OMN-1006: Verify that ModelNodeLivenessExpired events include the
+        last_heartbeat_at timestamp from the projection. This is critical
+        for debugging liveness issues and understanding when the node
+        was last known to be alive.
+
+        Related Tickets:
+            - OMN-1006: Add last_heartbeat_at for liveness expired event reporting
+        """
+        now = datetime.now(UTC)
+        tick_id = uuid4()
+        correlation_id = uuid4()
+        past_deadline = now - LIVENESS_TIMEOUT_OFFSET
+        node_id = uuid4()
+
+        # Create projection with explicit last_heartbeat_at
+        last_hb = now - timedelta(minutes=15)  # 15 minutes ago
+        projection = create_mock_projection(
+            state=EnumRegistrationState.ACTIVE,
+            liveness_deadline=past_deadline,
+            entity_id=node_id,
+            last_heartbeat_at=last_hb,
+        )
+
+        await processor._emit_liveness_expiration(
+            projection=projection,
+            detected_at=now,
+            tick_id=tick_id,
+            correlation_id=correlation_id,
+        )
+
+        # Verify publish was called
+        mock_event_bus.publish_envelope.assert_called_once()
+        call_args = mock_event_bus.publish_envelope.call_args
+
+        # CRITICAL: Verify last_heartbeat_at is correctly passed to event
+        event = call_args.kwargs["envelope"]
+        assert event.last_heartbeat_at == last_hb, (
+            f"Expected last_heartbeat_at={last_hb}, got {event.last_heartbeat_at}"
+        )
+        assert event.liveness_deadline == past_deadline
+        assert event.detected_at == now
+
+    async def test_emit_liveness_expiration_handles_none_last_heartbeat_at(
+        self,
+        processor: TimeoutEmitter,
+        mock_event_bus: AsyncMock,
+        mock_projector: AsyncMock,
+    ) -> None:
+        """Test _emit_liveness_expiration handles None last_heartbeat_at.
+
+        OMN-1006: When a node has never sent a heartbeat (e.g., during initial
+        registration), last_heartbeat_at will be None. The emitter should
+        handle this gracefully.
+        """
+        now = datetime.now(UTC)
+        tick_id = uuid4()
+        correlation_id = uuid4()
+        past_deadline = now - LIVENESS_TIMEOUT_OFFSET
+        node_id = uuid4()
+
+        # Create projection WITHOUT last_heartbeat_at (node never sent heartbeat)
+        projection = create_mock_projection(
+            state=EnumRegistrationState.ACTIVE,
+            liveness_deadline=past_deadline,
+            entity_id=node_id,
+            last_heartbeat_at=None,  # No heartbeat received
+        )
+
+        await processor._emit_liveness_expiration(
+            projection=projection,
+            detected_at=now,
+            tick_id=tick_id,
+            correlation_id=correlation_id,
+        )
+
+        # Verify publish was called
+        mock_event_bus.publish_envelope.assert_called_once()
+        call_args = mock_event_bus.publish_envelope.call_args
+
+        # Verify None is correctly passed (event model allows None)
+        event = call_args.kwargs["envelope"]
+        assert event.last_heartbeat_at is None
+        assert event.liveness_deadline == past_deadline
+        assert event.detected_at == now
 
 
 @pytest.mark.unit

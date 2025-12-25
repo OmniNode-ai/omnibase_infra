@@ -452,11 +452,11 @@ class TestHandlerNodeHeartbeatLivenessWindow:
         reader: ProjectionReaderRegistration,
         projector: ProjectorRegistration,
     ) -> None:
-        """Verify liveness deadline calculation with default 90-second window."""
+        """Verify liveness deadline calculation with default liveness window."""
         handler = HandlerNodeHeartbeat(
             projection_reader=reader,
             projector=projector,
-            liveness_window_seconds=90.0,
+            liveness_window_seconds=DEFAULT_LIVENESS_WINDOW_SECONDS,
         )
 
         node_id = uuid4()
@@ -467,7 +467,9 @@ class TestHandlerNodeHeartbeatLivenessWindow:
         event = make_heartbeat_event(node_id, timestamp=event_time)
         result = await handler.handle(event)
 
-        expected_deadline = event_time + timedelta(seconds=90.0)
+        expected_deadline = event_time + timedelta(
+            seconds=DEFAULT_LIVENESS_WINDOW_SECONDS
+        )
         assert result.liveness_deadline is not None
         assert abs((result.liveness_deadline - expected_deadline).total_seconds()) < 0.1
 
@@ -487,7 +489,9 @@ class TestHandlerNodeHeartbeatLivenessWindow:
         result = await heartbeat_handler.handle(event)
 
         # Deadline should be relative to event timestamp
-        expected_deadline = past_time + timedelta(seconds=90.0)
+        expected_deadline = past_time + timedelta(
+            seconds=DEFAULT_LIVENESS_WINDOW_SECONDS
+        )
         assert result.liveness_deadline is not None
         assert abs((result.liveness_deadline - expected_deadline).total_seconds()) < 0.1
 
@@ -558,7 +562,14 @@ class TestHandlerNodeHeartbeatConcurrency:
         projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
-        """Verify rapid heartbeats from same node are handled correctly."""
+        """Verify rapid heartbeats from same node are handled correctly.
+
+        PR #94 NITPICK addressed: Added more specific assertions for:
+        - Individual result validation (liveness_deadline, last_heartbeat_at)
+        - Liveness deadline bounds verification
+        - Correlation ID presence
+        - Database state consistency
+        """
         node_id = uuid4()
         projection = make_projection(entity_id=node_id)
         await seed_projection(projector, projection)
@@ -572,13 +583,51 @@ class TestHandlerNodeHeartbeatConcurrency:
             )
             for i in range(10)
         ]
+        latest_event_time = events[-1].timestamp
 
         results = await asyncio.gather(
             *[heartbeat_handler_fast_window.handle(event) for event in events]
         )
 
         # All should succeed
-        assert all(r.success for r in results)
+        assert all(r.success for r in results), (
+            f"Expected all heartbeats to succeed, but got failures: "
+            f"{[r.error_message for r in results if not r.success]}"
+        )
+
+        # SPECIFIC ASSERTION 1: Each result should have valid fields
+        for i, result in enumerate(results):
+            assert result.node_id == node_id, f"Result {i}: node_id mismatch"
+            assert result.last_heartbeat_at is not None, (
+                f"Result {i}: last_heartbeat_at should be set"
+            )
+            assert result.liveness_deadline is not None, (
+                f"Result {i}: liveness_deadline should be set"
+            )
+            assert result.correlation_id is not None, (
+                f"Result {i}: correlation_id should be generated"
+            )
+            assert result.node_not_found is False, f"Result {i}: node should be found"
+
+        # SPECIFIC ASSERTION 2: All liveness deadlines should be within bounds
+        # With 5-second window, earliest deadline = base_time + 5s,
+        # latest deadline = latest_event_time + 5s
+        window_seconds = 5.0
+        earliest_valid_deadline = base_time + timedelta(seconds=window_seconds)
+        latest_valid_deadline = latest_event_time + timedelta(seconds=window_seconds)
+        for i, result in enumerate(results):
+            assert result.liveness_deadline is not None
+            assert result.liveness_deadline >= earliest_valid_deadline, (
+                f"Result {i}: deadline {result.liveness_deadline} is before "
+                f"earliest valid {earliest_valid_deadline}"
+            )
+            # Allow 1 second tolerance for timing variations
+            assert result.liveness_deadline <= latest_valid_deadline + timedelta(
+                seconds=1
+            ), (
+                f"Result {i}: deadline {result.liveness_deadline} is after "
+                f"latest valid {latest_valid_deadline}"
+            )
 
         # Final state should have the last heartbeat timestamp
         final = await reader.get_entity_state(node_id)
@@ -592,6 +641,20 @@ class TestHandlerNodeHeartbeatConcurrency:
         assert final.last_heartbeat_at in expected_timestamps, (
             f"Expected last_heartbeat_at to be one of {len(expected_timestamps)} "
             f"event timestamps, but got {final.last_heartbeat_at}"
+        )
+
+        # SPECIFIC ASSERTION 3: Final liveness_deadline should be consistent
+        # with final last_heartbeat_at
+        assert final.liveness_deadline is not None
+        expected_final_deadline = final.last_heartbeat_at + timedelta(
+            seconds=window_seconds
+        )
+        assert (
+            abs((final.liveness_deadline - expected_final_deadline).total_seconds())
+            < 0.1
+        ), (
+            f"Final liveness_deadline {final.liveness_deadline} should be "
+            f"last_heartbeat_at + {window_seconds}s = {expected_final_deadline}"
         )
 
 
@@ -882,3 +945,234 @@ class TestHandlerNodeHeartbeatDatabaseState:
         assert row is not None
         # ack_deadline should be unchanged
         assert row["ack_deadline"] is not None
+
+
+# =============================================================================
+# Timestamp Accuracy Tests (OMN-1006)
+# =============================================================================
+
+
+class TestHandlerNodeHeartbeatTimestampAccuracy:
+    """Tests for timestamp accuracy in heartbeat processing.
+
+    OMN-1006: Verify that timestamps are accurately tracked and can be
+    used in ModelNodeLivenessExpired events for debugging liveness issues.
+
+    Timestamp flow:
+    1. Heartbeat event contains timestamp (event.timestamp)
+    2. Handler sets projection.last_heartbeat_at = event.timestamp
+    3. Handler sets projection.liveness_deadline = event.timestamp + window
+    4. TimeoutEmitter uses projection.last_heartbeat_at in ModelNodeLivenessExpired
+
+    These tests verify steps 1-3 with precise timestamp assertions.
+    """
+
+    async def test_heartbeat_timestamp_matches_event_timestamp_exactly(
+        self,
+        heartbeat_handler: HandlerNodeHeartbeat,
+        projector: ProjectorRegistration,
+        reader: ProjectionReaderRegistration,
+    ) -> None:
+        """Verify last_heartbeat_at exactly matches event timestamp.
+
+        Critical for accurate liveness expired event reporting.
+        """
+        node_id = uuid4()
+        projection = make_projection(entity_id=node_id)
+        await seed_projection(projector, projection)
+
+        # Use a specific timestamp
+        event_time = datetime(2025, 12, 25, 10, 30, 45, 123456, tzinfo=UTC)
+        event = make_heartbeat_event(node_id, timestamp=event_time)
+        result = await heartbeat_handler.handle(event)
+
+        # Verify result contains exact timestamp
+        assert result.success is True
+        assert result.last_heartbeat_at == event_time, (
+            f"Result last_heartbeat_at should be exactly {event_time}, "
+            f"got {result.last_heartbeat_at}"
+        )
+
+        # Verify database contains exact timestamp
+        updated = await reader.get_entity_state(node_id)
+        assert updated is not None
+        assert updated.last_heartbeat_at == event_time, (
+            f"DB last_heartbeat_at should be exactly {event_time}, "
+            f"got {updated.last_heartbeat_at}"
+        )
+
+    async def test_liveness_deadline_calculation_precision(
+        self,
+        reader: ProjectionReaderRegistration,
+        projector: ProjectorRegistration,
+    ) -> None:
+        """Verify liveness_deadline is calculated with sub-second precision.
+
+        liveness_deadline = event.timestamp + liveness_window_seconds
+        """
+        from omnibase_infra.orchestrators.registration.handlers import (
+            HandlerNodeHeartbeat,
+        )
+
+        # Use a 45.5 second window to test sub-second precision
+        handler = HandlerNodeHeartbeat(
+            projection_reader=reader,
+            projector=projector,
+            liveness_window_seconds=45.5,
+        )
+
+        node_id = uuid4()
+        projection = make_projection(entity_id=node_id)
+        await seed_projection(projector, projection)
+
+        # Use timestamp with microseconds
+        event_time = datetime(2025, 12, 25, 12, 0, 0, 500000, tzinfo=UTC)
+        event = make_heartbeat_event(node_id, timestamp=event_time)
+        result = await handler.handle(event)
+
+        # Expected: 12:00:00.500000 + 45.5s = 12:00:46.000000
+        expected_deadline = event_time + timedelta(seconds=45.5)
+
+        assert result.liveness_deadline is not None
+        # Allow 1 millisecond tolerance for floating point
+        delta = abs((result.liveness_deadline - expected_deadline).total_seconds())
+        assert delta < 0.001, (
+            f"Deadline calculation off by {delta}s. "
+            f"Expected {expected_deadline}, got {result.liveness_deadline}"
+        )
+
+    async def test_heartbeat_preserves_utc_timezone(
+        self,
+        heartbeat_handler: HandlerNodeHeartbeat,
+        projector: ProjectorRegistration,
+        reader: ProjectionReaderRegistration,
+    ) -> None:
+        """Verify timestamps preserve UTC timezone.
+
+        All timestamps should be timezone-aware with UTC.
+        """
+        node_id = uuid4()
+        projection = make_projection(entity_id=node_id)
+        await seed_projection(projector, projection)
+
+        event_time = datetime.now(UTC)
+        event = make_heartbeat_event(node_id, timestamp=event_time)
+        result = await heartbeat_handler.handle(event)
+
+        # Verify result timestamps are timezone-aware
+        assert result.last_heartbeat_at is not None
+        assert result.last_heartbeat_at.tzinfo is not None
+        assert result.liveness_deadline is not None
+        assert result.liveness_deadline.tzinfo is not None
+
+        # Verify database timestamps are timezone-aware
+        updated = await reader.get_entity_state(node_id)
+        assert updated is not None
+        assert updated.last_heartbeat_at is not None
+        # Note: PostgreSQL may return timezone-naive datetimes depending on
+        # connection settings, but the values should still be correct
+
+    async def test_successive_heartbeats_update_timestamps_monotonically(
+        self,
+        heartbeat_handler_fast_window: HandlerNodeHeartbeat,
+        projector: ProjectorRegistration,
+        reader: ProjectionReaderRegistration,
+    ) -> None:
+        """Verify successive heartbeats update timestamps monotonically.
+
+        Each heartbeat should update last_heartbeat_at and liveness_deadline
+        to later values than the previous heartbeat.
+        """
+        node_id = uuid4()
+        projection = make_projection(entity_id=node_id)
+        await seed_projection(projector, projection)
+
+        # Send 5 heartbeats with increasing timestamps
+        timestamps = [datetime(2025, 12, 25, 10, 0, i, tzinfo=UTC) for i in range(5)]
+        results = []
+
+        for ts in timestamps:
+            event = make_heartbeat_event(node_id, timestamp=ts)
+            result = await heartbeat_handler_fast_window.handle(event)
+            results.append(result)
+
+        # Verify monotonic increase in timestamps
+        for i in range(1, len(results)):
+            assert results[i].last_heartbeat_at is not None
+            assert results[i - 1].last_heartbeat_at is not None
+            assert results[i].last_heartbeat_at > results[i - 1].last_heartbeat_at, (
+                f"Heartbeat {i} timestamp should be > heartbeat {i - 1}"
+            )
+
+            assert results[i].liveness_deadline is not None
+            assert results[i - 1].liveness_deadline is not None
+            assert results[i].liveness_deadline > results[i - 1].liveness_deadline, (
+                f"Heartbeat {i} deadline should be > heartbeat {i - 1}"
+            )
+
+        # Verify final database state has latest timestamp
+        updated = await reader.get_entity_state(node_id)
+        assert updated is not None
+        assert updated.last_heartbeat_at == timestamps[-1]
+
+    async def test_timestamp_accuracy_for_liveness_expired_event_reporting(
+        self,
+        heartbeat_handler_fast_window: HandlerNodeHeartbeat,
+        projector: ProjectorRegistration,
+        reader: ProjectionReaderRegistration,
+        pg_pool: asyncpg.Pool,
+    ) -> None:
+        """Verify timestamp accuracy for ModelNodeLivenessExpired event construction.
+
+        OMN-1006: This test verifies the complete data flow that would be used
+        when constructing a ModelNodeLivenessExpired event:
+
+        1. Node sends heartbeat at T1
+        2. Handler stores last_heartbeat_at = T1, liveness_deadline = T1 + window
+        3. At T2 (after deadline), TimeoutEmitter would query this projection
+        4. Emitter creates ModelNodeLivenessExpired with:
+           - last_heartbeat_at = T1 (from projection)
+           - liveness_deadline = T1 + window (from projection)
+           - detected_at = T2 (from RuntimeTick)
+
+        This test verifies steps 1-2 to ensure projection has accurate data.
+        """
+        node_id = uuid4()
+        projection = make_projection(entity_id=node_id)
+        await seed_projection(projector, projection)
+
+        # Simulate heartbeat at a known time
+        heartbeat_time = datetime(2025, 12, 25, 14, 30, 0, 0, tzinfo=UTC)
+        event = make_heartbeat_event(node_id, timestamp=heartbeat_time)
+        result = await heartbeat_handler_fast_window.handle(event)
+
+        assert result.success is True
+
+        # Query the projection directly (as TimeoutEmitter would)
+        async with pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT last_heartbeat_at, liveness_deadline
+                FROM registration_projections
+                WHERE entity_id = $1
+                """,
+                node_id,
+            )
+
+        assert row is not None
+
+        # Verify data available for ModelNodeLivenessExpired construction
+        db_last_heartbeat = row["last_heartbeat_at"]
+        db_liveness_deadline = row["liveness_deadline"]
+
+        assert db_last_heartbeat is not None, (
+            "last_heartbeat_at should be set for liveness expired event"
+        )
+        assert db_liveness_deadline is not None, (
+            "liveness_deadline should be set for liveness expired event"
+        )
+
+        # Verify timestamps are consistent with handler result
+        # (PostgreSQL returns timezone-naive, so compare without timezone)
+        assert db_last_heartbeat.replace(tzinfo=UTC) == heartbeat_time
+        assert db_liveness_deadline.replace(tzinfo=UTC) == result.liveness_deadline

@@ -25,6 +25,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
+    InfraAuthenticationError,
+    InfraConnectionError,
+    InfraTimeoutError,
+    InfraUnavailableError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
@@ -282,11 +286,23 @@ class HandlerNodeHeartbeat:
                 correlation_id=correlation_id,
             )
 
+        except (
+            InfraConnectionError,
+            InfraTimeoutError,
+            InfraAuthenticationError,
+            InfraUnavailableError,
+        ):
+            # Re-raise specific infrastructure errors directly (preserves error type)
+            # These are the expected error types from database operations:
+            # - InfraConnectionError: Database connection failures
+            # - InfraTimeoutError: Query/operation timeout exceeded
+            # - InfraAuthenticationError: Database auth/authz failures
+            # - InfraUnavailableError: Database temporarily unavailable
+            # Callers can catch these specific types for differentiated handling
+            raise
         except RuntimeHostError:
-            # Re-raise all infrastructure errors directly (preserves error type)
-            # This includes InfraConnectionError, InfraTimeoutError,
-            # InfraAuthenticationError, InfraUnavailableError, etc.
-            # Callers can catch specific error types for differentiated handling
+            # Re-raise any other RuntimeHostError subclasses directly
+            # This catches future infrastructure error types without wrapping them
             raise
         except Exception as e:
             # Wrap only non-infrastructure errors in RuntimeHostError
