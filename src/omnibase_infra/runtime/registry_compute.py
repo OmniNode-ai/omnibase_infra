@@ -461,8 +461,8 @@ class RegistryCompute:
                 self._metrics.record_registry_size(registry_size)
             except Exception:
                 # Metrics recording should never break registry operations
-                # Log at DEBUG level for observability without impacting operations
-                logger.debug(
+                # WARNING level for development visibility (change to DEBUG for production)
+                logger.warning(
                     "Metrics error suppressed during register()",
                     exc_info=True,
                     extra={"plugin_id": plugin_id, "version": version},
@@ -558,7 +558,8 @@ class RegistryCompute:
                                 self._metrics.record_error("not_found", plugin_id)
                             except Exception:
                                 # Metrics recording should never break registry operations
-                                logger.debug(
+                                # WARNING level for development visibility (change to DEBUG for production)
+                                logger.warning(
                                     "Metrics error suppressed during get() not_found",
                                     exc_info=True,
                                     extra={"plugin_id": plugin_id},
@@ -585,7 +586,8 @@ class RegistryCompute:
                                 )
                             except Exception:
                                 # Metrics recording should never break registry operations
-                                logger.debug(
+                                # WARNING level for development visibility (change to DEBUG for production)
+                                logger.warning(
                                     "Metrics error suppressed during get() version_not_found",
                                     exc_info=True,
                                     extra={"plugin_id": plugin_id, "version": version},
@@ -622,7 +624,8 @@ class RegistryCompute:
                     )
                 except Exception:
                     # Metrics recording should never break registry operations
-                    logger.debug(
+                    # WARNING level for development visibility (change to DEBUG for production)
+                    logger.warning(
                         "Metrics error suppressed during get() latency recording",
                         exc_info=True,
                         extra={"plugin_id": plugin_id, "version": version},
@@ -760,7 +763,8 @@ class RegistryCompute:
                 self._metrics.record_registry_size(registry_size)
             except Exception:
                 # Metrics recording should never break registry operations
-                logger.debug(
+                # WARNING level for development visibility (change to DEBUG for production)
+                logger.warning(
                     "Metrics error suppressed during unregister()",
                     exc_info=True,
                     extra={"plugin_id": plugin_id, "version": version},
