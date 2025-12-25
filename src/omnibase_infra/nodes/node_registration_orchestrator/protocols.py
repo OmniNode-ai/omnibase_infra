@@ -236,10 +236,10 @@ class ProtocolEffect(Protocol):
     The effect node performs the actual I/O operations (Consul registration,
     PostgreSQL upsert, etc.) based on typed intents from the reducer.
 
-    Thread Safety:
-        Implementations MUST be thread-safe for concurrent async calls.
-        Multiple async tasks may invoke execute_intent() simultaneously.
-        Use asyncio.Lock for any shared mutable state.
+    Concurrency Safety:
+        Implementations MUST be safe for concurrent async coroutine calls.
+        Multiple coroutines may invoke execute_intent() simultaneously.
+        Use asyncio.Lock for any shared mutable state (coroutine-safe).
 
     Error Handling:
         Implementations MUST follow error sanitization guidelines:
@@ -302,9 +302,9 @@ class ProtocolEffect(Protocol):
         Performs the infrastructure operation described by the intent and
         returns a result capturing success/failure and timing.
 
-        Thread Safety:
+        Concurrency Safety:
             This method MUST be safe to call concurrently from multiple
-            async tasks. Implementations should not rely on instance state
+            coroutines. Implementations should not rely on instance state
             that could be modified by concurrent calls.
 
         Error Sanitization:

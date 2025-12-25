@@ -44,6 +44,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
 
     Example:
         >>> from uuid import uuid4
+        >>> from datetime import datetime, timezone
         >>> event = ModelNodeIntrospectionEvent(
         ...     node_id=uuid4(),
         ...     node_type="effect",
@@ -51,6 +52,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
         ...     capabilities={"postgres": True, "read": True, "write": True},
         ...     endpoints={"health": "http://localhost:8080/health"},
         ...     correlation_id=uuid4(),
+        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
         ... )
     """
 

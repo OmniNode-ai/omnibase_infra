@@ -36,6 +36,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
 
     Example:
         >>> from uuid import uuid4
+        >>> from datetime import datetime, timezone
         >>> event = ModelNodeHeartbeatEvent(
         ...     node_id=uuid4(),
         ...     node_type="effect",
@@ -44,6 +45,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
         ...     active_operations_count=5,
         ...     memory_usage_mb=256.0,
         ...     cpu_usage_percent=15.5,
+        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
         ... )
     """
 
