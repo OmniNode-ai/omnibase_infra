@@ -19,6 +19,7 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     IntrospectionCacheDict,
     IntrospectionPerformanceMetrics,
     MixinNodeIntrospection,
+    PerformanceMetricsCacheDict,
 )
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
 
@@ -31,4 +32,5 @@ __all__ = [
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
     "ModelIntrospectionConfig",
+    "PerformanceMetricsCacheDict",
 ]

@@ -13,6 +13,7 @@ This directory contains detailed implementation guides and best practices for ON
 
 ### Observability
 - **[Correlation ID Tracking](./correlation_id_tracking.md)** - Request tracing, envelope pattern, distributed logging
+- **[Event Streaming Topics](../architecture/EVENT_STREAMING_TOPICS.md)** - Kafka/Redpanda topic catalog, schemas, and usage patterns
 
 ### Architecture
 - **[Container Dependency Injection](./container_dependency_injection.md)** - Service registration, resolution, and testing patterns

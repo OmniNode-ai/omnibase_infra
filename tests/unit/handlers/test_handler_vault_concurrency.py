@@ -10,6 +10,7 @@ and concurrent operation handling under production load scenarios.
 from __future__ import annotations
 
 import asyncio
+import threading
 from itertools import cycle
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
@@ -91,26 +92,58 @@ class TestVaultHandlerConcurrency:
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
 
-            # Mix of failures and successes - create a predictable pattern
-            # Use cycle to ensure responses never run out (circuit breaker retries
-            # can cause more calls than expected, and StopIteration in async
-            # context causes Python 3.12+ issues with futures)
-            response_pattern = [
-                Exception("Connection error"),
-                {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}},
-                Exception("Connection error"),
-                {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}},
+            # Mix of failures and successes - create a predictable cycling pattern
+            # Use cycle() to prevent StopIteration when concurrent requests with
+            # retries exhaust a finite list (Python 3.12+ raises TypeError when
+            # StopIteration is raised into an async Future context)
+            #
+            # IMPORTANT: Use string markers for errors instead of pre-created
+            # Exception objects. Exception instances are mutable (they carry
+            # __traceback__ state), so reusing the same Exception object across
+            # threads causes race conditions when multiple threads modify the
+            # traceback simultaneously.
+            success_response: dict[str, object] = {
+                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+            }
+            responses_pattern: list[dict[str, object] | str] = [
+                "error:Connection error",  # String marker - creates fresh Exception
+                success_response,
+                "error:Connection error",
+                success_response,
             ]
-            response_cycle = cycle(response_pattern)
+            response_cycle = cycle(responses_pattern)
 
-            def mock_read_secret(*args, **kwargs):
-                response = next(response_cycle)
-                if isinstance(response, Exception):
-                    raise response
-                return response
+            # Lock for thread-safe cycle access - VaultAdapter.execute() runs hvac
+            # client calls in a ThreadPoolExecutor, so multiple threads may
+            # concurrently call get_response() which accesses the shared iterator
+            cycle_lock = threading.Lock()
+
+            def get_response(*args: object, **kwargs: object) -> dict[str, object]:
+                """Return next response from cycle - thread-safe with lock.
+
+                When using a callable for side_effect, mock does NOT automatically
+                raise exceptions - it returns them as values. We must explicitly
+                raise exceptions for error markers.
+
+                Thread safety is ensured by:
+                1. Lock protects the shared iterator (response_cycle)
+                2. Fresh Exception instances are created inside the lock
+                3. No mutable state is shared between concurrent calls
+
+                Using string markers ("error:message") instead of pre-created
+                Exception objects ensures each thread gets its own Exception
+                instance with independent __traceback__ state.
+                """
+                with cycle_lock:
+                    response = next(response_cycle)
+                    if isinstance(response, str) and response.startswith("error:"):
+                        # Create fresh RuntimeError instance for thread safety
+                        # Using RuntimeError instead of base Exception per TRY002
+                        raise RuntimeError(response[6:])
+                    return response
 
             mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
-                mock_read_secret
+                get_response
             )
 
             await handler.initialize(vault_config)

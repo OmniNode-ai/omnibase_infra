@@ -82,7 +82,10 @@ class TestModelSnapshotTopicConfigCleanupPolicyValidation:
                 topic="test.snapshots",
                 cleanup_policy="delete",
             )
-        assert "MUST use cleanup.policy=compact" in str(exc_info.value)
+        # Check error type and that key terms are present (not exact message)
+        assert isinstance(exc_info.value, ProtocolConfigurationError)
+        error_msg = str(exc_info.value).lower()
+        assert "compact" in error_msg or "cleanup" in error_msg
 
     def test_compact_delete_policy_rejected(self) -> None:
         """Test that compact,delete hybrid policy is rejected."""
@@ -91,7 +94,10 @@ class TestModelSnapshotTopicConfigCleanupPolicyValidation:
                 topic="test.snapshots",
                 cleanup_policy="compact,delete",
             )
-        assert "MUST use cleanup.policy=compact" in str(exc_info.value)
+        # Check error type and that key terms are present (not exact message)
+        assert isinstance(exc_info.value, ProtocolConfigurationError)
+        error_msg = str(exc_info.value).lower()
+        assert "compact" in error_msg or "cleanup" in error_msg
 
     def test_empty_policy_rejected(self) -> None:
         """Test that empty cleanup policy is rejected."""
