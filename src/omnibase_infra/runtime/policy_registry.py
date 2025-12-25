@@ -1105,7 +1105,8 @@ class PolicyRegistry:
         Implementation:
             - Returns ModelSemVer instance with integer major, minor, patch
             - ModelSemVer implements comparison operators for correct ordering
-            - Prerelease versions sort before release: "1.0.0-alpha" < "1.0.0"
+            - Prerelease is parsed but NOT used in comparisons (major.minor.patch only)
+            - "1.0.0-alpha" and "1.0.0" compare as EQUAL (same major.minor.patch)
 
         Supported Formats:
             - Full: "1.2.3", "1.2.3-beta"
@@ -1141,7 +1142,7 @@ class PolicyRegistry:
         Returns:
             ModelSemVer instance for comparison.
             Components are INTEGERS (not strings) for correct semantic sorting.
-            Prerelease is empty string for release versions (sorts after prereleases).
+            Prerelease is parsed and stored but ignored in version comparisons.
 
         Raises:
             ProtocolConfigurationError: If version format is invalid
@@ -1157,8 +1158,9 @@ class PolicyRegistry:
             True
             >>> PolicyRegistry._parse_semver("1.0.0-alpha")
             ModelSemVer(major=1, minor=0, patch=0, prerelease='alpha')
-            >>> PolicyRegistry._parse_semver("1.0.0-alpha") < PolicyRegistry._parse_semver("1.0.0")
-            True
+            >>> # Prerelease is parsed but NOT used in comparisons:
+            >>> PolicyRegistry._parse_semver("1.0.0-alpha") == PolicyRegistry._parse_semver("1.0.0")
+            True  # Same major.minor.patch, prerelease ignored
         """
         parser = cls._get_semver_parser()
         return parser(version)

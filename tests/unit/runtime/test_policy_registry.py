@@ -22,10 +22,11 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumPolicyType
-from omnibase_infra.errors import PolicyRegistryError
+from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
 from omnibase_infra.runtime.models import ModelPolicyKey
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 
@@ -551,8 +552,6 @@ class TestPolicyRegistryVersioning:
         Version validation happens during registration via _parse_semver,
         preventing invalid versions from being registered.
         """
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         # Attempt to register with invalid version format
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             policy_registry.register_policy(
@@ -578,8 +577,6 @@ class TestPolicyRegistryVersioning:
         Versions with non-numeric parts should raise ProtocolConfigurationError
         immediately during register_policy() call.
         """
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         # Attempt to register with malformed version components
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             policy_registry.register_policy(
@@ -604,8 +601,6 @@ class TestPolicyRegistryVersioning:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that empty version strings raise ProtocolConfigurationError at registration."""
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         # Attempt to register with empty version
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             policy_registry.register_policy(
@@ -626,8 +621,6 @@ class TestPolicyRegistryVersioning:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that versions with more than 3 parts raise error."""
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         # Attempt to register with too many version parts
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             policy_registry.register_policy(
@@ -1409,8 +1402,6 @@ class TestPolicyRegistrySemverCaching:
 
     def test_parse_semver_returns_consistent_results(self) -> None:
         """Test that _parse_semver returns consistent results for same input."""
-        from omnibase_core.models.primitives.model_semver import ModelSemVer
-
         # Reset cache to ensure clean state
         PolicyRegistry._reset_semver_cache()
 
@@ -1714,8 +1705,6 @@ class TestPolicyRegistryInvalidVersions:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that empty version string raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             policy_registry.register_policy(
                 policy_id="invalid-version",
@@ -1737,8 +1726,6 @@ class TestPolicyRegistryInvalidVersions:
         - "1.2.3-alpha" is VALID
         - "1.2.3" is VALID (no prerelease)
         """
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             policy_registry.register_policy(
                 policy_id="empty-prerelease",
@@ -1793,8 +1780,6 @@ class TestPolicyRegistryInvalidVersions:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test empty prerelease suffix is rejected for various version formats."""
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         invalid_versions = [
             "1-",  # major only with trailing dash
             "1.2-",  # major.minor with trailing dash
@@ -1822,8 +1807,6 @@ class TestPolicyRegistryInvalidVersions:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that non-numeric version components raise ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             policy_registry.register_policy(
                 policy_id="invalid-version",
@@ -1839,8 +1822,6 @@ class TestPolicyRegistryInvalidVersions:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that negative version numbers raise ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             policy_registry.register_policy(
                 policy_id="invalid-version",
@@ -1856,8 +1837,6 @@ class TestPolicyRegistryInvalidVersions:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that version with too many parts raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             policy_registry.register_policy(
                 policy_id="invalid-version",
@@ -2000,8 +1979,6 @@ class TestPolicyRegistryInvalidVersions:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that whitespace-only version strings raise ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             policy_registry.register_policy(
                 policy_id="whitespace-only",
@@ -2015,8 +1992,6 @@ class TestPolicyRegistryInvalidVersions:
 
     def test_parse_semver_whitespace_trimming(self) -> None:
         """Test _parse_semver directly with whitespace inputs."""
-        from omnibase_core.models.primitives.model_semver import ModelSemVer
-
         # Reset cache to ensure clean state
         PolicyRegistry._reset_semver_cache()
 

@@ -49,9 +49,11 @@ class ModelFailedComponent(BaseModel):
     )
 
     component_name: str = Field(
+        min_length=1,
         description="Name or type identifier of the failed component",
     )
     error_message: str = Field(
+        min_length=1,
         description="Error message describing the failure reason",
     )
 

@@ -46,7 +46,7 @@ Example:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
@@ -103,6 +103,11 @@ class ModelCategoryMatchResult(BaseModel):
     .. versionadded:: 0.6.1
         Created as part of OMN-1007 tuple-to-model conversion.
     """
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+    )
 
     matched: bool = Field(
         description="Whether the category matching criteria was satisfied.",

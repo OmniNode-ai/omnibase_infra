@@ -739,6 +739,37 @@ def _is_simple_optional(pattern: ModelUnionPattern) -> bool:
     return len(pattern.types) == 2 and "None" in pattern.types
 
 
+def _should_skip_path(path: Path) -> bool:
+    """
+    Check if a path should be skipped for union validation.
+
+    Skips archive directories, examples, and __pycache__ directories.
+    These are excluded because:
+    - Archive/archived: Historical code not subject to current validation rules
+    - Examples: Demo code that may intentionally show anti-patterns
+    - __pycache__: Compiled Python files, not source code
+
+    Args:
+        path: The file path to check.
+
+    Returns:
+        True if the path should be skipped, False otherwise.
+    """
+    path_str = str(path)
+    return any(
+        part in path_str
+        for part in [
+            "/archived/",
+            "archived",
+            "/archive/",
+            "archive",
+            "/examples/",
+            "examples",
+            "__pycache__",
+        ]
+    )
+
+
 def _count_non_optional_unions(directory: Path) -> tuple[int, int, list[str]]:
     """
     Count unions in a directory, excluding simple optional patterns (`X | None`).
@@ -760,19 +791,8 @@ def _count_non_optional_unions(directory: Path) -> tuple[int, int, list[str]]:
     all_issues: list[str] = []
 
     for py_file in directory.rglob("*.py"):
-        # Filter out archived files and __pycache__
-        if any(
-            part in str(py_file)
-            for part in [
-                "/archived/",
-                "archived",
-                "/archive/",
-                "archive",
-                "/examples/",
-                "examples",
-                "__pycache__",
-            ]
-        ):
+        # Filter out archived files, examples, and __pycache__
+        if _should_skip_path(py_file):
             continue
 
         union_count, issues, patterns = validate_union_usage_file(py_file)
@@ -853,26 +873,9 @@ def validate_infra_union_usage(
         not filtered_issues or not strict
     )
 
-    # Count Python files for metadata
+    # Count Python files for metadata (excluding archive, examples, __pycache__)
     python_files = list(dir_path.rglob("*.py"))
-    files_processed = len(
-        [
-            f
-            for f in python_files
-            if not any(
-                part in str(f)
-                for part in [
-                    "/archived/",
-                    "archived",
-                    "/archive/",
-                    "archive",
-                    "/examples/",
-                    "examples",
-                    "__pycache__",
-                ]
-            )
-        ]
-    )
+    files_processed = len([f for f in python_files if not _should_skip_path(f)])
 
     # Create result with enhanced metadata showing both counts
     return ModelValidationResult(

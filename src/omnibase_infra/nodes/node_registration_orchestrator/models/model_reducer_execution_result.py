@@ -73,9 +73,25 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_u
     ModelPostgresUpsertIntent,
 )
 
-# Type alias matching ModelRegistrationIntent but using the concrete union
-# We use the explicit union here to avoid circular imports from model_registration_intent.py
-_RegistrationIntentUnion = ModelConsulRegistrationIntent | ModelPostgresUpsertIntent
+RegistrationIntentUnion = ModelConsulRegistrationIntent | ModelPostgresUpsertIntent
+"""Type alias for registration intent union without discriminator annotation.
+
+This alias represents the same union as ``ModelRegistrationIntent`` in
+``model_registration_intent.py``, but without the ``Annotated[..., Field(discriminator=...)]``
+wrapper. We define it here rather than importing ``ModelRegistrationIntent`` to avoid
+circular imports between these modules.
+
+Use this alias for:
+    - Type hints in method signatures and field definitions
+    - Cases where Pydantic's discriminated union behavior is not needed
+
+Use ``ModelRegistrationIntent`` from ``model_registration_intent.py`` when:
+    - Pydantic needs to discriminate between intent types based on the ``kind`` field
+    - Deserializing JSON where the discriminator determines the concrete type
+
+.. versionadded:: 0.7.0
+    Created as part of OMN-1007 tuple-to-model conversion work.
+"""
 
 
 class ModelReducerExecutionResult(BaseModel):
@@ -92,6 +108,35 @@ class ModelReducerExecutionResult(BaseModel):
         state: The updated reducer state after processing an event.
         intents: List of registration intents to be executed by the effect node.
             May be empty if no infrastructure operations are needed.
+
+    Warning:
+        **Non-standard __bool__ behavior**: This model overrides ``__bool__`` to return
+        ``True`` only when intents are present (i.e., ``has_intents`` is True). This
+        differs from typical Pydantic model behavior where ``bool(model)`` always
+        returns ``True`` for any valid model instance.
+
+        This design enables idiomatic conditional checks for work to be done::
+
+            if result:
+                # Process intents - there is work to do
+                execute_intents(result.intents)
+            else:
+                # No intents - skip processing
+                pass
+
+        If you need to check model validity instead, use explicit attribute access::
+
+            # Check for intents (uses __bool__)
+            if result:
+                ...
+
+            # Check model is valid (always True for constructed instance)
+            if result is not None:
+                ...
+
+            # Explicit intent check (preferred for clarity)
+            if result.has_intents:
+                ...
 
     Example:
         >>> # Create result with state and intents
@@ -124,7 +169,7 @@ class ModelReducerExecutionResult(BaseModel):
         ...,
         description="The updated reducer state after processing the event.",
     )
-    intents: list[_RegistrationIntentUnion] = Field(
+    intents: list[RegistrationIntentUnion] = Field(
         default_factory=list,
         description="List of registration intents to be executed by the effect node.",
     )
@@ -215,7 +260,7 @@ class ModelReducerExecutionResult(BaseModel):
     def with_intents(
         cls,
         state: ModelReducerState,
-        intents: Sequence[_RegistrationIntentUnion],
+        intents: Sequence[RegistrationIntentUnion],
     ) -> ModelReducerExecutionResult:
         """Create a result with state and intents.
 
@@ -242,7 +287,7 @@ class ModelReducerExecutionResult(BaseModel):
     @classmethod
     def from_legacy_tuple(
         cls,
-        result: tuple[ModelReducerState, Sequence[_RegistrationIntentUnion]],
+        result: tuple[ModelReducerState, Sequence[RegistrationIntentUnion]],
     ) -> ModelReducerExecutionResult:
         """Create from legacy tuple-based reducer result.
 
@@ -272,7 +317,7 @@ class ModelReducerExecutionResult(BaseModel):
 
     def to_legacy_tuple(
         self,
-    ) -> tuple[ModelReducerState, list[_RegistrationIntentUnion]]:
+    ) -> tuple[ModelReducerState, list[RegistrationIntentUnion]]:
         """Convert back to legacy tuple format.
 
         This method enables gradual migration by allowing conversion back
@@ -292,16 +337,36 @@ class ModelReducerExecutionResult(BaseModel):
         return (self.state, list(self.intents))
 
     def __bool__(self) -> bool:
-        """Allow using result in boolean context.
+        """Allow using result in boolean context to check for pending work.
 
         Returns True if the result contains any intents, indicating that
         infrastructure operations need to be performed.
+
+        Warning:
+            This differs from typical Pydantic model behavior where ``bool(model)``
+            always returns ``True`` for any valid model instance. Here, ``bool(result)``
+            returns ``False`` for valid results with no intents.
+
+            Use ``result.has_intents`` for explicit, self-documenting code.
+            Use ``result is not None`` if you need to check model existence.
 
         Returns:
             True if intents is non-empty, False otherwise.
 
         Example:
-            >>> if ModelReducerExecutionResult.empty():
+            >>> result_with_work = ModelReducerExecutionResult.with_intents(
+            ...     state=ModelReducerState.initial(),
+            ...     intents=[some_intent],
+            ... )
+            >>> bool(result_with_work)
+            True
+
+            >>> result_no_work = ModelReducerExecutionResult.empty()
+            >>> bool(result_no_work)  # False even though model is valid!
+            False
+
+            >>> # Idiomatic usage
+            >>> if result_no_work:
             ...     print("Has work to do")
             ... else:
             ...     print("No work needed")
@@ -329,4 +394,4 @@ class ModelReducerExecutionResult(BaseModel):
         )
 
 
-__all__ = ["ModelReducerExecutionResult"]
+__all__ = ["ModelReducerExecutionResult", "RegistrationIntentUnion"]
