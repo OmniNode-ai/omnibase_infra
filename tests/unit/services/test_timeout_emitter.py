@@ -49,6 +49,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ProtocolConfigurationError,
 )
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration.model_node_capabilities import (
@@ -492,7 +493,7 @@ class TestTimeoutEmitterAckTimeout:
             ack_deadline=None,  # Missing deadline
         )
 
-        with pytest.raises(ValueError, match="ack_deadline is None"):
+        with pytest.raises(ProtocolConfigurationError, match="ack_deadline is None"):
             await processor._emit_ack_timeout(
                 projection=projection,
                 detected_at=datetime.now(UTC),
@@ -594,7 +595,7 @@ class TestTimeoutEmitterLivenessExpiration:
             liveness_deadline=None,  # Missing deadline
         )
 
-        with pytest.raises(ValueError, match="liveness_deadline is None"):
+        with pytest.raises(ProtocolConfigurationError, match="liveness_deadline is None"):
             await processor._emit_liveness_expiration(
                 projection=projection,
                 detected_at=datetime.now(UTC),

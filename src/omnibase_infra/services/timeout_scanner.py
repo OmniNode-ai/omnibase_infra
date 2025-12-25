@@ -23,6 +23,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime
@@ -183,8 +184,8 @@ class TimeoutScanner:
     ) -> ModelTimeoutQueryResult:
         """Find all entities requiring timeout events.
 
-        Queries both ack and liveness timeout candidates in parallel
-        (via sequential calls to leverage same connection pool).
+        Queries both ack and liveness timeout candidates in parallel using
+        asyncio.gather for optimal performance.
 
         The returned result contains both categories of overdue entities
         along with query metadata for observability.
@@ -224,19 +225,20 @@ class TimeoutScanner:
             },
         )
 
-        # Query both timeout types
-        ack_timeouts = await self._reader.get_overdue_ack_registrations(
-            now=now,
-            domain=domain,
-            limit=self._batch_size,
-            correlation_id=corr_id,
-        )
-
-        liveness_expirations = await self._reader.get_overdue_liveness_registrations(
-            now=now,
-            domain=domain,
-            limit=self._batch_size,
-            correlation_id=corr_id,
+        # Query both timeout types in parallel for optimal performance
+        ack_timeouts, liveness_expirations = await asyncio.gather(
+            self._reader.get_overdue_ack_registrations(
+                now=now,
+                domain=domain,
+                limit=self._batch_size,
+                correlation_id=corr_id,
+            ),
+            self._reader.get_overdue_liveness_registrations(
+                now=now,
+                domain=domain,
+                limit=self._batch_size,
+                correlation_id=corr_id,
+            ),
         )
 
         end_time = time.perf_counter()

@@ -35,6 +35,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.mixins import ProtocolEventBusLike
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.projectors.projector_registration import ProjectorRegistration
@@ -476,6 +478,7 @@ class TimeoutEmitter:
             correlation_id: Correlation ID for distributed tracing.
 
         Raises:
+            ProtocolConfigurationError: If ack_deadline is None (invalid projection state)
             InfraConnectionError: If Kafka connection fails
             InfraTimeoutError: If publish times out
             InfraUnavailableError: If circuit breaker is open
@@ -483,9 +486,15 @@ class TimeoutEmitter:
         """
         # Validate ack_deadline exists (should always be present for timeout candidates)
         if projection.ack_deadline is None:
-            raise ValueError(
+            raise ProtocolConfigurationError(
                 f"Cannot emit ack timeout for node {projection.entity_id}: "
-                "ack_deadline is None"
+                "ack_deadline is None",
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="emit_ack_timeout",
+                    target_name="registration_projection",
+                    correlation_id=correlation_id,
+                ),
             )
 
         # Runtime import to avoid circular import (see TYPE_CHECKING block)
@@ -554,6 +563,7 @@ class TimeoutEmitter:
             correlation_id: Correlation ID for distributed tracing.
 
         Raises:
+            ProtocolConfigurationError: If liveness_deadline is None (invalid projection state)
             InfraConnectionError: If Kafka connection fails
             InfraTimeoutError: If publish times out
             InfraUnavailableError: If circuit breaker is open
@@ -561,9 +571,15 @@ class TimeoutEmitter:
         """
         # Validate liveness_deadline exists
         if projection.liveness_deadline is None:
-            raise ValueError(
+            raise ProtocolConfigurationError(
                 f"Cannot emit liveness expiration for node {projection.entity_id}: "
-                "liveness_deadline is None"
+                "liveness_deadline is None",
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="emit_liveness_expiration",
+                    target_name="registration_projection",
+                    correlation_id=correlation_id,
+                ),
             )
 
         # Runtime import to avoid circular import (see TYPE_CHECKING block)
