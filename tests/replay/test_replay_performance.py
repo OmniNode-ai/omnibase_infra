@@ -145,7 +145,7 @@ def generate_events_with_duplicates(
 # =============================================================================
 
 
-@pytest.mark.slow
+@pytest.mark.slow  # 1000-5000 events for throughput benchmarks
 @pytest.mark.asyncio
 class TestLargeEventReplayPerformance:
     """Performance tests for large event replay scenarios."""
@@ -221,7 +221,7 @@ class TestLargeEventReplayPerformance:
 # =============================================================================
 
 
-@pytest.mark.slow
+@pytest.mark.slow  # 1000 events with deduplication overhead
 @pytest.mark.asyncio
 class TestDeduplicationReplayPerformance:
     """Performance tests for replay with deduplication."""
@@ -344,7 +344,7 @@ class TestDeduplicationReplayPerformance:
 # =============================================================================
 
 
-@pytest.mark.slow
+@pytest.mark.slow  # 500-1000 events with retry simulation
 @pytest.mark.asyncio
 class TestChaosReplayPerformance:
     """Performance tests combining chaos injection with replay."""
@@ -498,7 +498,7 @@ class TestChaosReplayPerformance:
 # =============================================================================
 
 
-@pytest.mark.slow
+@pytest.mark.slow  # 10000 events for memory measurement
 @pytest.mark.asyncio
 class TestMemoryUsagePerformance:
     """Performance tests for memory usage during large replay."""
@@ -626,7 +626,7 @@ class TestMemoryUsagePerformance:
 # =============================================================================
 
 
-@pytest.mark.slow
+@pytest.mark.slow  # 5x1000 event batches for throughput stability
 @pytest.mark.asyncio
 class TestReplayThroughput:
     """Throughput benchmark tests for replay operations."""

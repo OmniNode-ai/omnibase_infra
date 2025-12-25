@@ -70,6 +70,95 @@ class ChaosConfig:
     partition_duration_ms: int = 0
     enabled: bool = True
 
+    def __post_init__(self) -> None:
+        """Validate configuration bounds after initialization.
+
+        Ensures all rate and timing fields are within valid ranges.
+        This prevents invalid configurations from being created via
+        direct instantiation, complementing the setter methods.
+
+        Raises:
+            ValueError: If any field is outside valid bounds.
+        """
+        if not 0.0 <= self.failure_rate <= 1.0:
+            raise ValueError(
+                f"failure_rate must be in [0.0, 1.0], got {self.failure_rate}"
+            )
+        if not 0.0 <= self.timeout_rate <= 1.0:
+            raise ValueError(
+                f"timeout_rate must be in [0.0, 1.0], got {self.timeout_rate}"
+            )
+        if self.latency_min_ms < 0:
+            raise ValueError(f"latency_min_ms must be >= 0, got {self.latency_min_ms}")
+        if self.latency_max_ms < 0:
+            raise ValueError(f"latency_max_ms must be >= 0, got {self.latency_max_ms}")
+        if self.latency_min_ms > self.latency_max_ms:
+            raise ValueError(
+                f"latency_min_ms ({self.latency_min_ms}) must be <= latency_max_ms ({self.latency_max_ms})"
+            )
+        if self.partition_duration_ms < 0:
+            raise ValueError(
+                f"partition_duration_ms must be >= 0, got {self.partition_duration_ms}"
+            )
+
+
+# =============================================================================
+# Chaos Profiles - Predefined Configurations
+# =============================================================================
+
+CHAOS_PROFILES: dict[str, ChaosConfig] = {
+    # No chaos - baseline testing for comparison
+    "stable": ChaosConfig(),
+    # High latency scenario - simulates slow network or overloaded service
+    "high_latency": ChaosConfig(latency_min_ms=100, latency_max_ms=500),
+    # Frequent failures - simulates unreliable service (50% failure rate)
+    "frequent_failures": ChaosConfig(failure_rate=0.5),
+    # Intermittent failures - simulates occasional transient errors
+    "intermittent_failures": ChaosConfig(failure_rate=0.1),
+    # Timeout prone - simulates services with frequent timeouts
+    "timeout_prone": ChaosConfig(timeout_rate=0.3),
+    # Network instability - simulates network partition scenarios
+    "network_instability": ChaosConfig(partition_duration_ms=1000),
+    # Degraded network - combines moderate latency with occasional failures
+    "degraded_network": ChaosConfig(
+        latency_min_ms=50,
+        latency_max_ms=200,
+        failure_rate=0.1,
+    ),
+    # Chaos monkey - aggressive chaos for resilience testing
+    "chaos_monkey": ChaosConfig(
+        failure_rate=0.3,
+        timeout_rate=0.1,
+        latency_min_ms=10,
+        latency_max_ms=100,
+    ),
+}
+
+
+def get_chaos_profile(name: str) -> ChaosConfig:
+    """Get a predefined chaos profile by name.
+
+    Args:
+        name: Profile name (see CHAOS_PROFILES keys).
+
+    Returns:
+        ChaosConfig for the requested profile.
+
+    Raises:
+        KeyError: If profile name not found.
+
+    Available Profiles:
+        - stable: No chaos - baseline testing
+        - high_latency: 100-500ms latency injection
+        - frequent_failures: 50% failure rate
+        - intermittent_failures: 10% failure rate
+        - timeout_prone: 30% timeout rate
+        - network_instability: 1000ms partition duration
+        - degraded_network: 50-200ms latency + 10% failures
+        - chaos_monkey: 30% failures + 10% timeouts + 10-100ms latency
+    """
+    return CHAOS_PROFILES[name]
+
 
 @dataclass
 class FailureInjector:
@@ -635,6 +724,34 @@ def chaos_config() -> ChaosConfig:
         ChaosConfig with default settings (no chaos by default).
     """
     return ChaosConfig()
+
+
+@pytest.fixture
+def chaos_profile() -> Callable[[str], ChaosConfig]:
+    """Fixture to get chaos profiles by name.
+
+    Returns a callable that retrieves predefined chaos configurations.
+    Use this to quickly configure chaos scenarios in tests.
+
+    Available Profiles:
+        - stable: No chaos - baseline testing
+        - high_latency: 100-500ms latency injection
+        - frequent_failures: 50% failure rate
+        - intermittent_failures: 10% failure rate
+        - timeout_prone: 30% timeout rate
+        - network_instability: 1000ms partition duration
+        - degraded_network: 50-200ms latency + 10% failures
+        - chaos_monkey: 30% failures + 10% timeouts + 10-100ms latency
+
+    Returns:
+        Callable that takes profile name and returns ChaosConfig.
+
+    Example:
+        >>> def test_resilience(chaos_profile):
+        ...     config = chaos_profile("chaos_monkey")
+        ...     assert config.failure_rate == 0.3
+    """
+    return get_chaos_profile
 
 
 @pytest.fixture
