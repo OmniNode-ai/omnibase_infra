@@ -22,8 +22,15 @@ Exports:
     ModelPolicyKey: Strongly-typed policy registry key model
     ModelRuntimeTick: Infrastructure event emitted by runtime scheduler
     ModelDuplicateResponse: Response for duplicate message detection
+    ModelLifecycleResult: Result of individual handler lifecycle operation
+    ModelBatchLifecycleResult: Result of batch handler lifecycle operations
+    ModelShutdownBatchResult: Result of batch shutdown operation
+    ModelHealthCheckResult: Result of component health check operation
 """
 
+from omnibase_infra.runtime.models.model_batch_lifecycle_result import (
+    ModelBatchLifecycleResult,
+)
 from omnibase_infra.runtime.models.model_duplicate_response import (
     ModelDuplicateResponse,
 )
@@ -31,6 +38,12 @@ from omnibase_infra.runtime.models.model_enabled_protocols_config import (
     ModelEnabledProtocolsConfig,
 )
 from omnibase_infra.runtime.models.model_event_bus_config import ModelEventBusConfig
+from omnibase_infra.runtime.models.model_health_check_result import (
+    ModelHealthCheckResult,
+)
+from omnibase_infra.runtime.models.model_lifecycle_result import (
+    ModelLifecycleResult,
+)
 from omnibase_infra.runtime.models.model_logging_config import ModelLoggingConfig
 from omnibase_infra.runtime.models.model_optional_correlation_id import (
     ModelOptionalCorrelationId,
@@ -53,14 +66,21 @@ from omnibase_infra.runtime.models.model_runtime_scheduler_metrics import (
     ModelRuntimeSchedulerMetrics,
 )
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
+from omnibase_infra.runtime.models.model_shutdown_batch_result import (
+    ModelShutdownBatchResult,
+)
 from omnibase_infra.runtime.models.model_shutdown_config import ModelShutdownConfig
 
 __all__: list[str] = [
+    "ModelBatchLifecycleResult",
     "ModelDuplicateResponse",
     "ModelEventBusConfig",
     "ModelEnabledProtocolsConfig",
+    "ModelHealthCheckResult",
+    "ModelLifecycleResult",
     "ModelProtocolRegistrationConfig",
     "ModelLoggingConfig",
+    "ModelShutdownBatchResult",
     "ModelShutdownConfig",
     "ModelRuntimeConfig",
     "ModelRuntimeSchedulerConfig",

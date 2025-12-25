@@ -24,20 +24,17 @@ Thread Safety:
     This orchestrator is NOT thread-safe. Each instance should handle one
     workflow at a time. For concurrent workflows, create multiple instances.
 
-FUTURE Features (not yet implemented):
-    - FUTURE(OMN-973): time_injection - Contract declares time injection from
-      RuntimeTick events, but the orchestrator does not yet parse this from
-      contract.yaml or wire it into workflow step execution. The infrastructure
-      (DispatchContextEnforcer) provides time injection at dispatch time, but
-      explicit contract-driven configuration is pending.
+Implemented Features:
+    - OMN-973 (Time Injection): The DispatchContextEnforcer provides time injection
+      at dispatch time. Orchestrators receive injected `now` timestamps from
+      RuntimeTick events, enabling deterministic timeout evaluation in workflow
+      steps. See: omnibase_infra/runtime/dispatch_context_enforcer.py
 
-    - FUTURE(OMN-930): projection_reader - Contract declares a projection reader
-      dependency (ProtocolProjectionReader), but:
-      1. The protocol does not yet exist in omnibase_spi.protocols
-      2. The orchestrator does not resolve/inject this dependency
-      3. The "read_projection" workflow step has no implementation
-      The concrete implementation (ProjectionReaderRegistration) exists and
-      is ready for use once the SPI protocol and DI wiring are complete.
+    - OMN-930 (Projection Reader): ProtocolProjectionReader is defined in
+      omnibase_spi.protocols (merged in omnibase_spi#44). The orchestrator can
+      resolve and inject projection readers as dependencies, enabling the
+      "read_projection" workflow step to query current registration state.
+      See: omnibase_spi/protocols/protocol_projection_reader.py
 
 Related Modules:
     - contract.yaml: Workflow definition and execution graph

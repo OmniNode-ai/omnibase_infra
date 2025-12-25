@@ -380,7 +380,7 @@ def detect_message_category(
     # Strategy 1: Check for explicit category attribute
     if hasattr(message, "category"):
         category = message.category
-        if isinstance(category, (EnumMessageCategory, EnumNodeOutputType)):
+        if isinstance(category, EnumMessageCategory | EnumNodeOutputType):
             return category
 
     # Strategy 2a: Check for message_category attribute
