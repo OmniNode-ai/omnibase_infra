@@ -85,6 +85,7 @@ def create_mock_row(
         "liveness_deadline": liveness_deadline,
         "ack_timeout_emitted_at": ack_timeout_emitted_at,
         "liveness_timeout_emitted_at": liveness_timeout_emitted_at,
+        "last_heartbeat_at": None,
         "last_applied_event_id": uuid4(),
         "last_applied_offset": 100,
         "last_applied_sequence": None,

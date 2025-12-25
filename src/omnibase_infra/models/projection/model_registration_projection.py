@@ -13,6 +13,7 @@ Concurrency Safety:
     thread-safety, depending on the execution context).
 
 Related Tickets:
+    - OMN-1006: Add last_heartbeat_at for liveness expired event reporting
     - OMN-944 (F1): Implement Registration Projection Schema
     - OMN-940 (F0): Define Projector Execution Model
     - OMN-932 (C2): Durable Timeout Handling
@@ -62,7 +63,7 @@ class ModelRegistrationProjection(BaseModel):
         capabilities: Node capabilities snapshot at registration time
         ack_deadline: Deadline for node acknowledgment (nullable)
         liveness_deadline: Deadline for next heartbeat (nullable)
-        last_heartbeat_at: Timestamp of last received heartbeat (None if never received)
+        last_heartbeat_at: Timestamp of last received heartbeat (None if never received, for liveness reporting)
         ack_timeout_emitted_at: Marker for ack timeout event deduplication (C2)
         liveness_timeout_emitted_at: Marker for liveness timeout deduplication (C2)
         last_applied_event_id: message_id of last applied event (idempotency)
@@ -135,11 +136,9 @@ class ModelRegistrationProjection(BaseModel):
         default=None,
         description="Deadline for next heartbeat (nullable)",
     )
-
-    # Heartbeat Tracking
     last_heartbeat_at: datetime | None = Field(
         default=None,
-        description="Timestamp of the last received heartbeat (None if never received)",
+        description="Timestamp of last received heartbeat (None if never received, for liveness reporting)",
     )
 
     # Timeout Emission Markers (for C2 deduplication)

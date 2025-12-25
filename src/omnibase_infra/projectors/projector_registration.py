@@ -263,13 +263,13 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         upsert_sql = """
             INSERT INTO registration_projections (
                 entity_id, domain, current_state, node_type, node_version,
-                capabilities, ack_deadline, liveness_deadline,
+                capabilities, ack_deadline, liveness_deadline, last_heartbeat_at,
                 ack_timeout_emitted_at, liveness_timeout_emitted_at,
                 last_applied_event_id, last_applied_offset,
                 last_applied_sequence, last_applied_partition,
                 registered_at, updated_at, correlation_id
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
             )
             ON CONFLICT (entity_id, domain) DO UPDATE SET
                 -- EXCLUDED.* refers to values from the INSERT that triggered conflict
@@ -279,6 +279,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                 capabilities = EXCLUDED.capabilities,
                 ack_deadline = EXCLUDED.ack_deadline,
                 liveness_deadline = EXCLUDED.liveness_deadline,
+                last_heartbeat_at = EXCLUDED.last_heartbeat_at,
                 ack_timeout_emitted_at = EXCLUDED.ack_timeout_emitted_at,
                 liveness_timeout_emitted_at = EXCLUDED.liveness_timeout_emitted_at,
                 last_applied_event_id = EXCLUDED.last_applied_event_id,
@@ -322,6 +323,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             projection.capabilities.model_dump_json(),  # JSONB as JSON string
             projection.ack_deadline,
             projection.liveness_deadline,
+            projection.last_heartbeat_at,
             projection.ack_timeout_emitted_at,
             projection.liveness_timeout_emitted_at,
             projection.last_applied_event_id,
@@ -713,6 +715,131 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                 )
             raise RuntimeHostError(
                 f"Failed to update liveness timeout marker: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def update_heartbeat(
+        self,
+        entity_id: UUID,
+        domain: str,
+        last_heartbeat_at: datetime,
+        liveness_deadline: datetime,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Update heartbeat tracking fields for a node registration.
+
+        Updates the `last_heartbeat_at` and `liveness_deadline` columns
+        when a heartbeat is received from a node. This extends the node's
+        liveness window and records when the heartbeat was received.
+
+        This method is called by the heartbeat handler when processing
+        NodeHeartbeatReceived events.
+
+        Args:
+            entity_id: Node UUID to update.
+            domain: Domain namespace.
+            last_heartbeat_at: Timestamp when heartbeat was received.
+            liveness_deadline: New deadline for next heartbeat.
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            True if heartbeat was updated, False if entity not found.
+
+        Raises:
+            InfraConnectionError: If database connection fails.
+            InfraTimeoutError: If update times out.
+            RuntimeHostError: For other database errors.
+
+        Example:
+            >>> await projector.update_heartbeat(
+            ...     entity_id=node_id,
+            ...     domain="registration",
+            ...     last_heartbeat_at=datetime.now(UTC),
+            ...     liveness_deadline=datetime.now(UTC) + timedelta(seconds=90),
+            ... )
+
+        Related:
+            - OMN-1006: Add last_heartbeat_at for liveness expired event reporting
+            - handler_node_heartbeat.py: Handler that calls this method
+        """
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="update_heartbeat",
+            target_name="projector.registration",
+            correlation_id=corr_id,
+        )
+
+        # Check circuit breaker
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("update_heartbeat", corr_id)
+
+        update_sql = """
+            UPDATE registration_projections
+            SET last_heartbeat_at = $3,
+                liveness_deadline = $4,
+                updated_at = $3
+            WHERE entity_id = $1 AND domain = $2
+            RETURNING entity_id
+        """
+
+        try:
+            async with self._pool.acquire() as conn:
+                result = await conn.fetchrow(
+                    update_sql,
+                    entity_id,
+                    domain,
+                    last_heartbeat_at,
+                    liveness_deadline,
+                )
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            if result:
+                logger.debug(
+                    "Heartbeat updated",
+                    extra={
+                        "entity_id": str(entity_id),
+                        "domain": domain,
+                        "last_heartbeat_at": last_heartbeat_at.isoformat(),
+                        "liveness_deadline": liveness_deadline.isoformat(),
+                        "correlation_id": str(corr_id),
+                    },
+                )
+                return True
+
+            logger.warning(
+                "Entity not found for heartbeat update",
+                extra={
+                    "entity_id": str(entity_id),
+                    "domain": domain,
+                    "correlation_id": str(corr_id),
+                },
+            )
+            return False
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("update_heartbeat", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for heartbeat update",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("update_heartbeat", corr_id)
+            raise InfraTimeoutError(
+                "Heartbeat update timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("update_heartbeat", corr_id)
+            raise RuntimeHostError(
+                f"Failed to update heartbeat: {type(e).__name__}",
                 context=ctx,
             ) from e
 

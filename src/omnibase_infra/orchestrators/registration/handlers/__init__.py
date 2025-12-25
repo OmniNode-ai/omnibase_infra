@@ -9,6 +9,7 @@ Handlers:
     - HandlerNodeIntrospected: Processes NodeIntrospectionEvent (canonical trigger)
     - HandlerNodeRegistrationAcked: Processes NodeRegistrationAcked commands
     - HandlerRuntimeTick: Processes RuntimeTick for timeout evaluation
+    - HandlerNodeHeartbeat: Processes NodeHeartbeat for liveness tracking
 
 All handlers follow the pattern:
     async def handle(event, now, correlation_id) -> list[BaseModel]
@@ -22,8 +23,14 @@ Handler Architecture:
 Related Tickets:
     - OMN-888 (C1): Registration Orchestrator
     - OMN-932 (C2): Durable Timeout Handling
+    - OMN-1006: Node Heartbeat for Liveness Tracking
 """
 
+from omnibase_infra.orchestrators.registration.handlers.handler_node_heartbeat import (
+    DEFAULT_LIVENESS_WINDOW_SECONDS,
+    HandlerNodeHeartbeat,
+    ModelHeartbeatHandlerResult,
+)
 from omnibase_infra.orchestrators.registration.handlers.handler_node_introspected import (
     HandlerNodeIntrospected,
 )
@@ -35,7 +42,10 @@ from omnibase_infra.orchestrators.registration.handlers.handler_runtime_tick imp
 )
 
 __all__: list[str] = [
+    "DEFAULT_LIVENESS_WINDOW_SECONDS",
+    "HandlerNodeHeartbeat",
     "HandlerNodeIntrospected",
     "HandlerNodeRegistrationAcked",
     "HandlerRuntimeTick",
+    "ModelHeartbeatHandlerResult",
 ]

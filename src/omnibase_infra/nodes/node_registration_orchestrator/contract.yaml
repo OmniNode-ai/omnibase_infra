@@ -209,6 +209,15 @@ consumed_events:
     event_type: "NodeRegistrationAcked"
     message_category: "COMMAND"
     description: "Node acknowledges registration acceptance"
+  # OMN-1006: Node heartbeat events for liveness tracking
+  # Heartbeats update last_heartbeat_at and extend liveness_deadline in the
+  # registration projection. The HandlerNodeHeartbeat processes these events.
+  # Note: direct_handler=true indicates this event bypasses the workflow and is
+  # handled by a dedicated handler (HandlerNodeHeartbeat) via handle_heartbeat().
+  - topic: "{env}.{namespace}.onex.evt.node-heartbeat.v1"
+    event_type: "ModelNodeHeartbeatEvent"
+    description: "Periodic heartbeat from active nodes for liveness tracking"
+    direct_handler: true
 # Handler Routing Configuration
 # ==============================
 # Declarative mapping of consumed events to handler implementations.

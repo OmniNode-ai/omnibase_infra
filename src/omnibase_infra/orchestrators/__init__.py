@@ -15,10 +15,21 @@ Key Architectural Constraints (from ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md):
 
 Exports:
     NodeRegistrationOrchestrator: Registration workflow orchestrator (C1)
+    DEFAULT_LIVENESS_WINDOW_SECONDS: Default liveness window (90 seconds)
+    HandlerNodeHeartbeat: Handler for node heartbeat events
+    ModelHeartbeatHandlerResult: Result model for heartbeat processing
 """
 
-from omnibase_infra.orchestrators.registration import NodeRegistrationOrchestrator
+from omnibase_infra.orchestrators.registration import (
+    DEFAULT_LIVENESS_WINDOW_SECONDS,
+    HandlerNodeHeartbeat,
+    ModelHeartbeatHandlerResult,
+    NodeRegistrationOrchestrator,
+)
 
 __all__: list[str] = [
+    "DEFAULT_LIVENESS_WINDOW_SECONDS",
+    "HandlerNodeHeartbeat",
+    "ModelHeartbeatHandlerResult",
     "NodeRegistrationOrchestrator",
 ]

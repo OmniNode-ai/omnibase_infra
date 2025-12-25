@@ -374,11 +374,11 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 600 (2025-12-25): OMN-952 PR #79 merge with main (OMN-811 compute registry + models) (~11 added)
 # - 606 (2025-12-25): OMN-949 DLQ configuration merge (~17 unions from DLQ + topic validation)
 # - 610 (2025-12-25): OMN-952 declarative orchestrator refactor + container wiring (~3 unions added)
-# - 620 (2025-12-25): OMN-952 + OMN-949 merge conflict resolution (~10 unions from combined changes)
+# - 626 (2025-12-25): OMN-952 + OMN-949 + OMN-1006 merge (~6 unions from combined changes)
 #
-# Threshold: 620 (buffer above ~615 baseline for codebase growth)
+# Threshold: 630 (buffer above ~626 baseline for codebase growth)
 # Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
-INFRA_MAX_UNIONS = 620
+INFRA_MAX_UNIONS = 630
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
