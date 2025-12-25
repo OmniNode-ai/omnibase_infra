@@ -1307,7 +1307,17 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             def health_check_func() -> dict[str, JsonValue]:
                 if self._client is None:
                     raise RuntimeError("Client not initialized")
-                result: dict[str, JsonValue] = self._client.sys.read_health_status()
+                response = self._client.sys.read_health_status()
+                # hvac returns Response object for some status codes, dict for others
+                if hasattr(response, "json"):
+                    # Response may have empty body (200 OK with no content)
+                    if hasattr(response, "text") and response.text:
+                        result: dict[str, JsonValue] = response.json()
+                    else:
+                        # Empty response means healthy (200 OK)
+                        result = {"initialized": True, "sealed": False}
+                else:
+                    result = response
                 return result
 
             # Use thread pool executor with retry logic for consistency

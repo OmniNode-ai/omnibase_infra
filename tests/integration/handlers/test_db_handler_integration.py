@@ -81,7 +81,9 @@ class TestDbHandlerConnection:
             # Verify health response structure
             assert health.healthy is True, "Handler should report healthy"
             assert health.initialized is True, "Handler should be initialized"
-            assert health.adapter_type == "db", "Adapter type should be 'db'"
+            assert health.adapter_type == "database", (
+                "Adapter type should be 'database'"
+            )
             assert health.pool_size == 5, "Default pool size should be 5"
             assert health.timeout_seconds == 30.0, "Timeout should match config"
         finally:
@@ -110,7 +112,7 @@ class TestDbHandlerConnection:
         try:
             description = handler.describe()
 
-            assert description.adapter_type == "db"
+            assert description.adapter_type == "database"
             assert "db.query" in description.supported_operations
             assert "db.execute" in description.supported_operations
             assert description.pool_size == 5

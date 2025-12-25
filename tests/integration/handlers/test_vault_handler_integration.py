@@ -479,8 +479,8 @@ class TestVaultHandlerErrors:
         # Verify error context contains expected information
         error = exc_info.value
         assert error.model.context is not None
-        assert error.model.context.transport_type.value == "vault"
-        assert error.model.context.operation == "vault.read_secret"
+        assert error.model.context["transport_type"].value == "vault"
+        assert error.model.context["operation"] == "vault.read_secret"
 
     @pytest.mark.asyncio
     async def test_vault_list_nonexistent_path(
