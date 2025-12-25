@@ -1632,6 +1632,7 @@ class TestKafkaEventBusDLQRouting:
                 source="test-source",
                 event_type="test-event",
                 correlation_id=correlation_id,
+                timestamp=datetime.now(UTC),
                 retry_count=3,  # Exhausted
                 max_retries=3,
             )
@@ -1789,6 +1790,7 @@ class TestKafkaEventBusDLQRouting:
                 source="test-source",
                 event_type="test-event",
                 correlation_id=correlation_id,
+                timestamp=datetime.now(UTC),
                 retry_count=3,
                 max_retries=3,
             )
@@ -1861,6 +1863,7 @@ class TestKafkaEventBusDLQRouting:
                 source="test-source",
                 event_type="test-event",
                 correlation_id=correlation_id,
+                timestamp=datetime.now(UTC),
                 retry_count=3,
                 max_retries=3,
             )
