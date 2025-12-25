@@ -52,12 +52,13 @@ class TestInfraValidatorConstants:
         - 544 (2025-12-23): OMN-954 effect idempotency and retry tests (PR #78)
         - 580 (2025-12-23): OMN-888 + PR #57 + OMN-954 merge
         - 585 (2025-12-25): OMN-811 ComputeRegistry + node registration orchestrator unions
+        - 586 (2025-12-25): OMN-932 durable timeouts + introspection config migration
 
-        Threshold: 585 (buffer above ~583 baseline for codebase growth)
+        Threshold: 586 (buffer above ~584 baseline for codebase growth)
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 585, (
-            "INFRA_MAX_UNIONS should be 585 (OMN-811 ComputeRegistry + node registration)"
+        assert INFRA_MAX_UNIONS == 586, (
+            "INFRA_MAX_UNIONS should be 586 (OMN-932 durable timeouts)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
