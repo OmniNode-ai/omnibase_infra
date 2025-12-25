@@ -76,8 +76,9 @@ from __future__ import annotations
 
 import ast
 import logging
-from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict
 
 from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
@@ -253,23 +254,36 @@ EXECUTION_SHAPE_RULES: dict[EnumHandlerType, ModelExecutionShapeRule] = {
 }
 
 
-@dataclass
-class HandlerInfo:
-    """Information about a detected handler in source code.
+class ModelDetectedNodeInfo(BaseModel):
+    """Information about a detected node in source code during validation.
+
+    This Pydantic model replaces the previous dataclass implementation
+    to comply with ONEX requirements for Pydantic-based data structures.
 
     Attributes:
         name: The class or function name.
-        handler_type: The detected handler type (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
-        node: The AST node representing the handler.
-        line_number: The line number where the handler is defined.
+        node_type: The detected node type (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
+        node: The AST node representing the detected element.
+        line_number: The line number where the element is defined.
         file_path: The absolute path to the source file.
     """
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     name: str
-    handler_type: EnumHandlerType
+    node_type: EnumHandlerType  # Renamed from handler_type for clarity
     node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
     line_number: int
     file_path: str
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Backwards compatibility alias for node_type."""
+        return self.node_type
+
+
+# Backwards compatibility alias
+HandlerInfo = ModelDetectedNodeInfo
 
 
 class ExecutionShapeValidator:
@@ -439,7 +453,7 @@ class ExecutionShapeValidator:
                     handlers.append(
                         HandlerInfo(
                             name=node.name,
-                            handler_type=handler_type,
+                            node_type=handler_type,
                             node=node,
                             line_number=node.lineno,
                             file_path=file_path,
@@ -451,7 +465,7 @@ class ExecutionShapeValidator:
                     handlers.append(
                         HandlerInfo(
                             name=node.name,
-                            handler_type=handler_type,
+                            node_type=handler_type,
                             node=node,
                             line_number=node.lineno,
                             file_path=file_path,

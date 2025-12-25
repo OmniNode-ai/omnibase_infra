@@ -198,13 +198,13 @@ COMMENT ON COLUMN registration_projections.last_applied_partition IS
 --
 -- ACK DEADLINE INDEXES:
 -- ---------------------
--- 1. idx_registration_ack_deadline (line 104-106):
+-- 1. idx_registration_ack_deadline:
 --    - Single-column index on ack_deadline
 --    - WHERE: ack_deadline IS NOT NULL
 --    - Use case: General queries filtering by ack_deadline regardless of emission status
 --    - Example: SELECT * FROM registration_projections WHERE ack_deadline < :now
 --
--- 2. idx_registration_ack_timeout_scan (line 143-145):
+-- 2. idx_registration_ack_timeout_scan:
 --    - Composite index on (ack_deadline, ack_timeout_emitted_at)
 --    - WHERE: ack_deadline IS NOT NULL AND ack_timeout_emitted_at IS NULL
 --    - Use case: Timeout scanner queries that need un-emitted timeouts only

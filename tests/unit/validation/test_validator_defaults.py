@@ -59,6 +59,7 @@ class TestInfraValidatorConstants:
           - ~100 non-optional unions remain
           - Buffer of 20 above baseline for codebase growth
         - 121 (2025-12-25): OMN-881 introspection feature (+1 non-optional union)
+        - 121 (2025-12-25): OMN-949 DLQ, OMN-816, OMN-811 merges (all used X | None patterns, excluded)
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """

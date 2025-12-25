@@ -1982,7 +1982,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         metrics = node.get_performance_metrics()
 
         assert metrics is not None
-        metrics_dict = metrics.to_dict()
+        metrics_dict = metrics.model_dump()
 
         assert isinstance(metrics_dict, dict)
         assert "get_capabilities_ms" in metrics_dict
@@ -2745,7 +2745,7 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
         )
 
         # Validate to_dict() returns all fields
-        metrics_dict = metrics.to_dict()
+        metrics_dict = metrics.model_dump()
         expected_keys = {
             "get_capabilities_ms",
             "discover_capabilities_ms",
@@ -2756,9 +2756,10 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
             "method_count",
             "threshold_exceeded",
             "slow_operations",
+            "captured_at",  # Added by Pydantic model
         }
         assert set(metrics_dict.keys()) == expected_keys, (
-            f"to_dict() missing keys: {expected_keys - set(metrics_dict.keys())}"
+            f"model_dump() missing keys: {expected_keys - set(metrics_dict.keys())}"
         )
 
         print("\nPerformance Metrics Validation:")

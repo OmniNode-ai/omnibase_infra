@@ -15,10 +15,12 @@ from omnibase_infra.models.discovery.model_introspection_performance_metrics imp
     ModelIntrospectionPerformanceMetrics,
 )
 from omnibase_infra.models.discovery.model_node_introspection_event import (
+    CapabilitiesTypedDict,
     ModelNodeIntrospectionEvent,
 )
 
 __all__ = [
+    "CapabilitiesTypedDict",
     "DEFAULT_HEARTBEAT_TOPIC",
     "DEFAULT_INTROSPECTION_TOPIC",
     "DEFAULT_REQUEST_INTROSPECTION_TOPIC",

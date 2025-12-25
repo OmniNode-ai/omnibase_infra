@@ -169,7 +169,6 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
@@ -210,69 +209,8 @@ PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS = 30.0
 PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS = 50.0
 PERF_THRESHOLD_CACHE_HIT_MS = 1.0
 
-
-@dataclass
-class IntrospectionPerformanceMetrics:
-    """Performance metrics for introspection operations.
-
-    This dataclass captures timing information for introspection operations,
-    enabling performance monitoring and alerting when operations exceed
-    the <50ms target threshold.
-
-    Attributes:
-        get_capabilities_ms: Time taken by get_capabilities() in milliseconds.
-        discover_capabilities_ms: Time taken by _discover_capabilities() in ms.
-        get_endpoints_ms: Time taken by get_endpoints() in milliseconds.
-        get_current_state_ms: Time taken by get_current_state() in milliseconds.
-        total_introspection_ms: Total time for get_introspection_data() in ms.
-        cache_hit: Whether the result was served from cache.
-        method_count: Number of methods discovered during reflection.
-        threshold_exceeded: Whether any operation exceeded performance thresholds.
-        slow_operations: List of operation names that exceeded their thresholds.
-
-    Example:
-        ```python
-        metrics = node.get_performance_metrics()
-        if metrics.threshold_exceeded:
-            logger.warning(
-                "Introspection performance degraded",
-                extra={
-                    "slow_operations": metrics.slow_operations,
-                    "total_ms": metrics.total_introspection_ms,
-                }
-            )
-        ```
-    """
-
-    get_capabilities_ms: float = 0.0
-    discover_capabilities_ms: float = 0.0
-    get_endpoints_ms: float = 0.0
-    get_current_state_ms: float = 0.0
-    total_introspection_ms: float = 0.0
-    cache_hit: bool = False
-    method_count: int = 0
-    threshold_exceeded: bool = False
-    slow_operations: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, object]:
-        """Convert metrics to dictionary for logging/serialization.
-
-        Returns:
-            Dictionary with all metric fields. Uses ``object`` as the value type
-            to avoid union complexity while maintaining type safety. Callers
-            should use :class:`ModelIntrospectionMetrics` for strongly-typed access.
-        """
-        return {
-            "get_capabilities_ms": self.get_capabilities_ms,
-            "discover_capabilities_ms": self.discover_capabilities_ms,
-            "get_endpoints_ms": self.get_endpoints_ms,
-            "get_current_state_ms": self.get_current_state_ms,
-            "total_introspection_ms": self.total_introspection_ms,
-            "cache_hit": self.cache_hit,
-            "method_count": self.method_count,
-            "threshold_exceeded": self.threshold_exceeded,
-            "slow_operations": list(self.slow_operations),
-        }
+# Backwards compatibility alias (ModelIntrospectionPerformanceMetrics imported from models.discovery)
+IntrospectionPerformanceMetrics = ModelIntrospectionPerformanceMetrics
 
 
 class PerformanceMetricsCacheDict(TypedDict, total=False):
@@ -1140,8 +1078,13 @@ class MixinNodeIntrospection:
         total_start = time.perf_counter()
         current_time = time.time()
 
-        # Initialize metrics for this call
-        metrics = IntrospectionPerformanceMetrics()
+        # Collect metrics values in local variables (model is frozen)
+        get_capabilities_ms = 0.0
+        discover_capabilities_ms = 0.0
+        get_endpoints_ms = 0.0
+        get_current_state_ms = 0.0
+        method_count = 0
+        slow_operations: list[str] = []
 
         # Check cache validity
         if (
@@ -1155,33 +1098,36 @@ class MixinNodeIntrospection:
 
             # Record cache hit metrics
             elapsed_ms = (time.perf_counter() - total_start) * 1000
-            metrics.total_introspection_ms = elapsed_ms
-            metrics.cache_hit = True
+            threshold_exceeded = elapsed_ms > PERF_THRESHOLD_CACHE_HIT_MS
+            if threshold_exceeded:
+                slow_operations.append("cache_hit")
 
-            # Check cache hit threshold
-            if elapsed_ms > PERF_THRESHOLD_CACHE_HIT_MS:
-                metrics.threshold_exceeded = True
-                metrics.slow_operations.append("cache_hit")
-
+            # Create frozen metrics object with final values
+            metrics = IntrospectionPerformanceMetrics(
+                total_introspection_ms=elapsed_ms,
+                cache_hit=True,
+                threshold_exceeded=threshold_exceeded,
+                slow_operations=slow_operations,
+            )
             self._introspection_last_metrics = metrics
             return cached_event
 
         # Build fresh introspection data with timing for each component
         cap_start = time.perf_counter()
         capabilities = await self.get_capabilities()
-        metrics.get_capabilities_ms = (time.perf_counter() - cap_start) * 1000
+        get_capabilities_ms = (time.perf_counter() - cap_start) * 1000
 
         # Extract method count from capabilities
         method_sigs = capabilities.get("method_signatures", {})
-        metrics.method_count = len(method_sigs) if isinstance(method_sigs, dict) else 0
+        method_count = len(method_sigs) if isinstance(method_sigs, dict) else 0
 
         endpoints_start = time.perf_counter()
         endpoints = await self.get_endpoints()
-        metrics.get_endpoints_ms = (time.perf_counter() - endpoints_start) * 1000
+        get_endpoints_ms = (time.perf_counter() - endpoints_start) * 1000
 
         state_start = time.perf_counter()
         current_state = await self.get_current_state()
-        metrics.get_current_state_ms = (time.perf_counter() - state_start) * 1000
+        get_current_state_ms = (time.perf_counter() - state_start) * 1000
 
         # Get node_id and node_type with fallback logging
         # The nil UUID fallback indicates a potential initialization issue
@@ -1213,24 +1159,37 @@ class MixinNodeIntrospection:
             len(operations_value) if isinstance(operations_value, list) else 0
         )
 
-        # Finalize metrics before creating event (so they can be included)
-        metrics.total_introspection_ms = (time.perf_counter() - total_start) * 1000
-        metrics.cache_hit = False
+        # Finalize metrics calculations
+        total_introspection_ms = (time.perf_counter() - total_start) * 1000
+        threshold_exceeded = False
 
         # Check thresholds and identify slow operations
-        if metrics.get_capabilities_ms > PERF_THRESHOLD_GET_CAPABILITIES_MS:
-            metrics.threshold_exceeded = True
-            metrics.slow_operations.append("get_capabilities")
+        if get_capabilities_ms > PERF_THRESHOLD_GET_CAPABILITIES_MS:
+            threshold_exceeded = True
+            slow_operations.append("get_capabilities")
 
-        if metrics.total_introspection_ms > PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS:
-            metrics.threshold_exceeded = True
-            if "total_introspection" not in metrics.slow_operations:
-                metrics.slow_operations.append("total_introspection")
+        if total_introspection_ms > PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS:
+            threshold_exceeded = True
+            if "total_introspection" not in slow_operations:
+                slow_operations.append("total_introspection")
+
+        # Create frozen metrics object with final values
+        metrics = IntrospectionPerformanceMetrics(
+            get_capabilities_ms=get_capabilities_ms,
+            discover_capabilities_ms=discover_capabilities_ms,
+            get_endpoints_ms=get_endpoints_ms,
+            get_current_state_ms=get_current_state_ms,
+            total_introspection_ms=total_introspection_ms,
+            cache_hit=False,
+            method_count=method_count,
+            threshold_exceeded=threshold_exceeded,
+            slow_operations=slow_operations,
+        )
 
         # Store metrics for later retrieval
         self._introspection_last_metrics = metrics
 
-        # Create event with performance metrics included
+        # Create event with performance metrics (metrics is already Pydantic model)
         event = ModelNodeIntrospectionEvent(
             node_id=node_id_uuid,
             node_type=node_type,
@@ -1240,7 +1199,7 @@ class MixinNodeIntrospection:
             version=self._introspection_version,
             reason="cache_refresh",
             correlation_id=uuid4(),
-            performance_metrics=self._to_pydantic_metrics(metrics),
+            performance_metrics=metrics,
         )
 
         # Update cache - cast the model_dump output to our typed dict since we know
@@ -1972,33 +1931,6 @@ class MixinNodeIntrospection:
         logger.debug(
             f"Introspection cache invalidated for {self._introspection_node_id}",
             extra={"node_id": self._introspection_node_id},
-        )
-
-    def _to_pydantic_metrics(
-        self, metrics: IntrospectionPerformanceMetrics
-    ) -> ModelIntrospectionPerformanceMetrics:
-        """Convert internal metrics dataclass to Pydantic model for event payload.
-
-        This method converts the internal ``IntrospectionPerformanceMetrics``
-        dataclass to a ``ModelIntrospectionPerformanceMetrics`` Pydantic model,
-        enabling inclusion in ``ModelNodeIntrospectionEvent`` payloads.
-
-        Args:
-            metrics: Internal performance metrics dataclass from introspection.
-
-        Returns:
-            Pydantic model suitable for event serialization.
-        """
-        return ModelIntrospectionPerformanceMetrics(
-            get_capabilities_ms=metrics.get_capabilities_ms,
-            discover_capabilities_ms=metrics.discover_capabilities_ms,
-            get_endpoints_ms=metrics.get_endpoints_ms,
-            get_current_state_ms=metrics.get_current_state_ms,
-            total_introspection_ms=metrics.total_introspection_ms,
-            cache_hit=metrics.cache_hit,
-            method_count=metrics.method_count,
-            threshold_exceeded=metrics.threshold_exceeded,
-            slow_operations=list(metrics.slow_operations),
         )
 
     def get_performance_metrics(self) -> IntrospectionPerformanceMetrics | None:
