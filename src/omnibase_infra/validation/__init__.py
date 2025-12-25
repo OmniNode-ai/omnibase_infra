@@ -57,8 +57,8 @@ Security Design (Intentional Fail-Open Architecture):
 
     1. **Check for blocking violations explicitly**::
 
-           passed, violations = validate_execution_shapes_ci(directory)
-           if not passed:
+           result = validate_execution_shapes_ci(directory)
+           if not result.passed:
                sys.exit(1)  # Fail the pipeline
 
     2. **Use strict wrapper around validators**::
@@ -128,6 +128,7 @@ from omnibase_infra.validation.execution_shape_validator import (
     EXECUTION_SHAPE_RULES,
     ExecutionShapeValidator,
     HandlerInfo,
+    ModelExecutionShapeValidationResult,
     get_execution_shape_rules,
     validate_execution_shapes,
     validate_execution_shapes_ci,
@@ -222,6 +223,7 @@ __all__ = [
     # AST-based execution shape validation (OMN-958)
     "ExecutionShapeValidator",
     "HandlerInfo",
+    "ModelExecutionShapeValidationResult",
     "validate_execution_shapes",
     "validate_execution_shapes_ci",
     "get_execution_shape_rules",

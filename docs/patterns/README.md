@@ -22,6 +22,9 @@ This directory contains detailed implementation guides and best practices for ON
 - **[Security Patterns](./security_patterns.md)** - Comprehensive security guide covering error sanitization, input validation, authentication, authorization, secret management, network security, and production checklists
 - **[Policy Registry Trust Model](./policy_registry_trust_model.md)** - Trust assumptions, validation boundaries, and security mitigations for policy registration
 
+### Testing
+- **[Testing Patterns](./testing_patterns.md)** - Assertion patterns, "HOW TO FIX" error messages, and test best practices
+
 ## Quick Reference
 
 ### Error Scenarios
@@ -56,6 +59,8 @@ This directory contains detailed implementation guides and best practices for ON
 | Manage secrets with Vault | [Security Patterns](./security_patterns.md) | Secret Management |
 | Implement authentication | [Security Patterns](./security_patterns.md) | Authentication and Authorization |
 | Review production security | [Security Patterns](./security_patterns.md) | Production Security Checklist |
+| Write actionable assertions | [Testing Patterns](./testing_patterns.md) | The "HOW TO FIX" Pattern |
+| Improve test error messages | [Testing Patterns](./testing_patterns.md) | Writing Effective Messages |
 
 ### Transport Types
 
@@ -117,6 +122,12 @@ Security Patterns
     ├── Includes: Error sanitization, input validation, auth, secrets, network security
     ├── Depends on: All error patterns, Correlation ID Tracking
     └── References: Vault, Kafka, PostgreSQL, TLS configuration
+
+Testing Patterns
+    ├── Assertion patterns and "HOW TO FIX" error messages
+    ├── Used by: All test modules
+    ├── References: pytest, architectural tests
+    └── Enhances: Developer experience during test failures
 ```
 
 ## Usage Examples
