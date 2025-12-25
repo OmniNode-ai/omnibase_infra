@@ -526,8 +526,12 @@ class TestConsumedEventHandlers:
             pytest.skip("No consumed_events defined in contract")
 
         # Extract topic slugs from consumed events
+        # Skip events with direct_handler=true as they bypass workflow execution
         consumed_slugs: dict[str, str] = {}  # slug -> event_type for error messages
         for event in consumed_events:
+            # Skip events handled by dedicated handlers (not workflow)
+            if event.get("direct_handler", False):
+                continue
             topic = event.get("topic", "")
             event_type = event.get("event_type", "unknown")
             if topic:
@@ -568,8 +572,10 @@ class TestConsumedEventHandlers:
             f"Every consumed event must have a corresponding receive step "
             f"with matching event_pattern in execution_graph.\n"
             f"Available patterns: {handled_patterns}\n"
-            f"Either add a receive step with matching pattern, "
-            f"or remove the event from consumed_events."
+            f"Options to fix:\n"
+            f"  1. Add a receive step with matching event_pattern, OR\n"
+            f"  2. Add 'direct_handler: true' if handled by dedicated handler, OR\n"
+            f"  3. Remove the event from consumed_events."
         )
 
     def test_consumed_events_section_exists(self, contract_data: dict) -> None:

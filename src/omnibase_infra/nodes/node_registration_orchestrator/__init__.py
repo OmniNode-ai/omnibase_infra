@@ -16,6 +16,18 @@ The orchestrator extends NodeOrchestrator from omnibase_core, which provides:
 - Parallel/sequential execution modes
 - Action emission for deferred execution
 
+Event Handlers:
+    - RuntimeTick: Handled via TimeoutCoordinator for timeout detection
+    - NodeHeartbeat: Handled via HandlerNodeHeartbeat for liveness tracking (OMN-1006)
+
+    For heartbeat handling, import from omnibase_infra.orchestrators.registration.handlers:
+    ```python
+    from omnibase_infra.orchestrators.registration.handlers import (
+        HandlerNodeHeartbeat,
+        ModelHeartbeatHandlerResult,
+    )
+    ```
+
 Exports:
     NodeRegistrationOrchestrator: Main orchestrator node implementation (declarative)
     TimeoutCoordinator: Coordinator for RuntimeTick timeout coordination

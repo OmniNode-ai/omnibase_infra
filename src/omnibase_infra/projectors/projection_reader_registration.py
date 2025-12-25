@@ -131,6 +131,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             capabilities=capabilities,
             ack_deadline=row["ack_deadline"],
             liveness_deadline=row["liveness_deadline"],
+            last_heartbeat_at=row["last_heartbeat_at"],
             ack_timeout_emitted_at=row["ack_timeout_emitted_at"],
             liveness_timeout_emitted_at=row["liveness_timeout_emitted_at"],
             last_applied_event_id=row["last_applied_event_id"],

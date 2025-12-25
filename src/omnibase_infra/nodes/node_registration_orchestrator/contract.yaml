@@ -205,6 +205,15 @@ consumed_events:
     event_type: "RuntimeTick"
     internal: true
     description: "Internal tick for timeout evaluation"
+  # OMN-1006: Node heartbeat events for liveness tracking
+  # Heartbeats update last_heartbeat_at and extend liveness_deadline in the
+  # registration projection. The HandlerNodeHeartbeat processes these events.
+  # Note: direct_handler=true indicates this event bypasses the workflow and is
+  # handled by a dedicated handler (HandlerNodeHeartbeat) via handle_heartbeat().
+  - topic: "{env}.{namespace}.onex.evt.node-heartbeat.v1"
+    event_type: "ModelNodeHeartbeatEvent"
+    description: "Periodic heartbeat from active nodes for liveness tracking"
+    direct_handler: true
 published_events:
   - topic: "{env}.{namespace}.onex.evt.node-registration-result.v1"
     event_type: "NodeRegistrationResultEvent"
