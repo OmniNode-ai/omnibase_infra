@@ -384,9 +384,9 @@ class TestInfraConnectionErrorTransportMapping:
         for transport in [EnumInfraTransportType.HTTP, EnumInfraTransportType.GRPC]:
             context = ModelInfraErrorContext(transport_type=transport)
             error_code = InfraConnectionError._resolve_connection_error_code(context)
-            assert (
-                error_code == EnumCoreErrorCode.NETWORK_ERROR
-            ), f"Expected NETWORK_ERROR for {transport}, got {error_code}"
+            assert error_code == EnumCoreErrorCode.NETWORK_ERROR, (
+                f"Expected NETWORK_ERROR for {transport}, got {error_code}"
+            )
 
     def test_resolve_connection_error_code_service_transports(self) -> None:
         """Test _resolve_connection_error_code for service transports."""
@@ -399,9 +399,9 @@ class TestInfraConnectionErrorTransportMapping:
         for transport in service_transports:
             context = ModelInfraErrorContext(transport_type=transport)
             error_code = InfraConnectionError._resolve_connection_error_code(context)
-            assert (
-                error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
-            ), f"Expected SERVICE_UNAVAILABLE for {transport}, got {error_code}"
+            assert error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE, (
+                f"Expected SERVICE_UNAVAILABLE for {transport}, got {error_code}"
+            )
 
     def test_all_transport_types_have_mapping(self) -> None:
         """Test that all EnumInfraTransportType values have error code mappings."""
@@ -409,16 +409,16 @@ class TestInfraConnectionErrorTransportMapping:
             context = ModelInfraErrorContext(transport_type=transport)
             # Should not raise and should return a valid error code
             error_code = InfraConnectionError._resolve_connection_error_code(context)
-            assert isinstance(
-                error_code, EnumCoreErrorCode
-            ), f"Transport {transport} returned invalid error code type: {type(error_code)}"
+            assert isinstance(error_code, EnumCoreErrorCode), (
+                f"Transport {transport} returned invalid error code type: {type(error_code)}"
+            )
 
     def test_transport_error_code_map_completeness(self) -> None:
         """Test that the transport error code map includes all transport types."""
         for transport in EnumInfraTransportType:
-            assert (
-                transport in InfraConnectionError._TRANSPORT_ERROR_CODE_MAP
-            ), f"Transport {transport} missing from _TRANSPORT_ERROR_CODE_MAP"
+            assert transport in InfraConnectionError._TRANSPORT_ERROR_CODE_MAP, (
+                f"Transport {transport} missing from _TRANSPORT_ERROR_CODE_MAP"
+            )
         # Also verify None is in the map
         assert None in InfraConnectionError._TRANSPORT_ERROR_CODE_MAP
 
@@ -439,9 +439,9 @@ class TestInfraConnectionErrorTransportMapping:
         for transport, expected_code in test_cases:
             context = ModelInfraErrorContext(transport_type=transport)
             error = InfraConnectionError("Test error", context=context)
-            assert (
-                error.model.error_code == expected_code
-            ), f"Transport {transport}: expected {expected_code}, got {error.model.error_code}"
+            assert error.model.error_code == expected_code, (
+                f"Transport {transport}: expected {expected_code}, got {error.model.error_code}"
+            )
 
 
 class TestInfraTimeoutError:
@@ -1187,9 +1187,9 @@ class TestErrorContextSecretSanitization:
         serialized = self._serialize_context(error.model.context)
 
         for pattern in self.SECRET_PATTERNS:
-            assert (
-                pattern not in serialized
-            ), f"{test_description}: Secret pattern '{pattern}' found in context: {error.model.context}"
+            assert pattern not in serialized, (
+                f"{test_description}: Secret pattern '{pattern}' found in context: {error.model.context}"
+            )
 
     def _assert_no_secret_values_in_context(
         self, error: RuntimeHostError, test_description: str
@@ -1203,9 +1203,9 @@ class TestErrorContextSecretSanitization:
         serialized = self._serialize_context(error.model.context)
 
         for value in self.SECRET_VALUES:
-            assert (
-                value.lower() not in serialized
-            ), f"{test_description}: Secret value found in context: {error.model.context}"
+            assert value.lower() not in serialized, (
+                f"{test_description}: Secret value found in context: {error.model.context}"
+            )
 
     # =========================================================================
     # Test: Safe fields only
@@ -1263,9 +1263,9 @@ class TestErrorContextSecretSanitization:
 
         # Verify our detection logic works
         serialized = self._serialize_context(bad_error.model.context)
-        assert (
-            "password" in serialized
-        ), "Detection logic should find 'password' in context"
+        assert "password" in serialized, (
+            "Detection logic should find 'password' in context"
+        )
 
     def test_detection_of_api_key_field_in_context(self) -> None:
         """Verify detection logic catches api_key fields in error context."""
@@ -1275,9 +1275,9 @@ class TestErrorContextSecretSanitization:
         )
 
         serialized = self._serialize_context(bad_error.model.context)
-        assert (
-            "api_key" in serialized
-        ), "Detection logic should find 'api_key' in context"
+        assert "api_key" in serialized, (
+            "Detection logic should find 'api_key' in context"
+        )
 
     def test_detection_of_connection_string_with_credentials(self) -> None:
         """Verify detection logic catches connection strings with credentials."""
@@ -1290,9 +1290,9 @@ class TestErrorContextSecretSanitization:
 
         serialized = self._serialize_context(bad_error.model.context)
         # Verify credential pattern is detectable in serialized context
-        assert (
-            "mys3cr3tp@ss" in serialized.lower()
-        ), "Detection logic should find credentials in connection string"
+        assert "mys3cr3tp@ss" in serialized.lower(), (
+            "Detection logic should find credentials in connection string"
+        )
 
     def test_detection_of_token_field_in_context(self) -> None:
         """Verify detection logic catches token fields in error context."""
@@ -1320,9 +1320,9 @@ class TestErrorContextSecretSanitization:
         error = InfraConnectionError(bad_message)
 
         error_str = str(error).lower()
-        assert (
-            "password=secret123" in error_str
-        ), "Detection logic should find password in error message"
+        assert "password=secret123" in error_str, (
+            "Detection logic should find password in error message"
+        )
 
     def test_detection_of_connection_string_in_error_message(self) -> None:
         """Verify detection logic catches connection strings in error messages."""
@@ -1331,9 +1331,9 @@ class TestErrorContextSecretSanitization:
         error = InfraConnectionError(bad_message)
 
         error_str = str(error).lower()
-        assert (
-            "hunter2" in error_str
-        ), "Detection logic should find credentials in error message"
+        assert "hunter2" in error_str, (
+            "Detection logic should find credentials in error message"
+        )
 
     # =========================================================================
     # Test: Proper sanitized error construction patterns
@@ -1360,9 +1360,9 @@ class TestErrorContextSecretSanitization:
 
         serialized = self._serialize_context(error.model.context)
         for secret in ["password", "secret", "credential"]:
-            assert (
-                secret not in serialized
-            ), f"Properly constructed error should not contain '{secret}'"
+            assert secret not in serialized, (
+                f"Properly constructed error should not contain '{secret}'"
+            )
 
     def test_sanitized_error_excludes_api_key_from_context(self) -> None:
         """Verify properly constructed errors exclude API keys."""
@@ -1381,9 +1381,9 @@ class TestErrorContextSecretSanitization:
 
         serialized = self._serialize_context(error.model.context)
         for secret in ["api_key", "apikey", "token", "bearer"]:
-            assert (
-                secret not in serialized
-            ), f"Properly constructed error should not contain '{secret}'"
+            assert secret not in serialized, (
+                f"Properly constructed error should not contain '{secret}'"
+            )
 
     def test_sanitized_connection_error_uses_parsed_components(self) -> None:
         """Verify connection errors use parsed components, not raw strings.
@@ -1412,9 +1412,9 @@ class TestErrorContextSecretSanitization:
         assert "5432" in serialized
         # Verify no credential patterns
         for pattern in ["://", "password", "secret", "@"]:
-            assert (
-                pattern not in serialized
-            ), f"Sanitized error should not contain credential pattern '{pattern}'"
+            assert pattern not in serialized, (
+                f"Sanitized error should not contain credential pattern '{pattern}'"
+            )
 
     # =========================================================================
     # Test: All error types - comprehensive secret detection
@@ -1496,15 +1496,15 @@ class TestErrorContextSecretSanitization:
 
         # Verify no unexpected fields
         unexpected = model_fields - allowed_fields
-        assert (
-            not unexpected
-        ), f"Unexpected fields in ModelInfraErrorContext: {unexpected}"
+        assert not unexpected, (
+            f"Unexpected fields in ModelInfraErrorContext: {unexpected}"
+        )
 
         # Verify none of the secret patterns are field names
         for secret_pattern in self.SECRET_PATTERNS:
-            assert (
-                secret_pattern not in model_fields
-            ), f"Secret pattern '{secret_pattern}' found as field in ModelInfraErrorContext"
+            assert secret_pattern not in model_fields, (
+                f"Secret pattern '{secret_pattern}' found as field in ModelInfraErrorContext"
+            )
 
     def test_model_infra_error_context_forbids_extra_fields(self) -> None:
         """Verify ModelInfraErrorContext rejects extra fields via extra='forbid'."""

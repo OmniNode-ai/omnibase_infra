@@ -37,5 +37,17 @@ class ModelShutdownBatchResult(BaseModel):
         description="Component types that failed with error messages",
     )
 
+    def __str__(self) -> str:
+        """Return a human-readable string representation for debugging.
+
+        Returns:
+            String format showing succeeded and failed counts.
+        """
+        return (
+            f"ModelShutdownBatchResult("
+            f"succeeded={len(self.succeeded_components)}, "
+            f"failed={len(self.failed_components)})"
+        )
+
 
 __all__: list[str] = ["ModelShutdownBatchResult"]

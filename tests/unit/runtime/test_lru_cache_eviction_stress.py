@@ -113,9 +113,9 @@ class TestCacheMaxCapacity:
             # Periodically verify size
             if i % 100 == 0:
                 info = parser.cache_info()
-                assert (
-                    info.currsize == cache_size
-                ), f"Cache size {info.currsize} deviated from max {cache_size}"
+                assert info.currsize == cache_size, (
+                    f"Cache size {info.currsize} deviated from max {cache_size}"
+                )
 
         # Final verification
         info_final = parser.cache_info()
@@ -188,9 +188,9 @@ class TestLRUEvictionOrdering:
         info_after = parser.cache_info()
 
         # If "0.0.0" was evicted, accessing it should cause a miss
-        assert (
-            info_after.misses > info_before.misses
-        ), "Expected 0.0.0 to be evicted but it was still in cache"
+        assert info_after.misses > info_before.misses, (
+            "Expected 0.0.0 to be evicted but it was still in cache"
+        )
 
     def test_recently_accessed_entries_preserved(self) -> None:
         """Verify recently accessed entries survive eviction.
@@ -219,9 +219,9 @@ class TestLRUEvictionOrdering:
         PolicyRegistry._parse_semver("0.0.0")
 
         hits_after = parser.cache_info().hits
-        assert (
-            hits_after > hits_before
-        ), "Recently accessed entry 0.0.0 was evicted when it should have been preserved"
+        assert hits_after > hits_before, (
+            "Recently accessed entry 0.0.0 was evicted when it should have been preserved"
+        )
 
     def test_lru_order_with_access_pattern_changes(self) -> None:
         """Verify LRU ordering adapts to changing access patterns.
@@ -252,9 +252,9 @@ class TestLRUEvictionOrdering:
         hits_after = parser.cache_info().hits
 
         # If 3.0.0 was evicted (as expected), this should be a miss (no new hits)
-        assert (
-            hits_after == hits_before
-        ), "Expected 3.0.0 to be evicted (least recently used) but it was still cached"
+        assert hits_after == hits_before, (
+            "Expected 3.0.0 to be evicted (least recently used) but it was still cached"
+        )
 
     def test_eviction_sequence_under_continuous_churn(self) -> None:
         """Verify correct eviction sequence during continuous cache churn.
@@ -325,17 +325,17 @@ class TestRapidInsertEvictCycles:
         info = parser.cache_info()
 
         # Verify cache integrity
-        assert (
-            info.currsize <= cache_size
-        ), f"Cache size {info.currsize} exceeded limit {cache_size}"
-        assert (
-            info.misses >= 10_000 - cache_size
-        ), "Cache miss count lower than expected"
+        assert info.currsize <= cache_size, (
+            f"Cache size {info.currsize} exceeded limit {cache_size}"
+        )
+        assert info.misses >= 10_000 - cache_size, (
+            "Cache miss count lower than expected"
+        )
 
         # Performance sanity check (should complete in < 2s on any reasonable hardware)
-        assert (
-            elapsed_ms < 2000
-        ), f"Rapid insertion took {elapsed_ms:.1f}ms (expected < 2000ms)"
+        assert elapsed_ms < 2000, (
+            f"Rapid insertion took {elapsed_ms:.1f}ms (expected < 2000ms)"
+        )
 
     def test_eviction_rate_under_continuous_churn(self) -> None:
         """Verify eviction rate matches insertion rate at capacity.
@@ -366,9 +366,9 @@ class TestRapidInsertEvictCycles:
 
         # Total misses should be cache_size (initial fill) + num_new_versions
         expected_misses = cache_size + num_new_versions
-        assert (
-            info_after.misses == expected_misses
-        ), f"Expected {expected_misses} misses, got {info_after.misses}"
+        assert info_after.misses == expected_misses, (
+            f"Expected {expected_misses} misses, got {info_after.misses}"
+        )
 
     def test_burst_insertion_stability(self) -> None:
         """Test stability during burst insertions followed by quiet periods.
@@ -390,9 +390,9 @@ class TestRapidInsertEvictCycles:
 
             # Verify cache integrity after each burst
             info = parser.cache_info()
-            assert (
-                info.currsize <= cache_size
-            ), f"Cache exceeded limit after burst {burst}"
+            assert info.currsize <= cache_size, (
+                f"Cache exceeded limit after burst {burst}"
+            )
 
             # Small delay (simulated quiet period)
             time.sleep(0.001)
@@ -479,9 +479,9 @@ class TestConcurrentCacheAccess:
             t.join()
 
         assert len(errors) == 0, f"Thread errors: {errors}"
-        assert (
-            len(size_violations) == 0
-        ), f"Cache size exceeded limit: {size_violations}"
+        assert len(size_violations) == 0, (
+            f"Cache size exceeded limit: {size_violations}"
+        )
 
         # Final size check
         parser = PolicyRegistry._get_semver_parser()
@@ -639,9 +639,9 @@ class TestConcurrentCacheAccess:
 
         # Verify total accesses
         total_accesses = sum(access_counts.values())
-        assert (
-            total_accesses == 20 * 500
-        ), f"Expected {20 * 500} total accesses, got {total_accesses}"
+        assert total_accesses == 20 * 500, (
+            f"Expected {20 * 500} total accesses, got {total_accesses}"
+        )
 
 
 # =============================================================================
@@ -711,9 +711,9 @@ class TestCacheHitMissRatios:
         info_after_first_pass = parser.cache_info()
 
         # All first accesses should be misses
-        assert info_after_first_pass.misses == len(
-            working_set
-        ), f"Expected {len(working_set)} misses, got {info_after_first_pass.misses}"
+        assert info_after_first_pass.misses == len(working_set), (
+            f"Expected {len(working_set)} misses, got {info_after_first_pass.misses}"
+        )
 
         # Second pass in SAME order - this demonstrates "thrashing"
         # When accessing in same order, each entry gets evicted before reuse
@@ -745,9 +745,9 @@ class TestCacheHitMissRatios:
 
         # Should get at least some hits when accessing in reverse
         # (the most recently cached entries will be hit first)
-        assert (
-            reverse_hits >= cache_size - 2
-        ), f"Expected ~{cache_size} hits in reverse pass, got {reverse_hits}"
+        assert reverse_hits >= cache_size - 2, (
+            f"Expected ~{cache_size} hits in reverse pass, got {reverse_hits}"
+        )
 
     def test_cache_effectiveness_metrics(self) -> None:
         """Verify cache provides measurable performance benefit.
@@ -817,9 +817,9 @@ class TestCacheEdgeCases:
         PolicyRegistry._parse_semver("1.0.0")
         info_after = parser.cache_info()
 
-        assert (
-            info_after.misses > info_before.misses
-        ), "1.0.0 should have been evicted from size=1 cache"
+        assert info_after.misses > info_before.misses, (
+            "1.0.0 should have been evicted from size=1 cache"
+        )
 
     def test_cache_size_one_rapid_operations(self) -> None:
         """Cache size=1 remains stable under rapid operations.
@@ -833,9 +833,9 @@ class TestCacheEdgeCases:
         for i in range(1000):
             PolicyRegistry._parse_semver(f"{i}.0.0")
             info = parser.cache_info()
-            assert (
-                info.currsize == 1
-            ), f"Cache size {info.currsize} != 1 after {i} insertions"
+            assert info.currsize == 1, (
+                f"Cache size {info.currsize} != 1 after {i} insertions"
+            )
 
         # All should be misses (no hits possible with size=1 and unique versions)
         final_info = parser.cache_info()
@@ -985,9 +985,9 @@ class TestCacheEdgeCases:
         PolicyRegistry._parse_semver("1.0.0-alpha")
         info_after = parser.cache_info()
 
-        assert (
-            info_after.misses > info_before.misses
-        ), "Expected 1.0.0-alpha to be evicted"
+        assert info_after.misses > info_before.misses, (
+            "Expected 1.0.0-alpha to be evicted"
+        )
 
 
 # =============================================================================
@@ -1025,9 +1025,9 @@ class TestCachePerformanceUnderStress:
         p99 = latencies[int(len(latencies) * 0.99)]
 
         # Latency should be reasonable even under continuous eviction
-        assert (
-            p99 < 1.0
-        ), f"P99 latency {p99:.3f}ms exceeds 1ms under continuous eviction"
+        assert p99 < 1.0, (
+            f"P99 latency {p99:.3f}ms exceeds 1ms under continuous eviction"
+        )
 
     def test_throughput_at_maximum_eviction_rate(self) -> None:
         """Measure throughput when every operation causes eviction.
@@ -1048,9 +1048,9 @@ class TestCachePerformanceUnderStress:
         ops_per_sec = num_operations / (elapsed_ms / 1000)
 
         # Should still achieve reasonable throughput
-        assert (
-            ops_per_sec > 10_000
-        ), f"Throughput {ops_per_sec:.0f} ops/sec too low (expected > 10,000 ops/sec)"
+        assert ops_per_sec > 10_000, (
+            f"Throughput {ops_per_sec:.0f} ops/sec too low (expected > 10,000 ops/sec)"
+        )
 
     def test_memory_stability_under_long_running_stress(self) -> None:
         """Cache memory usage remains stable over extended operation.
@@ -1073,9 +1073,9 @@ class TestCachePerformanceUnderStress:
             # Periodically verify cache state
             if i % 10_000 == 0 and i > 0:
                 info = parser.cache_info()
-                assert (
-                    info.currsize == cache_size
-                ), f"Cache size drifted to {info.currsize} at iteration {i}"
+                assert info.currsize == cache_size, (
+                    f"Cache size drifted to {info.currsize} at iteration {i}"
+                )
 
         # Final verification
         final_info = parser.cache_info()

@@ -10,6 +10,7 @@ and concurrent operation handling under production load scenarios.
 from __future__ import annotations
 
 import asyncio
+from itertools import cycle
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -91,14 +92,26 @@ class TestVaultAdapterConcurrency:
             MockClient.return_value = mock_hvac_client
 
             # Mix of failures and successes - create a predictable pattern
-            responses = [
+            # Use cycle to ensure responses never run out (circuit breaker retries
+            # can cause more calls than expected, and StopIteration in async
+            # context causes Python 3.12+ issues with futures)
+            response_pattern = [
                 Exception("Connection error"),
                 {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}},
                 Exception("Connection error"),
                 {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}},
-            ] * 5
+            ]
+            response_cycle = cycle(response_pattern)
 
-            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = responses
+            def mock_read_secret(*args, **kwargs):
+                response = next(response_cycle)
+                if isinstance(response, Exception):
+                    raise response
+                return response
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
+                mock_read_secret
+            )
 
             await handler.initialize(vault_config)
 
@@ -130,28 +143,28 @@ class TestVaultAdapterConcurrency:
 
             # Verify no race conditions occurred (no RuntimeError from race conditions)
             for result in results:
-                assert not isinstance(
-                    result, RuntimeError
-                ), f"Race condition detected: {result}"
+                assert not isinstance(result, RuntimeError), (
+                    f"Race condition detected: {result}"
+                )
 
             # Verify all requests were processed
-            assert (
-                success_count + failure_count == 20
-            ), f"Expected 20 total, got {success_count + failure_count}"
+            assert success_count + failure_count == 20, (
+                f"Expected 20 total, got {success_count + failure_count}"
+            )
 
             # Verify circuit breaker failure count is consistent with observed failures
             # Due to retries, failure count could be higher than circuit breaker count
             # but circuit breaker should have recorded at least some failures (mixin attrs)
-            assert (
-                handler._circuit_breaker_failures >= 0
-            ), "Circuit breaker failure count should be non-negative"
+            assert handler._circuit_breaker_failures >= 0, (
+                "Circuit breaker failure count should be non-negative"
+            )
 
             # With threshold of 10, circuit should not be open if failures < 10
             # or should be open if failures >= 10 (using mixin attributes)
             if handler._circuit_breaker_failures >= 10:
-                assert (
-                    handler._circuit_breaker_open is True
-                ), "Circuit should be OPEN after 10+ failures"
+                assert handler._circuit_breaker_open is True, (
+                    "Circuit should be OPEN after 10+ failures"
+                )
 
     @pytest.mark.asyncio
     async def test_concurrent_successful_operations(
@@ -375,15 +388,15 @@ class TestVaultAdapterConcurrency:
                 await asyncio.wait(pending)
 
             # Verify all tasks were started
-            assert (
-                started_count == 10
-            ), f"Expected 10 started tasks, got {started_count}"
+            assert started_count == 10, (
+                f"Expected 10 started tasks, got {started_count}"
+            )
 
             # Verify all tasks completed (either successfully or with expected error)
             total_finished = completed_count + failed_count
-            assert (
-                total_finished == 10
-            ), f"Expected 10 finished tasks, got {total_finished}"
+            assert total_finished == 10, (
+                f"Expected 10 finished tasks, got {total_finished}"
+            )
 
             # Verify handler is fully shut down
             assert handler._initialized is False, "Handler should not be initialized"
@@ -391,9 +404,9 @@ class TestVaultAdapterConcurrency:
             assert handler._executor is None, "Executor should be None after shutdown"
 
             # Verify circuit breaker is reset (initialized flag is cleared)
-            assert (
-                handler._circuit_breaker_initialized is False
-            ), "Circuit breaker should not be initialized after shutdown"
+            assert handler._circuit_breaker_initialized is False, (
+                "Circuit breaker should not be initialized after shutdown"
+            )
 
     @pytest.mark.asyncio
     async def test_thread_pool_handles_concurrent_load(
@@ -565,9 +578,9 @@ class TestVaultAdapterConcurrency:
             runtime_errors = [
                 e for e in transition_errors if e.startswith("RuntimeError")
             ]
-            assert (
-                len(runtime_errors) == 0
-            ), f"Race condition detected: {runtime_errors}"
+            assert len(runtime_errors) == 0, (
+                f"Race condition detected: {runtime_errors}"
+            )
 
             # After successful execution, circuit should be closed
             # (at least one request should have succeeded and closed the circuit)
@@ -575,9 +588,9 @@ class TestVaultAdapterConcurrency:
                 r for r in results if isinstance(r, dict) and r is not None
             ]
             if successful_results:
-                assert (
-                    handler._circuit_breaker_open is False
-                ), "Circuit should be CLOSED after successful test request in HALF_OPEN state"
+                assert handler._circuit_breaker_open is False, (
+                    "Circuit should be CLOSED after successful test request in HALF_OPEN state"
+                )
 
     @pytest.mark.asyncio
     async def test_executor_shutdown_robustness(
@@ -715,21 +728,21 @@ class TestVaultAdapterConcurrency:
             assert attempts == 20, f"Expected 20 attempts, got {attempts}"
 
             # Verify total handled equals total requests
-            assert (
-                successes + failures == 20
-            ), f"Expected 20 handled, got {successes + failures}"
+            assert successes + failures == 20, (
+                f"Expected 20 handled, got {successes + failures}"
+            )
 
             # Final state should be consistent - circuit closed after recovery
             # (at least some requests should have succeeded)
-            assert (
-                successes > 0
-            ), "At least some requests should succeed during recovery"
+            assert successes > 0, (
+                "At least some requests should succeed during recovery"
+            )
 
             # Circuit should now be closed (recovered)
             if successes > 0:
-                assert (
-                    handler._circuit_breaker_open is False
-                ), "Circuit should be CLOSED after successful recovery"
-                assert (
-                    handler._circuit_breaker_failures == 0
-                ), "Failure count should be reset after recovery"
+                assert handler._circuit_breaker_open is False, (
+                    "Circuit should be CLOSED after successful recovery"
+                )
+                assert handler._circuit_breaker_failures == 0, (
+                    "Failure count should be reset after recovery"
+                )

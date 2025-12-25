@@ -81,6 +81,7 @@ class ModelLifecycleResult(BaseModel):
     """
 
     model_config = ConfigDict(
+        strict=True,
         frozen=True,
         extra="forbid",
         from_attributes=True,
@@ -190,6 +191,15 @@ class ModelLifecycleResult(BaseModel):
             Shutdown complete!
         """
         return self.success
+
+    def __str__(self) -> str:
+        """Return a human-readable string representation for debugging.
+
+        Returns:
+            String format: "ModelLifecycleResult(handler_type='...', success=...)"
+        """
+        status = "succeeded" if self.success else f"failed: {self.error_message}"
+        return f"ModelLifecycleResult(handler_type='{self.handler_type}', {status})"
 
 
 __all__ = ["ModelLifecycleResult"]

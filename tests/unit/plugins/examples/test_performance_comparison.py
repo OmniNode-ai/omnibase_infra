@@ -77,9 +77,9 @@ class TestPerformanceAnalysis:
         # With optimization: primitives short-circuit to early return
         # CI-friendly threshold: 0.5s catches severe regressions while allowing
         # for variable CI performance (containerization, CPU throttling, etc.)
-        assert (
-            execution_time < 0.5
-        ), f"Early exit optimization underperforming: {execution_time:.4f}s"
+        assert execution_time < 0.5, (
+            f"Early exit optimization underperforming: {execution_time:.4f}s"
+        )
 
     def test_optimization_sorted_efficiency(self, plugin: PluginJsonNormalizer) -> None:
         """Demonstrate Timsort efficiency for pre-sorted and partially sorted data.
@@ -103,9 +103,9 @@ class TestPerformanceAnalysis:
         # Timsort handles partially sorted data efficiently
         # CI-friendly threshold: 0.5s catches severe regressions while allowing
         # for variable CI performance (containerization, CPU throttling, etc.)
-        assert (
-            execution_time < 0.5
-        ), f"Timsort optimization underperforming: {execution_time:.4f}s"
+        assert execution_time < 0.5, (
+            f"Timsort optimization underperforming: {execution_time:.4f}s"
+        )
 
     def test_optimization_dict_comprehension(
         self, plugin: PluginJsonNormalizer
@@ -134,16 +134,16 @@ class TestPerformanceAnalysis:
         # Dict comprehension optimization for nested dicts
         # CI-friendly threshold: 0.5s catches severe regressions while allowing
         # for variable CI performance (containerization, CPU throttling, etc.)
-        assert (
-            execution_time < 0.5
-        ), f"Dict comprehension optimization underperforming: {execution_time:.4f}s"
+        assert execution_time < 0.5, (
+            f"Dict comprehension optimization underperforming: {execution_time:.4f}s"
+        )
 
     def test_optimization_type_check_reduction(
         self, plugin: PluginJsonNormalizer
     ) -> None:
         """Demonstrate reduced isinstance calls with early exit pattern.
 
-        Optimization: Single isinstance(obj, (dict, list)) check followed by
+        Optimization: Single isinstance(obj, dict | list) check followed by
         early return for primitives eliminates redundant type checks.
 
         Expected Improvement: ~15-25% for mixed structures.
@@ -164,9 +164,9 @@ class TestPerformanceAnalysis:
         # Reduced isinstance calls improve performance
         # CI-friendly threshold: 0.5s catches severe regressions while allowing
         # for variable CI performance (containerization, CPU throttling, etc.)
-        assert (
-            execution_time < 0.5
-        ), f"Type check optimization underperforming: {execution_time:.4f}s"
+        assert execution_time < 0.5, (
+            f"Type check optimization underperforming: {execution_time:.4f}s"
+        )
 
     def test_baseline_1000_keys(self, plugin: PluginJsonNormalizer) -> None:
         """Baseline performance test for 1000-key structure.
@@ -188,9 +188,9 @@ class TestPerformanceAnalysis:
         # Combined optimizations should achieve excellent performance
         # CI-friendly threshold: 0.5s catches severe regressions while allowing
         # for variable CI performance (containerization, CPU throttling, etc.)
-        assert (
-            execution_time < 0.5
-        ), f"Baseline performance regression: {execution_time:.4f}s for 1000 keys"
+        assert execution_time < 0.5, (
+            f"Baseline performance regression: {execution_time:.4f}s for 1000 keys"
+        )
 
     def test_baseline_5000_keys(self, plugin: PluginJsonNormalizer) -> None:
         """Baseline performance test for 5000-key structure.
@@ -230,9 +230,9 @@ class TestPerformanceAnalysis:
         # Deep nesting should be very fast (few nodes)
         # CI-friendly threshold: 0.5s catches severe regressions while allowing
         # for variable CI performance (containerization, CPU throttling, etc.)
-        assert (
-            execution_time < 0.5
-        ), f"Deep nesting performance issue: {execution_time:.4f}s for 50 levels"
+        assert execution_time < 0.5, (
+            f"Deep nesting performance issue: {execution_time:.4f}s for 50 levels"
+        )
 
     def test_complexity_analysis_documentation(self) -> None:
         """Verify complexity analysis is documented in docstring."""

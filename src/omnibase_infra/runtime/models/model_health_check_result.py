@@ -52,6 +52,7 @@ class ModelHealthCheckResult(BaseModel):
     """
 
     model_config = ConfigDict(
+        strict=True,
         frozen=True,
         extra="forbid",
         from_attributes=True,
@@ -216,6 +217,15 @@ class ModelHealthCheckResult(BaseModel):
             healthy=True,
             details={"raw_response": health_response},
         )
+
+    def __str__(self) -> str:
+        """Return a human-readable string representation for debugging.
+
+        Returns:
+            String format: "ModelHealthCheckResult(handler_type='...', healthy=...)"
+        """
+        status = "healthy" if self.healthy else "unhealthy"
+        return f"ModelHealthCheckResult(handler_type='{self.handler_type}', {status})"
 
 
 __all__: list[str] = ["ModelHealthCheckResult"]
