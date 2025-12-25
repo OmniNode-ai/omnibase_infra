@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.models.validation import ModelValidationOutcome
 from omnibase_infra.runtime.registry.model_domain_constraint import (
     ModelDomainConstraint,
 )
@@ -190,7 +191,7 @@ class ModelMessageTypeEntry(BaseModel):
     def validate_category(
         self,
         topic_category: EnumMessageCategory,
-    ) -> tuple[bool, str | None]:
+    ) -> ModelValidationOutcome:
         """
         Validate if the message type can appear in the given topic category.
 
@@ -198,8 +199,8 @@ class ModelMessageTypeEntry(BaseModel):
             topic_category: The category inferred from the topic.
 
         Returns:
-            Tuple of (is_valid, error_message). If is_valid is True,
-            error_message is None.
+            ModelValidationOutcome with is_valid=True if valid,
+            or is_valid=False with error_message if invalid.
 
         Example:
             >>> entry = ModelMessageTypeEntry(
@@ -208,19 +209,21 @@ class ModelMessageTypeEntry(BaseModel):
             ...     allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             ...     domain_constraint=ModelDomainConstraint(owning_domain="user"),
             ... )
-            >>> entry.validate_category(EnumMessageCategory.COMMAND)
-            (False, "Message type 'UserCreated' is not allowed in category ...")
+            >>> outcome = entry.validate_category(EnumMessageCategory.COMMAND)
+            >>> outcome.is_valid
+            False
 
         .. versionadded:: 0.5.0
+        .. versionchanged:: 0.6.0
+            Return type changed from tuple[bool, str | None] to ModelValidationOutcome.
         """
         if self.supports_category(topic_category):
-            return (True, None)
+            return ModelValidationOutcome.success()
 
         allowed_str = ", ".join(sorted(c.value for c in self.allowed_categories))
-        return (
-            False,
+        return ModelValidationOutcome.failure(
             f"Message type '{self.message_type}' is not allowed in category "
-            f"'{topic_category.value}'. Allowed categories: [{allowed_str}].",
+            f"'{topic_category.value}'. Allowed categories: [{allowed_str}]."
         )
 
     def with_additional_handler(self, handler_id: str) -> "ModelMessageTypeEntry":

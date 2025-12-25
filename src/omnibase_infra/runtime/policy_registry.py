@@ -732,9 +732,10 @@ class PolicyRegistry:
             >>> policy_cls = registry.get("retry", version="1.0.0")
         """
         # Normalize policy_type if provided (outside lock for minimal critical section)
-        normalized_type: str | None = None
-        if policy_type is not None:
-            normalized_type = self._normalize_policy_type(policy_type)
+        # Use empty string as sentinel for "no filter" to reduce union types
+        normalized_type: str = (
+            self._normalize_policy_type(policy_type) if policy_type is not None else ""
+        )
 
         with self._lock:
             # Performance optimization: Use secondary index for O(1) lookup by policy_id
@@ -760,7 +761,7 @@ class PolicyRegistry:
 
             # Find matching entries from candidates (optimized to reduce allocations)
             # Fast path: no filtering needed (common case - just get latest version)
-            if normalized_type is None and version is None:
+            if not normalized_type and version is None:
                 # Fast path optimization: avoid tuple allocation and batch dict lookups
                 # Only build the matches list if we have multiple versions
                 if len(candidate_keys) == 1:
@@ -778,10 +779,7 @@ class PolicyRegistry:
                 # Filtered path: apply type and version filters
                 matches = []
                 for key in candidate_keys:
-                    if (
-                        normalized_type is not None
-                        and key.policy_type != normalized_type
-                    ):
+                    if normalized_type and key.policy_type != normalized_type:
                         continue
                     if version is not None and key.version != version:
                         continue
@@ -1097,9 +1095,10 @@ class PolicyRegistry:
             [('retry', 'orchestrator', '1.0.0')]
         """
         # Normalize policy_type if provided
-        normalized_type: str | None = None
-        if policy_type is not None:
-            normalized_type = self._normalize_policy_type(policy_type)
+        # Use empty string as sentinel for "no filter" to reduce union types
+        normalized_type: str = (
+            self._normalize_policy_type(policy_type) if policy_type is not None else ""
+        )
 
         with self._lock:
             results: list[tuple[str, str, str]] = []
@@ -1107,7 +1106,7 @@ class PolicyRegistry:
                 self._registry.keys(),
                 key=lambda k: (k.policy_id, k.policy_type, k.version),
             ):
-                if normalized_type is not None and key.policy_type != normalized_type:
+                if normalized_type and key.policy_type != normalized_type:
                     continue
                 results.append(key.to_tuple())
             return results
@@ -1175,7 +1174,8 @@ class PolicyRegistry:
             False
         """
         # Normalize policy_type if provided
-        normalized_type: str | None = None
+        # Use empty string as sentinel for "no filter" to reduce union types
+        normalized_type: str = ""
         if policy_type is not None:
             try:
                 normalized_type = self._normalize_policy_type(policy_type)
@@ -1186,7 +1186,7 @@ class PolicyRegistry:
             # Performance optimization: Use secondary index
             candidate_keys = self._policy_id_index.get(policy_id, [])
             for key in candidate_keys:
-                if normalized_type is not None and key.policy_type != normalized_type:
+                if normalized_type and key.policy_type != normalized_type:
                     continue
                 if version is not None and key.version != version:
                     continue
@@ -1222,7 +1222,8 @@ class PolicyRegistry:
             1
         """
         # Normalize policy_type if provided
-        normalized_type: str | None = None
+        # Use empty string as sentinel for "no filter" to reduce union types
+        normalized_type: str = ""
         if policy_type is not None:
             try:
                 normalized_type = self._normalize_policy_type(policy_type)
@@ -1236,7 +1237,7 @@ class PolicyRegistry:
             keys_to_remove: list[ModelPolicyKey] = []
 
             for key in candidate_keys:
-                if normalized_type is not None and key.policy_type != normalized_type:
+                if normalized_type and key.policy_type != normalized_type:
                     continue
                 if version is not None and key.version != version:
                     continue
