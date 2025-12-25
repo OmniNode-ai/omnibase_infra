@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 """DLQ Replay Utility - Replay failed messages from Dead Letter Queue.
 
-WARNING: This script has STUB IMPLEMENTATION components. While the core
-Kafka consume/produce logic is implemented using aiokafka, some features
-like PostgreSQL tracking are not yet integrated. See OMN-949 for status.
-
 This script provides a command-line interface for replaying messages from
 the Dead Letter Queue (DLQ) back to their original topics.
 
@@ -16,33 +12,15 @@ Usage:
 
 Environment Variables:
     KAFKA_BOOTSTRAP_SERVERS: Kafka broker addresses (default: localhost:9092)
-    POSTGRES_HOST: PostgreSQL host for replay tracking (optional)
-    POSTGRES_PORT: PostgreSQL port (default: 5432)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
-    POSTGRES_USER: Database user (default: postgres)
-    POSTGRES_PASSWORD: Database password (required if tracking enabled)
 
 See Also:
     docs/operations/DLQ_REPLAY_GUIDE.md - Complete replay documentation
-    OMN-949 - DLQ Replay Mechanism ticket
+    OMN-949 - DLQ configuration ticket
+    OMN-1032 - PostgreSQL tracking integration (planned)
 
 SPDX-License-Identifier: MIT
 Copyright (c) 2025 OmniNode Team
 """
-
-# =========================================================================
-# IMPLEMENTATION STATUS
-# =========================================================================
-# This script provides a complete DLQ replay utility with aiokafka.
-#
-# Current state:
-#   - CLI parsing and configuration: IMPLEMENTED
-#   - Message filtering logic: IMPLEMENTED
-#   - Kafka consume/produce: IMPLEMENTED (aiokafka)
-#   - Graceful shutdown: IMPLEMENTED
-#
-# See: OMN-949 - DLQ Replay Mechanism
-# =========================================================================
 
 from __future__ import annotations
 
