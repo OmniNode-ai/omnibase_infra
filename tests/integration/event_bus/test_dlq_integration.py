@@ -35,7 +35,10 @@ import pytest
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
-    from omnibase_infra.event_bus.models import ModelDlqEvent, ModelEventMessage
+    from omnibase_infra.event_bus.models import ModelDlqEvent
+
+# Import ModelEventMessage at runtime for use in tests
+from omnibase_infra.event_bus.models import ModelEventMessage
 
 # =============================================================================
 # Test Configuration and Skip Conditions
@@ -611,7 +614,12 @@ class TestDlqCallbacks:
 @requires_kafka
 @pytest.mark.asyncio
 class TestDlqMetrics:
-    """Tests for DLQ metrics tracking."""
+    """Tests for DLQ metrics tracking.
+
+    PR #90 feedback: DLQ publish tests should assert that DLQ metrics were
+    incremented, not just that the publish succeeded. These tests use direct
+    `_publish_to_dlq` calls for deterministic metric verification.
+    """
 
     async def test_dlq_metrics_available(
         self,
@@ -631,13 +639,85 @@ class TestDlqMetrics:
         assert metrics.successful_publishes >= 0
         assert metrics.failed_publishes >= 0
 
-    async def test_dlq_metrics_increment_on_publish(
+    async def test_dlq_metrics_increment_on_successful_publish(
+        self,
+        started_dlq_bus: KafkaEventBus,
+        unique_topic: str,
+    ) -> None:
+        """Verify DLQ metrics are incremented when messages are published successfully.
+
+        PR #90 feedback: Use direct _publish_to_dlq call for deterministic testing.
+        This ensures metrics are incremented synchronously without timing issues.
+        """
+        from omnibase_infra.event_bus.models import ModelEventHeaders
+
+        # Capture initial metrics
+        initial_metrics = started_dlq_bus.dlq_metrics
+        initial_total = initial_metrics.total_publishes
+        initial_successful = initial_metrics.successful_publishes
+        initial_failed = initial_metrics.failed_publishes
+
+        # Create a failed message for DLQ
+        correlation_id = uuid.uuid4()
+        headers = ModelEventHeaders(
+            source="metrics-test",
+            event_type="test.metrics.success",
+            correlation_id=correlation_id,
+            retry_count=5,  # Exhausted
+            max_retries=3,
+        )
+        failed_message = ModelEventMessage(
+            topic=unique_topic,
+            key=b"metrics-key",
+            value=b'{"test": "metrics_success"}',
+            headers=headers,
+        )
+        error = RuntimeError("Handler failed for metrics test")
+
+        # Directly call _publish_to_dlq for deterministic testing
+        await started_dlq_bus._publish_to_dlq(
+            original_topic=unique_topic,
+            failed_message=failed_message,
+            error=error,
+            correlation_id=correlation_id,
+        )
+
+        # Verify metrics were incremented (PR #90 feedback: strict assertions)
+        final_metrics = started_dlq_bus.dlq_metrics
+        assert final_metrics.total_publishes == initial_total + 1, (
+            f"total_publishes should be incremented from {initial_total} to {initial_total + 1}, "
+            f"got {final_metrics.total_publishes}"
+        )
+        assert final_metrics.successful_publishes == initial_successful + 1, (
+            f"successful_publishes should be incremented from {initial_successful} to {initial_successful + 1}, "
+            f"got {final_metrics.successful_publishes}"
+        )
+        assert final_metrics.failed_publishes == initial_failed, (
+            f"failed_publishes should remain at {initial_failed}, got {final_metrics.failed_publishes}"
+        )
+        # Verify per-topic and per-error-type metrics
+        assert final_metrics.get_topic_count(unique_topic) >= 1, (
+            f"topic_counts[{unique_topic}] should be at least 1"
+        )
+        assert final_metrics.get_error_type_count("RuntimeError") >= 1, (
+            "error_type_counts['RuntimeError'] should be at least 1"
+        )
+        # Verify timestamp was set
+        assert final_metrics.last_publish_at is not None, (
+            "last_publish_at should be set after successful publish"
+        )
+
+    async def test_dlq_metrics_increment_on_full_flow(
         self,
         started_dlq_bus: KafkaEventBus,
         unique_topic: str,
         unique_group: str,
     ) -> None:
-        """Verify DLQ metrics are incremented when messages are published."""
+        """Verify DLQ metrics are incremented in full consumer flow.
+
+        This test verifies the complete flow with a failing handler.
+        Note: Timing may be unpredictable, so we use relaxed assertions.
+        """
         initial_metrics = started_dlq_bus.dlq_metrics
         initial_total = initial_metrics.total_publishes
 
@@ -670,10 +750,11 @@ class TestDlqMetrics:
         # Wait for processing
         await asyncio.sleep(DLQ_PROCESSING_WAIT_SECONDS)
 
-        # Check metrics (may or may not have incremented depending on timing)
+        # Check metrics - in full flow, timing may be unpredictable
+        # but total_publishes should at least not decrease
         final_metrics = started_dlq_bus.dlq_metrics
-        # Don't assert exact increment as timing is unpredictable
-        # Just verify metrics are accessible
-        assert final_metrics.total_publishes >= initial_total
+        assert final_metrics.total_publishes >= initial_total, (
+            f"total_publishes should be at least {initial_total}, got {final_metrics.total_publishes}"
+        )
 
         await unsub()

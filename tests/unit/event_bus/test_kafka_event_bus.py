@@ -1536,6 +1536,7 @@ class TestKafkaEventBusDLQRouting:
         """Test that deserialization errors are routed to DLQ.
 
         OMN-949: No silent drops - malformed messages must go to DLQ.
+        PR #90 feedback: Assert DLQ metrics are incremented.
         """
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -1543,6 +1544,11 @@ class TestKafkaEventBusDLQRouting:
         ):
             event_bus = KafkaEventBus(config=dlq_config)
             await event_bus.start()
+
+            # Capture initial metrics
+            initial_metrics = event_bus.dlq_metrics
+            assert initial_metrics.total_publishes == 0
+            assert initial_metrics.successful_publishes == 0
 
             # Simulate a raw Kafka message that will fail deserialization
             mock_raw_msg = MagicMock()
@@ -1580,6 +1586,18 @@ class TestKafkaEventBusDLQRouting:
             assert "Invalid message format" in payload["failure_reason"]
             assert payload["error_type"] == "ValueError"
 
+            # Verify DLQ metrics were incremented (PR #90 feedback)
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.total_publishes == 1, (
+                "DLQ total_publishes should be incremented on publish"
+            )
+            assert final_metrics.successful_publishes == 1, (
+                "DLQ successful_publishes should be incremented on success"
+            )
+            assert final_metrics.failed_publishes == 0
+            assert final_metrics.get_topic_count("source-topic") == 1
+            assert final_metrics.get_error_type_count("ValueError") == 1
+
             await event_bus.close()
 
     @pytest.mark.asyncio
@@ -1589,6 +1607,7 @@ class TestKafkaEventBusDLQRouting:
         """Test that handler failures with exhausted retries are routed to DLQ.
 
         OMN-949: When retry_count >= max_retries, message MUST go to DLQ.
+        PR #90 feedback: Assert DLQ metrics are incremented.
         """
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -1596,6 +1615,11 @@ class TestKafkaEventBusDLQRouting:
         ):
             event_bus = KafkaEventBus(config=dlq_config)
             await event_bus.start()
+
+            # Capture initial metrics
+            initial_metrics = event_bus.dlq_metrics
+            assert initial_metrics.total_publishes == 0
+            assert initial_metrics.successful_publishes == 0
 
             # Create a message with exhausted retries
             from uuid import uuid4
@@ -1636,6 +1660,18 @@ class TestKafkaEventBusDLQRouting:
             assert payload["original_topic"] == "source-topic"
             assert payload["retry_count"] == 3
             assert "Handler processing failed" in payload["failure_reason"]
+
+            # Verify DLQ metrics were incremented (PR #90 feedback)
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.total_publishes == 1, (
+                "DLQ total_publishes should be incremented on publish"
+            )
+            assert final_metrics.successful_publishes == 1, (
+                "DLQ successful_publishes should be incremented on success"
+            )
+            assert final_metrics.failed_publishes == 0
+            assert final_metrics.get_topic_count("source-topic") == 1
+            assert final_metrics.get_error_type_count("RuntimeError") == 1
 
             await event_bus.close()
 
@@ -1783,6 +1819,7 @@ class TestKafkaEventBusDLQRouting:
         """Test that DLQ publish failures do not crash the consumer.
 
         Even if DLQ publishing fails, the consumer should continue operating.
+        PR #90 feedback: Assert DLQ failed_publishes metric is incremented.
         """
         # Make producer fail on DLQ publish
         call_count = 0
@@ -1808,6 +1845,11 @@ class TestKafkaEventBusDLQRouting:
         ):
             event_bus = KafkaEventBus(config=dlq_config)
             await event_bus.start()
+
+            # Capture initial metrics
+            initial_metrics = event_bus.dlq_metrics
+            assert initial_metrics.total_publishes == 0
+            assert initial_metrics.failed_publishes == 0
 
             from uuid import uuid4
 
@@ -1839,6 +1881,20 @@ class TestKafkaEventBusDLQRouting:
             health = await event_bus.health_check()
             assert health["started"] is True
 
+            # Verify DLQ metrics track the failure (PR #90 feedback)
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.total_publishes == 1, (
+                "DLQ total_publishes should be incremented even on failure"
+            )
+            assert final_metrics.successful_publishes == 0, (
+                "DLQ successful_publishes should NOT be incremented on failure"
+            )
+            assert final_metrics.failed_publishes == 1, (
+                "DLQ failed_publishes should be incremented on failure"
+            )
+            # Error type is still tracked even when DLQ publish fails
+            assert final_metrics.get_error_type_count("RuntimeError") == 1
+
             await event_bus.close()
 
     @pytest.mark.asyncio
@@ -1848,6 +1904,7 @@ class TestKafkaEventBusDLQRouting:
         """Test that _publish_raw_to_dlq handles decode failures gracefully.
 
         Even corrupted binary data should be safely published to DLQ.
+        PR #90 feedback: Assert DLQ metrics are incremented.
         """
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -1855,6 +1912,10 @@ class TestKafkaEventBusDLQRouting:
         ):
             event_bus = KafkaEventBus(config=dlq_config)
             await event_bus.start()
+
+            # Capture initial metrics
+            initial_metrics = event_bus.dlq_metrics
+            assert initial_metrics.total_publishes == 0
 
             # Simulate a raw Kafka message with invalid UTF-8
             mock_raw_msg = MagicMock()
@@ -1888,6 +1949,16 @@ class TestKafkaEventBusDLQRouting:
             # Check that decode didn't crash and we have some representation
             assert payload["original_message"]["key"] is not None
             assert payload["original_message"]["value"] is not None
+
+            # Verify DLQ metrics were incremented (PR #90 feedback)
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.total_publishes == 1, (
+                "DLQ total_publishes should be incremented"
+            )
+            assert final_metrics.successful_publishes == 1, (
+                "DLQ successful_publishes should be incremented on success"
+            )
+            assert final_metrics.get_error_type_count("ValueError") == 1
 
             await event_bus.close()
 

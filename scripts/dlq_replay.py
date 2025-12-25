@@ -29,11 +29,9 @@ import asyncio
 import json
 import logging
 import os
-import signal
 import sys
 from datetime import UTC, datetime
 from enum import Enum
-from types import FrameType
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -1081,76 +1079,20 @@ See docs/operations/DLQ_REPLAY_GUIDE.md for complete documentation.
 
 
 # =============================================================================
-# Graceful Shutdown Handler
-# =============================================================================
-
-
-class GracefulShutdown:
-    """Handler for graceful shutdown on SIGINT/SIGTERM.
-
-    This class manages shutdown signals and provides a mechanism for
-    async tasks to check if shutdown has been requested.
-
-    Attributes:
-        _shutdown_event: Event that is set when shutdown is requested
-        _shutdown_requested: Flag indicating shutdown was requested
-    """
-
-    def __init__(self) -> None:
-        """Initialize shutdown handler."""
-        self._shutdown_event = asyncio.Event()
-        self._shutdown_requested = False
-
-    @property
-    def is_shutdown_requested(self) -> bool:
-        """Check if shutdown has been requested."""
-        return self._shutdown_requested
-
-    def request_shutdown(self) -> None:
-        """Request graceful shutdown."""
-        if not self._shutdown_requested:
-            self._shutdown_requested = True
-            self._shutdown_event.set()
-            logger.info("Shutdown requested, cleaning up...")
-
-    async def wait_for_shutdown(self) -> None:
-        """Wait until shutdown is requested."""
-        await self._shutdown_event.wait()
-
-
-def setup_signal_handlers() -> GracefulShutdown:
-    """Set up signal handlers for graceful shutdown.
-
-    Returns:
-        GracefulShutdown instance for monitoring shutdown state
-    """
-    shutdown_handler = GracefulShutdown()
-
-    def signal_handler(signum: int, frame: FrameType | None) -> None:
-        """Handle shutdown signals (SIGINT/SIGTERM).
-
-        Args:
-            signum: Signal number received
-            frame: Current stack frame or None if not available
-        """
-        signal_name = signal.Signals(signum).name
-        logger.info(f"Received {signal_name}, initiating graceful shutdown...")
-        shutdown_handler.request_shutdown()
-
-    # Register signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    return shutdown_handler
-
-
-# =============================================================================
 # Main Entry Point
 # =============================================================================
 
 
 async def main() -> int:
-    """Main entry point with graceful shutdown handling."""
+    """Main entry point for DLQ replay CLI.
+
+    Signal handling relies on asyncio's default behavior:
+    - SIGINT (Ctrl+C) raises asyncio.CancelledError in async tasks
+    - KeyboardInterrupt is caught as a fallback
+
+    Returns:
+        Exit code (0 for success, 1 for error, 130 for interrupt)
+    """
     parser = create_parser()
     args = parser.parse_args()
 
@@ -1171,9 +1113,6 @@ async def main() -> int:
     if handler is None:
         parser.print_help()
         return 1
-
-    # Set up signal handlers for graceful shutdown
-    shutdown_handler = setup_signal_handlers()
 
     try:
         return await handler(args)
