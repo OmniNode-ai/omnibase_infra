@@ -58,11 +58,12 @@ class TestInfraValidatorConstants:
           - ~468 are simple `X | None` optionals (82%)
           - ~100 non-optional unions remain
           - Buffer of 20 above baseline for codebase growth
+        - 121 (2025-12-25): OMN-881 introspection feature (+1 non-optional union)
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 120, (
-            "INFRA_MAX_UNIONS should be 120 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 121, (
+            "INFRA_MAX_UNIONS should be 121 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

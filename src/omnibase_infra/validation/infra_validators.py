@@ -376,9 +376,10 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #   - ~468 are simple `X | None` optionals (82%)
 #   - ~100 non-optional unions remain
 #   - Buffer of 20 above baseline for codebase growth
+# - 121 (2025-12-25): OMN-881 introspection feature (+1 non-optional union)
 #
 # Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
-INFRA_MAX_UNIONS = 120
+INFRA_MAX_UNIONS = 121
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
