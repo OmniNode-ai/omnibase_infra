@@ -57,7 +57,7 @@ def create_deterministic_event(
         node_id: Fixed node identifier.
         correlation_id: Fixed correlation ID for tracing.
         timestamp: Fixed timestamp (defaults to epoch for max determinism).
-        node_type: Node type (EnumNodeKind.EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
+        node_type: ONEX node type (e.g., EnumNodeKind.EFFECT).
         node_version: Semantic version string.
 
     Returns:
