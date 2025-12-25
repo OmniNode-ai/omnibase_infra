@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 import yaml
@@ -448,7 +449,6 @@ class TestTimeoutHandling:
     ) -> None:
         """Test that handle_runtime_tick raises RuntimeError without coordinator."""
         from datetime import UTC, datetime
-        from uuid import uuid4
 
         # Create a minimal tick mock
         tick = MagicMock()
@@ -470,7 +470,6 @@ class TestTimeoutHandling:
         """Test that handle_runtime_tick delegates to the configured coordinator."""
         from datetime import UTC, datetime
         from unittest.mock import AsyncMock
-        from uuid import uuid4
 
         # Create a mock tick
         tick = MagicMock()
@@ -498,7 +497,6 @@ class TestTimeoutHandling:
         """Test that handle_runtime_tick passes custom domain to coordinator."""
         from datetime import UTC, datetime
         from unittest.mock import AsyncMock
-        from uuid import uuid4
 
         tick = MagicMock()
         tick.now = datetime.now(UTC)

@@ -43,6 +43,8 @@ from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.services.timeout_scanner import TimeoutScanner
 
 if TYPE_CHECKING:
+    # Import protocols inside TYPE_CHECKING to avoid circular imports.
+    # ProtocolEventBus is used only for type annotations.
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
 
     # Import models inside TYPE_CHECKING to avoid circular import.
