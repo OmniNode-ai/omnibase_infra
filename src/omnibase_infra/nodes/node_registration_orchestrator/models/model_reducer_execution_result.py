@@ -18,13 +18,6 @@ Thread Safety:
     ModelReducerExecutionResult is immutable (frozen=True) after creation,
     making it thread-safe for concurrent read access.
 
-Migration:
-    Use the factory methods for gradual migration:
-    - `from_legacy_tuple()`: Convert old tuple returns to new model
-    - `to_legacy_tuple()`: Convert back to tuple where needed
-
-    After all callers are migrated, the legacy methods can be removed.
-
 Example:
     >>> from omnibase_infra.nodes.node_registration_orchestrator.models import (
     ...     ModelReducerExecutionResult,
@@ -100,8 +93,7 @@ class ModelReducerExecutionResult(BaseModel):
     This model replaces the `tuple[ModelReducerState, list[ModelRegistrationIntent]]`
     pattern with a strongly-typed container that provides:
     - Self-documenting field names (state, intents)
-    - Factory methods for common patterns (empty, no_change)
-    - Legacy compatibility methods for gradual migration
+    - Factory methods for common patterns (empty, no_change, with_intents)
     - Immutability for thread safety
 
     Attributes:
@@ -283,58 +275,6 @@ class ModelReducerExecutionResult(BaseModel):
         .. versionadded:: 0.7.0
         """
         return cls(state=state, intents=list(intents))
-
-    @classmethod
-    def from_legacy_tuple(
-        cls,
-        result: tuple[ModelReducerState, Sequence[RegistrationIntentUnion]],
-    ) -> ModelReducerExecutionResult:
-        """Create from legacy tuple-based reducer result.
-
-        This factory method handles the conversion from the old tuple pattern
-        `tuple[ModelReducerState, list[ModelRegistrationIntent]]` to the new
-        model structure.
-
-        Args:
-            result: Legacy reducer result as (state, intents).
-
-        Returns:
-            ModelReducerExecutionResult with equivalent values.
-
-        Example:
-            >>> state = ModelReducerState.initial()
-            >>> legacy_result = (state, [intent1, intent2])
-            >>> result = ModelReducerExecutionResult.from_legacy_tuple(legacy_result)
-            >>> result.state == state
-            True
-            >>> result.intent_count
-            2
-
-        .. versionadded:: 0.7.0
-        """
-        state, intents = result
-        return cls(state=state, intents=list(intents))
-
-    def to_legacy_tuple(
-        self,
-    ) -> tuple[ModelReducerState, list[RegistrationIntentUnion]]:
-        """Convert back to legacy tuple format.
-
-        This method enables gradual migration by allowing conversion back
-        to the original tuple format where needed.
-
-        Returns:
-            Tuple of (state, intents).
-
-        Example:
-            >>> result = ModelReducerExecutionResult.empty()
-            >>> state, intents = result.to_legacy_tuple()
-            >>> len(intents)
-            0
-
-        .. versionadded:: 0.7.0
-        """
-        return (self.state, list(self.intents))
 
     def __bool__(self) -> bool:
         """Allow using result in boolean context to check for pending work.

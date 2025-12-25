@@ -2318,3 +2318,452 @@ class TestModelPolicyKeyHashUniqueness:
         hashes = {hash(k) for k in keys}
         # Allow some collisions but expect >99% unique
         assert len(hashes) > 990, f"Too many collisions: {1000 - len(hashes)}"
+
+
+# =============================================================================
+# TestPolicyRegistryVersionNormalizationIntegration
+# =============================================================================
+
+
+class TestPolicyRegistryVersionNormalizationIntegration:
+    """Integration tests for version normalization edge cases.
+
+    These tests verify that the PolicyRegistry correctly normalizes version
+    strings during registration and lookup, ensuring that partial versions
+    and whitespace-trimmed versions work correctly with ModelPolicyKey.
+
+    Required by PR #92 review feedback.
+    """
+
+    # =========================================================================
+    # Partial Version Normalization Tests
+    # =========================================================================
+
+    def test_partial_version_major_only_registers_and_retrieves(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that major-only version '1' normalizes to '1.0.0' for storage.
+
+        Verifies:
+        - Registration with "1" succeeds
+        - Lookup with "1" finds the policy
+        - Lookup with "1.0.0" also finds the policy (normalized match)
+        """
+        policy_registry.register_policy(
+            policy_id="partial-major",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1",
+        )
+
+        # Should be registered with partial version
+        assert policy_registry.is_registered("partial-major", version="1")
+
+        # Should also match normalized version
+        assert policy_registry.is_registered("partial-major", version="1.0.0")
+
+        # get() with partial version should work
+        policy_cls = policy_registry.get("partial-major", version="1")
+        assert policy_cls is MockSyncPolicy
+
+        # get() with normalized version should work
+        policy_cls_normalized = policy_registry.get("partial-major", version="1.0.0")
+        assert policy_cls_normalized is MockSyncPolicy
+
+    def test_partial_version_major_minor_registers_and_retrieves(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that major.minor version '1.2' normalizes to '1.2.0' for storage.
+
+        Verifies:
+        - Registration with "1.2" succeeds
+        - Lookup with "1.2" finds the policy
+        - Lookup with "1.2.0" also finds the policy (normalized match)
+        """
+        policy_registry.register_policy(
+            policy_id="partial-major-minor",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.2",
+        )
+
+        # Should be registered with partial version
+        assert policy_registry.is_registered("partial-major-minor", version="1.2")
+
+        # Should also match normalized version
+        assert policy_registry.is_registered("partial-major-minor", version="1.2.0")
+
+        # get() should work with both formats
+        policy_cls = policy_registry.get("partial-major-minor", version="1.2")
+        assert policy_cls is MockSyncPolicy
+
+        policy_cls_normalized = policy_registry.get(
+            "partial-major-minor", version="1.2.0"
+        )
+        assert policy_cls_normalized is MockSyncPolicy
+
+    def test_partial_version_zero_normalizes_correctly(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test edge case: version '0' normalizes to '0.0.0'.
+
+        This is an important edge case as zero versions are valid in semver.
+        """
+        policy_registry.register_policy(
+            policy_id="zero-version",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="0",
+        )
+
+        # Should be registered and retrievable
+        assert policy_registry.is_registered("zero-version", version="0")
+        assert policy_registry.is_registered("zero-version", version="0.0.0")
+
+        policy_cls = policy_registry.get("zero-version", version="0")
+        assert policy_cls is MockSyncPolicy
+
+        policy_cls_normalized = policy_registry.get("zero-version", version="0.0.0")
+        assert policy_cls_normalized is MockSyncPolicy
+
+    def test_partial_version_zero_major_minor_normalizes_correctly(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test edge case: version '0.1' normalizes to '0.1.0'."""
+        policy_registry.register_policy(
+            policy_id="zero-minor-version",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="0.1",
+        )
+
+        assert policy_registry.is_registered("zero-minor-version", version="0.1")
+        assert policy_registry.is_registered("zero-minor-version", version="0.1.0")
+
+        policy_cls = policy_registry.get("zero-minor-version", version="0.1")
+        assert policy_cls is MockSyncPolicy
+
+    # =========================================================================
+    # Whitespace Trimming Integration Tests
+    # =========================================================================
+
+    def test_whitespace_trimming_space_padded_version(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that ' 1.0.0 ' is trimmed and matches '1.0.0'.
+
+        Verifies full integration: register with whitespace, lookup without.
+        """
+        policy_registry.register_policy(
+            policy_id="space-padded",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version=" 1.0.0 ",
+        )
+
+        # Lookup without whitespace should work
+        assert policy_registry.is_registered("space-padded", version="1.0.0")
+        policy_cls = policy_registry.get("space-padded", version="1.0.0")
+        assert policy_cls is MockSyncPolicy
+
+        # Lookup with same whitespace should also work (normalized)
+        assert policy_registry.is_registered("space-padded", version=" 1.0.0 ")
+        policy_cls_with_spaces = policy_registry.get("space-padded", version=" 1.0.0 ")
+        assert policy_cls_with_spaces is MockSyncPolicy
+
+    def test_whitespace_trimming_tab_newline_version(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that tab and newline characters are trimmed from versions.
+
+        Verifies: '\\t1.0.0\\n' normalizes to '1.0.0'.
+        """
+        policy_registry.register_policy(
+            policy_id="tab-newline",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="\t1.0.0\n",
+        )
+
+        # Lookup without whitespace
+        assert policy_registry.is_registered("tab-newline", version="1.0.0")
+        policy_cls = policy_registry.get("tab-newline", version="1.0.0")
+        assert policy_cls is MockSyncPolicy
+
+        # Lookup with different whitespace patterns
+        assert policy_registry.is_registered("tab-newline", version=" 1.0.0 ")
+
+    def test_whitespace_with_partial_version_combined(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test combined whitespace trimming and partial version normalization.
+
+        Verifies: ' 2 ' normalizes to '2.0.0'.
+        """
+        policy_registry.register_policy(
+            policy_id="whitespace-partial",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version=" 2 ",
+        )
+
+        # Should match all normalized forms
+        assert policy_registry.is_registered("whitespace-partial", version="2")
+        assert policy_registry.is_registered("whitespace-partial", version="2.0.0")
+        assert policy_registry.is_registered("whitespace-partial", version=" 2 ")
+        assert policy_registry.is_registered("whitespace-partial", version=" 2.0.0 ")
+
+        policy_cls = policy_registry.get("whitespace-partial", version="2.0.0")
+        assert policy_cls is MockSyncPolicy
+
+    # =========================================================================
+    # ModelPolicyKey Lookup Equivalence Tests
+    # =========================================================================
+
+    def test_model_policy_key_equivalence_partial_versions(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that ModelPolicyKey treats normalized versions as equivalent.
+
+        This tests the core of ModelPolicyKey normalization - that registering
+        with '1' and looking up with '1.0.0' uses the same key internally.
+        """
+        # Register with partial version
+        policy_registry.register_policy(
+            policy_id="key-equiv-partial",
+            policy_class=MockPolicyV1,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1",
+        )
+
+        # Verify list_versions returns the stored version
+        versions = policy_registry.list_versions("key-equiv-partial")
+        # The registry normalizes during storage
+        assert len(versions) == 1
+
+        # Both partial and full versions should work for retrieval
+        policy_cls_partial = policy_registry.get("key-equiv-partial", version="1")
+        policy_cls_full = policy_registry.get("key-equiv-partial", version="1.0.0")
+        assert policy_cls_partial is policy_cls_full is MockPolicyV1
+
+    def test_model_policy_key_equivalence_whitespace_versions(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that ModelPolicyKey treats whitespace-padded versions equivalently.
+
+        Registering with ' 1.0.0 ' and looking up with '1.0.0' should match.
+        """
+        policy_registry.register_policy(
+            policy_id="key-equiv-whitespace",
+            policy_class=MockPolicyV1,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="  1.0.0  ",
+        )
+
+        # Various whitespace patterns should all resolve to same policy
+        lookups = ["1.0.0", " 1.0.0", "1.0.0 ", "  1.0.0  ", "\t1.0.0\n"]
+        for version in lookups:
+            policy_cls = policy_registry.get("key-equiv-whitespace", version=version)
+            assert policy_cls is MockPolicyV1, f"Failed for version: {version!r}"
+
+    def test_multiple_versions_with_normalization(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that multiple normalized versions don't collide unexpectedly.
+
+        Registering '1' and '1.0.0' should be treated as the same version.
+        """
+        policy_registry.register_policy(
+            policy_id="multi-norm",
+            policy_class=MockPolicyV1,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1",
+        )
+
+        # Re-registering with '1.0.0' should overwrite (same normalized key)
+        policy_registry.register_policy(
+            policy_id="multi-norm",
+            policy_class=MockPolicyV2,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.0.0",
+        )
+
+        # Should have only one entry (overwritten)
+        versions = policy_registry.list_versions("multi-norm")
+        assert len(versions) == 1
+
+        # Should return the newer registration
+        policy_cls = policy_registry.get("multi-norm")
+        assert policy_cls is MockPolicyV2
+
+    def test_latest_version_selection_with_partial_versions(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that get() returns latest version with mixed partial/full formats.
+
+        Register '1', '2.0', '3.0.0' - get() should return the policy for '3.0.0'.
+        """
+        policy_registry.register_policy(
+            policy_id="latest-partial",
+            policy_class=MockPolicyV1,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1",  # Normalizes to 1.0.0
+        )
+        policy_registry.register_policy(
+            policy_id="latest-partial",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="2.0",  # Normalizes to 2.0.0
+        )
+        policy_registry.register_policy(
+            policy_id="latest-partial",
+            policy_class=MockPolicyV2,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="3.0.0",
+        )
+
+        # get() without version should return latest (3.0.0)
+        latest_cls = policy_registry.get("latest-partial")
+        assert latest_cls is MockPolicyV2
+
+    # =========================================================================
+    # Leading Zeros Edge Cases
+    # =========================================================================
+
+    def test_version_with_leading_zeros_in_numbers(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test versions with leading zeros in numeric components.
+
+        Note: Semver spec says leading zeros are NOT allowed, but we test
+        what the registry does with them for documentation purposes.
+        """
+        # This may raise an error depending on ModelSemVer strictness
+        # or may normalize. Document the actual behavior.
+        try:
+            policy_registry.register_policy(
+                policy_id="leading-zeros",
+                policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+                policy_type=EnumPolicyType.ORCHESTRATOR,
+                version="01.02.03",
+            )
+            # If it succeeds, verify retrieval
+            assert policy_registry.is_registered("leading-zeros")
+            # Lookup behavior depends on normalization
+        except ProtocolConfigurationError:
+            # Leading zeros are rejected - this is valid semver behavior
+            assert len(policy_registry) == 0
+
+    def test_version_zero_zero_zero_explicit(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that '0.0.0' is a valid version (initial/prerelease indicator)."""
+        policy_registry.register_policy(
+            policy_id="zero-zero-zero",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="0.0.0",
+        )
+
+        assert policy_registry.is_registered("zero-zero-zero", version="0.0.0")
+        policy_cls = policy_registry.get("zero-zero-zero", version="0.0.0")
+        assert policy_cls is MockSyncPolicy
+
+    # =========================================================================
+    # v-prefix Normalization Tests
+    # =========================================================================
+
+    def test_v_prefix_stripped_during_normalization(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that 'v1.0.0' is normalized to '1.0.0'.
+
+        Common in git tags but not strictly semver.
+        """
+        policy_registry.register_policy(
+            policy_id="v-prefix",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="v1.0.0",
+        )
+
+        # Should be retrievable with or without v prefix
+        assert policy_registry.is_registered("v-prefix", version="1.0.0")
+        policy_cls = policy_registry.get("v-prefix", version="1.0.0")
+        assert policy_cls is MockSyncPolicy
+
+        # Should also work with v prefix in lookup (both normalized)
+        assert policy_registry.is_registered("v-prefix", version="v1.0.0")
+
+    def test_v_prefix_with_partial_version(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that 'v2' normalizes to '2.0.0'."""
+        policy_registry.register_policy(
+            policy_id="v-partial",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="v2",
+        )
+
+        # All these lookups should work
+        assert policy_registry.is_registered("v-partial", version="2")
+        assert policy_registry.is_registered("v-partial", version="2.0.0")
+        assert policy_registry.is_registered("v-partial", version="v2")
+        assert policy_registry.is_registered("v-partial", version="v2.0.0")
+
+    # =========================================================================
+    # _parse_semver Direct Tests for Normalization
+    # =========================================================================
+
+    def test_parse_semver_partial_version_normalization(self) -> None:
+        """Test _parse_semver directly handles partial version normalization."""
+        PolicyRegistry._reset_semver_cache()
+
+        # Major only
+        result_1 = PolicyRegistry._parse_semver("1")
+        assert result_1 == ModelSemVer(major=1, minor=0, patch=0)
+
+        # Major.minor
+        result_1_2 = PolicyRegistry._parse_semver("1.2")
+        assert result_1_2 == ModelSemVer(major=1, minor=2, patch=0)
+
+        # Zero versions
+        result_0 = PolicyRegistry._parse_semver("0")
+        assert result_0 == ModelSemVer(major=0, minor=0, patch=0)
+
+        result_0_1 = PolicyRegistry._parse_semver("0.1")
+        assert result_0_1 == ModelSemVer(major=0, minor=1, patch=0)
+
+    def test_parse_semver_whitespace_normalization(self) -> None:
+        """Test _parse_semver trims whitespace before parsing."""
+        PolicyRegistry._reset_semver_cache()
+
+        # All should parse to same result
+        expected = ModelSemVer(major=1, minor=0, patch=0)
+
+        assert PolicyRegistry._parse_semver(" 1.0.0 ") == expected
+        assert PolicyRegistry._parse_semver("1.0.0\n") == expected
+        assert PolicyRegistry._parse_semver("\t1.0.0") == expected
+        assert PolicyRegistry._parse_semver("  1  ") == expected  # Partial with spaces
+
+    def test_parse_semver_combined_normalization(self) -> None:
+        """Test _parse_semver with combined whitespace and partial versions.
+
+        Note: _parse_semver does NOT strip v-prefix - that's handled by
+        _normalize_version and ModelPolicyKey. This test only verifies
+        whitespace trimming + partial version expansion within _parse_semver.
+        """
+        PolicyRegistry._reset_semver_cache()
+
+        # Whitespace + partial
+        result = PolicyRegistry._parse_semver("  2  ")
+        assert result == ModelSemVer(major=2, minor=0, patch=0)
+
+        # Whitespace + major.minor partial
+        result_2 = PolicyRegistry._parse_semver(" 3.1 ")
+        assert result_2 == ModelSemVer(major=3, minor=1, patch=0)
+
+        # Whitespace + full version
+        result_3 = PolicyRegistry._parse_semver("\t4.5.6\n")
+        assert result_3 == ModelSemVer(major=4, minor=5, patch=6)

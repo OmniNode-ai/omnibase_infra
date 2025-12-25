@@ -50,8 +50,7 @@ async def reduce(
 
 **Note**: The return type was changed from `tuple[ModelReducerState, list[ModelRegistrationIntent]]`
 to `ModelReducerExecutionResult` as part of OMN-1007 tuple-to-model conversion. The new model
-provides factory methods (`no_change()`, `with_intents()`, `empty()`) and legacy compatibility
-methods (`from_legacy_tuple()`, `to_legacy_tuple()`) for gradual migration.
+provides factory methods (`no_change()`, `with_intents()`, `empty()`) for common patterns.
 
 ### ProtocolEffect
 

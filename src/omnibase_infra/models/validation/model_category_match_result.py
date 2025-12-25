@@ -9,7 +9,6 @@ By using a structured model, we provide:
 - Clear semantics for match results (matched vs has_category)
 - Type-safe access to the matched category
 - Factory methods for common use cases
-- Legacy compatibility for gradual migration
 
 Usage in routing_coverage_validator.py:
     The ``_has_message_decorator`` function uses this model to return
@@ -260,66 +259,6 @@ class ModelCategoryMatchResult(BaseModel):
         .. versionadded:: 0.6.1
         """
         return cls(matched=False, category=None)
-
-    @classmethod
-    def from_legacy_tuple(
-        cls,
-        result: tuple[bool, EnumMessageCategory | EnumNodeOutputType | None],
-    ) -> ModelCategoryMatchResult:
-        """Create from legacy tuple-based result.
-
-        This factory method handles the conversion from the old tuple pattern
-        to the new model structure, enabling gradual migration.
-
-        Args:
-            result: Legacy result as (matched, category).
-
-        Returns:
-            ModelCategoryMatchResult with equivalent values.
-
-        Example:
-            >>> legacy = (True, EnumMessageCategory.EVENT)
-            >>> result = ModelCategoryMatchResult.from_legacy_tuple(legacy)
-            >>> result.matched
-            True
-            >>> result.category
-            <EnumMessageCategory.EVENT: 'event'>
-
-            >>> legacy_no_match = (False, None)
-            >>> result = ModelCategoryMatchResult.from_legacy_tuple(legacy_no_match)
-            >>> result.matched
-            False
-
-        .. versionadded:: 0.6.1
-        """
-        matched, category = result
-        return cls(matched=matched, category=category)
-
-    def to_legacy_tuple(
-        self,
-    ) -> tuple[bool, EnumMessageCategory | EnumNodeOutputType | None]:
-        """Convert back to legacy tuple format.
-
-        This method enables gradual migration by allowing conversion back
-        to the original format where needed for backwards compatibility.
-
-        Returns:
-            Tuple of (matched, category).
-
-        Example:
-            >>> result = ModelCategoryMatchResult.matched_with_category(
-            ...     EnumMessageCategory.INTENT
-            ... )
-            >>> result.to_legacy_tuple()
-            (True, <EnumMessageCategory.INTENT: 'intent'>)
-
-            >>> result = ModelCategoryMatchResult.not_matched()
-            >>> result.to_legacy_tuple()
-            (False, None)
-
-        .. versionadded:: 0.6.1
-        """
-        return (self.matched, self.category)
 
     def __bool__(self) -> bool:
         """Allow using result in boolean context.
