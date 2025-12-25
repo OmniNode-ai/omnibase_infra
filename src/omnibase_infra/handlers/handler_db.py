@@ -1,11 +1,57 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""PostgreSQL Database Adapter - MVP implementation using asyncpg async client.
+"""PostgreSQL Database Handler - MVP implementation using asyncpg async client.
 
 Supports query and execute operations with fixed pool size (5).
 Transaction support deferred to Beta. Configurable pool size deferred to Beta.
 
 All queries MUST use parameterized statements for SQL injection protection.
+
+Single-Statement SQL Limitation
+===============================
+
+This handler uses asyncpg's ``execute()`` and ``fetch()`` methods, which only
+support **single SQL statements per call**. Multi-statement SQL (statements
+separated by semicolons) is NOT supported and will raise an error.
+
+**Example - Incorrect (will fail):**
+
+.. code-block:: python
+
+    # This will fail - multiple statements in one call
+    envelope = {
+        "operation": "db.execute",
+        "payload": {
+            "sql": "CREATE TABLE foo (id INT); INSERT INTO foo VALUES (1);",
+            "parameters": [],
+        },
+    }
+
+**Example - Correct (split into separate calls):**
+
+.. code-block:: python
+
+    # Execute each statement separately
+    create_envelope = {
+        "operation": "db.execute",
+        "payload": {"sql": "CREATE TABLE foo (id INT)", "parameters": []},
+    }
+    await handler.execute(create_envelope)
+
+    insert_envelope = {
+        "operation": "db.execute",
+        "payload": {"sql": "INSERT INTO foo VALUES (1)", "parameters": []},
+    }
+    await handler.execute(insert_envelope)
+
+This is a deliberate design choice for security and clarity:
+1. Prevents SQL injection through statement concatenation
+2. Provides clear error attribution per statement
+3. Enables proper row count tracking per operation
+4. Aligns with asyncpg's native API design
+
+For multi-statement operations requiring atomicity, use the ``db.transaction``
+operation (planned for Beta release).
 """
 
 from __future__ import annotations
@@ -51,12 +97,12 @@ _DEFAULT_TIMEOUT_SECONDS: float = 30.0
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
 
 
-class DbAdapter(MixinEnvelopeExtraction):
-    """PostgreSQL database adapter using asyncpg connection pool (MVP: query, execute only).
+class DbHandler(MixinEnvelopeExtraction):
+    """PostgreSQL database handler using asyncpg connection pool (MVP: query, execute only).
 
     Security Policy - DSN Handling:
         The database connection string (DSN) contains sensitive credentials and is
-        treated as a secret throughout this adapter. The following security measures
+        treated as a secret throughout this handler. The following security measures
         are enforced:
 
         1. DSN is stored internally in ``_dsn`` but NEVER logged or exposed in errors
@@ -75,7 +121,7 @@ class DbAdapter(MixinEnvelopeExtraction):
     """
 
     def __init__(self) -> None:
-        """Initialize DbAdapter in uninitialized state."""
+        """Initialize DbHandler in uninitialized state."""
         self._pool: asyncpg.Pool | None = None
         self._pool_size: int = _DEFAULT_POOL_SIZE
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
@@ -101,12 +147,21 @@ class DbAdapter(MixinEnvelopeExtraction):
         # Generate correlation_id for initialization tracing
         init_correlation_id = uuid4()
 
+        logger.info(
+            "Initializing %s",
+            self.__class__.__name__,
+            extra={
+                "handler": self.__class__.__name__,
+                "correlation_id": str(init_correlation_id),
+            },
+        )
+
         dsn = config.get("dsn")
         if not isinstance(dsn, str) or not dsn:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
@@ -130,17 +185,21 @@ class DbAdapter(MixinEnvelopeExtraction):
             # Use _sanitize_dsn() if DSN info ever needs to be logged.
             self._initialized = True
             logger.info(
-                "DbAdapter initialized",
+                "%s initialized successfully",
+                self.__class__.__name__,
                 extra={
-                    "pool_size": self._pool_size,
+                    "handler": self.__class__.__name__,
+                    "pool_min_size": 1,
+                    "pool_max_size": self._pool_size,
                     "timeout_seconds": self._timeout,
+                    "correlation_id": str(init_correlation_id),
                 },
             )
         except asyncpg.InvalidPasswordError as e:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=init_correlation_id,
             )
             raise InfraAuthenticationError(
@@ -150,7 +209,7 @@ class DbAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
@@ -160,7 +219,7 @@ class DbAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=init_correlation_id,
             )
             raise InfraConnectionError(
@@ -170,7 +229,7 @@ class DbAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
@@ -183,7 +242,7 @@ class DbAdapter(MixinEnvelopeExtraction):
             await self._pool.close()
             self._pool = None
         self._initialized = False
-        logger.info("DbAdapter shutdown complete")
+        logger.info("DbHandler shutdown complete")
 
     async def execute(
         self, envelope: dict[str, JsonValue]
@@ -205,7 +264,7 @@ class DbAdapter(MixinEnvelopeExtraction):
                 - handler_id: "db-handler"
 
         Raises:
-            RuntimeHostError: If adapter not initialized or invalid input.
+            RuntimeHostError: If handler not initialized or invalid input.
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If query times out.
         """
@@ -216,11 +275,11 @@ class DbAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="execute",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "DbAdapter not initialized. Call initialize() first.", context=ctx
+                "DbHandler not initialized. Call initialize() first.", context=ctx
             )
 
         operation = envelope.get("operation")
@@ -228,7 +287,7 @@ class DbAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="execute",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -239,7 +298,7 @@ class DbAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation=operation,
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -252,7 +311,7 @@ class DbAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation=operation,
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -264,7 +323,7 @@ class DbAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation=operation,
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError("Missing or invalid 'sql' in payload", context=ctx)
@@ -297,7 +356,7 @@ class DbAdapter(MixinEnvelopeExtraction):
             Sanitized DSN with password replaced by '***'.
 
         Example:
-            >>> adapter._sanitize_dsn("postgresql://user:secret@host:5432/db")
+            >>> handler._sanitize_dsn("postgresql://user:secret@host:5432/db")
             'postgresql://user:***@host:5432/db'
 
         Note:
@@ -320,7 +379,7 @@ class DbAdapter(MixinEnvelopeExtraction):
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation=operation,
-            target_name="db_adapter",
+            target_name="db_handler",
             correlation_id=correlation_id,
         )
         raise RuntimeHostError(
@@ -339,17 +398,17 @@ class DbAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="db.query",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "DbAdapter not initialized - call initialize() first", context=ctx
+                "DbHandler not initialized - call initialize() first", context=ctx
             )
 
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="db.query",
-            target_name="db_adapter",
+            target_name="db_handler",
             correlation_id=correlation_id,
         )
 
@@ -395,17 +454,17 @@ class DbAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="db.execute",
-                target_name="db_adapter",
+                target_name="db_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "DbAdapter not initialized - call initialize() first", context=ctx
+                "DbHandler not initialized - call initialize() first", context=ctx
             )
 
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="db.execute",
-            target_name="db_adapter",
+            target_name="db_handler",
             correlation_id=correlation_id,
         )
 
@@ -491,7 +550,7 @@ class DbAdapter(MixinEnvelopeExtraction):
         )
 
     async def health_check(self) -> ModelDbHealthResponse:
-        """Return adapter health status."""
+        """Return handler health status."""
         healthy = False
         if self._initialized and self._pool is not None:
             try:
@@ -508,15 +567,15 @@ class DbAdapter(MixinEnvelopeExtraction):
         return ModelDbHealthResponse(
             healthy=healthy,
             initialized=self._initialized,
-            adapter_type=self.handler_type.value,
+            handler_type=self.handler_type.value,
             pool_size=self._pool_size,
             timeout_seconds=self._timeout,
         )
 
     def describe(self) -> ModelDbDescribeResponse:
-        """Return adapter metadata and capabilities."""
+        """Return handler metadata and capabilities."""
         return ModelDbDescribeResponse(
-            adapter_type=self.handler_type.value,
+            handler_type=self.handler_type.value,
             supported_operations=sorted(_SUPPORTED_OPERATIONS),
             pool_size=self._pool_size,
             timeout_seconds=self._timeout,
@@ -525,4 +584,4 @@ class DbAdapter(MixinEnvelopeExtraction):
         )
 
 
-__all__: list[str] = ["DbAdapter"]
+__all__: list[str] = ["DbHandler"]

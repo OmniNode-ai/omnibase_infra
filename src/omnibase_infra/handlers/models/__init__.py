@@ -11,8 +11,8 @@ Generic Response Model:
 Database Models:
     ModelDbQueryPayload: Payload containing database query results
     ModelDbQueryResponse: Full database query response envelope
-    ModelDbHealthResponse: Database adapter health check response
-    ModelDbDescribeResponse: Database adapter metadata and capabilities
+    ModelDbHealthResponse: Database handler health check response
+    ModelDbDescribeResponse: Database handler metadata and capabilities
 
 Consul Models:
     ModelConsulHandlerPayload: Payload containing Consul operation results

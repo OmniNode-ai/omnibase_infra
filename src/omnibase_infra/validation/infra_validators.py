@@ -370,6 +370,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 586 (2025-12-25): OMN-932 durable timeouts + introspection config migration (~1 added)
 # - 588 (2025-12-25): OMN-811 RegistryCompute merge (+2 unions)
 # - 589 (2025-12-25): OMN-881 PR review fixes - _EventBusType conditional alias (+1 union)
+# - 589 (2025-12-25): OMN-816 removed ProtocolEventBusLike (net zero change)
 # - 606 (2025-12-25): OMN-949 DLQ configuration merge (~17 unions from DLQ + topic validation)
 #
 # Threshold: 606 (buffer above ~600 current baseline for codebase growth)

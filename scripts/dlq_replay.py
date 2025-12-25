@@ -11,7 +11,7 @@ Usage:
     python scripts/dlq_replay.py replay --dlq-topic dlq-events --filter-topic dev.orders
 
 Environment Variables:
-    KAFKA_BOOTSTRAP_SERVERS: Kafka broker addresses (default: localhost:9092)
+    KAFKA_BOOTSTRAP_SERVERS: Kafka broker addresses (REQUIRED - no default)
 
 See Also:
     docs/operations/DLQ_REPLAY_GUIDE.md - Complete replay documentation
@@ -39,7 +39,7 @@ from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import KafkaConnectionError, KafkaError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -55,6 +55,53 @@ logger = logging.getLogger("dlq_replay")
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+
+def sanitize_bootstrap_servers(servers: str) -> str:
+    """Sanitize bootstrap servers for logging (remove potential credentials).
+
+    Kafka bootstrap servers typically don't contain credentials, but some
+    configurations or URL-like formats might. This function extracts just
+    the host:port parts for safe logging.
+
+    Args:
+        servers: The bootstrap_servers connection string
+
+    Returns:
+        Sanitized string with just host:port entries, or "[redacted]" if
+        the format is unexpected and might contain sensitive data.
+
+    Example:
+        >>> sanitize_bootstrap_servers("kafka:9092,kafka2:9092")
+        'kafka:9092,kafka2:9092'
+        >>> sanitize_bootstrap_servers("user:pass@kafka:9092")
+        '[redacted]'
+    """
+    # Check for common credential patterns
+    if "@" in servers or "://" in servers:
+        # Might contain credentials - redact entirely
+        return "[redacted]"
+
+    # For standard host:port format, extract just the hosts
+    try:
+        parts = servers.split(",")
+        sanitized_parts = []
+        for part in parts:
+            part = part.strip()
+            # Validate it looks like host:port
+            if ":" in part:
+                host, port = part.rsplit(":", 1)
+                # Ensure port is numeric
+                if port.isdigit():
+                    sanitized_parts.append(f"{host}:{port}")
+                else:
+                    return "[redacted]"
+            else:
+                # Just a hostname without port - allow it
+                sanitized_parts.append(part)
+        return ",".join(sanitized_parts)
+    except Exception:
+        return "[redacted]"
 
 
 def safe_truncate(text: str, max_chars: int, suffix: str = "...") -> str:
@@ -209,7 +256,7 @@ class ModelDlqMessage(BaseModel):
 class ModelReplayConfig(BaseModel):
     """Configuration for DLQ replay operation."""
 
-    bootstrap_servers: str = "localhost:9092"
+    bootstrap_servers: str  # REQUIRED - no default, must be provided via env or CLI
     dlq_topic: str = "dlq-events"
     max_replay_count: int = 5
     rate_limit_per_second: float = 100.0
@@ -230,13 +277,36 @@ class ModelReplayConfig(BaseModel):
         description="Kafka producer request timeout in milliseconds (default: 30s)",
     )
 
+    @field_validator("rate_limit_per_second")
+    @classmethod
+    def validate_rate_limit(cls, v: float) -> float:
+        """Validate rate_limit_per_second is positive to prevent division by zero."""
+        if v <= 0:
+            raise ValueError(
+                f"rate_limit_per_second must be > 0, got {v}. "
+                "A zero or negative rate limit would cause division by zero."
+            )
+        return v
+
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> ModelReplayConfig:
-        """Create config from command line arguments."""
-        bootstrap_servers = os.environ.get(
-            "KAFKA_BOOTSTRAP_SERVERS",
-            args.bootstrap_servers,
-        )
+        """Create config from command line arguments.
+
+        Raises:
+            ValueError: If bootstrap_servers is not provided via env var or CLI.
+        """
+        # Bootstrap servers: env var takes precedence, then CLI arg, no default
+        bootstrap_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS")
+        if bootstrap_servers is None:
+            cli_bootstrap = getattr(args, "bootstrap_servers", None)
+            if cli_bootstrap is not None:
+                bootstrap_servers = cli_bootstrap
+            else:
+                raise ValueError(
+                    "KAFKA_BOOTSTRAP_SERVERS environment variable or "
+                    "--bootstrap-servers argument is required. "
+                    "No default value is provided for security reasons."
+                )
 
         filter_type = EnumFilterType.ALL
         filter_topics: list[str] = []
@@ -335,7 +405,11 @@ class DLQConsumer:
         """
         logger.info(
             f"Starting DLQ consumer for topic: {self.config.dlq_topic}",
-            extra={"bootstrap_servers": self.config.bootstrap_servers},
+            extra={
+                "bootstrap_servers": sanitize_bootstrap_servers(
+                    self.config.bootstrap_servers
+                )
+            },
         )
         try:
             self._consumer = AIOKafkaConsumer(
@@ -352,7 +426,11 @@ class DLQConsumer:
         except KafkaConnectionError:
             logger.exception(
                 "Failed to connect to Kafka",
-                extra={"bootstrap_servers": self.config.bootstrap_servers},
+                extra={
+                    "bootstrap_servers": sanitize_bootstrap_servers(
+                        self.config.bootstrap_servers
+                    )
+                },
             )
             raise
         except KafkaError:
@@ -392,7 +470,17 @@ class DLQConsumer:
                         )
                         continue
 
-                    payload = json.loads(msg.value.decode("utf-8"))
+                    # Decode with error handling for malformed UTF-8
+                    try:
+                        decoded_value = msg.value.decode("utf-8")
+                    except UnicodeDecodeError:
+                        logger.warning(
+                            f"Failed to decode message at offset {msg.offset} as UTF-8, "
+                            "using replacement characters"
+                        )
+                        decoded_value = msg.value.decode("utf-8", errors="replace")
+
+                    payload = json.loads(decoded_value)
                     yield ModelDlqMessage.from_kafka_message(
                         payload=payload,
                         dlq_offset=msg.offset,
@@ -463,7 +551,9 @@ class DLQProducer:
         logger.info(
             "Starting DLQ producer",
             extra={
-                "bootstrap_servers": self.config.bootstrap_servers,
+                "bootstrap_servers": sanitize_bootstrap_servers(
+                    self.config.bootstrap_servers
+                ),
                 "max_request_size": self.config.max_request_size,
                 "request_timeout_ms": self.config.request_timeout_ms,
             },
@@ -482,7 +572,11 @@ class DLQProducer:
         except KafkaConnectionError:
             logger.exception(
                 "Failed to connect to Kafka",
-                extra={"bootstrap_servers": self.config.bootstrap_servers},
+                extra={
+                    "bootstrap_servers": sanitize_bootstrap_servers(
+                        self.config.bootstrap_servers
+                    )
+                },
             )
             raise
         except KafkaError:
@@ -913,8 +1007,8 @@ See docs/operations/DLQ_REPLAY_GUIDE.md for complete documentation.
     # Global options
     parser.add_argument(
         "--bootstrap-servers",
-        default="localhost:9092",
-        help="Kafka bootstrap servers (default: localhost:9092, env: KAFKA_BOOTSTRAP_SERVERS)",
+        default=None,
+        help="Kafka bootstrap servers (REQUIRED via env KAFKA_BOOTSTRAP_SERVERS or this flag)",
     )
     parser.add_argument(
         "--dlq-topic",

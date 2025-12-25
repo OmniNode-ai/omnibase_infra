@@ -25,7 +25,7 @@ class ModelConsulKVGetFoundPayload(BaseModel):
         index: The Consul response index for blocking queries.
     """
 
-    model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", coerce_numbers_to_str=False)
 
     operation_type: Literal["kv_get_found"] = Field(
         default="kv_get_found", description="Discriminator for payload type"
