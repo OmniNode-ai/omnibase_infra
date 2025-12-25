@@ -41,6 +41,7 @@ import time
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 # Test UUIDs - use deterministic values for reproducible tests
 TEST_NODE_UUID_1 = UUID("00000000-0000-0000-0000-000000000001")
@@ -254,7 +255,7 @@ class TestMixinNodeIntrospectionInit:
         node.initialize_introspection(config)
 
         assert node._introspection_node_id == TEST_NODE_UUID_1
-        assert node._introspection_node_type == "EFFECT"
+        assert node._introspection_node_type == EnumNodeKind.EFFECT
         assert node._introspection_event_bus is None
         assert node._introspection_version == "1.0.0"
         assert node._introspection_start_time is not None
@@ -622,7 +623,7 @@ class TestMixinNodeIntrospectionCaching:
         # node_id is a UUID passed via config
         assert isinstance(data.node_id, UUID)
         assert data.node_id == TEST_NODE_UUID_1
-        assert data.node_type == "EFFECT"
+        assert data.node_type == EnumNodeKind.EFFECT
         assert isinstance(data.capabilities, dict)
         assert isinstance(data.endpoints, dict)
         assert data.version == "1.0.0"

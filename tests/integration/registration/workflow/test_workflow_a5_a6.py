@@ -417,6 +417,7 @@ class TestA5NormalizedDeterminism:
 
         # Result structure
         result_data = normalized["result"]
+        assert isinstance(result_data, dict), "result_data should be a dict"
         assert "status" in result_data
         assert "node_id" in result_data
         assert "consul_confirmed" in result_data

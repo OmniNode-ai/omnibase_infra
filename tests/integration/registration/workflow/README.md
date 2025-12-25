@@ -170,12 +170,16 @@ pytest tests/integration/registration/workflow/test_workflow_a5_a6.py::TestA6Obs
 | `deterministic_introspection_event_factory` | Creates events with deterministic values |
 | `registry_request_factory` | Creates registry requests with deterministic values |
 
-### Log Capture Fixtures
+### Log Capture
 
-| Fixture | Description |
-|---------|-------------|
-| `log_capture` | Captures all log records |
-| `reducer_log_capture` | Captures reducer-specific logs |
+Tests use pytest's built-in `caplog` fixture (`pytest.LogCaptureFixture`) for log capture and assertion.
+
+```python
+def test_observability_logs(caplog: pytest.LogCaptureFixture):
+    with caplog.at_level(logging.WARNING):
+        # ... test code ...
+    assert "correlation_id" in caplog.text
+```
 
 ### Scenario Fixtures
 

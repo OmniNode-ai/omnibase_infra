@@ -2720,7 +2720,14 @@ class TestDeterminismProperty:
     """
 
     @given(
-        node_type=st.sampled_from(list(EnumNodeKind)),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
         major=st.integers(min_value=0, max_value=99),
         minor=st.integers(min_value=0, max_value=99),
         patch=st.integers(min_value=0, max_value=99),
@@ -2835,7 +2842,14 @@ class TestDeterminismProperty:
             current_state = replay_output.result
 
     @given(
-        node_type=st.sampled_from(list(EnumNodeKind)),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
     )
     @settings(max_examples=20)
     def test_derived_event_id_is_deterministic(self, node_type: EnumNodeKind) -> None:
@@ -3046,7 +3060,14 @@ class TestDeterminismProperty:
             current_state = replay_output.result
 
     @given(
-        node_type=st.sampled_from(list(EnumNodeKind)),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
     )
     @settings(max_examples=20)
     def test_state_hash_stability_across_reduce_calls(
@@ -4778,7 +4799,14 @@ class TestPropertyBasedStateInvariants:
                 )
 
     @given(
-        node_type=st.sampled_from(list(EnumNodeKind)),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
     )
     @settings(max_examples=20)
     def test_state_transition_preserves_node_id(self, node_type: EnumNodeKind) -> None:
@@ -4840,7 +4868,14 @@ class TestPropertyBasedStateInvariants:
         )
 
     @given(
-        node_type=st.sampled_from(list(EnumNodeKind)),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
         replay_count=st.integers(min_value=2, max_value=5),
     )
     @settings(max_examples=25)

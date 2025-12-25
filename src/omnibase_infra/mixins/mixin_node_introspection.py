@@ -173,6 +173,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
+from omnibase_core.enums import EnumNodeKind
+
 from omnibase_infra.models.discovery import (
     ModelIntrospectionConfig,
     ModelNodeIntrospectionEvent,
@@ -423,7 +425,7 @@ class MixinNodeIntrospection:
 
     # Configuration attributes
     _introspection_node_id: UUID | None
-    _introspection_node_type: str | None
+    _introspection_node_type: EnumNodeKind | None
     _introspection_event_bus: ProtocolEventBus | None
     _introspection_version: str
     _introspection_start_time: float | None
@@ -562,7 +564,9 @@ class MixinNodeIntrospection:
 
         # Configuration - extract from config model
         self._introspection_node_id = config.node_id
-        self._introspection_node_type = config.node_type
+        # Convert string node_type to EnumNodeKind, handling both uppercase (legacy)
+        # and lowercase formats for backwards compatibility
+        self._introspection_node_type = EnumNodeKind(config.node_type.lower())
         self._introspection_event_bus = config.event_bus
         self._introspection_version = config.version
         self._introspection_cache_ttl = config.cache_ttl
@@ -1127,21 +1131,21 @@ class MixinNodeIntrospection:
             # Use nil UUID (all zeros) as sentinel for uninitialized node
             node_id_uuid = UUID("00000000-0000-0000-0000-000000000000")
 
-        node_type = self._introspection_node_type
-        if node_type is None:
+        node_type_enum = self._introspection_node_type
+        if node_type_enum is None:
             logger.warning(
-                "Node type not initialized, using 'unknown' - "
+                "Node type not initialized, using EFFECT as fallback - "
                 "ensure initialize_introspection() was called correctly",
                 extra={
                     "node_id": str(node_id_uuid),
                     "operation": "get_introspection_data",
                 },
             )
-            node_type = "unknown"
+            node_type_enum = EnumNodeKind.EFFECT
 
         event = ModelNodeIntrospectionEvent(
             node_id=node_id_uuid,
-            node_type=node_type,
+            node_type=node_type_enum,
             capabilities=capabilities,
             endpoints=endpoints,
             current_state=current_state,
@@ -1336,19 +1340,22 @@ class MixinNodeIntrospection:
                 # Use nil UUID (all zeros) as sentinel for uninitialized node
                 node_id = UUID("00000000-0000-0000-0000-000000000000")
 
-            node_type = self._introspection_node_type
-            if node_type is None:
+            node_type_enum = self._introspection_node_type
+            if node_type_enum is None:
                 logger.warning(
-                    "Node type not initialized, using 'unknown' in heartbeat - "
+                    "Node type not initialized, using 'effect' in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
                     extra={"node_id": str(node_id), "operation": "_publish_heartbeat"},
                 )
-                node_type = "unknown"
+                node_type_str = "effect"
+            else:
+                # Convert EnumNodeKind to string for ModelNodeHeartbeatEvent
+                node_type_str = node_type_enum.value
 
             # Create heartbeat event
             heartbeat = ModelNodeHeartbeatEvent(
                 node_id=node_id,
-                node_type=node_type,
+                node_type=node_type_str,
                 uptime_seconds=uptime_seconds,
                 # TODO(ACTIVE-OP-TRACKING): Implement active operation tracking
                 # Ticket: Create Linear ticket for active operation tracking implementation

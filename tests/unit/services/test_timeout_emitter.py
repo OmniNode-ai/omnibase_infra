@@ -98,7 +98,7 @@ def create_mock_projection(
         entity_id=entity_id or uuid4(),
         domain="registration",
         current_state=state,
-        node_type=EnumNodeKind.EFFECT.value,
+        node_type=EnumNodeKind.EFFECT,
         node_version="1.0.0",
         capabilities=ModelNodeCapabilities(),
         ack_deadline=ack_deadline,

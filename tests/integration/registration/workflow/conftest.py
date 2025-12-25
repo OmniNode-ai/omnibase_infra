@@ -37,6 +37,7 @@ from omnibase_infra.models.discovery import ModelIntrospectionConfig
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.effects import NodeRegistryEffect
 from omnibase_infra.nodes.effects.models import (
+    ModelBackendResult,
     ModelEffectIdempotencyConfig,
     ModelRegistryRequest,
     ModelRegistryResponse,
@@ -107,7 +108,7 @@ class IntrospectableTestNode(MixinNodeIntrospection):
         return self._node_id
 
     @property
-    def node_type(self) -> str:
+    def node_type(self) -> EnumNodeKind:
         """Get node type."""
         return self._node_type_value
 
@@ -750,7 +751,7 @@ class MockConsulEffect:
         service_name: str,
         tags: list[str],
         health_check: dict[str, str] | None = None,
-    ):
+    ) -> ModelBackendResult:
         """Register a service with call tracking.
 
         Args:
@@ -762,8 +763,6 @@ class MockConsulEffect:
         Returns:
             ModelBackendResult with operation outcome.
         """
-        from omnibase_infra.nodes.effects.models import ModelBackendResult
-
         # Record call
         self._call_history.append(
             {
@@ -844,7 +843,7 @@ class MockPostgresEffect:
         node_version: str,
         endpoints: dict[str, str],
         metadata: dict[str, str],
-    ):
+    ) -> ModelBackendResult:
         """Upsert registration record with call tracking.
 
         Args:
@@ -857,8 +856,6 @@ class MockPostgresEffect:
         Returns:
             ModelBackendResult with operation outcome.
         """
-        from omnibase_infra.nodes.effects.models import ModelBackendResult
-
         # Record call
         self._call_history.append(
             {
