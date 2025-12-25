@@ -189,8 +189,8 @@ class ModelDispatchResult(BaseModel):
         default=None,
         description="Error code if the dispatch failed.",
     )
-    error_details: dict[str, JsonValue] | None = Field(
-        default=None,
+    error_details: dict[str, JsonValue] = Field(
+        default_factory=dict,
         description="Additional JSON-serializable error details for debugging.",
     )
 
@@ -321,7 +321,7 @@ class ModelDispatchResult(BaseModel):
                 "status": status,
                 "error_message": message,
                 "error_code": code,
-                "error_details": details,
+                "error_details": details if details is not None else {},
                 "completed_at": datetime.now(UTC),
             }
         )
@@ -352,15 +352,14 @@ class ModelDispatchResult(BaseModel):
             ...     output_count=1,
             ... )
         """
-        count = (
-            output_count
-            if output_count is not None
-            else (len(outputs) if outputs else 0)
+        resolved_outputs: ModelDispatchOutputs = (
+            outputs if outputs is not None else ModelDispatchOutputs()
         )
+        count = output_count if output_count is not None else len(resolved_outputs)
         return self.model_copy(
             update={
                 "status": EnumDispatchStatus.SUCCESS,
-                "outputs": outputs,
+                "outputs": resolved_outputs,
                 "output_count": count,
                 "completed_at": datetime.now(UTC),
             }

@@ -254,7 +254,7 @@ class ModelDispatchContext(BaseModel):
         Args:
             correlation_id: Unique identifier for request tracing.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Optional additional metadata.
+            metadata: Optional additional metadata for extensibility.
 
         Returns:
             ModelDispatchContext configured for REDUCER execution.
@@ -293,7 +293,7 @@ class ModelDispatchContext(BaseModel):
             correlation_id: Unique identifier for request tracing.
             now: Current time for time-dependent decisions.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Optional additional metadata.
+            metadata: Optional additional metadata for extensibility.
 
         Returns:
             ModelDispatchContext configured for ORCHESTRATOR execution.
@@ -333,7 +333,7 @@ class ModelDispatchContext(BaseModel):
             correlation_id: Unique identifier for request tracing.
             now: Current time for time-dependent decisions.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Optional additional metadata.
+            metadata: Optional additional metadata for extensibility.
 
         Returns:
             ModelDispatchContext configured for EFFECT execution.
@@ -372,7 +372,7 @@ class ModelDispatchContext(BaseModel):
         Args:
             correlation_id: Unique identifier for request tracing.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Optional additional metadata.
+            metadata: Optional additional metadata for extensibility.
 
         Returns:
             ModelDispatchContext configured for COMPUTE execution.
@@ -412,7 +412,7 @@ class ModelDispatchContext(BaseModel):
             correlation_id: Unique identifier for request tracing.
             now: Current time for infrastructure operations.
             trace_id: Optional trace identifier for distributed tracing.
-            metadata: Optional additional metadata.
+            metadata: Optional additional metadata for extensibility.
 
         Returns:
             ModelDispatchContext configured for RUNTIME_HOST execution.
