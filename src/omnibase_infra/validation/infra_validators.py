@@ -378,6 +378,16 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #   - Buffer of 20 above baseline for codebase growth
 # - 121 (2025-12-25): OMN-881 introspection feature (+1 non-optional union)
 #
+# Soft ceiling guidance:
+# - 100-120: Healthy range, minor increments OK for legitimate features
+# - 120-140: Caution zone, consider refactoring before incrementing
+# - 140+: Refactor required - extract type aliases or use domain models from omnibase_core
+#
+# When incrementing threshold:
+# 1. Document the ticket/PR that added unions in threshold history above
+# 2. Verify new unions are not simple X | None (those should be excluded automatically)
+# 3. Consider if a domain-specific type from omnibase_core would be cleaner
+#
 # Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
 INFRA_MAX_UNIONS = 121
 

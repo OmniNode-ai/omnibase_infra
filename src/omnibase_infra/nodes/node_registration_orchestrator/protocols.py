@@ -189,7 +189,7 @@ class ProtocolReducer(Protocol):
         This method processes an incoming introspection event and produces
         a ModelReducerExecutionResult containing:
         1. Updated reducer state (for deduplication, rate limiting, etc.)
-        2. A list of intents describing infrastructure operations to perform
+        2. A tuple of intents describing infrastructure operations to perform
 
         Thread Safety:
             This method MUST be safe to call concurrently from multiple
@@ -219,7 +219,7 @@ class ProtocolReducer(Protocol):
         Returns:
             ModelReducerExecutionResult containing:
                 - state: NEW reducer state instance (do not mutate input)
-                - intents: List of intents for the effect node to execute.
+                - intents: Tuple of intents for the effect node to execute.
                   May be empty if the event should be filtered.
 
             Use factory methods for common patterns:

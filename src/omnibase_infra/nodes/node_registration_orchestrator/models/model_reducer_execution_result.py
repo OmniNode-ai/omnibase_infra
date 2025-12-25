@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Reducer execution result model for the registration orchestrator.
 
-This model replaces the tuple pattern `tuple[ModelReducerState, list[ModelRegistrationIntent]]`
+This model replaces the tuple pattern `tuple[ModelReducerState, tuple[ModelRegistrationIntent, ...]]`
 that was used for reducer return values. By using a single model type, we eliminate
 the tuple pattern while providing richer context and self-documenting field names.
 
@@ -12,11 +12,13 @@ Design Pattern:
     of using Pydantic models instead of tuple returns for method results.
 
     The model is intentionally frozen (immutable) to ensure thread safety when
-    the same result is passed between components.
+    the same result is passed between components. The intents field uses an
+    immutable tuple rather than a mutable list to maintain full immutability.
 
 Thread Safety:
     ModelReducerExecutionResult is immutable (frozen=True) after creation,
-    making it thread-safe for concurrent read access.
+    making it thread-safe for concurrent read access. All fields use immutable
+    types (ModelReducerState is also frozen, intents is a tuple).
 
 Example:
     >>> from omnibase_infra.nodes.node_registration_orchestrator.models import (
@@ -29,11 +31,11 @@ Example:
     >>> result.state.processed_node_ids
     frozenset()
     >>> result.intents
-    []
+    ()
     >>>
     >>> # Create from existing state with intents
     >>> state = ModelReducerState(pending_registrations=2)
-    >>> result = ModelReducerExecutionResult(state=state, intents=[intent1, intent2])
+    >>> result = ModelReducerExecutionResult(state=state, intents=(intent1, intent2))
 
 .. versionadded:: 0.7.0
     Created as part of tuple-to-model conversion work (OMN-1007).
@@ -90,15 +92,15 @@ Use ``ModelRegistrationIntent`` from ``model_registration_intent.py`` when:
 class ModelReducerExecutionResult(BaseModel):
     """Result of reducer execution containing state and generated intents.
 
-    This model replaces the `tuple[ModelReducerState, list[ModelRegistrationIntent]]`
+    This model replaces the `tuple[ModelReducerState, tuple[ModelRegistrationIntent, ...]]`
     pattern with a strongly-typed container that provides:
     - Self-documenting field names (state, intents)
     - Factory methods for common patterns (empty, no_change, with_intents)
-    - Immutability for thread safety
+    - Full immutability for thread safety (frozen model with tuple intents)
 
     Attributes:
         state: The updated reducer state after processing an event.
-        intents: List of registration intents to be executed by the effect node.
+        intents: Tuple of registration intents to be executed by the effect node.
             May be empty if no infrastructure operations are needed.
 
     Warning:
@@ -135,7 +137,7 @@ class ModelReducerExecutionResult(BaseModel):
         >>> state = ModelReducerState(pending_registrations=2)
         >>> result = ModelReducerExecutionResult(
         ...     state=state,
-        ...     intents=[consul_intent, postgres_intent],
+        ...     intents=(consul_intent, postgres_intent),
         ... )
         >>> result.has_intents
         True
@@ -161,9 +163,9 @@ class ModelReducerExecutionResult(BaseModel):
         ...,
         description="The updated reducer state after processing the event.",
     )
-    intents: list[RegistrationIntentUnion] = Field(
-        default_factory=list,
-        description="List of registration intents to be executed by the effect node.",
+    intents: tuple[RegistrationIntentUnion, ...] = Field(
+        default=(),
+        description="Tuple of registration intents to be executed by the effect node.",
     )
 
     @property
@@ -171,14 +173,14 @@ class ModelReducerExecutionResult(BaseModel):
         """Check if the result contains any intents.
 
         Returns:
-            True if intents list is non-empty, False otherwise.
+            True if intents tuple is non-empty, False otherwise.
 
         Example:
             >>> ModelReducerExecutionResult.empty().has_intents
             False
             >>> result = ModelReducerExecutionResult(
             ...     state=ModelReducerState.initial(),
-            ...     intents=[some_intent],
+            ...     intents=(some_intent,),
             ... )
             >>> result.has_intents
             True
@@ -192,7 +194,7 @@ class ModelReducerExecutionResult(BaseModel):
         """Get the number of intents in the result.
 
         Returns:
-            Number of intents in the intents list.
+            Number of intents in the intents tuple.
 
         Example:
             >>> ModelReducerExecutionResult.empty().intent_count
@@ -217,11 +219,11 @@ class ModelReducerExecutionResult(BaseModel):
             >>> result.state.processed_node_ids
             frozenset()
             >>> result.intents
-            []
+            ()
 
         .. versionadded:: 0.7.0
         """
-        return cls(state=ModelReducerState.initial(), intents=[])
+        return cls(state=ModelReducerState.initial(), intents=())
 
     @classmethod
     def no_change(cls, state: ModelReducerState) -> ModelReducerExecutionResult:
@@ -242,11 +244,11 @@ class ModelReducerExecutionResult(BaseModel):
             >>> result.state.pending_registrations
             5
             >>> result.intents
-            []
+            ()
 
         .. versionadded:: 0.7.0
         """
-        return cls(state=state, intents=[])
+        return cls(state=state, intents=())
 
     @classmethod
     def with_intents(
@@ -258,7 +260,8 @@ class ModelReducerExecutionResult(BaseModel):
 
         Args:
             state: The updated reducer state.
-            intents: Sequence of registration intents to execute.
+            intents: Sequence of registration intents to execute. Will be
+                converted to an immutable tuple.
 
         Returns:
             ModelReducerExecutionResult with the provided state and intents.
@@ -274,7 +277,7 @@ class ModelReducerExecutionResult(BaseModel):
 
         .. versionadded:: 0.7.0
         """
-        return cls(state=state, intents=list(intents))
+        return cls(state=state, intents=tuple(intents))
 
     def __bool__(self) -> bool:
         """Allow using result in boolean context to check for pending work.
@@ -291,12 +294,12 @@ class ModelReducerExecutionResult(BaseModel):
             Use ``result is not None`` if you need to check model existence.
 
         Returns:
-            True if intents is non-empty, False otherwise.
+            True if intents tuple is non-empty, False otherwise.
 
         Example:
             >>> result_with_work = ModelReducerExecutionResult.with_intents(
             ...     state=ModelReducerState.initial(),
-            ...     intents=[some_intent],
+            ...     intents=(some_intent,),
             ... )
             >>> bool(result_with_work)
             True

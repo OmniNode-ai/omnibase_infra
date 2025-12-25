@@ -191,6 +191,23 @@ output_type.is_routable()  # True for EVENT, COMMAND, INTENT; False for PROJECTI
 - Class: `Registry<Purpose>`
 - Examples: `registry_handler.py` → `RegistryHandler`, `registry_policy.py` → `RegistryPolicy`, `registry_compute.py` → `RegistryCompute`
 
+### Custom `__bool__` for Result Models
+
+Result models may override `__bool__` to enable idiomatic conditional checks. This differs from standard Pydantic behavior where `bool(model)` always returns `True`.
+
+**Current implementations**:
+- `ModelReducerExecutionResult`: Returns `True` only if `has_intents` (intents tuple is non-empty)
+- `ModelCategoryMatchResult`: Returns `True` only if `matched` is True
+
+**Usage pattern**:
+```python
+result = reducer.reduce(state, event)
+if result:  # True only if there are intents to process
+    execute_intents(result.intents)
+```
+
+**Documentation requirement**: Always include a `Warning` section in the `__bool__` docstring explaining the non-standard behavior.
+
 ### Type Annotation Conventions
 
 **Nullable Types: Use `X | None` (PEP 604) over `Optional[X]`**

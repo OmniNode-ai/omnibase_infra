@@ -51,7 +51,7 @@ from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 
 # Type alias for the category union - improves readability
-CategoryType = EnumMessageCategory | EnumNodeOutputType
+type CategoryType = EnumMessageCategory | EnumNodeOutputType
 
 
 class ModelCategoryMatchResult(BaseModel):
