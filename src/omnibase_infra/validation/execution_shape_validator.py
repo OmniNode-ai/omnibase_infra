@@ -445,7 +445,7 @@ class ExecutionShapeValidator:
                             file_path=file_path,
                         )
                     )
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 handler_type = self._detect_handler_type_from_decorator(node)
                 if handler_type is not None:
                     handlers.append(
@@ -622,7 +622,7 @@ class ExecutionShapeValidator:
         methods: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
         if isinstance(handler.node, ast.ClassDef):
             for item in handler.node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef):
                     methods.append(item)
         else:
             methods = [handler.node]
