@@ -11,7 +11,7 @@ Tests cover:
 - Retryable errors trigger retry logic
 
 These tests validate the retry patterns documented in CLAUDE.md and
-implemented across handlers like VaultAdapter and ConsulHandler.
+implemented across handlers like VaultHandler and ConsulHandler.
 """
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ class RetryExecutor:
     """Executes operations with retry and exponential backoff.
 
     This is a minimal implementation for testing the retry pattern.
-    Production handlers (VaultAdapter, ConsulHandler) have more features.
+    Production handlers (VaultHandler, ConsulHandler) have more features.
     """
 
     def __init__(

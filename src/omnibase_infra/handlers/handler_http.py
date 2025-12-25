@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""HTTP REST Adapter - MVP implementation using httpx async client.
+"""HTTP REST Handler - MVP implementation using httpx async client.
 
 Supports GET and POST operations with 30-second fixed timeout.
 PUT, DELETE, PATCH deferred to Beta. Retry logic and rate limiting deferred to Beta.
@@ -71,8 +71,8 @@ def _categorize_size(size: int) -> str:
         return "very_large"
 
 
-class HttpRestAdapter(MixinEnvelopeExtraction):
-    """HTTP REST protocol adapter using httpx async client (MVP: GET, POST only).
+class HttpRestHandler(MixinEnvelopeExtraction):
+    """HTTP REST protocol handler using httpx async client (MVP: GET, POST only).
 
     Security Features:
         - Configurable request/response size limits to prevent DoS attacks
@@ -81,7 +81,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
     """
 
     def __init__(self) -> None:
-        """Initialize HttpRestAdapter in uninitialized state."""
+        """Initialize HttpRestHandler in uninitialized state."""
         self._client: httpx.AsyncClient | None = None
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._max_request_size: int = _DEFAULT_MAX_REQUEST_SIZE
@@ -155,7 +155,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             )
             self._initialized = True
             logger.info(
-                "HttpRestAdapter initialized",
+                "HttpRestHandler initialized",
                 extra={
                     "timeout_seconds": self._timeout,
                     "max_request_size": self._max_request_size,
@@ -191,7 +191,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             await self._client.aclose()
             self._client = None
         self._initialized = False
-        logger.info("HttpRestAdapter shutdown complete")
+        logger.info("HttpRestHandler shutdown complete")
 
     async def execute(
         self, envelope: dict[str, JsonValue]
@@ -223,7 +223,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HttpRestAdapter not initialized. Call initialize() first.", context=ctx
+                "HttpRestHandler not initialized. Call initialize() first.", context=ctx
             )
 
         operation = envelope.get("operation")
@@ -562,7 +562,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HttpRestAdapter not initialized - call initialize() first", context=ctx
+                "HttpRestHandler not initialized - call initialize() first", context=ctx
             )
 
         ctx = ModelInfraErrorContext(
@@ -741,4 +741,4 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
         }
 
 
-__all__: list[str] = ["HttpRestAdapter"]
+__all__: list[str] = ["HttpRestHandler"]

@@ -72,8 +72,8 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
-class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
-    """HashiCorp Vault adapter using hvac client (MVP: KV v2 secrets engine).
+class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
+    """HashiCorp Vault handler using hvac client (MVP: KV v2 secrets engine).
 
     Security Policy - Token Handling:
         The Vault token contains sensitive credentials and is treated as a secret
@@ -118,7 +118,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
     """
 
     def __init__(self) -> None:
-        """Initialize VaultAdapter in uninitialized state.
+        """Initialize VaultHandler in uninitialized state.
 
         Note: Circuit breaker is initialized during initialize() call when
         configuration is available. The mixin's _init_circuit_breaker() method
@@ -327,7 +327,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
             self._initialized = True
             logger.info(
-                "VaultAdapter initialized",
+                "VaultHandler initialized",
                 extra={
                     "url": self._config.url,
                     "namespace": self._config.namespace,
@@ -402,7 +402,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         self._initialized = False
         self._config = None
         self._circuit_breaker_initialized = False
-        logger.info("VaultAdapter shutdown complete")
+        logger.info("VaultHandler shutdown complete")
 
     async def execute(
         self, envelope: dict[str, JsonValue]
@@ -438,7 +438,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
-                "VaultAdapter not initialized. Call initialize() first.",
+                "VaultHandler not initialized. Call initialize() first.",
                 context=ctx,
             )
 
@@ -1100,7 +1100,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
-                "VaultAdapter not initialized",
+                "VaultHandler not initialized",
                 context=ctx,
             )
 
@@ -1399,4 +1399,4 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         }
 
 
-__all__: list[str] = ["VaultAdapter"]
+__all__: list[str] = ["VaultHandler"]

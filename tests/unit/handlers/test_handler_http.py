@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # mypy: disable-error-code="index, operator, arg-type"
-"""Unit tests for HttpRestAdapter.
+"""Unit tests for HttpRestHandler.
 
 Comprehensive test suite covering initialization, GET/POST operations,
 error handling, health checks, describe, and lifecycle management.
@@ -25,7 +25,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.handlers.handler_http import HttpRestAdapter
+from omnibase_infra.handlers.handler_http import HttpRestHandler
 from tests.helpers import (
     DeterministicClock,
     DeterministicIdGenerator,
@@ -84,26 +84,26 @@ async def mock_stream_context(
     yield mock_response
 
 
-class TestHttpRestAdapterInitialization:
-    """Test suite for HttpRestAdapter initialization."""
+class TestHttpRestHandlerInitialization:
+    """Test suite for HttpRestHandler initialization."""
 
     @pytest.fixture
-    def handler(self) -> HttpRestAdapter:
-        """Create HttpRestAdapter fixture."""
-        return HttpRestAdapter()
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
 
-    def test_handler_init_default_state(self, handler: HttpRestAdapter) -> None:
+    def test_handler_init_default_state(self, handler: HttpRestHandler) -> None:
         """Test handler initializes in uninitialized state."""
         assert handler._initialized is False
         assert handler._client is None
         assert handler._timeout == 30.0
 
-    def test_handler_type_returns_http(self, handler: HttpRestAdapter) -> None:
+    def test_handler_type_returns_http(self, handler: HttpRestHandler) -> None:
         """Test handler_type property returns EnumHandlerType.HTTP."""
         assert handler.handler_type == EnumHandlerType.HTTP
 
     @pytest.mark.asyncio
-    async def test_initialize_with_empty_config(self, handler: HttpRestAdapter) -> None:
+    async def test_initialize_with_empty_config(self, handler: HttpRestHandler) -> None:
         """Test handler initializes with empty config (uses defaults)."""
         await handler.initialize({})
 
@@ -114,7 +114,7 @@ class TestHttpRestAdapterInitialization:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_initialize_with_config_dict(self, handler: HttpRestAdapter) -> None:
+    async def test_initialize_with_config_dict(self, handler: HttpRestHandler) -> None:
         """Test handler initializes with config dict (config ignored in MVP)."""
         config: dict[str, object] = {"timeout": 60.0, "custom_option": "value"}
         await handler.initialize(config)
@@ -127,7 +127,7 @@ class TestHttpRestAdapterInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_creates_async_client(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test initialize creates httpx.AsyncClient with correct timeout."""
         await handler.initialize({})
@@ -139,16 +139,16 @@ class TestHttpRestAdapterInitialization:
         await handler.shutdown()
 
 
-class TestHttpRestAdapterGetOperations:
+class TestHttpRestHandlerGetOperations:
     """Test suite for HTTP GET operations."""
 
     @pytest.fixture
-    def handler(self) -> HttpRestAdapter:
-        """Create HttpRestAdapter fixture."""
-        return HttpRestAdapter()
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
 
     @pytest.mark.asyncio
-    async def test_get_successful_response(self, handler: HttpRestAdapter) -> None:
+    async def test_get_successful_response(self, handler: HttpRestHandler) -> None:
         """Test successful GET request returns correct response structure."""
         await handler.initialize({})
 
@@ -193,7 +193,7 @@ class TestHttpRestAdapterGetOperations:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_get_with_custom_headers(self, handler: HttpRestAdapter) -> None:
+    async def test_get_with_custom_headers(self, handler: HttpRestHandler) -> None:
         """Test GET request passes custom headers correctly."""
         await handler.initialize({})
 
@@ -234,7 +234,7 @@ class TestHttpRestAdapterGetOperations:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_get_with_query_params_in_url(self, handler: HttpRestAdapter) -> None:
+    async def test_get_with_query_params_in_url(self, handler: HttpRestHandler) -> None:
         """Test GET request with query parameters in URL."""
         await handler.initialize({})
 
@@ -274,7 +274,7 @@ class TestHttpRestAdapterGetOperations:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_get_text_response(self, handler: HttpRestAdapter) -> None:
+    async def test_get_text_response(self, handler: HttpRestHandler) -> None:
         """Test GET request with text/plain response."""
         await handler.initialize({})
 
@@ -302,16 +302,16 @@ class TestHttpRestAdapterGetOperations:
         await handler.shutdown()
 
 
-class TestHttpRestAdapterPostOperations:
+class TestHttpRestHandlerPostOperations:
     """Test suite for HTTP POST operations."""
 
     @pytest.fixture
-    def handler(self) -> HttpRestAdapter:
-        """Create HttpRestAdapter fixture."""
-        return HttpRestAdapter()
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
 
     @pytest.mark.asyncio
-    async def test_post_with_json_body(self, handler: HttpRestAdapter) -> None:
+    async def test_post_with_json_body(self, handler: HttpRestHandler) -> None:
         """Test POST request with JSON body.
 
         Note: Dict bodies are pre-serialized during size validation to avoid
@@ -363,7 +363,7 @@ class TestHttpRestAdapterPostOperations:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_post_with_string_body(self, handler: HttpRestAdapter) -> None:
+    async def test_post_with_string_body(self, handler: HttpRestHandler) -> None:
         """Test POST request with string body."""
         await handler.initialize({})
 
@@ -401,7 +401,7 @@ class TestHttpRestAdapterPostOperations:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_post_with_no_body(self, handler: HttpRestAdapter) -> None:
+    async def test_post_with_no_body(self, handler: HttpRestHandler) -> None:
         """Test POST request with no body."""
         await handler.initialize({})
 
@@ -436,7 +436,7 @@ class TestHttpRestAdapterPostOperations:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_post_with_custom_headers(self, handler: HttpRestAdapter) -> None:
+    async def test_post_with_custom_headers(self, handler: HttpRestHandler) -> None:
         """Test POST request with custom headers.
 
         Note: Dict bodies are pre-serialized during size validation. When
@@ -493,7 +493,7 @@ class TestHttpRestAdapterPostOperations:
 
     @pytest.mark.asyncio
     async def test_post_with_list_body_serialized_to_json(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test POST with list body gets JSON serialized."""
         await handler.initialize({})
@@ -532,17 +532,17 @@ class TestHttpRestAdapterPostOperations:
         await handler.shutdown()
 
 
-class TestHttpRestAdapterErrorHandling:
+class TestHttpRestHandlerErrorHandling:
     """Test suite for error handling."""
 
     @pytest.fixture
-    def handler(self) -> HttpRestAdapter:
-        """Create HttpRestAdapter fixture."""
-        return HttpRestAdapter()
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
 
     @pytest.mark.asyncio
     async def test_timeout_error_raises_infra_timeout(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test timeout error is converted to InfraTimeoutError."""
         await handler.initialize({})
@@ -570,7 +570,7 @@ class TestHttpRestAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_connection_error_raises_infra_connection(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test connection error is converted to InfraConnectionError."""
         await handler.initialize({})
@@ -597,7 +597,7 @@ class TestHttpRestAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_unsupported_operation_put_raises_error(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test http.put operation raises ProtocolConfigurationError (not supported)."""
         await handler.initialize({})
@@ -617,7 +617,7 @@ class TestHttpRestAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_unsupported_operation_delete_raises_error(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test http.delete operation raises ProtocolConfigurationError (not supported)."""
         await handler.initialize({})
@@ -637,7 +637,7 @@ class TestHttpRestAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_unsupported_operation_patch_raises_error(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test http.patch operation raises ProtocolConfigurationError (not supported)."""
         await handler.initialize({})
@@ -656,7 +656,7 @@ class TestHttpRestAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_missing_url_field_raises_error(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test missing URL field raises ProtocolConfigurationError."""
         await handler.initialize({})
@@ -674,7 +674,7 @@ class TestHttpRestAdapterErrorHandling:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_empty_url_field_raises_error(self, handler: HttpRestAdapter) -> None:
+    async def test_empty_url_field_raises_error(self, handler: HttpRestHandler) -> None:
         """Test empty URL field raises ProtocolConfigurationError."""
         await handler.initialize({})
 
@@ -692,7 +692,7 @@ class TestHttpRestAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_missing_operation_raises_error(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test missing operation field raises ProtocolConfigurationError."""
         await handler.initialize({})
@@ -709,7 +709,7 @@ class TestHttpRestAdapterErrorHandling:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_missing_payload_raises_error(self, handler: HttpRestAdapter) -> None:
+    async def test_missing_payload_raises_error(self, handler: HttpRestHandler) -> None:
         """Test missing payload field raises ProtocolConfigurationError."""
         await handler.initialize({})
 
@@ -726,7 +726,7 @@ class TestHttpRestAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_invalid_headers_type_raises_error(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test invalid headers type raises ProtocolConfigurationError."""
         await handler.initialize({})
@@ -748,7 +748,7 @@ class TestHttpRestAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_http_status_error_returns_response(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test non-2xx HTTP responses still return successfully (not an exception).
 
@@ -788,7 +788,7 @@ class TestHttpRestAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_generic_http_error_raises_connection_error(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test generic HTTPError raises InfraConnectionError."""
         await handler.initialize({})
@@ -814,16 +814,16 @@ class TestHttpRestAdapterErrorHandling:
         await handler.shutdown()
 
 
-class TestHttpRestAdapterHealthCheck:
+class TestHttpRestHandlerHealthCheck:
     """Test suite for health check operations."""
 
     @pytest.fixture
-    def handler(self) -> HttpRestAdapter:
-        """Create HttpRestAdapter fixture."""
-        return HttpRestAdapter()
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
 
     @pytest.mark.asyncio
-    async def test_health_check_structure(self, handler: HttpRestAdapter) -> None:
+    async def test_health_check_structure(self, handler: HttpRestHandler) -> None:
         """Test health_check returns correct structure."""
         await handler.initialize({})
 
@@ -838,7 +838,7 @@ class TestHttpRestAdapterHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_healthy_when_initialized(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test health_check shows healthy=True when initialized."""
         await handler.initialize({})
@@ -854,7 +854,7 @@ class TestHttpRestAdapterHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_unhealthy_when_not_initialized(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test health_check shows healthy=False when not initialized."""
         health = await handler.health_check()
@@ -864,7 +864,7 @@ class TestHttpRestAdapterHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_unhealthy_after_shutdown(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test health_check shows healthy=False after shutdown."""
         await handler.initialize({})
@@ -876,15 +876,15 @@ class TestHttpRestAdapterHealthCheck:
         assert health["initialized"] is False
 
 
-class TestHttpRestAdapterDescribe:
+class TestHttpRestHandlerDescribe:
     """Test suite for describe operations."""
 
     @pytest.fixture
-    def handler(self) -> HttpRestAdapter:
-        """Create HttpRestAdapter fixture."""
-        return HttpRestAdapter()
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
 
-    def test_describe_returns_handler_metadata(self, handler: HttpRestAdapter) -> None:
+    def test_describe_returns_handler_metadata(self, handler: HttpRestHandler) -> None:
         """Test describe returns correct handler metadata."""
         description = handler.describe()
 
@@ -894,7 +894,7 @@ class TestHttpRestAdapterDescribe:
         assert description["initialized"] is False
 
     def test_describe_lists_supported_operations(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test describe lists supported operations."""
         description = handler.describe()
@@ -908,7 +908,7 @@ class TestHttpRestAdapterDescribe:
 
     @pytest.mark.asyncio
     async def test_describe_reflects_initialized_state(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test describe shows correct initialized state."""
         assert handler.describe()["initialized"] is False
@@ -920,16 +920,16 @@ class TestHttpRestAdapterDescribe:
         assert handler.describe()["initialized"] is False
 
 
-class TestHttpRestAdapterLifecycle:
+class TestHttpRestHandlerLifecycle:
     """Test suite for lifecycle management."""
 
     @pytest.fixture
-    def handler(self) -> HttpRestAdapter:
-        """Create HttpRestAdapter fixture."""
-        return HttpRestAdapter()
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
 
     @pytest.mark.asyncio
-    async def test_shutdown_closes_client(self, handler: HttpRestAdapter) -> None:
+    async def test_shutdown_closes_client(self, handler: HttpRestHandler) -> None:
         """Test shutdown closes the HTTP client properly."""
         await handler.initialize({})
 
@@ -945,7 +945,7 @@ class TestHttpRestAdapterLifecycle:
 
     @pytest.mark.asyncio
     async def test_execute_after_shutdown_raises_error(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test execute after shutdown raises RuntimeHostError."""
         await handler.initialize({})
@@ -963,7 +963,7 @@ class TestHttpRestAdapterLifecycle:
 
     @pytest.mark.asyncio
     async def test_execute_before_initialize_raises_error(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test execute before initialize raises RuntimeHostError."""
         envelope: dict[str, object] = {
@@ -977,7 +977,7 @@ class TestHttpRestAdapterLifecycle:
         assert "not initialized" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
-    async def test_multiple_shutdown_calls_safe(self, handler: HttpRestAdapter) -> None:
+    async def test_multiple_shutdown_calls_safe(self, handler: HttpRestHandler) -> None:
         """Test multiple shutdown calls are safe (idempotent)."""
         await handler.initialize({})
         await handler.shutdown()
@@ -987,7 +987,7 @@ class TestHttpRestAdapterLifecycle:
         assert handler._client is None
 
     @pytest.mark.asyncio
-    async def test_reinitialize_after_shutdown(self, handler: HttpRestAdapter) -> None:
+    async def test_reinitialize_after_shutdown(self, handler: HttpRestHandler) -> None:
         """Test handler can be reinitialized after shutdown."""
         await handler.initialize({})
         await handler.shutdown()
@@ -1003,7 +1003,7 @@ class TestHttpRestAdapterLifecycle:
 
     @pytest.mark.asyncio
     async def test_initialize_called_once_per_lifecycle(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test that initialize creates client exactly once.
 
@@ -1028,17 +1028,17 @@ class TestHttpRestAdapterLifecycle:
         await handler.shutdown()
 
 
-class TestHttpRestAdapterCorrelationId:
+class TestHttpRestHandlerCorrelationId:
     """Test suite for correlation ID handling."""
 
     @pytest.fixture
-    def handler(self) -> HttpRestAdapter:
-        """Create HttpRestAdapter fixture."""
-        return HttpRestAdapter()
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
 
     @pytest.mark.asyncio
     async def test_correlation_id_from_envelope_uuid(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test correlation ID extracted from envelope as UUID.
 
@@ -1076,7 +1076,7 @@ class TestHttpRestAdapterCorrelationId:
 
     @pytest.mark.asyncio
     async def test_correlation_id_from_envelope_string(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test correlation ID extracted from envelope as string."""
         await handler.initialize({})
@@ -1108,7 +1108,7 @@ class TestHttpRestAdapterCorrelationId:
 
     @pytest.mark.asyncio
     async def test_correlation_id_generated_when_missing(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test correlation ID generated when not in envelope."""
         await handler.initialize({})
@@ -1140,7 +1140,7 @@ class TestHttpRestAdapterCorrelationId:
 
     @pytest.mark.asyncio
     async def test_correlation_id_invalid_string_generates_new(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test invalid correlation ID string generates new UUID."""
         await handler.initialize({})
@@ -1173,16 +1173,16 @@ class TestHttpRestAdapterCorrelationId:
         await handler.shutdown()
 
 
-class TestHttpRestAdapterResponseParsing:
+class TestHttpRestHandlerResponseParsing:
     """Test suite for response parsing."""
 
     @pytest.fixture
-    def handler(self) -> HttpRestAdapter:
-        """Create HttpRestAdapter fixture."""
-        return HttpRestAdapter()
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
 
     @pytest.mark.asyncio
-    async def test_json_response_parsed(self, handler: HttpRestAdapter) -> None:
+    async def test_json_response_parsed(self, handler: HttpRestHandler) -> None:
         """Test JSON response is parsed correctly."""
         await handler.initialize({})
 
@@ -1212,7 +1212,7 @@ class TestHttpRestAdapterResponseParsing:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_invalid_json_returns_text(self, handler: HttpRestAdapter) -> None:
+    async def test_invalid_json_returns_text(self, handler: HttpRestHandler) -> None:
         """Test invalid JSON response falls back to text."""
         await handler.initialize({})
 
@@ -1240,7 +1240,7 @@ class TestHttpRestAdapterResponseParsing:
 
     @pytest.mark.asyncio
     async def test_non_json_content_type_returns_text(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test non-JSON content type returns text body."""
         await handler.initialize({})
@@ -1268,7 +1268,7 @@ class TestHttpRestAdapterResponseParsing:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_response_headers_included(self, handler: HttpRestAdapter) -> None:
+    async def test_response_headers_included(self, handler: HttpRestHandler) -> None:
         """Test response headers are included in result."""
         await handler.initialize({})
 
@@ -1300,21 +1300,21 @@ class TestHttpRestAdapterResponseParsing:
         await handler.shutdown()
 
 
-class TestHttpRestAdapterSizeLimits:
+class TestHttpRestHandlerSizeLimits:
     """Test suite for request/response size limits."""
 
     @pytest.fixture
-    def handler(self) -> HttpRestAdapter:
-        """Create HttpRestAdapter fixture."""
-        return HttpRestAdapter()
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
 
-    def test_default_size_limits(self, handler: HttpRestAdapter) -> None:
+    def test_default_size_limits(self, handler: HttpRestHandler) -> None:
         """Test default size limits are set correctly."""
         assert handler._max_request_size == 10 * 1024 * 1024  # 10 MB
         assert handler._max_response_size == 50 * 1024 * 1024  # 50 MB
 
     @pytest.mark.asyncio
-    async def test_configurable_size_limits(self, handler: HttpRestAdapter) -> None:
+    async def test_configurable_size_limits(self, handler: HttpRestHandler) -> None:
         """Test size limits can be configured via initialize()."""
         config: dict[str, object] = {
             "max_request_size": 1024,  # 1 KB
@@ -1329,7 +1329,7 @@ class TestHttpRestAdapterSizeLimits:
 
     @pytest.mark.asyncio
     async def test_request_size_validation_string_body(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test request size validation with string body."""
         config: dict[str, object] = {"max_request_size": 10}  # 10 bytes
@@ -1354,7 +1354,7 @@ class TestHttpRestAdapterSizeLimits:
 
     @pytest.mark.asyncio
     async def test_request_size_validation_dict_body(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test request size validation with dict body (JSON serialized)."""
         config: dict[str, object] = {"max_request_size": 10}  # 10 bytes
@@ -1379,7 +1379,7 @@ class TestHttpRestAdapterSizeLimits:
 
     @pytest.mark.asyncio
     async def test_request_size_validation_bytes_body(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test request size validation with bytes body."""
         config: dict[str, object] = {"max_request_size": 5}  # 5 bytes
@@ -1404,7 +1404,7 @@ class TestHttpRestAdapterSizeLimits:
 
     @pytest.mark.asyncio
     async def test_request_size_exceeds_limit_raises_error(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test that request exceeding size limit raises InfraUnavailableError."""
         config: dict[str, object] = {"max_request_size": 100}
@@ -1430,7 +1430,7 @@ class TestHttpRestAdapterSizeLimits:
 
     @pytest.mark.asyncio
     async def test_response_size_exceeds_limit_raises_error(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test that response exceeding size limit raises InfraUnavailableError."""
         config: dict[str, object] = {"max_response_size": 50}  # 50 bytes
@@ -1462,7 +1462,7 @@ class TestHttpRestAdapterSizeLimits:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_none_body_skips_validation(self, handler: HttpRestAdapter) -> None:
+    async def test_none_body_skips_validation(self, handler: HttpRestHandler) -> None:
         """Test that None body skips size validation."""
         config: dict[str, object] = {"max_request_size": 1}  # 1 byte - very small
         await handler.initialize(config)
@@ -1491,7 +1491,7 @@ class TestHttpRestAdapterSizeLimits:
 
     @pytest.mark.asyncio
     async def test_request_within_limit_succeeds(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test that request within size limit succeeds."""
         config: dict[str, object] = {"max_request_size": 1000}  # 1000 bytes
@@ -1527,7 +1527,7 @@ class TestHttpRestAdapterSizeLimits:
 
     @pytest.mark.asyncio
     async def test_response_within_limit_succeeds(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test that response within size limit succeeds."""
         config: dict[str, object] = {"max_response_size": 1000}  # 1000 bytes
@@ -1556,7 +1556,7 @@ class TestHttpRestAdapterSizeLimits:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_size_limits_in_health_check(self, handler: HttpRestAdapter) -> None:
+    async def test_size_limits_in_health_check(self, handler: HttpRestHandler) -> None:
         """Test that size limits are included in health check response."""
         config: dict[str, object] = {
             "max_request_size": 5000,
@@ -1571,7 +1571,7 @@ class TestHttpRestAdapterSizeLimits:
 
         await handler.shutdown()
 
-    def test_size_limits_in_describe(self, handler: HttpRestAdapter) -> None:
+    def test_size_limits_in_describe(self, handler: HttpRestHandler) -> None:
         """Test that size limits are included in describe response."""
         description = handler.describe()
 
@@ -1580,7 +1580,7 @@ class TestHttpRestAdapterSizeLimits:
         assert description["max_response_size"] == 50 * 1024 * 1024
 
     @pytest.mark.asyncio
-    async def test_invalid_config_uses_defaults(self, handler: HttpRestAdapter) -> None:
+    async def test_invalid_config_uses_defaults(self, handler: HttpRestHandler) -> None:
         """Test that invalid config values use defaults."""
         config: dict[str, object] = {
             "max_request_size": -100,  # Invalid negative
@@ -1596,7 +1596,7 @@ class TestHttpRestAdapterSizeLimits:
 
     @pytest.mark.asyncio
     async def test_content_length_header_validation_rejects_large_response(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test that Content-Length header is validated BEFORE reading response body.
 
@@ -1638,7 +1638,7 @@ class TestHttpRestAdapterSizeLimits:
 
     @pytest.mark.asyncio
     async def test_content_length_header_validation_allows_small_response(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test that Content-Length header validation allows responses under limit."""
         config: dict[str, object] = {"max_response_size": 1000}  # 1000 bytes
@@ -1672,7 +1672,7 @@ class TestHttpRestAdapterSizeLimits:
 
     @pytest.mark.asyncio
     async def test_streaming_validation_for_chunked_responses(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test that responses without Content-Length are validated during streaming.
 
@@ -1709,7 +1709,7 @@ class TestHttpRestAdapterSizeLimits:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_content_length_zero_succeeds(self, handler: HttpRestAdapter) -> None:
+    async def test_content_length_zero_succeeds(self, handler: HttpRestHandler) -> None:
         """Test Content-Length: 0 returns empty response successfully.
 
         Content-Length of 0 is a valid HTTP response indicating an empty body.
@@ -1747,7 +1747,7 @@ class TestHttpRestAdapterSizeLimits:
 
     @pytest.mark.asyncio
     async def test_content_length_with_whitespace_handled(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test Content-Length with leading/trailing whitespace parses correctly.
 
@@ -1790,7 +1790,7 @@ class TestHttpRestAdapterSizeLimits:
 
     @pytest.mark.asyncio
     async def test_multiple_content_length_headers_handled(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test multiple Content-Length headers are handled gracefully.
 
@@ -1832,7 +1832,7 @@ class TestHttpRestAdapterSizeLimits:
         await handler.shutdown()
 
 
-class TestHttpRestAdapterLogWarnings:
+class TestHttpRestHandlerLogWarnings:
     """Test suite for log warning assertions (OMN-252 acceptance criteria).
 
     These tests verify that:
@@ -1843,13 +1843,13 @@ class TestHttpRestAdapterLogWarnings:
     HANDLER_MODULE = "omnibase_infra.handlers.handler_http"
 
     @pytest.fixture
-    def handler(self) -> HttpRestAdapter:
-        """Create HttpRestAdapter fixture."""
-        return HttpRestAdapter()
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
 
     @pytest.mark.asyncio
     async def test_no_unexpected_warnings_during_normal_operation(
-        self, handler: HttpRestAdapter, caplog: pytest.LogCaptureFixture
+        self, handler: HttpRestHandler, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test that normal operations produce no unexpected warnings.
 
@@ -1898,7 +1898,7 @@ class TestHttpRestAdapterLogWarnings:
 
     @pytest.mark.asyncio
     async def test_expected_warning_on_invalid_max_request_size(
-        self, handler: HttpRestAdapter, caplog: pytest.LogCaptureFixture
+        self, handler: HttpRestHandler, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test that invalid max_request_size config produces expected warning.
 
@@ -1924,7 +1924,7 @@ class TestHttpRestAdapterLogWarnings:
 
     @pytest.mark.asyncio
     async def test_expected_warning_on_invalid_max_response_size(
-        self, handler: HttpRestAdapter, caplog: pytest.LogCaptureFixture
+        self, handler: HttpRestHandler, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test that invalid max_response_size config produces expected warning.
 
@@ -1950,7 +1950,7 @@ class TestHttpRestAdapterLogWarnings:
 
     @pytest.mark.asyncio
     async def test_expected_warning_on_invalid_content_length_header(
-        self, handler: HttpRestAdapter, caplog: pytest.LogCaptureFixture
+        self, handler: HttpRestHandler, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test that invalid Content-Length header produces expected warning.
 
@@ -1994,7 +1994,7 @@ class TestHttpRestAdapterLogWarnings:
         assert "Invalid Content-Length" in handler_warnings[0].message
 
 
-class TestHttpRestAdapterDeterministicIntegration:
+class TestHttpRestHandlerDeterministicIntegration:
     """Integration tests demonstrating deterministic test utilities (OMN-252).
 
     These tests validate that the deterministic utilities from
@@ -2002,13 +2002,13 @@ class TestHttpRestAdapterDeterministicIntegration:
     """
 
     @pytest.fixture
-    def handler(self) -> HttpRestAdapter:
-        """Create HttpRestAdapter fixture."""
-        return HttpRestAdapter()
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
 
     @pytest.mark.asyncio
     async def test_deterministic_correlation_id_in_full_flow(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test full HTTP flow with deterministic correlation ID.
 
@@ -2052,7 +2052,7 @@ class TestHttpRestAdapterDeterministicIntegration:
 
     @pytest.mark.asyncio
     async def test_deterministic_clock_for_timing_assertions(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test DeterministicClock provides controllable time for timing tests.
 
@@ -2095,7 +2095,7 @@ class TestHttpRestAdapterDeterministicIntegration:
 
     @pytest.mark.asyncio
     async def test_deterministic_utilities_combined_in_handler_flow(
-        self, handler: HttpRestAdapter
+        self, handler: HttpRestHandler
     ) -> None:
         """Test both deterministic utilities working together in full flow.
 
@@ -2168,16 +2168,16 @@ class TestHttpRestAdapterDeterministicIntegration:
 
 
 __all__: list[str] = [
-    "TestHttpRestAdapterInitialization",
-    "TestHttpRestAdapterGetOperations",
-    "TestHttpRestAdapterPostOperations",
-    "TestHttpRestAdapterErrorHandling",
-    "TestHttpRestAdapterHealthCheck",
-    "TestHttpRestAdapterDescribe",
-    "TestHttpRestAdapterLifecycle",
-    "TestHttpRestAdapterCorrelationId",
-    "TestHttpRestAdapterResponseParsing",
-    "TestHttpRestAdapterSizeLimits",
-    "TestHttpRestAdapterLogWarnings",
-    "TestHttpRestAdapterDeterministicIntegration",
+    "TestHttpRestHandlerInitialization",
+    "TestHttpRestHandlerGetOperations",
+    "TestHttpRestHandlerPostOperations",
+    "TestHttpRestHandlerErrorHandling",
+    "TestHttpRestHandlerHealthCheck",
+    "TestHttpRestHandlerDescribe",
+    "TestHttpRestHandlerLifecycle",
+    "TestHttpRestHandlerCorrelationId",
+    "TestHttpRestHandlerResponseParsing",
+    "TestHttpRestHandlerSizeLimits",
+    "TestHttpRestHandlerLogWarnings",
+    "TestHttpRestHandlerDeterministicIntegration",
 ]

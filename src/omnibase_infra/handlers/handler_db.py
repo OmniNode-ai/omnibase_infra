@@ -51,8 +51,8 @@ _DEFAULT_TIMEOUT_SECONDS: float = 30.0
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
 
 
-class DbAdapter(MixinEnvelopeExtraction):
-    """PostgreSQL database adapter using asyncpg connection pool (MVP: query, execute only).
+class DbHandler(MixinEnvelopeExtraction):
+    """PostgreSQL database handler using asyncpg connection pool (MVP: query, execute only).
 
     Security Policy - DSN Handling:
         The database connection string (DSN) contains sensitive credentials and is
@@ -75,7 +75,7 @@ class DbAdapter(MixinEnvelopeExtraction):
     """
 
     def __init__(self) -> None:
-        """Initialize DbAdapter in uninitialized state."""
+        """Initialize DbHandler in uninitialized state."""
         self._pool: asyncpg.Pool | None = None
         self._pool_size: int = _DEFAULT_POOL_SIZE
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
@@ -130,7 +130,7 @@ class DbAdapter(MixinEnvelopeExtraction):
             # Use _sanitize_dsn() if DSN info ever needs to be logged.
             self._initialized = True
             logger.info(
-                "DbAdapter initialized",
+                "DbHandler initialized",
                 extra={
                     "pool_size": self._pool_size,
                     "timeout_seconds": self._timeout,
@@ -183,7 +183,7 @@ class DbAdapter(MixinEnvelopeExtraction):
             await self._pool.close()
             self._pool = None
         self._initialized = False
-        logger.info("DbAdapter shutdown complete")
+        logger.info("DbHandler shutdown complete")
 
     async def execute(
         self, envelope: dict[str, JsonValue]
@@ -220,7 +220,7 @@ class DbAdapter(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "DbAdapter not initialized. Call initialize() first.", context=ctx
+                "DbHandler not initialized. Call initialize() first.", context=ctx
             )
 
         operation = envelope.get("operation")
@@ -343,7 +343,7 @@ class DbAdapter(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "DbAdapter not initialized - call initialize() first", context=ctx
+                "DbHandler not initialized - call initialize() first", context=ctx
             )
 
         ctx = ModelInfraErrorContext(
@@ -399,7 +399,7 @@ class DbAdapter(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "DbAdapter not initialized - call initialize() first", context=ctx
+                "DbHandler not initialized - call initialize() first", context=ctx
             )
 
         ctx = ModelInfraErrorContext(
@@ -525,4 +525,4 @@ class DbAdapter(MixinEnvelopeExtraction):
         )
 
 
-__all__: list[str] = ["DbAdapter"]
+__all__: list[str] = ["DbHandler"]
