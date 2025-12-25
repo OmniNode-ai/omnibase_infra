@@ -1153,7 +1153,7 @@ class MixinNodeIntrospection:
             and current_time - self._introspection_cached_at
             < self._introspection_cache_ttl
         ):
-            # Return cached data with updated timestamp
+            # Return cached data (timestamp reflects when cache was populated, not current time)
             cached_event = ModelNodeIntrospectionEvent(**self._introspection_cache)
 
             # Record cache hit metrics

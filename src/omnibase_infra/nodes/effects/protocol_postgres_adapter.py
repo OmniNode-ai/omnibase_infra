@@ -5,10 +5,11 @@
 This module defines the protocol that PostgreSQL adapters must implement
 to be used with the NodeRegistryEffect node.
 
-Thread Safety:
-    Implementations MUST be thread-safe for concurrent async calls.
-    Multiple async tasks may invoke upsert() simultaneously for
-    different or identical node registrations.
+Concurrency Safety:
+    Implementations MUST be safe for concurrent async calls.
+    Multiple coroutines may invoke upsert() simultaneously for
+    different or identical node registrations. Implementations
+    should use asyncio.Lock for coroutine-safety when protecting shared state.
 
 Related:
     - NodeRegistryEffect: Effect node that uses this protocol
@@ -30,11 +31,11 @@ class ProtocolPostgresAdapter(Protocol):
     Implementations must provide async upsert capability for
     registration records.
 
-    Thread Safety:
-        Implementations MUST be thread-safe for concurrent async calls.
+    Concurrency Safety:
+        Implementations MUST be safe for concurrent async coroutine calls.
 
         **Guarantees implementers MUST provide:**
-            - Concurrent upsert() calls are safe
+            - Concurrent upsert() calls are coroutine-safe
             - Connection pooling (if used) is async-safe
             - Database transactions are properly isolated
 
@@ -42,6 +43,8 @@ class ProtocolPostgresAdapter(Protocol):
             - Multiple coroutines can call upsert() concurrently
             - Each upsert operation is independent
             - Failures in one upsert do not affect others
+
+        Note: asyncio.Lock provides coroutine-safety, not thread-safety.
     """
 
     async def upsert(

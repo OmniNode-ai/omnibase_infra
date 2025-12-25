@@ -3,7 +3,7 @@
 """In-Memory Idempotency Store.
 
 This module provides an in-memory implementation of ProtocolIdempotencyStore
-for testing purposes. It uses a dict with asyncio.Lock for thread-safe
+for testing purposes. It uses a dict with asyncio.Lock for coroutine-safe
 operations.
 
 This store is NOT suitable for production use:
@@ -30,7 +30,7 @@ class InMemoryIdempotencyStore(ProtocolIdempotencyStore):
     """In-memory idempotency store for testing.
 
     Implements ProtocolIdempotencyStore using a dict for storage and
-    asyncio.Lock for thread-safe operations. Designed for unit testing
+    asyncio.Lock for coroutine-safe operations. Designed for unit testing
     scenarios where external dependencies are not available.
 
     Storage Structure:
@@ -38,9 +38,11 @@ class InMemoryIdempotencyStore(ProtocolIdempotencyStore):
         - Key: (domain, message_id) composite key
         - Value: ModelIdempotencyRecord with full message metadata
 
-    Thread Safety:
+    Concurrency Safety:
         All operations are protected by an asyncio.Lock to ensure atomic
-        check-and-record semantics even under concurrent access.
+        check-and-record semantics even under concurrent coroutine access.
+        Note: This is coroutine-safe, not thread-safe. For multi-threaded
+        access, additional synchronization would be required.
 
     Test Utilities:
         - clear(): Reset store to empty state between tests

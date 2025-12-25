@@ -19,10 +19,13 @@ Architecture:
     that orchestrators subscribe to for timeout decisions (DOMAIN concern). This
     separation ensures clear ownership and testability.
 
-Thread Safety:
-    - Circuit breaker operations protected by `_circuit_breaker_lock`
-    - State variables protected by `_state_lock`
+Concurrency Safety:
+    This scheduler is coroutine-safe, not thread-safe. All locking uses
+    asyncio primitives which protect against concurrent coroutine access:
+    - Circuit breaker operations protected by `_circuit_breaker_lock` (asyncio.Lock)
+    - State variables protected by `_state_lock` (asyncio.Lock)
     - Tick loop runs as background task with shutdown signaling via `asyncio.Event`
+    For multi-threaded access, additional synchronization would be required.
 
 Usage:
     ```python
@@ -96,10 +99,12 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
         is_running: Whether the scheduler is currently running.
         current_sequence_number: Current sequence number for restart-safety.
 
-    Thread Safety:
-        - Circuit breaker operations protected by `_circuit_breaker_lock`
-        - State variables protected by `_state_lock`
+    Concurrency Safety:
+        This scheduler is coroutine-safe using asyncio primitives:
+        - Circuit breaker operations protected by `_circuit_breaker_lock` (asyncio.Lock)
+        - State variables protected by `_state_lock` (asyncio.Lock)
         - Shutdown signaling via `asyncio.Event`
+        Note: This is coroutine-safe, not thread-safe.
 
     Restart Safety:
         The `current_sequence_number` property returns a monotonically increasing
@@ -344,9 +349,9 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             now: Optional override for current time. If None, uses actual
                 current time (datetime.now(timezone.utc)).
 
-        Thread Safety:
-            This method is safe for concurrent calls. State modifications
-            are protected by `_state_lock`.
+        Concurrency Safety:
+            This method is safe for concurrent coroutine calls. State modifications
+            are protected by `_state_lock` (asyncio.Lock).
         """
         tick_time = now or datetime.now(UTC)
         correlation_id = uuid4()
@@ -448,12 +453,37 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
         Returns:
             ModelRuntimeSchedulerMetrics: Current metrics snapshot.
 
-        Thread Safety:
-            This method acquires ``_state_lock`` to ensure a consistent snapshot
-            of all metrics. The returned Pydantic model is immutable and safe
-            to use after the lock is released. All state variables are read
-            atomically within a single lock acquisition.
+        Concurrency Safety:
+            This method acquires both ``_circuit_breaker_lock`` and ``_state_lock``
+            (asyncio.Lock instances) to ensure a consistent snapshot of all metrics.
+            Circuit breaker state is read under its own lock first (consistent with
+            modification patterns), then scheduler state is read under the state lock.
+            The returned Pydantic model is immutable and safe to use after locks are
+            released. Note: This is coroutine-safe, not thread-safe.
+
+        Example:
+            >>> scheduler = RuntimeScheduler(config=config, event_bus=event_bus)
+            >>> await scheduler.start()
+            >>> # After some ticks have been emitted...
+            >>> metrics = await scheduler.get_metrics()
+            >>> print(f"Scheduler: {metrics.scheduler_id}")
+            >>> print(f"Status: {metrics.status}")
+            >>> print(f"Ticks emitted: {metrics.ticks_emitted}")
+            >>> print(f"Ticks failed: {metrics.ticks_failed}")
+            >>> print(f"Success rate: {metrics.tick_success_rate()}")
+            >>> print(f"Average tick duration: {metrics.average_tick_duration_ms}ms")
+            >>> print(f"Circuit breaker open: {metrics.circuit_breaker_open}")
+            >>> print(f"Consecutive failures: {metrics.consecutive_failures}")
+            >>> print(f"Uptime: {metrics.total_uptime_seconds}s")
+            >>> if metrics.is_healthy():
+            ...     print("Scheduler is healthy")
         """
+        # First, capture circuit breaker state under its own lock
+        # This ensures consistency with how _circuit_breaker_open is modified
+        async with self._circuit_breaker_lock:
+            circuit_breaker_open = self._circuit_breaker_open
+
+        # Then capture scheduler state under state lock
         async with self._state_lock:
             # Calculate uptime
             uptime_seconds = 0.0
@@ -478,7 +508,7 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                 max_tick_duration_ms=self._max_tick_duration_ms,
                 current_sequence_number=self._sequence_number,
                 last_persisted_sequence=self._last_persisted_sequence,
-                circuit_breaker_open=self._circuit_breaker_open,
+                circuit_breaker_open=circuit_breaker_open,
                 consecutive_failures=self._consecutive_failures,
                 started_at=self._started_at,
                 total_uptime_seconds=uptime_seconds,

@@ -27,6 +27,7 @@ Example:
     >>> from omnibase_infra.models.dispatch import ModelDispatcherRegistration
     >>> from omnibase_infra.enums import EnumMessageCategory
     >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
+    >>> from datetime import datetime, timezone
     >>>
     >>> # Register a dispatcher for user events
     >>> dispatcher = ModelDispatcherRegistration(
@@ -36,6 +37,7 @@ Example:
     ...     supported_categories=[EnumMessageCategory.EVENT],
     ...     timeout_seconds=30,
     ...     max_concurrent=10,
+    ...     registered_at=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
     ... )
 
 See Also:
@@ -82,6 +84,7 @@ class ModelDispatcherRegistration(BaseModel):
         metadata: Optional additional metadata about the dispatcher.
 
     Example:
+        >>> from datetime import datetime, timezone
         >>> dispatcher = ModelDispatcherRegistration(
         ...     dispatcher_id="order-processor",
         ...     dispatcher_name="Order Processing Dispatcher",
@@ -91,6 +94,7 @@ class ModelDispatcherRegistration(BaseModel):
         ...     timeout_seconds=60,
         ...     max_concurrent=5,
         ...     description="Processes order commands and coordinates fulfillment",
+        ...     registered_at=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
         ... )
     """
 
@@ -212,11 +216,13 @@ class ModelDispatcherRegistration(BaseModel):
             True if the dispatcher supports this category, False otherwise
 
         Example:
+            >>> from datetime import datetime, timezone
             >>> dispatcher = ModelDispatcherRegistration(
             ...     dispatcher_id="test",
             ...     dispatcher_name="Test Dispatcher",
             ...     node_kind=EnumNodeKind.REDUCER,
             ...     supported_categories=[EnumMessageCategory.EVENT],
+            ...     registered_at=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
             ... )
             >>> dispatcher.supports_category(EnumMessageCategory.EVENT)
             True
@@ -238,12 +244,14 @@ class ModelDispatcherRegistration(BaseModel):
             True if the dispatcher supports this message type, False otherwise
 
         Example:
+            >>> from datetime import datetime, timezone
             >>> dispatcher = ModelDispatcherRegistration(
             ...     dispatcher_id="test",
             ...     dispatcher_name="Test Dispatcher",
             ...     node_kind=EnumNodeKind.REDUCER,
             ...     supported_categories=[EnumMessageCategory.EVENT],
             ...     supported_message_types=["UserCreated", "UserUpdated"],
+            ...     registered_at=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
             ... )
             >>> dispatcher.supports_message_type("UserCreated")
             True
@@ -271,12 +279,14 @@ class ModelDispatcherRegistration(BaseModel):
             True if the dispatcher can accept this message, False otherwise
 
         Example:
+            >>> from datetime import datetime, timezone
             >>> dispatcher = ModelDispatcherRegistration(
             ...     dispatcher_id="test",
             ...     dispatcher_name="Test Dispatcher",
             ...     node_kind=EnumNodeKind.REDUCER,
             ...     supported_categories=[EnumMessageCategory.EVENT],
             ...     supported_message_types=["UserCreated"],
+            ...     registered_at=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
             ... )
             >>> dispatcher.can_accept_message(EnumMessageCategory.EVENT, "UserCreated")
             True

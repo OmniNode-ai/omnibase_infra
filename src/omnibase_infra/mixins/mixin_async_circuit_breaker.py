@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Thread-safe async circuit breaker mixin for infrastructure components.
+"""Coroutine-safe async circuit breaker mixin for infrastructure components.
 
 This module provides a reusable circuit breaker implementation for infrastructure
 components such as event buses, service adapters, HTTP clients, and database
 connections. It implements the standard 3-state circuit breaker pattern with
-thread-safe async operations.
+coroutine-safe async operations.
 
 Circuit Breaker States:
     - CLOSED: Normal operation, requests allowed
@@ -13,7 +13,7 @@ Circuit Breaker States:
     - HALF_OPEN: Testing recovery, limited requests allowed
 
 Features:
-    - Thread-safe state management using asyncio.Lock
+    - Coroutine-safe state management using asyncio.Lock
     - Automatic state transitions based on failure thresholds
     - Time-based auto-reset with configurable timeout
     - Infrastructure error integration (InfraUnavailableError)
@@ -61,10 +61,14 @@ Usage:
                 raise
     ```
 
-Thread Safety:
+Concurrency Safety:
     All circuit breaker methods require the caller to hold `_circuit_breaker_lock`
     before invocation. This is documented in each method's docstring using:
     "REQUIRES: self._circuit_breaker_lock must be held by caller."
+
+    Note: This mixin uses asyncio.Lock which provides coroutine-safe access,
+    not thread-safe access. For true multi-threaded usage, additional
+    synchronization (e.g., threading.Lock) would be required.
 
     Example:
         ```python
@@ -72,7 +76,7 @@ Thread Safety:
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("operation")
 
-        # Incorrect - race condition!
+        # Incorrect - race condition between coroutines!
         await self._check_circuit_breaker("operation")
         ```
 
@@ -149,7 +153,7 @@ class MixinAsyncCircuitBreaker:
         _circuit_breaker_failures: Failure counter (incremented on each failure)
         _circuit_breaker_open: Circuit open/closed state (True = open)
         _circuit_breaker_open_until: Timestamp for automatic reset
-        _circuit_breaker_lock: asyncio.Lock for thread safety
+        _circuit_breaker_lock: asyncio.Lock for coroutine-safe access
 
     Configuration Variables:
         circuit_breaker_threshold: Max failures before opening (default: 5)
@@ -157,9 +161,11 @@ class MixinAsyncCircuitBreaker:
         service_name: Service identifier for error context
         transport_type: Transport type for error context (default: HTTP)
 
-    Thread Safety:
+    Concurrency Safety:
         All circuit breaker methods MUST be called while holding
-        `_circuit_breaker_lock`. Callers are responsible for lock acquisition:
+        `_circuit_breaker_lock`. Callers are responsible for lock acquisition.
+        Note: asyncio.Lock protects against concurrent coroutine access,
+        not OS thread access. For multi-threaded scenarios, use threading.Lock.
 
         ```python
         async with self._circuit_breaker_lock:
@@ -178,7 +184,7 @@ class MixinAsyncCircuitBreaker:
                 )
 
             async def register_service(self, service, correlation_id=None):
-                # Check circuit (thread-safe)
+                # Check circuit (coroutine-safe)
                 async with self._circuit_breaker_lock:
                     await self._check_circuit_breaker(
                         operation="register_service",
@@ -189,12 +195,12 @@ class MixinAsyncCircuitBreaker:
                     # Perform operation
                     await self._consul_client.register(service)
 
-                    # Record success (thread-safe)
+                    # Record success (coroutine-safe)
                     async with self._circuit_breaker_lock:
                         await self._reset_circuit_breaker()
 
                 except Exception:
-                    # Record failure (thread-safe)
+                    # Record failure (coroutine-safe)
                     async with self._circuit_breaker_lock:
                         await self._record_circuit_failure(
                             operation="register_service",
@@ -256,7 +262,7 @@ class MixinAsyncCircuitBreaker:
         self.service_name = service_name
         self.transport_type = transport_type
 
-        # Thread safety lock
+        # Coroutine-safety lock (asyncio.Lock for concurrent async access, not thread-safe)
         self._circuit_breaker_lock = asyncio.Lock()
 
         logger.debug(
@@ -277,18 +283,18 @@ class MixinAsyncCircuitBreaker:
         circuit is open. Automatically transitions from OPEN to HALF_OPEN
         if reset timeout has elapsed.
 
-        Thread Safety:
+        Concurrency Safety:
             REQUIRES: self._circuit_breaker_lock must be held by caller.
 
             This method accesses shared state variables and MUST be called
-            while holding the lock to prevent race conditions:
+            while holding the lock to prevent race conditions between coroutines:
 
             ```python
             # Correct
             async with self._circuit_breaker_lock:
                 await self._check_circuit_breaker("operation")
 
-            # Incorrect - race condition!
+            # Incorrect - race condition between coroutines!
             await self._check_circuit_breaker("operation")
             ```
 
@@ -310,7 +316,7 @@ class MixinAsyncCircuitBreaker:
         Example:
             ```python
             async def perform_operation(self, correlation_id=None):
-                # Check circuit before operation (thread-safe)
+                # Check circuit before operation (coroutine-safe)
                 async with self._circuit_breaker_lock:
                     await self._check_circuit_breaker(
                         operation="perform_operation",
@@ -374,18 +380,18 @@ class MixinAsyncCircuitBreaker:
         is reached. When the circuit opens, it sets the reset timestamp for
         automatic recovery.
 
-        Thread Safety:
+        Concurrency Safety:
             REQUIRES: self._circuit_breaker_lock must be held by caller.
 
             This method mutates shared state variables and MUST be called
-            while holding the lock to prevent race conditions:
+            while holding the lock to prevent race conditions between coroutines:
 
             ```python
             # Correct
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("operation")
 
-            # Incorrect - race condition!
+            # Incorrect - race condition between coroutines!
             await self._record_circuit_failure("operation")
             ```
 
@@ -412,7 +418,7 @@ class MixinAsyncCircuitBreaker:
                     result = await self._do_work()
                     return result
                 except Exception:
-                    # Record failure on exception (thread-safe)
+                    # Record failure on exception (coroutine-safe)
                     async with self._circuit_breaker_lock:
                         await self._record_circuit_failure(
                             operation="perform_operation",
@@ -462,18 +468,18 @@ class MixinAsyncCircuitBreaker:
         requests to proceed normally. Typically called after a successful
         operation.
 
-        Thread Safety:
+        Concurrency Safety:
             REQUIRES: self._circuit_breaker_lock must be held by caller.
 
             This method mutates shared state variables and MUST be called
-            while holding the lock to prevent race conditions:
+            while holding the lock to prevent race conditions between coroutines:
 
             ```python
             # Correct
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
-            # Incorrect - race condition!
+            # Incorrect - race condition between coroutines!
             await self._reset_circuit_breaker()
             ```
 
@@ -494,7 +500,7 @@ class MixinAsyncCircuitBreaker:
                 try:
                     result = await self._do_work()
 
-                    # Reset circuit on success (thread-safe)
+                    # Reset circuit on success (coroutine-safe)
                     async with self._circuit_breaker_lock:
                         await self._reset_circuit_breaker()
 

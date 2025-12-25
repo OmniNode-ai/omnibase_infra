@@ -6,9 +6,13 @@ Implements projection reads for the registration domain to support
 orchestrator state queries. Orchestrators read current state using
 projections only - never scanning Kafka topics.
 
-Thread Safety:
-    This implementation is thread-safe for concurrent read operations.
-    Uses asyncpg connection pool for connection management.
+Concurrency Safety:
+    This implementation is coroutine-safe for concurrent async read operations.
+    Uses asyncpg connection pool for connection management, and asyncio.Lock
+    (via MixinAsyncCircuitBreaker) for circuit breaker state protection.
+
+    Note: This is not thread-safe. For multi-threaded access, additional
+    synchronization would be required.
 
 Related Tickets:
     - OMN-944 (F1): Implement Registration Projection Schema

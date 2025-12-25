@@ -260,17 +260,18 @@ class HandlerRuntimeTick:
 
             # Determine last heartbeat time for the event.
             # Use projection.last_heartbeat_at if available (forward-compatible),
-            # otherwise None indicates heartbeat timestamp not tracked.
+            # otherwise fall back to registered_at as the last known "alive" time.
             #
-            # Semantic correctness of None fallback:
+            # Semantic correctness of registered_at fallback:
             #   - Using `now` would incorrectly imply the last heartbeat was just received
-            #   - Using `registered_at` would conflate registration with heartbeat receipt
-            #   - Using `None` accurately indicates we don't have heartbeat timestamp data
+            #   - Using `registered_at` indicates when we first knew the node was alive
+            #   - If no heartbeat was ever received, registration time is the best available
+            #     timestamp for when we last confirmed node liveness
             #
             # When ModelRegistrationProjection adds last_heartbeat_at field, this code
             # will automatically use it without modification.
             last_heartbeat_at: datetime | None = getattr(
-                projection, "last_heartbeat_at", None
+                projection, "last_heartbeat_at", projection.registered_at
             )
 
             event = ModelNodeLivenessExpired(

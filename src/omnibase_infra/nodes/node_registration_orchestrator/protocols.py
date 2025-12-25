@@ -10,8 +10,8 @@ Protocol Responsibilities:
     ProtocolReducer: Pure function that computes intents from events
     ProtocolEffect: Side-effectful executor that performs infrastructure operations
 
-Thread Safety:
-    All protocol implementations MUST be thread-safe for concurrent async calls.
+Concurrency Safety:
+    All protocol implementations MUST be safe for concurrent async coroutine calls.
 
     ProtocolReducer:
     - Same reducer instance may process multiple events concurrently
@@ -19,8 +19,8 @@ Thread Safety:
     - Avoid instance-level caches that could cause race conditions
 
     ProtocolEffect:
-    - Multiple async tasks may invoke execute_intent() simultaneously
-    - Use asyncio.Lock for any shared mutable state
+    - Multiple coroutines may invoke execute_intent() simultaneously
+    - Use asyncio.Lock for any shared mutable state (coroutine-safe, not thread-safe)
     - Ensure underlying clients (Consul, PostgreSQL) are async-safe
 
 Error Handling and Sanitization:
@@ -90,8 +90,8 @@ class ProtocolReducer(Protocol):
     and an incoming event, it returns updated state plus a list of typed
     intents describing what infrastructure operations should occur.
 
-    Thread Safety:
-        Implementations MUST be thread-safe for concurrent async calls.
+    Concurrency Safety:
+        Implementations MUST be safe for concurrent async coroutine calls.
         The same reducer instance may process multiple events concurrently.
         Follow these guidelines:
         - Treat ModelReducerState as immutable (create new instances)
@@ -186,9 +186,9 @@ class ProtocolReducer(Protocol):
         1. Updated reducer state (for deduplication, rate limiting, etc.)
         2. A list of intents describing infrastructure operations to perform
 
-        Thread Safety:
+        Concurrency Safety:
             This method MUST be safe to call concurrently from multiple
-            async tasks. Implementations should:
+            coroutines. Implementations should:
             - Not modify the input state object
             - Return a new ModelReducerState instance
             - Avoid instance-level mutation

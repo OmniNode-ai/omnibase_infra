@@ -45,14 +45,14 @@ class ModelNodeRegistrationAccepted(BaseModel):
 
     Example:
         >>> from uuid import uuid4
-        >>> from datetime import UTC, datetime, timedelta
+        >>> from datetime import datetime, timedelta, timezone
         >>> event = ModelNodeRegistrationAccepted(
         ...     entity_id=uuid4(),
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     causation_id=uuid4(),
-        ...     emitted_at=datetime.now(UTC),
-        ...     ack_deadline=datetime.now(UTC) + timedelta(seconds=30),
+        ...     emitted_at=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
+        ...     ack_deadline=datetime(2025, 1, 15, 12, 0, 30, tzinfo=timezone.utc),
         ... )
     """
 

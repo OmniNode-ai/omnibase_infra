@@ -7,9 +7,13 @@ Implements projection persistence for the registration domain with:
 - Parameterized queries for SQL injection protection
 - Circuit breaker resilience pattern
 
-Thread Safety:
-    This implementation is thread-safe for concurrent persist calls.
-    Uses asyncpg connection pool for connection management.
+Concurrency Safety:
+    This implementation is coroutine-safe for concurrent async persist calls.
+    Uses asyncpg connection pool for connection management, and asyncio.Lock
+    (via MixinAsyncCircuitBreaker) for circuit breaker state protection.
+
+    Note: This is not thread-safe. For multi-threaded access, additional
+    synchronization would be required.
 
 Related Tickets:
     - OMN-944 (F1): Implement Registration Projection Schema

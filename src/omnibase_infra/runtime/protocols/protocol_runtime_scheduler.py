@@ -28,9 +28,11 @@ Restart Safety:
     survives restarts. This enables orchestrators to detect scheduler restarts
     and handle any missed ticks appropriately.
 
-Thread Safety:
-    Implementations MUST be thread-safe. The scheduler may be accessed from
-    multiple coroutines for status checks while the tick loop runs.
+Concurrency Safety:
+    Implementations MUST be safe for concurrent coroutine access. The scheduler
+    may be accessed from multiple coroutines for status checks while the tick
+    loop runs. Use asyncio.Lock for shared mutable state (coroutine-safe, not
+    thread-safe).
 
 Example:
     .. code-block:: python
@@ -138,13 +140,14 @@ class ProtocolRuntimeScheduler(Protocol):
         **Note**: For complete type safety, use static type checking (mypy)
         in addition to duck typing verification.
 
-    Thread Safety:
-        Implementations MUST be thread-safe. The scheduler may be:
+    Concurrency Safety:
+        Implementations MUST be safe for concurrent coroutine access. The scheduler
+        may be:
         - Started/stopped from the main coroutine
         - Queried for status from multiple coroutines
         - Emitting ticks in a background task
 
-        Use appropriate synchronization primitives (asyncio.Lock) for state access.
+        Use asyncio.Lock for state access (coroutine-safe, not OS thread-safe).
 
     Restart Safety:
         The ``current_sequence_number`` property returns a monotonically increasing
@@ -227,9 +230,9 @@ class ProtocolRuntimeScheduler(Protocol):
         - True: Scheduler is actively emitting ticks
         - False: Scheduler is stopped or not yet started
 
-        Thread Safety:
-            This property MUST be safe for concurrent access. It may be
-            called from different coroutines while the tick loop runs.
+        Concurrency Safety:
+            This property MUST be safe for concurrent coroutine access. It may
+            be called from different coroutines while the tick loop runs.
 
         Returns:
             bool: True if running and emitting ticks, False otherwise.
@@ -382,9 +385,9 @@ class ProtocolRuntimeScheduler(Protocol):
             - Publishes the tick to the configured event bus/topic
             - Updates internal metrics
 
-        Thread Safety:
-            This method MUST be safe for concurrent calls. Use appropriate
-            locking if internal state is modified.
+        Concurrency Safety:
+            This method MUST be safe for concurrent coroutine calls. Use
+            asyncio.Lock if internal state is modified.
 
         Example:
             .. code-block:: python
@@ -432,11 +435,11 @@ class ProtocolRuntimeScheduler(Protocol):
         Returns:
             ModelRuntimeSchedulerMetrics: Current metrics snapshot.
 
-        Thread Safety:
-            This method acquires the internal state lock to ensure a consistent
-            snapshot of all metrics. The returned metrics object is immutable
-            and safe to use after the call returns. All state variables are
-            read atomically within a single lock acquisition.
+        Concurrency Safety:
+            This method acquires the internal state lock (asyncio.Lock) to ensure
+            a consistent snapshot of all metrics. The returned metrics object is
+            immutable and safe to use after the call returns. All state variables
+            are read atomically within a single lock acquisition.
 
         Example:
             .. code-block:: python

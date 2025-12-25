@@ -6,9 +6,11 @@ Provides the Pydantic model for registration projections stored in PostgreSQL.
 Used by orchestrators to query current registration state and make workflow
 decisions without scanning Kafka topics.
 
-Thread Safety:
+Concurrency Safety:
     This model is mutable (frozen=False) to allow updates during projection
-    persistence. Callers should ensure thread-safe access when updating.
+    persistence. Callers should ensure safe concurrent access when updating
+    (e.g., using asyncio.Lock for coroutine-safety or threading.Lock for
+    thread-safety, depending on the execution context).
 
 Related Tickets:
     - OMN-944 (F1): Implement Registration Projection Schema

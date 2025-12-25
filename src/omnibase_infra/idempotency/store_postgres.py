@@ -117,11 +117,16 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
         if the config validation is somehow bypassed (e.g., through direct
         attribute assignment or deserialization from untrusted sources).
 
-    Thread Safety:
-        This store is thread-safe. The underlying asyncpg pool handles
-        connection management and concurrent access safely. All metrics
-        updates are protected by ``_metrics_lock`` to ensure atomic
-        read-modify-write operations for observability counters.
+    Concurrency Safety:
+        This store is coroutine-safe for asyncio concurrent access. The
+        underlying asyncpg pool handles connection management and concurrent
+        coroutine access safely. All metrics updates are protected by
+        ``_metrics_lock`` (asyncio.Lock) to ensure atomic read-modify-write
+        operations for observability counters.
+
+        Note: This is not thread-safe. For multi-threaded access, additional
+        synchronization would be required (e.g., threading.Lock or
+        thread-safe connection pooling).
 
     Example:
         >>> from uuid import uuid4
@@ -184,8 +189,9 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             - last_cleanup_deleted: Records deleted in last cleanup
             - last_cleanup_at: Timestamp of last cleanup
 
-        Thread Safety:
-            This method acquires ``_metrics_lock`` to return a consistent snapshot.
+        Concurrency Safety:
+            This method acquires ``_metrics_lock`` (asyncio.Lock) to return
+            a consistent snapshot. Safe for concurrent coroutine access.
 
         Returns:
             Copy of current metrics.

@@ -525,6 +525,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
                 node_id=test_node_id,
                 node_type="effect",
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
                 extra_field="not_allowed",  # type: ignore[call-arg]
             )
         assert "extra_field" in str(exc_info.value)

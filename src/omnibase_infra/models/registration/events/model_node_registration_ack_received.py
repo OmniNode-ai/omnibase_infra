@@ -45,14 +45,14 @@ class ModelNodeRegistrationAckReceived(BaseModel):
 
     Example:
         >>> from uuid import uuid4
-        >>> from datetime import UTC, datetime, timedelta
+        >>> from datetime import datetime, timedelta, timezone
         >>> event = ModelNodeRegistrationAckReceived(
         ...     entity_id=uuid4(),
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     causation_id=uuid4(),
-        ...     emitted_at=datetime.now(UTC),
-        ...     liveness_deadline=datetime.now(UTC) + timedelta(seconds=60),
+        ...     emitted_at=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
+        ...     liveness_deadline=datetime(2025, 1, 15, 12, 1, 0, tzinfo=timezone.utc),
         ... )
     """
 

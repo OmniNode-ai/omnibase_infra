@@ -652,7 +652,7 @@ class TestFanOutMultipleSubscribers:
             [] for _ in range(subscriber_count)
         ]
 
-        async def create_handler(
+        def create_handler(
             idx: int,
         ) -> Callable[[ModelEventMessage], Awaitable[None]]:
             async def handler(msg: ModelEventMessage) -> None:
@@ -662,7 +662,7 @@ class TestFanOutMultipleSubscribers:
 
         # Subscribe multiple handlers
         for i in range(subscriber_count):
-            handler = await create_handler(i)
+            handler = create_handler(i)
             await event_bus.subscribe(topic, f"group-{i}", handler)
 
         # Publish many messages

@@ -56,11 +56,11 @@ class ModelNodeRegistrationAcked(BaseModel):
 
     Example:
         >>> from uuid import uuid4
-        >>> from datetime import datetime, UTC
+        >>> from datetime import datetime, timezone
         >>> ack = ModelNodeRegistrationAcked(
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
-        ...     timestamp=datetime.now(UTC),
+        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
         ... )
         >>> assert ack.command_id is not None
         >>> assert ack.timestamp.tzinfo is not None

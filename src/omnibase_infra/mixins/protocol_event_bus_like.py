@@ -5,8 +5,8 @@
 This module provides the minimal protocol interface for event bus compatibility
 with the MixinNodeIntrospection mixin.
 
-Thread Safety:
-    Implementations of ProtocolEventBusLike MUST be thread-safe for concurrent
+Concurrency Safety:
+    Implementations of ProtocolEventBusLike MUST be safe for concurrent
     async calls. Multiple coroutines may invoke publish methods simultaneously.
 
     Design Requirements:
@@ -18,6 +18,8 @@ Thread Safety:
         - Use asyncio.Lock for any shared mutable state (e.g., circuit breakers)
         - Use MixinAsyncCircuitBreaker for fault tolerance
         - Keep publish operations stateless where possible
+
+    Note: asyncio.Lock provides coroutine-safety, not OS thread-safety.
 
 Related:
     - docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md: Circuit breaker patterns
@@ -43,16 +45,16 @@ class ProtocolEventBusLike(Protocol):
     The mixin prefers ``publish_envelope`` when available, falling back
     to ``publish`` for raw bytes publishing.
 
-    Thread Safety:
-        Implementations MUST be thread-safe for concurrent async calls.
+    Concurrency Safety:
+        Implementations MUST be safe for concurrent async coroutine calls.
 
         **Guarantees implementers MUST provide:**
-            - Concurrent calls to publish methods are safe
-            - Internal state (if any) is protected by appropriate locks
+            - Concurrent calls to publish methods are coroutine-safe
+            - Internal state (if any) is protected by asyncio.Lock
             - Underlying transport clients are async-safe
 
         **Locking recommendations:**
-            - Use asyncio.Lock for shared mutable state
+            - Use asyncio.Lock for shared mutable state (coroutine-safe, not thread-safe)
             - Use MixinAsyncCircuitBreaker for fault tolerance (optional)
             - Connection state management should use async-safe patterns
 
@@ -67,7 +69,7 @@ class ProtocolEventBusLike(Protocol):
         for ``typing.Protocol`` classes per PEP 544.
 
     See Also:
-        - docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md: Thread safety patterns
+        - docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md: Concurrency safety patterns
         - MixinAsyncCircuitBreaker: Recommended for production implementations
     """
 
@@ -78,7 +80,7 @@ class ProtocolEventBusLike(Protocol):
     ) -> None:
         """Publish an event envelope to a topic.
 
-        Thread Safety:
+        Concurrency Safety:
             This method MUST be safe for concurrent calls from multiple
             coroutines. Implementations should not rely on call ordering.
 
@@ -96,7 +98,7 @@ class ProtocolEventBusLike(Protocol):
     ) -> None:
         """Publish raw bytes to a topic (fallback method).
 
-        Thread Safety:
+        Concurrency Safety:
             This method MUST be safe for concurrent calls from multiple
             coroutines. Implementations should not rely on call ordering.
 
