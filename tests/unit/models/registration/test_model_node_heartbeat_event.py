@@ -849,7 +849,8 @@ class TestModelNodeHeartbeatEventRequiredFields:
     def test_missing_node_id_raises_validation_error(self) -> None:
         """Test that missing node_id raises ValidationError."""
         with pytest.raises(ValidationError) as exc_info:
-            ModelNodeHeartbeatEvent(
+            # Intentionally omitting required field to test Pydantic validation
+            ModelNodeHeartbeatEvent(  # type: ignore[call-arg]
                 node_type="effect",
                 uptime_seconds=100.0,
                 timestamp=TEST_TIMESTAMP,
@@ -860,7 +861,8 @@ class TestModelNodeHeartbeatEventRequiredFields:
         """Test that missing node_type raises ValidationError."""
         test_node_id = uuid4()
         with pytest.raises(ValidationError) as exc_info:
-            ModelNodeHeartbeatEvent(
+            # Intentionally omitting required field to test Pydantic validation
+            ModelNodeHeartbeatEvent(  # type: ignore[call-arg]
                 node_id=test_node_id,
                 uptime_seconds=100.0,
                 timestamp=TEST_TIMESTAMP,
@@ -871,7 +873,8 @@ class TestModelNodeHeartbeatEventRequiredFields:
         """Test that missing uptime_seconds raises ValidationError."""
         test_node_id = uuid4()
         with pytest.raises(ValidationError) as exc_info:
-            ModelNodeHeartbeatEvent(
+            # Intentionally omitting required field to test Pydantic validation
+            ModelNodeHeartbeatEvent(  # type: ignore[call-arg]
                 node_id=test_node_id,
                 node_type="effect",
             )

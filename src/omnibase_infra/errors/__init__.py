@@ -18,6 +18,7 @@ Exports:
     EnvelopeValidationError: Envelope validation errors (pre-dispatch)
     UnknownHandlerTypeError: Unknown handler type prefix errors
     PolicyRegistryError: Policy registry operation errors
+    ComputeRegistryError: Compute registry operation errors
     ChainPropagationError: Correlation/causation chain validation errors
 
 Correlation ID Assignment:
@@ -85,6 +86,7 @@ Error Sanitization Guidelines:
 """
 
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
+from omnibase_infra.errors.error_compute_registry import ComputeRegistryError
 from omnibase_infra.errors.error_container_wiring import (
     ContainerValidationError,
     ContainerWiringError,
@@ -119,6 +121,7 @@ __all__: list[str] = [
     "EnvelopeValidationError",
     "UnknownHandlerTypeError",
     "PolicyRegistryError",
+    "ComputeRegistryError",
     "ChainPropagationError",
     # Container wiring errors
     "ContainerWiringError",
