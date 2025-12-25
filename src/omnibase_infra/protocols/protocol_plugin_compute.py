@@ -106,11 +106,11 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from omnibase_infra.plugins.models import (
-    ModelPluginContext,
-    ModelPluginInputData,
-    ModelPluginOutputData,
-)
+# Import directly from submodules to avoid circular import through plugins/__init__.py
+# (plugins/__init__.py imports plugin_compute_base which imports this module)
+from omnibase_infra.plugins.models.model_plugin_context import ModelPluginContext
+from omnibase_infra.plugins.models.model_plugin_input_data import ModelPluginInputData
+from omnibase_infra.plugins.models.model_plugin_output_data import ModelPluginOutputData
 
 __all__ = [
     "PluginInputData",
