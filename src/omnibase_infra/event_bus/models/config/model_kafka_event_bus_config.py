@@ -600,8 +600,9 @@ class ModelKafkaEventBusConfig(BaseModel):
             Configuration instance loaded from YAML with env overrides
 
         Raises:
-            FileNotFoundError: If the YAML file does not exist
-            ProtocolConfigurationError: If the YAML content is invalid
+            ProtocolConfigurationError: If the file does not exist, cannot be read,
+                contains invalid YAML, or has invalid content structure. Error includes
+                correlation_id for tracing and detailed context for debugging.
 
         Example YAML:
             ```yaml
@@ -613,25 +614,53 @@ class ModelKafkaEventBusConfig(BaseModel):
             circuit_breaker_threshold: 10
             ```
         """
-        if not path.exists():
-            raise FileNotFoundError(f"Configuration file not found: {path}")
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="load_yaml_config",
+            target_name=str(path),
+            correlation_id=correlation_id,
+        )
 
-        with path.open("r") as f:
-            data = yaml.safe_load(f)
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except FileNotFoundError as e:
+            raise ProtocolConfigurationError(
+                f"Configuration file not found: {path}",
+                context=context,
+                config_path=str(path),
+            ) from e
+        except yaml.YAMLError as e:
+            raise ProtocolConfigurationError(
+                f"Failed to parse YAML from {path}: {e}",
+                context=context,
+                config_path=str(path),
+                error_details=str(e),
+            ) from e
+        except UnicodeDecodeError as e:
+            raise ProtocolConfigurationError(
+                f"Configuration file contains binary or non-UTF-8 content: {path}",
+                context=context,
+                config_path=str(path),
+                error_details=f"Encoding error at position {e.start}-{e.end}: {e.reason}",
+            ) from e
+        except OSError as e:
+            raise ProtocolConfigurationError(
+                f"Failed to read configuration file: {path}: {e}",
+                context=context,
+                config_path=str(path),
+                error_details=str(e),
+            ) from e
 
         if data is None:
             data = {}
 
         if not isinstance(data, dict):
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.KAFKA,
-                operation="load_yaml_config",
-                target_name="kafka_config",
-                correlation_id=uuid4(),
-            )
             raise ProtocolConfigurationError(
                 f"YAML content must be a dictionary, got {type(data)}",
                 context=context,
+                config_path=str(path),
                 parameter="yaml_content",
                 value=type(data).__name__,
             )

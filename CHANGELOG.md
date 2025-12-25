@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
+#### Error Code for Unhandled node_kind (OMN-990, PR #73)
+- **Error code changed from `VALIDATION_ERROR` to `INTERNAL_ERROR`**: When `DispatchContextEnforcer.create_context_for_dispatcher()` encounters an unhandled `node_kind` value, it now raises `ModelOnexError` with `INTERNAL_ERROR` instead of `VALIDATION_ERROR`.
+  - **Old**: `error_code=EnumCoreErrorCode.VALIDATION_ERROR`
+  - **New**: `error_code=EnumCoreErrorCode.INTERNAL_ERROR`
+  - **Migration**: If you catch `ModelOnexError` and check for `VALIDATION_ERROR` when calling context creation methods, update to check for `INTERNAL_ERROR`.
+  - **Rationale**: Unhandled `node_kind` values represent internal implementation errors (missing switch cases in exhaustive pattern matching) rather than user input validation failures. `INTERNAL_ERROR` more accurately reflects that this indicates a bug in the code rather than invalid configuration.
+
 #### Handler Types (PR #33)
 - **HANDLER_TYPE_REDIS renamed to HANDLER_TYPE_VALKEY**: The handler type constant for Redis-compatible cache has been renamed to accurately reflect the service name.
   - **Old**: `HANDLER_TYPE_REDIS = "redis"`
@@ -68,6 +75,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `validation/`: Contract validation utilities
 
 ### Changed
+
+#### Handler to Dispatcher Terminology Migration (OMN-977, PR #63)
+
+The codebase has migrated from "handler" to "dispatcher" terminology for message routing components to better reflect their purpose as message dispatchers rather than generic handlers.
+
+- **Protocol Rename**: `ProtocolHandler` → `ProtocolMessageDispatcher`
+- **Class Naming**: Handler implementations renamed to Dispatcher (e.g., `UserEventHandler` → `UserEventDispatcher`)
+- **ID Convention**: `dispatcher_id` values now use `-dispatcher` suffix instead of `-handler`
+- **Enum Rename**: `EnumDispatchStatus.NO_HANDLER` renamed to `NO_DISPATCHER` with new value `no_dispatcher` for consistency with dispatcher terminology
+- **Enum Stability**: `EnumDispatchStatus.HANDLER_ERROR` value remains **unchanged** for backwards compatibility with existing metrics, logs, and monitoring systems
+- **Full Migration Guide**: See `docs/migrations/HANDLER_TO_DISPATCHER_MIGRATION.md` for complete migration details and code examples
 
 #### CI/CD
 - **Pre-commit Configuration**: Migrated to fix deprecated stage warnings (PR #25)

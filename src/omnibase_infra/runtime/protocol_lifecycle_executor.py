@@ -36,6 +36,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,40 @@ class ProtocolLifecycleExecutor:
     - Priority-based shutdown ordering (higher priority handlers shutdown first)
     - Health check execution with configurable timeouts
     - Parallel shutdown within priority groups for performance
+
+    Thread Safety:
+        This class is thread-safe for concurrent method calls.
+
+        **Instance State**:
+        - `_health_check_timeout_seconds`: Immutable after initialization (read-only)
+
+        **Method Safety**:
+        - `get_shutdown_priority()`: Static method, no shared state
+        - `shutdown_handler()`: Async, operates on provided handler only
+        - `check_handler_health()`: Async, operates on provided handler only
+        - `shutdown_handlers_by_priority()`: Async, manages parallel execution internally
+
+        **Handler Safety Requirement**:
+        While this executor is thread-safe, callers must ensure that the same
+        handler instance is not passed to multiple concurrent operations (e.g.,
+        do not call `shutdown_handler` on the same handler from two coroutines).
+        Each handler should only be shut down once.
+
+        **Safe Pattern**:
+        ```python
+        executor = ProtocolLifecycleExecutor()
+        # Multiple executors can share handlers dict safely
+        await executor.shutdown_handlers_by_priority(handlers)
+        ```
+
+        **Unsafe Pattern** (avoid):
+        ```python
+        # DO NOT shutdown same handler from multiple coroutines
+        await asyncio.gather(
+            executor.shutdown_handler("db", db_handler),  # First call
+            executor.shutdown_handler("db", db_handler),  # Duplicate - unsafe
+        )
+        ```
 
     Attributes:
         health_check_timeout_seconds: Default timeout for health checks (1-60 seconds).
@@ -218,7 +253,7 @@ class ProtocolLifecycleExecutor:
         handler_type: str,
         handler: ProtocolHandler,
         timeout_seconds: float = -1.0,
-    ) -> tuple[str, dict[str, object]]:
+    ) -> tuple[str, JsonValue]:
         """Check health of a single handler with timeout.
 
         This method performs an individual handler health check with a configurable

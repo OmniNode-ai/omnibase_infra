@@ -5,7 +5,7 @@
 This module provides the Pydantic model for database query result payloads.
 
 Note on row typing:
-    Database rows are typed as list[dict[str, object]] because:
+    Database rows are typed as list[dict[str, JsonValue]] because:
     1. Column names are dynamic (determined by SQL query)
     2. Column types are heterogeneous (str, int, float, datetime, etc.)
     3. The adapter returns generic rows that callers must interpret
@@ -16,6 +16,9 @@ Note on row typing:
 
 from __future__ import annotations
 
+from omnibase_core.types import (
+    JsonValue,  # noqa: TC002 - Required at runtime for Pydantic
+)
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -43,7 +46,7 @@ class ModelDbQueryPayload(BaseModel):
         from_attributes=True,  # Support pytest-xdist compatibility
     )
 
-    rows: list[dict[str, object]] = Field(
+    rows: list[dict[str, JsonValue]] = Field(
         description="Result rows as column->value dictionaries",
     )
     row_count: int = Field(

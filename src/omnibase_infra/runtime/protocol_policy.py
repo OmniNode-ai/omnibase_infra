@@ -62,7 +62,7 @@ Example Usage:
         def policy_type(self) -> EnumPolicyType:
             return EnumPolicyType.ORCHESTRATOR  # Recommended for type safety
 
-        def evaluate(self, context: dict[str, object]) -> dict[str, object]:
+        def evaluate(self, context: JsonValue) -> JsonValue:
             '''Calculate backoff delay based on retry attempt.'''
             attempt = int(context.get("attempt", 0))
             base_delay = float(context.get("base_delay_seconds", 1.0))
@@ -74,7 +74,7 @@ Example Usage:
                 "should_retry": attempt < 10,
             }
 
-        def decide(self, context: dict[str, object]) -> dict[str, object]:
+        def decide(self, context: JsonValue) -> JsonValue:
             '''Alias for evaluate() - delegates to evaluate().'''
             return self.evaluate(context)
 
@@ -110,9 +110,12 @@ See Also:
 
 from __future__ import annotations
 
-from typing import Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from omnibase_infra.enums import EnumPolicyType
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 
 
 @runtime_checkable
@@ -129,8 +132,22 @@ class ProtocolPolicy(Protocol):
         - Composition of multiple policies
 
     Thread Safety:
-        Implementations MUST be thread-safe. The evaluate() method may be called
-        concurrently from multiple threads. Avoid mutable instance state.
+        Implementations MUST be thread-safe for concurrent calls.
+
+        **Guarantees implementers MUST provide:**
+            - The evaluate() and decide() methods are safe for concurrent calls
+            - No mutable instance state that could cause race conditions
+            - Pure functions with no side effects
+
+        **Locking recommendations:**
+            - Policies SHOULD be stateless (no locking needed)
+            - If state is required (e.g., caching), use threading.Lock
+            - Avoid asyncio.Lock since policies are synchronous by design
+
+        **What callers can assume:**
+            - Multiple threads can call evaluate() concurrently
+            - Same input always produces same output (determinism)
+            - No side effects from policy evaluation
 
     Determinism:
         Implementations MUST be deterministic. Given identical context input,
@@ -157,7 +174,7 @@ class ProtocolPolicy(Protocol):
             def policy_type(self) -> str:
                 return "orchestrator"
 
-            def evaluate(self, context: dict[str, object]) -> dict[str, object]:
+            def evaluate(self, context: JsonValue) -> JsonValue:
                 failure_count = int(context.get("failure_count", 0))
                 threshold = int(context.get("threshold", 5))
                 return {
@@ -230,7 +247,7 @@ class ProtocolPolicy(Protocol):
         """
         ...
 
-    def evaluate(self, context: dict[str, object]) -> dict[str, object]:
+    def evaluate(self, context: JsonValue) -> JsonValue:
         """Evaluate the policy with the given context and return a decision.
 
         This is the primary method for policy execution. It receives contextual
@@ -260,7 +277,7 @@ class ProtocolPolicy(Protocol):
 
         Example:
             ```python
-            def evaluate(self, context: dict[str, object]) -> dict[str, object]:
+            def evaluate(self, context: JsonValue) -> JsonValue:
                 '''Decide retry behavior based on error type.'''
                 error_type = str(context.get("error_type", "unknown"))
                 attempt = int(context.get("attempt", 0))
@@ -276,7 +293,7 @@ class ProtocolPolicy(Protocol):
         """
         ...
 
-    def decide(self, context: dict[str, object]) -> dict[str, object]:
+    def decide(self, context: JsonValue) -> JsonValue:
         """Alias for evaluate() - provided for semantic clarity.
 
         Some use cases read more naturally with "decide" rather than "evaluate".
@@ -302,7 +319,7 @@ class ProtocolPolicy(Protocol):
         Note:
             Default implementations should delegate to evaluate():
             ```python
-            def decide(self, context: dict[str, object]) -> dict[str, object]:
+            def decide(self, context: JsonValue) -> JsonValue:
                 return self.evaluate(context)
             ```
         """

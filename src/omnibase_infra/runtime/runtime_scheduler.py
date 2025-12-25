@@ -1,0 +1,662 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""RuntimeScheduler - Core service for emitting RuntimeTick events.
+
+This module implements the RuntimeScheduler service that emits RuntimeTick events
+at configured intervals. The scheduler is the single source of truth for "now"
+across all orchestrators in the ONEX infrastructure.
+
+Key Features:
+    - Configurable tick interval (10ms - 60,000ms)
+    - Circuit breaker pattern for publish resilience
+    - Restart-safe sequence number tracking
+    - Jitter to prevent thundering herd
+    - Graceful shutdown with proper lifecycle management
+    - Metrics collection for observability
+
+Architecture:
+    The RuntimeScheduler is an INFRASTRUCTURE concern. It emits RuntimeTick events
+    that orchestrators subscribe to for timeout decisions (DOMAIN concern). This
+    separation ensures clear ownership and testability.
+
+Thread Safety:
+    - Circuit breaker operations protected by `_circuit_breaker_lock`
+    - State variables protected by `_state_lock`
+    - Tick loop runs as background task with shutdown signaling via `asyncio.Event`
+
+Usage:
+    ```python
+    from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
+    from omnibase_infra.runtime.models import ModelRuntimeSchedulerConfig
+    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+
+    # Create scheduler with configuration
+    config = ModelRuntimeSchedulerConfig.default()
+    event_bus = KafkaEventBus.default()
+    await event_bus.start()
+
+    scheduler = RuntimeScheduler(config=config, event_bus=event_bus)
+    await scheduler.start()
+
+    try:
+        # Scheduler runs, emitting ticks at configured interval
+        while scheduler.is_running:
+            await asyncio.sleep(1.0)
+    finally:
+        await scheduler.stop()
+        metrics = scheduler.get_metrics()
+        print(f"Emitted {metrics.ticks_emitted} ticks")
+    ```
+
+Related:
+    - OMN-953: RuntimeTick scheduler implementation
+    - ModelRuntimeTick: The event model emitted by the scheduler
+    - ModelRuntimeSchedulerConfig: Configuration model
+    - ModelRuntimeSchedulerMetrics: Metrics model for observability
+    - ProtocolRuntimeScheduler: Protocol interface
+
+.. versionadded:: 0.4.0
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import random
+import time
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
+
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.models import ModelEventHeaders
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.runtime.enums import EnumSchedulerStatus
+from omnibase_infra.runtime.models import (
+    ModelRuntimeSchedulerConfig,
+    ModelRuntimeSchedulerMetrics,
+    ModelRuntimeTick,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class RuntimeScheduler(MixinAsyncCircuitBreaker):
+    """Runtime scheduler that emits RuntimeTick events at configured intervals.
+
+    The scheduler is the single source of truth for "now" across all orchestrators.
+    It emits RuntimeTick events that orchestrators subscribe to for timeout decisions.
+
+    This is an INFRASTRUCTURE concern - orchestrators derive timeout decisions
+    (DOMAIN concern) from the ticks.
+
+    Attributes:
+        scheduler_id: Unique identifier for this scheduler instance.
+        is_running: Whether the scheduler is currently running.
+        current_sequence_number: Current sequence number for restart-safety.
+
+    Thread Safety:
+        - Circuit breaker operations protected by `_circuit_breaker_lock`
+        - State variables protected by `_state_lock`
+        - Shutdown signaling via `asyncio.Event`
+
+    Restart Safety:
+        The `current_sequence_number` property returns a monotonically increasing
+        value that helps orchestrators detect scheduler restarts. If the sequence
+        number decreases or resets, orchestrators know a restart occurred.
+
+    Example:
+        ```python
+        config = ModelRuntimeSchedulerConfig.default()
+        event_bus = KafkaEventBus.default()
+        await event_bus.start()
+
+        scheduler = RuntimeScheduler(config=config, event_bus=event_bus)
+        await scheduler.start()
+
+        # Scheduler runs in background
+        await asyncio.sleep(10.0)
+
+        await scheduler.stop()
+        print(f"Emitted {scheduler.get_metrics().ticks_emitted} ticks")
+        ```
+    """
+
+    def __init__(
+        self,
+        config: ModelRuntimeSchedulerConfig,
+        event_bus: KafkaEventBus,
+    ) -> None:
+        """Initialize the RuntimeScheduler.
+
+        Args:
+            config: Configuration model containing all scheduler settings.
+            event_bus: KafkaEventBus instance for publishing tick events.
+
+        Raises:
+            ValueError: If config or event_bus is None.
+        """
+        if config is None:
+            raise ValueError("config cannot be None")
+        if event_bus is None:
+            raise ValueError("event_bus cannot be None")
+
+        # Store configuration
+        self._config = config
+        self._event_bus = event_bus
+
+        # Initialize circuit breaker mixin
+        self._init_circuit_breaker(
+            threshold=config.circuit_breaker_threshold,
+            reset_timeout=config.circuit_breaker_reset_timeout_seconds,
+            service_name=f"runtime-scheduler.{config.scheduler_id}",
+            transport_type=EnumInfraTransportType.KAFKA,
+        )
+
+        # State variables (protected by _state_lock)
+        self._status = EnumSchedulerStatus.STOPPED
+        self._sequence_number: int = 0
+        self._started_at: datetime | None = None
+        self._last_tick_at: datetime | None = None
+        self._last_tick_duration_ms: float = 0.0
+        self._total_tick_duration_ms: float = 0.0
+        self._max_tick_duration_ms: float = 0.0
+        self._ticks_emitted: int = 0
+        self._ticks_failed: int = 0
+        self._consecutive_failures: int = 0
+        self._last_persisted_sequence: int = 0
+
+        # Synchronization primitives
+        self._state_lock = asyncio.Lock()
+        self._shutdown_event = asyncio.Event()
+        self._tick_task: asyncio.Task[None] | None = None
+
+    # =========================================================================
+    # Properties (ProtocolRuntimeScheduler interface)
+    # =========================================================================
+
+    @property
+    def scheduler_id(self) -> str:
+        """Return the unique identifier for this scheduler instance.
+
+        Returns:
+            Unique scheduler identifier from configuration.
+        """
+        return self._config.scheduler_id
+
+    @property
+    def is_running(self) -> bool:
+        """Return whether the scheduler is currently running.
+
+        Returns:
+            True if running and emitting ticks, False otherwise.
+        """
+        return self._status == EnumSchedulerStatus.RUNNING
+
+    @property
+    def current_sequence_number(self) -> int:
+        """Return the current sequence number for restart-safety tracking.
+
+        Returns:
+            Current sequence number (non-negative).
+        """
+        return self._sequence_number
+
+    # =========================================================================
+    # Lifecycle Methods
+    # =========================================================================
+
+    async def start(self) -> None:
+        """Start the scheduler and begin emitting ticks.
+
+        Initializes the scheduler and starts the tick emission loop.
+        After calling start(), the scheduler will emit RuntimeTick events
+        at its configured interval.
+
+        Idempotency:
+            Calling start() on an already-running scheduler is a no-op
+            with a warning log.
+
+        Raises:
+            InfraUnavailableError: If the circuit breaker is open.
+        """
+        async with self._state_lock:
+            if self._status.is_active():
+                logger.warning(
+                    "Scheduler already active, ignoring start()",
+                    extra={
+                        "scheduler_id": self.scheduler_id,
+                        "status": str(self._status),
+                    },
+                )
+                return
+
+            # Transition to STARTING
+            self._status = EnumSchedulerStatus.STARTING
+
+        # Check circuit breaker before starting (outside state lock)
+        async with self._circuit_breaker_lock:
+            try:
+                await self._check_circuit_breaker(
+                    operation="start",
+                    correlation_id=uuid4(),
+                )
+            except InfraUnavailableError:
+                async with self._state_lock:
+                    self._status = EnumSchedulerStatus.ERROR
+                raise
+
+        # Load persisted sequence number (if enabled)
+        await self._load_sequence_number()
+
+        # Start tick loop
+        async with self._state_lock:
+            self._shutdown_event.clear()
+            self._started_at = datetime.now(UTC)
+            self._status = EnumSchedulerStatus.RUNNING
+            self._tick_task = asyncio.create_task(self._tick_loop())
+
+        logger.info(
+            "Scheduler started",
+            extra={
+                "scheduler_id": self.scheduler_id,
+                "tick_interval_ms": self._config.tick_interval_ms,
+                "max_jitter_ms": self._config.max_tick_jitter_ms,
+            },
+        )
+
+    async def stop(self) -> None:
+        """Stop the scheduler gracefully.
+
+        Performs a graceful shutdown of the scheduler:
+        - Signals the tick loop to stop
+        - Waits for any in-flight tick emission to complete
+        - Sets status to STOPPED
+        - Persists sequence number if enabled
+
+        Idempotency:
+            Calling stop() on an already-stopped scheduler is a no-op.
+        """
+        async with self._state_lock:
+            if self._status.is_terminal():
+                logger.debug(
+                    "Scheduler already stopped, ignoring stop()",
+                    extra={
+                        "scheduler_id": self.scheduler_id,
+                        "status": str(self._status),
+                    },
+                )
+                return
+
+            # Transition to STOPPING
+            self._status = EnumSchedulerStatus.STOPPING
+
+        # Signal shutdown to tick loop
+        self._shutdown_event.set()
+
+        # Wait for tick task to complete
+        if self._tick_task is not None:
+            try:
+                await asyncio.wait_for(self._tick_task, timeout=5.0)
+            except TimeoutError:
+                logger.warning(
+                    "Tick task did not complete within timeout, cancelling",
+                    extra={"scheduler_id": self.scheduler_id},
+                )
+                self._tick_task.cancel()
+                try:
+                    await self._tick_task
+                except asyncio.CancelledError:
+                    pass
+            except asyncio.CancelledError:
+                pass
+            self._tick_task = None
+
+        # Persist sequence number (if enabled)
+        await self._persist_sequence_number()
+
+        # Finalize state
+        async with self._state_lock:
+            self._status = EnumSchedulerStatus.STOPPED
+
+        logger.info(
+            "Scheduler stopped",
+            extra={
+                "scheduler_id": self.scheduler_id,
+                "ticks_emitted": self._ticks_emitted,
+                "ticks_failed": self._ticks_failed,
+                "final_sequence": self._sequence_number,
+            },
+        )
+
+    # =========================================================================
+    # Core Methods
+    # =========================================================================
+
+    async def emit_tick(self, now: datetime | None = None) -> None:
+        """Emit a single tick immediately.
+
+        This method emits a RuntimeTick event outside the normal interval loop.
+        It is primarily used for testing and manual intervention.
+
+        Args:
+            now: Optional override for current time. If None, uses actual
+                current time (datetime.now(timezone.utc)).
+
+        Thread Safety:
+            This method is safe for concurrent calls. State modifications
+            are protected by `_state_lock`.
+        """
+        tick_time = now or datetime.now(UTC)
+        correlation_id = uuid4()
+        tick_id = uuid4()
+        start_time = time.monotonic()
+
+        # Increment sequence number (protected)
+        async with self._state_lock:
+            self._sequence_number += 1
+            current_sequence = self._sequence_number
+
+        # Create tick event
+        tick = ModelRuntimeTick(
+            now=tick_time,
+            tick_id=tick_id,
+            sequence_number=current_sequence,
+            scheduled_at=tick_time,
+            correlation_id=correlation_id,
+            scheduler_id=self.scheduler_id,
+            tick_interval_ms=self._config.tick_interval_ms,
+        )
+
+        # Check circuit breaker before publishing
+        async with self._circuit_breaker_lock:
+            try:
+                await self._check_circuit_breaker(
+                    operation="emit_tick",
+                    correlation_id=correlation_id,
+                )
+            except InfraUnavailableError:
+                await self._record_tick_failure(correlation_id)
+                raise
+
+        # Create headers for the event
+        headers = ModelEventHeaders(
+            correlation_id=correlation_id,
+            message_id=tick_id,
+            timestamp=tick_time,
+            source=f"runtime-scheduler.{self.scheduler_id}",
+            event_type="runtime.tick.v1",
+        )
+
+        # Serialize tick to JSON bytes
+        tick_bytes = tick.model_dump_json().encode("utf-8")
+
+        try:
+            # Publish tick event
+            await self._event_bus.publish(
+                topic=self._config.tick_topic,
+                key=self.scheduler_id.encode("utf-8"),
+                value=tick_bytes,
+                headers=headers,
+            )
+
+            # Record success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            await self._record_tick_success(start_time, tick_time)
+
+            logger.debug(
+                "Tick emitted",
+                extra={
+                    "scheduler_id": self.scheduler_id,
+                    "sequence_number": current_sequence,
+                    "tick_id": str(tick_id),
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        except Exception as e:
+            # Record failure
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="emit_tick",
+                    correlation_id=correlation_id,
+                )
+
+            await self._record_tick_failure(correlation_id)
+
+            logger.exception(
+                "Failed to emit tick",
+                extra={
+                    "scheduler_id": self.scheduler_id,
+                    "sequence_number": current_sequence,
+                    "correlation_id": str(correlation_id),
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+            raise
+
+    def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
+        """Get current scheduler metrics.
+
+        Returns a snapshot of the scheduler's operational metrics for
+        observability and monitoring purposes.
+
+        Returns:
+            ModelRuntimeSchedulerMetrics: Current metrics snapshot.
+
+        Thread Safety:
+            This method returns an immutable snapshot and is safe for
+            concurrent calls.
+        """
+        # Calculate uptime
+        uptime_seconds = 0.0
+        if self._started_at is not None:
+            uptime_seconds = (datetime.now(UTC) - self._started_at).total_seconds()
+
+        # Calculate average tick duration
+        average_tick_duration_ms = 0.0
+        if self._ticks_emitted > 0:
+            average_tick_duration_ms = (
+                self._total_tick_duration_ms / self._ticks_emitted
+            )
+
+        return ModelRuntimeSchedulerMetrics(
+            scheduler_id=self.scheduler_id,
+            status=self._status,
+            ticks_emitted=self._ticks_emitted,
+            ticks_failed=self._ticks_failed,
+            last_tick_at=self._last_tick_at,
+            last_tick_duration_ms=self._last_tick_duration_ms,
+            average_tick_duration_ms=average_tick_duration_ms,
+            max_tick_duration_ms=self._max_tick_duration_ms,
+            current_sequence_number=self._sequence_number,
+            last_persisted_sequence=self._last_persisted_sequence,
+            circuit_breaker_open=self._circuit_breaker_open,
+            consecutive_failures=self._consecutive_failures,
+            started_at=self._started_at,
+            total_uptime_seconds=uptime_seconds,
+        )
+
+    # =========================================================================
+    # Internal Methods
+    # =========================================================================
+
+    async def _tick_loop(self) -> None:
+        """Main tick loop that emits ticks at configured intervals.
+
+        This method runs as a background task and continuously emits ticks
+        until the shutdown event is set. It handles jitter and graceful
+        shutdown.
+        """
+        logger.debug(
+            "Tick loop started",
+            extra={
+                "scheduler_id": self.scheduler_id,
+                "tick_interval_ms": self._config.tick_interval_ms,
+            },
+        )
+
+        try:
+            while not self._shutdown_event.is_set():
+                # Calculate interval with jitter
+                interval_seconds = self._config.tick_interval_ms / 1000.0
+                if self._config.max_tick_jitter_ms > 0:
+                    jitter_ms = random.randint(0, self._config.max_tick_jitter_ms)
+                    interval_seconds += jitter_ms / 1000.0
+
+                # Wait for interval or shutdown
+                try:
+                    await asyncio.wait_for(
+                        self._shutdown_event.wait(),
+                        timeout=interval_seconds,
+                    )
+                    # Shutdown event was set - exit loop
+                    break
+                except TimeoutError:
+                    # Timeout expired - time to emit tick
+                    pass
+
+                # Check if we should still be running
+                if self._shutdown_event.is_set():
+                    break
+
+                # Emit tick (errors are logged but don't crash the loop)
+                try:
+                    await self.emit_tick()
+                except Exception as e:
+                    # Log but don't crash the loop
+                    logger.exception(
+                        "Error in tick loop, continuing",
+                        extra={
+                            "scheduler_id": self.scheduler_id,
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                        },
+                    )
+                    # Increment consecutive failures for monitoring
+                    async with self._state_lock:
+                        self._consecutive_failures += 1
+
+        except asyncio.CancelledError:
+            logger.info(
+                "Tick loop cancelled",
+                extra={"scheduler_id": self.scheduler_id},
+            )
+            raise
+
+        except Exception as e:
+            logger.exception(
+                "Unexpected error in tick loop",
+                extra={
+                    "scheduler_id": self.scheduler_id,
+                    "error": str(e),
+                },
+            )
+            async with self._state_lock:
+                self._status = EnumSchedulerStatus.ERROR
+
+        finally:
+            logger.debug(
+                "Tick loop exiting",
+                extra={
+                    "scheduler_id": self.scheduler_id,
+                    "ticks_emitted": self._ticks_emitted,
+                },
+            )
+
+    async def _record_tick_success(
+        self,
+        start_time: float,
+        tick_time: datetime,
+    ) -> None:
+        """Record a successful tick emission.
+
+        Args:
+            start_time: Monotonic time when tick started.
+            tick_time: The timestamp used in the tick.
+        """
+        duration_ms = (time.monotonic() - start_time) * 1000.0
+
+        async with self._state_lock:
+            self._ticks_emitted += 1
+            self._last_tick_at = tick_time
+            self._last_tick_duration_ms = duration_ms
+            self._total_tick_duration_ms += duration_ms
+            self._max_tick_duration_ms = max(duration_ms, self._max_tick_duration_ms)
+            self._consecutive_failures = 0
+
+    async def _record_tick_failure(self, correlation_id: UUID) -> None:
+        """Record a failed tick emission.
+
+        Args:
+            correlation_id: Correlation ID for tracing.
+        """
+        async with self._state_lock:
+            self._ticks_failed += 1
+            self._consecutive_failures += 1
+
+    # =========================================================================
+    # Persistence Stubs (for restart-safety)
+    # =========================================================================
+
+    async def _load_sequence_number(self) -> None:
+        """Load persisted sequence number for restart-safety.
+
+        This is a stub for Valkey/Redis persistence. Currently initializes
+        to 0. Future implementation will load from Valkey using the
+        configured `sequence_number_key`.
+
+        Note:
+            This method is called during start() if `persist_sequence_number`
+            is enabled in configuration.
+        """
+        if not self._config.persist_sequence_number:
+            logger.debug(
+                "Sequence number persistence disabled, starting from 0",
+                extra={"scheduler_id": self.scheduler_id},
+            )
+            return
+
+        # TODO: Implement Valkey persistence
+        # For now, initialize to 0
+        logger.debug(
+            "Sequence number persistence not yet implemented, starting from 0",
+            extra={
+                "scheduler_id": self.scheduler_id,
+                "sequence_key": self._config.sequence_number_key,
+            },
+        )
+
+    async def _persist_sequence_number(self) -> None:
+        """Persist current sequence number for restart-safety.
+
+        This is a stub for Valkey/Redis persistence. Currently a no-op.
+        Future implementation will persist to Valkey using the configured
+        `sequence_number_key`.
+
+        Note:
+            This method is called during stop() if `persist_sequence_number`
+            is enabled in configuration.
+        """
+        if not self._config.persist_sequence_number:
+            return
+
+        # TODO: Implement Valkey persistence
+        # For now, just record what we would have persisted
+        self._last_persisted_sequence = self._sequence_number
+
+        logger.debug(
+            "Sequence number persistence not yet implemented",
+            extra={
+                "scheduler_id": self.scheduler_id,
+                "sequence_number": self._sequence_number,
+                "sequence_key": self._config.sequence_number_key,
+            },
+        )
+
+
+__all__: list[str] = ["RuntimeScheduler"]

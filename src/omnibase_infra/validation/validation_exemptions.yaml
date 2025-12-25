@@ -1,0 +1,488 @@
+# Validation Exemption Patterns
+# ============================================================================
+# These patterns exempt specific code from validation rules.
+#
+# Why exemptions exist:
+# Infrastructure code often has legitimate architectural reasons to exceed
+# default thresholds (method counts, parameter counts, etc.). Rather than
+# raising global thresholds or suppressing warnings entirely, we document
+# specific exemptions with their rationale.
+#
+# How exemptions work:
+# - Uses regex-based matching to handle code evolution gracefully
+# - All specified pattern fields must match for exemption to apply
+# - Unspecified optional fields are not checked (match everything)
+# - Uses re.search() for flexible substring matching
+#
+# Pattern fields:
+# - file_pattern: Regex matching the filename (required in practice)
+# - class_pattern: Optional regex for class name context
+# - method_pattern: Optional regex for method name context
+# - violation_pattern: Regex matching the violation type
+#
+# Adding new exemptions:
+# 1. Identify the exact violation message from validator output
+# 2. Create minimal patterns to match only that specific case
+# 3. Document the rationale and link to relevant tickets
+# 4. Run tests to verify the exemption works
+# ============================================================================
+# Schema version for future compatibility
+schema_version: "1.0.0"
+# Pattern validator exemptions
+# These handle method count, parameter count, naming, and style violations
+pattern_exemptions:
+  # ==========================================================================
+  # KafkaEventBus Exemptions (OMN-934, PR #61)
+  # ==========================================================================
+  # Event bus pattern requires many methods for lifecycle (start/stop/health),
+  # pub/sub (subscribe/unsubscribe/publish), circuit breaker, protocol compatibility.
+  # See: kafka_event_bus.py class docstring, CLAUDE.md "Accepted Pattern Exceptions"
+  - file_pattern: 'kafka_event_bus\.py'
+    class_pattern: "Class 'KafkaEventBus'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Event bus pattern requires lifecycle (start/stop/health), pub/sub (subscribe/unsubscribe/publish), circuit breaker, and protocol compatibility methods. Threshold: 10 methods, KafkaEventBus has 14+.
+
+    ticket: OMN-934
+  - file_pattern: 'kafka_event_bus\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Backwards compatibility during config migration from direct parameters to ModelKafkaConfig object. Threshold: 5 params, KafkaEventBus has 10+.
+
+    ticket: OMN-934
+  # ==========================================================================
+  # Protocol Plugin Architecture Exemptions
+  # ==========================================================================
+  # The 'execute' method name is a standard plugin architecture pattern.
+  # It's intentionally generic as it's the protocol-defined entry point.
+  - file_pattern: 'protocol_plugin_compute\.py'
+    violation_pattern: "Function name 'execute' is too generic"
+    reason: Standard plugin architecture pattern - execute is the protocol-defined entry point.
+    ticket: null
+  - file_pattern: 'plugin_compute_base\.py'
+    violation_pattern: "Function name 'execute' is too generic"
+    reason: Base class implements protocol pattern - execute is the standard entry point.
+    ticket: null
+  # ==========================================================================
+  # RuntimeHostProcess Exemptions (OMN-756)
+  # ==========================================================================
+  # Central coordinator class that legitimately requires multiple methods for:
+  # - Lifecycle management (start, stop, health_check)
+  # - Message handling (_on_message, _handle_envelope)
+  # - Graceful shutdown (shutdown_ready, drain logic)
+  # - Handler management (register_handler, get_handler)
+  - file_pattern: 'runtime_host_process\.py'
+    class_pattern: "Class 'RuntimeHostProcess'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Central coordinator pattern requires lifecycle management, message handling, graceful shutdown, and handler management methods.
+
+    ticket: OMN-756
+  - file_pattern: 'runtime_host_process\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Central coordinator requires multiple configuration parameters: event_bus, input_topic, output_topic, config, handler_registry.
+
+    ticket: OMN-756
+  # ==========================================================================
+  # PolicyRegistry Exemptions
+  # ==========================================================================
+  # Domain registry pattern requires comprehensive policy management operations.
+  - file_pattern: 'policy_registry\.py'
+    class_pattern: "Class 'PolicyRegistry'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Central registry pattern requires CRUD operations (register, get, update, remove), query operations (list, filter, search), and lifecycle operations (enable, disable, validate).
+
+    ticket: null
+  - file_pattern: 'policy_registry\.py'
+    method_pattern: "Function 'register_policy'"
+    violation_pattern: 'has \d+ parameters'
+    reason: Policy registration requires multiple fields for complete policy definition.
+    ticket: null
+  # ==========================================================================
+  # Policy ID Exemptions (OMN-812)
+  # ==========================================================================
+  # policy_id is intentionally a human-readable string identifier (e.g., 'exponential_backoff'),
+  # NOT a UUID. The _id suffix triggers false positive UUID suggestions.
+  - file_pattern: 'model_policy_key\.py'
+    violation_pattern: "Field 'policy_id' should use UUID"
+    reason: >
+      policy_id is a human-readable string identifier (e.g., 'exponential_backoff'), not a UUID. The _id suffix triggers false positive.
+
+    ticket: OMN-812
+  - file_pattern: 'model_policy_registration\.py'
+    violation_pattern: "Field 'policy_id' should use UUID"
+    reason: Same as ModelPolicyKey - semantic identifier, not UUID.
+    ticket: OMN-812
+  # ==========================================================================
+  # Execution Shape Validator Exemptions (OMN-958)
+  # ==========================================================================
+  - file_pattern: 'enum_handler_type\.py'
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      EnumHandlerType defines ONEX handler types (Effect, Compute, Reducer, Orchestrator) which are architectural concepts, not implementation classes.
+
+    ticket: OMN-958
+  - file_pattern: 'execution_shape_validator\.py'
+    class_pattern: "Class name 'HandlerInfo'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      HandlerInfo is a validation data class for describing handler information during AST analysis - it describes handlers, not implements handler behavior.
+
+    ticket: OMN-958
+  - file_pattern: 'execution_shape_validator\.py'
+    class_pattern: "Class 'ExecutionShapeValidator'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Validator class requires multiple methods for comprehensive AST analysis: validate_file, validate_directory, _extract_handlers, _find_handler_type, _detect_return_type, _analyze_return_statement, _check_forbidden_calls, _categorize_output. Cohesive validator pattern.
+
+    ticket: OMN-958
+  # ==========================================================================
+  # AST Visitor Method Naming Exemptions
+  # ==========================================================================
+  # Python ast.NodeVisitor convention uses visit_ClassDef, visit_Call, etc.
+  # These follow PEP 8 exception for consistency with stdlib patterns.
+  - file_pattern: 'topic_category_validator\.py'
+    violation_pattern: "Function name 'visit_ClassDef' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_ClassDef is a standard AST visitor method name that the ast module dispatches to.
+
+    ticket: null
+  - file_pattern: 'topic_category_validator\.py'
+    violation_pattern: "Function name 'visit_Call' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_Call is a standard AST visitor method name that the ast module dispatches to.
+
+    ticket: null
+  # ==========================================================================
+  # RuntimeShapeValidator Exemptions
+  # ==========================================================================
+  - file_pattern: 'runtime_shape_validator\.py'
+    method_pattern: "Function 'validate_handler_output'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Validation requires multiple context parameters for proper violation reporting: handler_type, output, output_category, source_file, line_number, correlation_id. These are distinct required contexts, not candidates for a model wrapper.
+
+    ticket: null
+  - file_pattern: 'runtime_shape_validator\.py'
+    method_pattern: "Function 'validate_and_raise'"
+    violation_pattern: 'has \d+ parameters'
+    reason: Same rationale as validate_handler_output - requires distinct context params.
+    ticket: null
+  # ==========================================================================
+  # MixinNodeIntrospection Exemptions (OMN-958)
+  # ==========================================================================
+  - file_pattern: 'mixin_node_introspection\.py'
+    method_pattern: "Function 'initialize_introspection'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Legacy interface kept for backward compatibility. A new preferred method initialize_introspection_from_config() was added that takes ModelIntrospectionConfig, reducing parameter count to 2 (self, config). Legacy method preserved.
+
+    ticket: OMN-958
+  - file_pattern: 'mixin_node_introspection\.py'
+    class_pattern: "Class 'MixinNodeIntrospection'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Introspection mixin legitimately requires multiple methods: lifecycle (initialize_introspection, start/stop tasks), capability discovery (get_capabilities, get_endpoints, get_current_state), caching (invalidate_introspection_cache), publishing (publish_introspection), and background tasks (heartbeat, registry listener).
+
+    ticket: OMN-958
+  # ==========================================================================
+  # Message Dispatch Engine Exemptions (OMN-934, OMN-983)
+  # ==========================================================================
+  # Central dispatch coordinator pattern requires comprehensive routing capabilities.
+  - file_pattern: 'message_dispatch_engine\.py'
+    class_pattern: "Class 'MessageDispatchEngine'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Central dispatch coordinator requires: registration (register_dispatcher, register_route), routing (dispatch, get_dispatchers_for_message), metrics (get_dispatcher_metrics, get_dispatch_metrics), lifecycle (start, stop, health_check). This is a central coordinator pattern.
+
+    ticket: OMN-934
+  - file_pattern: 'message_dispatch_engine\.py'
+    method_pattern: "Function '_build_log_context'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Log context builder intentionally takes many optional parameters to build structured log context. Each parameter is a distinct log field.
+
+    ticket: OMN-934
+  - file_pattern: 'message_dispatch_engine\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Central dispatch coordinator requires multiple configuration parameters: context_enforcer, topic_parser, default_node_kind, logger, topic_to_dispatcher_map, category_dispatchers. These are distinct required contexts for dispatch orchestration.
+
+    ticket: OMN-990
+  - file_pattern: 'message_dispatch_engine\.py'
+    method_pattern: "Function 'register_dispatcher'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Dispatcher registration requires multiple parameters for complete routing configuration: dispatcher, category, node_kind, topic_patterns, priority. These are distinct routing configuration fields.
+
+    ticket: OMN-990
+  - file_pattern: 'message_dispatch_engine\.py'
+    method_pattern: "Function 'register_handler'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Handler registration for backwards compatibility with RuntimeHostProcess. Takes handler_id, handler, category, message_types, node_kind. Legacy alias for register_dispatcher.
+
+    ticket: OMN-990
+  # ==========================================================================
+  # DispatcherRegistry Exemptions (OMN-934)
+  # ==========================================================================
+  - file_pattern: 'dispatcher_registry\.py'
+    class_pattern: "Class 'DispatcherRegistry'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Domain registry pattern requires CRUD + query operations: registration (register, unregister), lookup (get_by_id, get_by_type, get_all), metrics (get_metrics). This is an established domain registry pattern.
+
+    ticket: OMN-934
+  # ==========================================================================
+  # Dispatch Model Semantic Identifier Exemptions (OMN-983)
+  # ==========================================================================
+  # dispatcher_id, route_id are semantic identifiers (like policy_id), NOT UUIDs.
+  # They are human-readable strings that identify dispatchers/routes by name.
+  - file_pattern: 'model_dispatcher_registration\.py'
+    violation_pattern: "Field 'dispatcher_id' should use UUID"
+    reason: >
+      dispatcher_id is a human-readable semantic identifier (e.g., "kafka-main-dispatcher"), not a UUID. Similar to policy_id pattern.
+
+    ticket: OMN-983
+  - file_pattern: 'model_dispatcher_registration\.py'
+    violation_pattern: 'dispatcher_name.*entity'
+    reason: >
+      dispatcher_name is a display name for the dispatcher, paired with dispatcher_id as the semantic identifier. This follows the ID + display_name pattern.
+
+    ticket: OMN-983
+  - file_pattern: 'model_dispatcher_metrics\.py'
+    violation_pattern: "Field 'dispatcher_id' should use UUID"
+    reason: >
+      dispatcher_id is a human-readable semantic identifier, not a UUID. Consistent with model_dispatcher_registration.
+
+    ticket: OMN-983
+  - file_pattern: 'model_dispatch_route\.py'
+    violation_pattern: "Field 'route_id' should use UUID"
+    reason: >
+      route_id is a human-readable semantic identifier (e.g., "default-route"), not a UUID.
+
+    ticket: OMN-983
+  - file_pattern: 'model_dispatch_route\.py'
+    violation_pattern: "Field 'dispatcher_id' should use UUID"
+    reason: >
+      dispatcher_id is a human-readable semantic identifier, consistent across dispatch models.
+
+    ticket: OMN-983
+  - file_pattern: 'model_dispatch_metrics\.py'
+    method_pattern: "Function 'record_dispatch'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Metrics recording requires multiple parameters for complete dispatch tracking: identifiers (dispatcher_id, route_id, topic, message_type), timing (start_time, end_time, duration_ms), status (success, error_code, error_message).
+
+    ticket: OMN-983
+  # ==========================================================================
+  # RuntimeScheduler Semantic Identifier Exemptions (OMN-953)
+  # ==========================================================================
+  # scheduler_id is a human-readable semantic identifier set via environment variable
+  # (e.g., "runtime-scheduler-prod-1"), NOT a UUID. Follows same pattern as policy_id
+  # and dispatcher_id.
+  - file_pattern: 'model_runtime_scheduler_config\.py'
+    violation_pattern: "Field 'scheduler_id' should use UUID"
+    reason: >
+      scheduler_id is a human-readable semantic identifier (e.g., "runtime-scheduler-prod-1") set via RUNTIME_SCHEDULER_ID environment variable. Not a UUID - follows policy_id/dispatcher_id pattern.
+
+    ticket: OMN-953
+  - file_pattern: 'model_runtime_scheduler_metrics\.py'
+    violation_pattern: "Field 'scheduler_id' should use UUID"
+    reason: >
+      scheduler_id is a human-readable semantic identifier, consistent with model_runtime_scheduler_config.
+
+    ticket: OMN-953
+  - file_pattern: 'model_runtime_tick\.py'
+    violation_pattern: "Field 'scheduler_id' should use UUID"
+    reason: >
+      scheduler_id identifies which runtime scheduler instance emitted the tick. Human-readable identifier, consistent across scheduler models.
+
+    ticket: OMN-953
+  # ==========================================================================
+  # Consul Service ID Exemptions (OMN-889)
+  # ==========================================================================
+  # consul_service_id is a Consul-specific identifier that is a user-defined string,
+  # NOT a UUID. The Consul API accepts any string as a service ID. This field is
+  # named with the 'consul_' prefix to clarify it's a Consul concept.
+  - file_pattern: 'model_consul_register_payload\.py'
+    violation_pattern: "Field 'consul_service_id' should use UUID"
+    reason: >
+      consul_service_id is a Consul-specific identifier that is a user-defined string, not a UUID. The Consul API accepts any string as a service ID.
+
+    ticket: OMN-889
+  - file_pattern: 'model_consul_deregister_payload\.py'
+    violation_pattern: "Field 'consul_service_id' should use UUID"
+    reason: >
+      consul_service_id is a Consul-specific identifier that is a user-defined string, not a UUID. The Consul API accepts any string as a service ID.
+
+    ticket: OMN-889
+  # ==========================================================================
+  # MessageTypeRegistry Exemptions (OMN-983)
+  # ==========================================================================
+  - file_pattern: 'registry_message_type\.py'
+    class_pattern: "Class 'MessageTypeRegistry'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Domain registry pattern requires comprehensive message type management: CRUD operations (register, unregister, get), query operations (list, filter, search by topic/domain), validation operations (validate_topic, resolve_type), and statistics (get_statistics). This is an established domain registry pattern.
+
+    ticket: OMN-983
+  # ==========================================================================
+  # Idempotency Store Configuration Exemptions (OMN-945)
+  # ==========================================================================
+  # table_name is a database configuration field specifying the PostgreSQL table
+  # name for storing idempotency records. It is NOT an entity reference.
+  - file_pattern: 'model_postgres_idempotency_store_config\.py'
+    violation_pattern: "Field 'table_name' might reference an entity"
+    reason: >
+      table_name is a database configuration parameter specifying the PostgreSQL table name for storing idempotency records (default: "idempotency_records"). This is infrastructure configuration, not an entity reference.
+
+    ticket: OMN-945
+  # ==========================================================================
+  # Consul Intent Payload Exemptions (OMN-888)
+  # ==========================================================================
+  # service_name in ModelConsulIntentPayload is the Consul service name to register,
+  # NOT a reference to an internal entity. It is a Consul-specific configuration field.
+  - file_pattern: 'model_consul_intent_payload\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name is the Consul service name to register in service discovery
+      (e.g., "node-effect-123"). This is Consul-specific configuration, not an
+      entity reference. The field specifies how the node appears in Consul's
+      service catalog.
+
+    ticket: OMN-888
+  # ==========================================================================
+  # Union Reduction Phase 2 Model Exemptions (OMN-1002)
+  # ==========================================================================
+  # These models use builder patterns with many convenience methods.
+  # Method counts exceed thresholds but provide valuable developer ergonomics.
+  # ModelLogContext - Structured logging context with builder pattern
+  - file_pattern: 'model_log_context\.py'
+    class_pattern: "Class 'ModelLogContext'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Builder pattern model for structured logging with fluent interface. Many methods provide convenience factories (for_event_bus, for_dispatch, for_error) and builder methods (with_*). This is intentional API design for developer ergonomics.
+
+    ticket: OMN-1002
+  - file_pattern: 'model_log_context\.py'
+    violation_pattern: "Field 'correlation_id' should use UUID"
+    reason: >
+      correlation_id is stored as str for logging compatibility. Log formatters expect string values. The correlation ID is typically stringified from UUID before logging anyway.
+
+    ticket: OMN-1002
+  - file_pattern: 'model_log_context\.py'
+    violation_pattern: "Field 'group_id' should use UUID"
+    reason: >
+      group_id is Kafka consumer group ID which is a string, not a UUID. This is infrastructure-specific and follows Kafka naming conventions.
+
+    ticket: OMN-1002
+  - file_pattern: 'model_log_context\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name is a logging field for identifying the service (e.g., "kafka", "consul"). It is NOT an entity reference but a simple label for log correlation.
+
+    ticket: OMN-1002
+  # ModelDispatchLogContext - Dispatch-specific logging
+  - file_pattern: 'model_dispatch_log_context\.py'
+    class_pattern: "Class 'ModelDispatchLogContext'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Builder pattern model for dispatch logging with factory methods for common patterns (for_dispatch_start, for_dispatch_complete, for_dispatch_error). Intentional API design.
+
+    ticket: OMN-1002
+  - file_pattern: 'model_dispatch_log_context\.py'
+    violation_pattern: "Field 'dispatcher_id' should use UUID"
+    reason: >
+      dispatcher_id is a user-defined string identifier for dispatchers, not a UUID. Dispatchers are registered with string IDs for readability in logs and configuration.
+
+    ticket: OMN-1002
+  - file_pattern: 'model_dispatch_log_context\.py'
+    method_pattern: "Function 'for_dispatch_complete'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Factory method that captures all dispatch completion context. Parameters are optional with defaults. Breaking into multiple calls would reduce usability.
+
+    ticket: OMN-1002
+  - file_pattern: 'model_dispatch_log_context\.py'
+    method_pattern: "Function 'for_dispatch_error'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Factory method that captures all dispatch error context. Parameters are optional with defaults. Breaking into multiple calls would reduce usability.
+
+    ticket: OMN-1002
+  # ModelDispatchOutcome - Dispatcher output normalization
+  - file_pattern: 'model_dispatch_outcome\.py'
+    class_pattern: "Class 'ModelDispatchOutcome'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Model with multiple factory methods (none, single, multiple, from_legacy_output) and convenience properties (is_empty, has_topics, single_topic, has_single_topic). Provides comprehensive API for handling dispatcher outputs.
+
+    ticket: OMN-1002
+# Architecture validator exemptions
+# These handle one-model-per-file violations for domain-grouped protocols
+architecture_exemptions:
+  # ==========================================================================
+  # Contract Linter Models Exemption (PR #57)
+  # ==========================================================================
+  # contract_linter.py contains domain-grouped validation models and enums
+  # that are cohesive and always used together. These define the complete
+  # interface for contract linting results.
+  - file_pattern: 'validation/contract_linter\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      Domain-grouped validation result models for contract linting.
+      ModelContractViolation and ModelContractLintResult define the complete
+      interface for contract validation results. Per CLAUDE.md domain-grouping
+      convention for cohesive models that are always used together.
+    ticket: PR-57
+  - file_pattern: 'validation/contract_linter\.py'
+    violation_pattern: 'Mixed types in one file'
+    reason: >
+      Contract linter module contains cohesive types (enum + models) for
+      validation results. EnumContractViolationSeverity is tightly coupled
+      with ModelContractViolation and ModelContractLintResult.
+    ticket: PR-57
+  # ==========================================================================
+  # Domain-Grouped Protocol Exemptions (CLAUDE.md Convention)
+  # ==========================================================================
+  # Per CLAUDE.md "Protocol File Naming" section:
+  # "Domain-grouped protocols: Use protocols.py when multiple cohesive protocols
+  # belong to a specific domain or node module"
+  - file_pattern: 'nodes/node_registration_orchestrator/protocols\.py'
+    violation_pattern: '\d+ protocols in one file'
+    reason: >
+      Domain-grouped protocols for registration orchestrator workflow.
+      ProtocolReducer and ProtocolEffect define the complete interface for the
+      reducer-effect pattern in node registration. Per CLAUDE.md convention.
+
+      Architectural documentation included in module:
+      - Thread safety requirements (lines 13-24): Implementations MUST be thread-safe
+      - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors
+      - Protocol contracts with examples in docstrings
+
+      Full architectural documentation:
+      - Node architecture: docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - Protocol design: docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
+      - Node README: src/omnibase_infra/nodes/node_registration_orchestrator/README.md
+    documentation:
+      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
+    ticket: OMN-888
+# Union usage validator exemptions
+# These handle complex union type violations
+union_exemptions:
+  # ==========================================================================
+  # ModelNodeCapabilities Config Field Exemption
+  # ==========================================================================
+  - file_pattern: 'model_node_capabilities\.py'
+    violation_pattern: 'Union with 4\+ primitive types.*bool.*float.*int.*str'
+    reason: >
+      The config field uses dict[str, int | str | bool | float] for nested configuration values. This is a standard JSON-like config pattern where values can be any primitive type. Creating a ModelConfigValue wrapper would add unnecessary complexity without real benefit for this infrastructure domain.
+
+    ticket: null

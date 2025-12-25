@@ -36,8 +36,13 @@ class ModelEventHeaders(BaseModel):
         priority: Message priority level.
         routing_key: Key for message routing.
         partition_key: Key for partition assignment.
-        retry_count: Current retry attempt number.
-        max_retries: Maximum retry attempts allowed.
+        retry_count: Current MESSAGE-LEVEL retry attempt number (application-level).
+            This tracks end-to-end message delivery attempts across services,
+            incremented when a handler fails and the message is republished.
+            Distinct from bus-level retry in KafkaEventBus (max_retry_attempts)
+            which handles transient Kafka connection failures.
+        max_retries: Maximum MESSAGE-LEVEL retry attempts allowed (application-level).
+            When retry_count >= max_retries, message should be sent to DLQ.
         ttl_seconds: Message time-to-live in seconds.
 
     Example:
@@ -66,8 +71,20 @@ class ModelEventHeaders(BaseModel):
     priority: Literal["low", "normal", "high", "critical"] = Field(default="normal")
     routing_key: str | None = Field(default=None)
     partition_key: str | None = Field(default=None)
-    retry_count: int = Field(default=0)
-    max_retries: int = Field(default=3)
+    retry_count: int = Field(
+        default=0,
+        description=(
+            "Current MESSAGE-LEVEL retry attempt (application-level). "
+            "Distinct from KafkaEventBus.max_retry_attempts (bus-level)."
+        ),
+    )
+    max_retries: int = Field(
+        default=3,
+        description=(
+            "Maximum MESSAGE-LEVEL retry attempts (application-level). "
+            "When retry_count >= max_retries, message should go to DLQ."
+        ),
+    )
     ttl_seconds: int | None = Field(default=None)
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)

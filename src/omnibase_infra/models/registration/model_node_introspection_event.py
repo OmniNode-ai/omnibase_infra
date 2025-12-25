@@ -36,7 +36,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
         endpoints: Dictionary of exposed endpoints (name -> URL).
         node_role: Optional role descriptor (registry, adapter, etc).
         metadata: Additional node metadata.
-        correlation_id: Request correlation ID for tracing.
+        correlation_id: Required correlation ID for tracing and idempotency.
         network_id: Network/cluster identifier.
         deployment_id: Deployment/release identifier.
         epoch: Registration epoch for ordering.
@@ -50,6 +50,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
         ...     node_version="1.2.3",
         ...     capabilities={"postgres": True, "read": True, "write": True},
         ...     endpoints={"health": "http://localhost:8080/health"},
+        ...     correlation_id=uuid4(),
         ... )
     """
 
@@ -116,8 +117,8 @@ class ModelNodeIntrospectionEvent(BaseModel):
     metadata: ModelNodeMetadata = Field(
         default_factory=ModelNodeMetadata, description="Additional node metadata"
     )
-    correlation_id: UUID | None = Field(
-        default=None, description="Request correlation ID for tracing"
+    correlation_id: UUID = Field(
+        ..., description="Request correlation ID for tracing (required for idempotency)"
     )
 
     # Deployment topology

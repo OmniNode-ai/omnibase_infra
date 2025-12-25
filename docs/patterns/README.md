@@ -5,8 +5,10 @@ This directory contains detailed implementation guides and best practices for ON
 ## Pattern Categories
 
 ### Error Handling
-- **[Error Handling Patterns](./error_handling_patterns.md)** - Error classification, context, sanitization, and hierarchy
+- **[Error Handling Patterns](./error_handling_patterns.md)** - Error classification, context, and hierarchy
+- **[Error Sanitization Patterns](./error_sanitization_patterns.md)** - Data classification, sanitization rules, and secure error reporting
 - **[Error Recovery Patterns](./error_recovery_patterns.md)** - Exponential backoff, circuit breakers, graceful degradation, credential refresh
+- **[Retry, Backoff, and Compensation Strategy](./retry_backoff_compensation_strategy.md)** - Formal retry policies, backoff formulas, compensation for partial failures
 - **[Circuit Breaker Implementation](./circuit_breaker_implementation.md)** - Complete production-ready circuit breaker with state machine
 
 ### Observability
@@ -16,6 +18,7 @@ This directory contains detailed implementation guides and best practices for ON
 - **[Container Dependency Injection](./container_dependency_injection.md)** - Service registration, resolution, and testing patterns
 
 ### Security
+- **[Security Patterns](./security_patterns.md)** - Comprehensive security guide covering error sanitization, input validation, authentication, authorization, secret management, network security, and production checklists
 - **[Policy Registry Trust Model](./policy_registry_trust_model.md)** - Trust assumptions, validation boundaries, and security mitigations for policy registration
 
 ## Quick Reference
@@ -29,19 +32,29 @@ This directory contains detailed implementation guides and best practices for ON
 | Timeout | [Error Recovery](./error_recovery_patterns.md#exponential-backoff-pattern) | `InfraTimeoutError` |
 | Auth failed | [Error Recovery](./error_recovery_patterns.md#credential-refresh-pattern) | `InfraAuthenticationError` |
 | Secret not found | [Error Handling](./error_handling_patterns.md#vault-secret-retrieval-error) | `SecretResolutionError` |
+| Partial failure | [Retry/Compensation](./retry_backoff_compensation_strategy.md#compensation-strategy-for-partial-failures) | Saga, Outbox Pattern |
 
 ### Common Tasks
 
 | Task | Pattern Document | Section |
 |------|-----------------|---------|
-| Add retry logic | [Error Recovery](./error_recovery_patterns.md) | Exponential Backoff |
+| Add retry logic | [Retry/Compensation](./retry_backoff_compensation_strategy.md) | Retry Policy, Backoff Strategy |
+| Configure per-effect retries | [Retry/Compensation](./retry_backoff_compensation_strategy.md#per-effect-type-configuration) | Effect-Specific Config |
+| Handle partial failures | [Retry/Compensation](./retry_backoff_compensation_strategy.md#compensation-strategy-for-partial-failures) | Compensation Patterns |
 | Prevent cascading failures | [Circuit Breaker](./circuit_breaker_implementation.md) | Complete Implementation |
 | Track requests across services | [Correlation ID](./correlation_id_tracking.md) | Correlation ID Flow |
 | Inject dependencies | [Container DI](./container_dependency_injection.md) | Constructor Injection |
 | Handle cache fallback | [Error Recovery](./error_recovery_patterns.md) | Graceful Degradation |
 | Refresh expired tokens | [Error Recovery](./error_recovery_patterns.md) | Credential Refresh |
+| Sanitize error messages | [Error Sanitization](./error_sanitization_patterns.md) | Implementation Patterns |
+| Secure connection strings | [Error Sanitization](./error_sanitization_patterns.md) | Connection String Sanitization |
 | Understand policy security | [Policy Registry Trust Model](./policy_registry_trust_model.md) | Trust Assumptions |
 | Implement policy allowlist | [Policy Registry Trust Model](./policy_registry_trust_model.md) | Security Mitigations |
+| Validate user input | [Security Patterns](./security_patterns.md) | Input Validation |
+| Configure TLS/SSL | [Security Patterns](./security_patterns.md) | Network Security |
+| Manage secrets with Vault | [Security Patterns](./security_patterns.md) | Secret Management |
+| Implement authentication | [Security Patterns](./security_patterns.md) | Authentication and Authorization |
+| Review production security | [Security Patterns](./security_patterns.md) | Production Security Checklist |
 
 ### Transport Types
 
@@ -62,10 +75,21 @@ Error Handling Patterns
     ├── Used by: All other patterns
     └── References: Transport types, correlation IDs
 
+Error Sanitization Patterns
+    ├── Data classification and sanitization rules
+    ├── Depends on: Error Handling Patterns
+    └── References: All error classes, logging integration
+
 Error Recovery Patterns
     ├── Implements resilience strategies
-    ├── Depends on: Error Handling Patterns
+    ├── Depends on: Error Handling, Error Sanitization
     └── References: Circuit Breaker, Correlation ID
+
+Retry, Backoff, and Compensation Strategy
+    ├── Formal specification for retry behavior
+    ├── Depends on: Error Handling, Error Recovery
+    ├── References: Circuit Breaker, Per-Effect Configs
+    └── Defines: Retryable errors, backoff formulas, compensation patterns
 
 Circuit Breaker Implementation
     ├── Detailed state machine implementation
@@ -86,6 +110,12 @@ Policy Registry Trust Model
     ├── Documents security boundaries for policy registration
     ├── Depends on: Container DI (for registry resolution)
     └── References: PolicyRegistry, ProtocolPolicy
+
+Security Patterns
+    ├── Comprehensive security guide for ONEX infrastructure
+    ├── Includes: Error sanitization, input validation, auth, secrets, network security
+    ├── Depends on: All error patterns, Correlation ID Tracking
+    └── References: Vault, Kafka, PostgreSQL, TLS configuration
 ```
 
 ## Usage Examples

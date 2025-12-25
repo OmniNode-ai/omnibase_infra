@@ -13,7 +13,6 @@ Tests the contract-driven bootstrap entrypoint including:
 from __future__ import annotations
 
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -54,7 +53,7 @@ class TestLoadRuntimeConfig:
             "output_topic": "test-responses",
             "group_id": "test-group",
         }
-        with open(config_file, "w") as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         # Load config
@@ -144,7 +143,7 @@ class TestLoadRuntimeConfig:
         test_config = {
             "input_topic": "invalid topic with spaces",
         }
-        with open(config_file, "w") as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -167,7 +166,7 @@ class TestLoadRuntimeConfig:
             "output_topic": "also invalid",
             "event_bus": {"type": "unknown-type"},
         }
-        with open(config_file, "w") as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -206,7 +205,7 @@ class TestLoadRuntimeConfig:
             "consumer_group": "bad group name",
             "event_bus": {"type": "unknown-type"},
         }
-        with open(config_file, "w") as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -363,16 +362,19 @@ class TestBootstrap:
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
-        """Test that bootstrap uses CONTRACTS_DIR from environment."""
-        with TemporaryDirectory() as tmpdir:
-            monkeypatch.setenv("CONTRACTS_DIR", tmpdir)
-            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
-                event_instance = MagicMock()
-                event_instance.wait = AsyncMock(return_value=None)
-                mock_event.return_value = event_instance
+        """Test that bootstrap uses CONTRACTS_DIR from environment.
 
-                exit_code = await bootstrap()
+        Uses pytest's tmp_path fixture for automatic temporary directory cleanup.
+        """
+        monkeypatch.setenv("CONTRACTS_DIR", str(tmp_path))
+        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            exit_code = await bootstrap()
 
         assert exit_code == 0
 
@@ -553,28 +555,29 @@ class TestIntegration:
     """Integration tests for kernel with real components."""
 
     async def test_full_bootstrap_with_real_event_bus(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """Test bootstrap with real InMemoryEventBus but mocked wait and health server."""
-        # This test uses real components except for the shutdown wait and health server
-        # Health server is mocked to avoid port conflicts in parallel tests
-        with TemporaryDirectory() as tmpdir:
-            contracts_dir = Path(tmpdir)
-            monkeypatch.setenv("CONTRACTS_DIR", str(contracts_dir))
+        """Test bootstrap with real InMemoryEventBus but mocked wait and health server.
 
-            with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_health:
-                mock_health_instance = MagicMock()
-                mock_health_instance.start = AsyncMock()
-                mock_health_instance.stop = AsyncMock()
-                mock_health.return_value = mock_health_instance
+        Uses pytest's tmp_path fixture for automatic temporary directory cleanup.
+        This test uses real components except for the shutdown wait and health server.
+        Health server is mocked to avoid port conflicts in parallel tests.
+        """
+        monkeypatch.setenv("CONTRACTS_DIR", str(tmp_path))
 
-                with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
-                    event_instance = MagicMock()
-                    event_instance.wait = AsyncMock(return_value=None)
-                    event_instance.set = MagicMock()
-                    mock_event.return_value = event_instance
+        with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_health:
+            mock_health_instance = MagicMock()
+            mock_health_instance.start = AsyncMock()
+            mock_health_instance.stop = AsyncMock()
+            mock_health.return_value = mock_health_instance
 
-                    exit_code = await bootstrap()
+            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+                event_instance = MagicMock()
+                event_instance.wait = AsyncMock(return_value=None)
+                event_instance.set = MagicMock()
+                mock_event.return_value = event_instance
+
+                exit_code = await bootstrap()
 
         assert exit_code == 0
 

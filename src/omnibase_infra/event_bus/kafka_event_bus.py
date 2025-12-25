@@ -44,6 +44,11 @@ Environment Variables:
             Range: 0-10
             Example: "5"
 
+            NOTE: This is the BUS-LEVEL retry for Kafka connection/publish failures.
+            This is distinct from MESSAGE-LEVEL retry tracked in ModelEventHeaders
+            (retry_count/max_retries), which is for application-level message
+            delivery tracking across services. See "Dual Retry Configuration" below.
+
         KAFKA_RETRY_BACKOFF_BASE: Base delay for exponential backoff (float seconds)
             Default: 1.0
             Range: 0.1-60.0
@@ -99,6 +104,32 @@ Environment Variables:
             - Correlation ID for tracking
             - Retry count and error type
 
+Dual Retry Configuration:
+    ONEX uses TWO distinct retry mechanisms that serve different purposes:
+
+    1. **Bus-Level Retry** (KafkaEventBus internal):
+       - Configured via: max_retry_attempts, retry_backoff_base
+       - Purpose: Handle transient Kafka connection/publish failures
+       - Scope: Single publish operation within the event bus
+       - Applies to: Producer.send() failures, timeouts, connection errors
+       - Example: If Kafka broker is temporarily unreachable, retry 3 times
+         with exponential backoff before failing
+
+    2. **Message-Level Retry** (ModelEventHeaders):
+       - Configured via: retry_count, max_retries in message headers
+       - Purpose: Track application-level message delivery attempts
+       - Scope: End-to-end message delivery across services
+       - Applies to: Business logic failures, handler exceptions
+       - Example: If order processing fails, increment retry_count and
+         republish; stop after max_retries reached
+
+    These mechanisms are INDEPENDENT and work together:
+    - Bus-level retry handles infrastructure failures (network, broker)
+    - Message-level retry handles application failures (handler errors)
+
+    A single message publish may trigger multiple bus-level retries,
+    while still counting as a single message-level delivery attempt.
+
 Usage:
     ```python
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
@@ -140,12 +171,17 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import KafkaError
 
 from omnibase_infra.enums import EnumInfraTransportType
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
+
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -610,7 +646,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     servers=sanitized_servers,
                 ) from e
 
-    async def initialize(self, config: dict[str, object]) -> None:
+    async def initialize(self, config: dict[str, JsonValue]) -> None:
         """Initialize the event bus with configuration.
 
         Protocol method for compatibility with ProtocolEventBus.
@@ -1319,7 +1355,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     async def broadcast_to_environment(
         self,
         command: str,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         target_environment: str | None = None,
     ) -> None:
         """Broadcast command to environment.
@@ -1347,7 +1383,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     async def send_to_group(
         self,
         command: str,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         target_group: str,
     ) -> None:
         """Send command to specific group.
@@ -1371,7 +1407,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
 
         await self.publish(topic, None, value, headers)
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(self) -> dict[str, JsonValue]:
         """Check event bus health.
 
         Protocol method for ProtocolEventBus compatibility.

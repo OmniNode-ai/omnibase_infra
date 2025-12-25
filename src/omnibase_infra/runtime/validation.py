@@ -32,12 +32,16 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import yaml
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 
 # Topic name pattern: alphanumeric, underscores, and hyphens only
 # This matches Kafka/Redpanda topic naming conventions
@@ -52,7 +56,7 @@ MAX_GRACE_PERIOD_SECONDS = 300
 
 
 def validate_runtime_config(
-    config: dict[str, object],
+    config: JsonValue,
     contract_path: Path | None = None,
 ) -> list[str]:
     """Validate runtime configuration against contract schema.
@@ -208,7 +212,7 @@ def validate_runtime_config(
 def load_and_validate_config(
     config_path: Path,
     contract_path: Path | None = None,
-) -> dict[str, object]:
+) -> JsonValue:
     """Load and validate runtime configuration from a YAML file.
 
     Loads a YAML configuration file and performs contract validation.
@@ -257,7 +261,7 @@ def load_and_validate_config(
 
     # Load YAML file
     try:
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
     except FileNotFoundError as e:
         raise ProtocolConfigurationError(
@@ -271,6 +275,13 @@ def load_and_validate_config(
             context=context,
             config_path=str(config_path),
             error_details=str(e),
+        ) from e
+    except UnicodeDecodeError as e:
+        raise ProtocolConfigurationError(
+            f"Configuration file contains binary or non-UTF-8 content: {config_path}",
+            context=context,
+            config_path=str(config_path),
+            error_details=f"Encoding error at position {e.start}-{e.end}: {e.reason}",
         ) from e
     except OSError as e:
         raise ProtocolConfigurationError(

@@ -33,6 +33,12 @@ from omnibase_infra.runtime.container_wiring import (
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 
+# Import shared conformance helpers from conftest
+from tests.conftest import (
+    assert_handler_registry_interface,
+    assert_policy_registry_interface,
+)
+
 
 class TestPolicyRegistryContainerIntegration:
     """Integration tests for PolicyRegistry with real container."""
@@ -60,9 +66,9 @@ class TestPolicyRegistryContainerIntegration:
         # Resolve PolicyRegistry from container
         registry = await get_policy_registry_from_container(container)
 
-        # Verify it's a real PolicyRegistry instance
-        assert isinstance(registry, PolicyRegistry)
-        assert len(registry) == 0  # Empty initially
+        # Verify PolicyRegistry interface via shared conformance helper
+        assert_policy_registry_interface(registry)
+        assert len(registry) == 0  # Empty initially (also verifies __len__ works)
 
     @pytest.mark.asyncio
     async def test_policy_registration_through_container(self) -> None:
@@ -210,7 +216,10 @@ class TestPolicyRegistryContainerIntegration:
 
         # get_or_create should create and register PolicyRegistry
         registry1 = await get_or_create_policy_registry(container)
-        assert isinstance(registry1, PolicyRegistry)
+
+        # Verify PolicyRegistry interface via shared conformance helper
+        assert_policy_registry_interface(registry1)
+        assert len(registry1) == 0  # Empty initially (also verifies __len__ works)
 
         # Second call should return same instance
         registry2 = await get_or_create_policy_registry(container)
@@ -254,8 +263,8 @@ class TestPolicyRegistryContainerIntegration:
         # Resolve handler registry
         handler_registry = await get_handler_registry_from_container(container)
 
-        # Verify it's a ProtocolBindingRegistry instance
-        assert isinstance(handler_registry, ProtocolBindingRegistry)
+        # Verify ProtocolBindingRegistry interface via shared conformance helper
+        assert_handler_registry_interface(handler_registry)
 
         # Verify basic operations work
         assert len(handler_registry) == 0  # Empty initially
@@ -420,7 +429,9 @@ class TestContainerWithRegistriesFixture:
                 PolicyRegistry
             )
         )
-        assert isinstance(policy_registry, PolicyRegistry)
+
+        # Verify PolicyRegistry interface via shared conformance helper
+        assert_policy_registry_interface(policy_registry)
 
         # Resolve ProtocolBindingRegistry
         handler_registry = (
@@ -428,7 +439,9 @@ class TestContainerWithRegistriesFixture:
                 ProtocolBindingRegistry
             )
         )
-        assert isinstance(handler_registry, ProtocolBindingRegistry)
+
+        # Verify ProtocolBindingRegistry interface via shared conformance helper
+        assert_handler_registry_interface(handler_registry)
 
     @pytest.mark.asyncio
     async def test_fixture_registries_are_functional(
