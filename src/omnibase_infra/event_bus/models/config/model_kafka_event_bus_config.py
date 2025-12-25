@@ -240,7 +240,12 @@ class ModelKafkaEventBusConfig(BaseModel):
     # Dead letter queue configuration
     dead_letter_topic: str | None = Field(
         default=None,
-        description="Dead letter queue topic for failed messages (optional)",
+        description=(
+            "Dead letter queue topic for failed messages (optional). "
+            "If not set, use get_dlq_topic() to build a topic name following "
+            "ONEX conventions: <env>.dlq.<category>.v1 "
+            "(e.g., 'dev.dlq.intents.v1', 'prod.dlq.events.v1')"
+        ),
     )
 
     @field_validator("bootstrap_servers", mode="before")
@@ -667,6 +672,54 @@ class ModelKafkaEventBusConfig(BaseModel):
 
         config = cls(**data)
         return config.apply_environment_overrides()
+
+    def get_dlq_topic(self, category: str = "intents") -> str:
+        """Get the DLQ topic for this configuration.
+
+        If dead_letter_topic is explicitly set, returns that value.
+        Otherwise, builds a DLQ topic name following ONEX conventions
+        using the configuration's environment.
+
+        DLQ Topic Naming Convention:
+            Format: <env>.dlq.<category>.v1
+            Examples:
+                - dev.dlq.intents.v1 (for permanently failed intents)
+                - prod.dlq.events.v1 (for permanently failed events)
+                - staging.dlq.commands.v1 (for permanently failed commands)
+
+        Args:
+            category: Message category for DLQ routing. Valid values:
+                - 'intent' or 'intents' (default)
+                - 'event' or 'events'
+                - 'command' or 'commands'
+
+        Returns:
+            The DLQ topic name (either explicit or generated).
+
+        Raises:
+            ValueError: If category is not a valid message category.
+
+        Example:
+            >>> config = ModelKafkaEventBusConfig(environment="prod")
+            >>> config.get_dlq_topic()
+            'prod.dlq.intents.v1'
+            >>> config.get_dlq_topic("events")
+            'prod.dlq.events.v1'
+            >>> # Explicit topic takes precedence
+            >>> config = ModelKafkaEventBusConfig(
+            ...     environment="prod",
+            ...     dead_letter_topic="custom-dlq"
+            ... )
+            >>> config.get_dlq_topic()
+            'custom-dlq'
+        """
+        if self.dead_letter_topic:
+            return self.dead_letter_topic
+
+        # Import here to avoid circular imports
+        from omnibase_infra.event_bus.topic_constants import build_dlq_topic
+
+        return build_dlq_topic(self.environment, category)
 
 
 __all__: list[str] = ["ModelKafkaEventBusConfig"]

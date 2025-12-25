@@ -39,6 +39,7 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.projectors.projector_registration import ProjectorRegistration
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.services.timeout_scanner import TimeoutScanner
 
 if TYPE_CHECKING:

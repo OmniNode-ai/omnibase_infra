@@ -159,11 +159,16 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from omnibase_infra.protocols.protocol_plugin_compute import (
-    PluginContext,
-    PluginInputData,
-    PluginOutputData,
-)
+# Import directly from model submodules to avoid circular import
+# (protocol_plugin_compute imports these same models, creating a cycle)
+from omnibase_infra.plugins.models.model_plugin_context import ModelPluginContext
+from omnibase_infra.plugins.models.model_plugin_input_data import ModelPluginInputData
+from omnibase_infra.plugins.models.model_plugin_output_data import ModelPluginOutputData
+
+# Type aliases for backwards compatibility with protocol imports
+PluginContext = ModelPluginContext
+PluginInputData = ModelPluginInputData
+PluginOutputData = ModelPluginOutputData
 
 
 class PluginComputeBase(ABC):
