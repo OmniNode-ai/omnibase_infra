@@ -49,6 +49,11 @@ class ModelNodeRegistrationAcked(BaseModel):
             this command to the original registration flow.
         timestamp: When the node sent the acknowledgment.
 
+    Time Injection:
+        The `timestamp` field must be explicitly provided by the caller
+        using an injected `now` parameter. Do NOT use datetime.now() directly.
+        This ensures deterministic testing and consistent ordering across nodes.
+
     Example:
         >>> from uuid import uuid4
         >>> from datetime import datetime, UTC

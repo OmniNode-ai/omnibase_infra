@@ -47,6 +47,11 @@ class ModelNodeRegistrationInitiated(BaseModel):
         registration_attempt_id: Unique identifier for this registration attempt.
             Enables tracking multiple registration attempts for the same node.
 
+    Time Injection:
+        The `emitted_at` field must be explicitly provided by the handler
+        using its injected `now` parameter. Do NOT use datetime.now() directly.
+        This ensures deterministic testing and consistent ordering across nodes.
+
     Example:
         >>> from uuid import uuid4
         >>> from datetime import UTC, datetime

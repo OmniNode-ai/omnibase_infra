@@ -1,9 +1,11 @@
 # MVP Event Catalog
 
 > **Status**: Living Document
+> **Document Version**: 1.0.0
 > **Phase**: 9 (Event Bus Integration)
 > **Ticket**: OMN-57
 > **Last Updated**: 2025-12-24
+> **Author**: ONEX Infrastructure Team
 
 ## Overview
 

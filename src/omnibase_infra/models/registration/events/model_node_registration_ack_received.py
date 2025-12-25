@@ -38,6 +38,11 @@ class ModelNodeRegistrationAckReceived(BaseModel):
         liveness_deadline: Deadline for the next heartbeat from the node.
             If no heartbeat is received by this time, NodeLivenessExpired is emitted.
 
+    Time Injection:
+        The `emitted_at` field must be explicitly provided by the handler
+        using its injected `now` parameter. Do NOT use datetime.now() directly.
+        This ensures deterministic testing and consistent ordering across nodes.
+
     Example:
         >>> from uuid import uuid4
         >>> from datetime import UTC, datetime, timedelta

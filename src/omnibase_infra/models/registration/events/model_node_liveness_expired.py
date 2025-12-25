@@ -43,6 +43,11 @@ class ModelNodeLivenessExpired(BaseModel):
         emitted_at: When the liveness expiry was detected (from tick.now)
         last_heartbeat_at: The timestamp of the last received heartbeat
 
+    Time Injection:
+        The `emitted_at` field must be explicitly provided by the handler
+        using its injected `now` parameter. Do NOT use datetime.now() directly.
+        This ensures deterministic testing and consistent ordering across nodes.
+
     Example:
         >>> from datetime import datetime, UTC, timedelta
         >>> from uuid import uuid4

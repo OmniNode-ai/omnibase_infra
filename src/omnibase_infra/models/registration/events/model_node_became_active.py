@@ -42,6 +42,11 @@ class ModelNodeBecameActive(BaseModel):
         capabilities: The node's capabilities at activation time.
             Used for routing and service discovery decisions.
 
+    Time Injection:
+        The `emitted_at` field must be explicitly provided by the handler
+        using its injected `now` parameter. Do NOT use datetime.now() directly.
+        This ensures deterministic testing and consistent ordering across nodes.
+
     Example:
         >>> from datetime import UTC, datetime
         >>> from uuid import uuid4

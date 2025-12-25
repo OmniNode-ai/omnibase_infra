@@ -38,6 +38,11 @@ class ModelNodeRegistrationAccepted(BaseModel):
         ack_deadline: Deadline by which the node must acknowledge registration.
             If not acknowledged by this time, NodeRegistrationAckTimedOut is emitted.
 
+    Time Injection:
+        The `emitted_at` field must be explicitly provided by the handler
+        using its injected `now` parameter. Do NOT use datetime.now() directly.
+        This ensures deterministic testing and consistent ordering across nodes.
+
     Example:
         >>> from uuid import uuid4
         >>> from datetime import UTC, datetime, timedelta

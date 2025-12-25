@@ -42,6 +42,11 @@ class ModelNodeRegistrationRejected(BaseModel):
         rejection_reason: Human-readable explanation for the rejection.
             Should be safe to expose to the node (no internal details).
 
+    Time Injection:
+        The `emitted_at` field must be explicitly provided by the handler
+        using its injected `now` parameter. Do NOT use datetime.now() directly.
+        This ensures deterministic testing and consistent ordering across nodes.
+
     Example:
         >>> from datetime import UTC, datetime
         >>> from uuid import uuid4
