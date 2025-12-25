@@ -12,12 +12,16 @@ These tests ensure architectural integrity and prevent violations of the
 COMPUTE layer contract.
 """
 
-from typing import Any
 from unittest.mock import patch
 
 import pytest
 
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
+from omnibase_infra.protocols.protocol_plugin_compute import (
+    PluginContext,
+    PluginInputData,
+    PluginOutputData,
+)
 
 
 class TestOnexArchitectureCompliance:
@@ -33,8 +37,8 @@ class TestOnexArchitectureCompliance:
         # Arrange: Plugin that violates architecture by doing HTTP call
         class NetworkViolator(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 import urllib.request
 
                 # ARCHITECTURAL VIOLATION: Network I/O in COMPUTE layer
@@ -62,8 +66,8 @@ class TestOnexArchitectureCompliance:
         # Arrange: Plugin that violates architecture by reading file
         class FileIOViolator(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 # ARCHITECTURAL VIOLATION: File I/O in COMPUTE layer
                 with open("/tmp/data.txt", encoding="utf-8") as f:  # noqa: S108 - Intentional violation for testing
                     return {"data": f.read()}
@@ -87,8 +91,8 @@ class TestOnexArchitectureCompliance:
         # Arrange: Plugin that violates architecture by querying database
         class DatabaseViolator(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 import sqlite3
 
                 # ARCHITECTURAL VIOLATION: Database access in COMPUTE layer
@@ -119,8 +123,8 @@ class TestOnexArchitectureCompliance:
 
         class GlobalStateViolator(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 # ARCHITECTURAL VIOLATION: Mutable global state
                 global_counter["count"] += 1
                 return {"count": global_counter["count"]}
@@ -143,8 +147,8 @@ class TestOnexArchitectureCompliance:
         # Arrange: Deterministic plugin (CORRECT)
         class DeterministicPlugin(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 # Pure computation - deterministic
                 values = input_data.get("values", [])
                 return {"sum": sum(values), "count": len(values)}
@@ -166,8 +170,8 @@ class TestOnexArchitectureCompliance:
         # Arrange: Plugin that uses random without seed (VIOLATION)
         class RandomViolator(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 import random
 
                 # ARCHITECTURAL VIOLATION: Non-deterministic randomness
@@ -188,8 +192,8 @@ class TestOnexArchitectureCompliance:
         # Arrange: Plugin with deterministic randomness (CORRECT)
         class SeededRandomPlugin(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 import random
 
                 # ACCEPTABLE: Deterministic randomness with seed from context
@@ -213,8 +217,8 @@ class TestOnexArchitectureCompliance:
         # Arrange: Plugin that uses current time (VIOLATION)
         class TimeViolator(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 import time
 
                 # ARCHITECTURAL VIOLATION: Non-deterministic time access
@@ -238,8 +242,8 @@ class TestOnexArchitectureCompliance:
         # Arrange: Plugin with deterministic time (CORRECT)
         class DeterministicTimePlugin(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 # ACCEPTABLE: Time provided as input parameter
                 execution_time = context.get("execution_timestamp", 0)
                 return {"timestamp": execution_time, "processed": True}
@@ -260,8 +264,8 @@ class TestOnexArchitectureCompliance:
         # Arrange: Plugin that modifies input (VIOLATION)
         class InputModifier(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 # ARCHITECTURAL VIOLATION: Mutating input data
                 input_data["modified"] = True
                 return {"result": "modified"}
@@ -283,8 +287,8 @@ class TestOnexArchitectureCompliance:
         # Arrange: Plugin that modifies context (VIOLATION)
         class ContextModifier(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 # ARCHITECTURAL VIOLATION: Mutating context
                 context["execution_count"] = context.get("execution_count", 0) + 1
                 return {"result": "modified"}
@@ -306,8 +310,8 @@ class TestOnexArchitectureCompliance:
         # Arrange: COMPUTE plugin (pure transformation)
         class ComputePlugin(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 # COMPUTE: Pure data transformation
                 values = input_data.get("values", [])
                 return {
@@ -343,8 +347,8 @@ class TestOnexArchitectureCompliance:
         # COMPUTE Plugin (CORRECT - single source transformation):
         class SingleSourcePlugin(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 # ACCEPTABLE: Transform single input source
                 return {"processed": input_data.get("value", 0) * 2}
 
@@ -366,8 +370,8 @@ class TestOnexArchitectureCompliance:
         # COMPUTE Plugin (CORRECT - single step transformation):
         class SingleStepPlugin(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 # ACCEPTABLE: Single transformation step
                 return {
                     "validated": input_data.get("email", "").endswith("@example.com")
@@ -395,8 +399,8 @@ class TestArchitecturalBenefits:
         # Arrange: Simple compute plugin
         class EasyToTestPlugin(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 values = input_data.get("values", [])
                 return {"max": max(values) if values else None}
 
@@ -412,16 +416,16 @@ class TestArchitecturalBenefits:
         # Arrange: Two composable plugins
         class NormalizerPlugin(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 values = input_data.get("values", [])
                 max_val = max(values) if values else 1
                 return {"normalized": [v / max_val for v in values]}
 
         class AggregatorPlugin(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 values = input_data.get("normalized", [])
                 return {"sum": sum(values), "count": len(values)}
 
@@ -445,8 +449,8 @@ class TestArchitecturalBenefits:
         # Arrange: Stateless plugin
         class StatelessPlugin(PluginComputeBase):
             def execute(
-                self, input_data: dict[str, Any], context: dict[str, Any]
-            ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 # No state - safe to run in parallel
                 return {"processed": input_data.get("value", 0) ** 2}
 

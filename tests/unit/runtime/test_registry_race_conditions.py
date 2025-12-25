@@ -416,6 +416,151 @@ class TestPolicyRegistrySemverCacheRaceConditions:
                 f"Inconsistent results for {version}: {set(version_results)}"
             )
 
+    def test_semver_cache_reset_during_concurrent_parsing(self) -> None:
+        """Test that cache reset during concurrent parsing is thread-safe.
+
+        This test specifically verifies the TOCTOU (time-of-check-time-of-use)
+        fix in _get_semver_parser(). Without the fix, a thread could:
+        1. Check if cls._semver_cache is not None (True)
+        2. Another thread calls _reset_semver_cache() setting it to None
+        3. First thread returns cls._semver_cache which is now None
+        4. Caller gets TypeError: 'NoneType' object is not callable
+
+        The fix stores the cache reference in a local variable before the check,
+        ensuring the returned reference is always valid.
+        """
+        PolicyRegistry._reset_semver_cache()
+
+        # Initialize the cache first
+        PolicyRegistry._parse_semver("1.0.0")
+
+        errors: list[Exception] = []
+        parse_count = 0
+        reset_count = 0
+        lock = threading.Lock()
+
+        def parse_continuously() -> None:
+            """Parse versions continuously while resets are happening."""
+            nonlocal parse_count
+            local_count = 0
+            try:
+                for i in range(200):
+                    # This should NEVER raise TypeError even during resets
+                    result = PolicyRegistry._parse_semver(f"{i % 10}.{i % 5}.{i % 3}")
+                    assert result is not None
+                    local_count += 1
+            except Exception as e:
+                errors.append(e)
+            finally:
+                with lock:
+                    parse_count += local_count
+
+        def reset_repeatedly() -> None:
+            """Reset the cache repeatedly to trigger race conditions."""
+            nonlocal reset_count
+            local_count = 0
+            try:
+                for _ in range(50):
+                    PolicyRegistry._reset_semver_cache()
+                    local_count += 1
+                    # Small sleep to allow interleaving
+                    time.sleep(0.0001)
+            except Exception as e:
+                errors.append(e)
+            finally:
+                with lock:
+                    reset_count += local_count
+
+        # Create multiple parsing threads and reset threads
+        parsers = [threading.Thread(target=parse_continuously) for _ in range(5)]
+        resetters = [threading.Thread(target=reset_repeatedly) for _ in range(2)]
+
+        for t in parsers + resetters:
+            t.start()
+        for t in parsers + resetters:
+            t.join()
+
+        # No errors should occur - especially not TypeError
+        assert len(errors) == 0, (
+            f"Errors during concurrent reset/parse: {errors}. "
+            f"TypeError indicates TOCTOU race condition in _get_semver_parser()"
+        )
+
+        # All parses should have completed successfully
+        assert parse_count == 1000, f"Expected 1000 parses, got {parse_count}"
+        # All resets should have completed
+        assert reset_count == 100, f"Expected 100 resets, got {reset_count}"
+
+
+class TestComputeRegistrySemverCacheResetDuringParsing:
+    """Tests for RegistryCompute semver cache reset thread safety."""
+
+    def test_semver_cache_reset_during_concurrent_parsing(
+        self, compute_registry: RegistryCompute
+    ) -> None:
+        """Test that cache reset during concurrent parsing is thread-safe.
+
+        This test specifically verifies the TOCTOU (time-of-check-time-of-use)
+        fix in _get_semver_parser(). Without the fix, a thread could return
+        None from _get_semver_parser() causing TypeError when calling the parser.
+        """
+        RegistryCompute._reset_semver_cache()
+
+        # Initialize the cache first
+        RegistryCompute._parse_semver("1.0.0")
+
+        errors: list[Exception] = []
+        parse_count = 0
+        reset_count = 0
+        lock = threading.Lock()
+
+        def parse_continuously() -> None:
+            """Parse versions continuously while resets are happening."""
+            nonlocal parse_count
+            local_count = 0
+            try:
+                for i in range(200):
+                    # This should NEVER raise TypeError even during resets
+                    result = RegistryCompute._parse_semver(f"{i % 10}.{i % 5}.{i % 3}")
+                    assert result is not None
+                    local_count += 1
+            except Exception as e:
+                errors.append(e)
+            finally:
+                with lock:
+                    parse_count += local_count
+
+        def reset_repeatedly() -> None:
+            """Reset the cache repeatedly to trigger race conditions."""
+            nonlocal reset_count
+            local_count = 0
+            try:
+                for _ in range(50):
+                    RegistryCompute._reset_semver_cache()
+                    local_count += 1
+                    time.sleep(0.0001)
+            except Exception as e:
+                errors.append(e)
+            finally:
+                with lock:
+                    reset_count += local_count
+
+        parsers = [threading.Thread(target=parse_continuously) for _ in range(5)]
+        resetters = [threading.Thread(target=reset_repeatedly) for _ in range(2)]
+
+        for t in parsers + resetters:
+            t.start()
+        for t in parsers + resetters:
+            t.join()
+
+        # No errors should occur
+        assert len(errors) == 0, (
+            f"Errors during concurrent reset/parse: {errors}. "
+            f"TypeError indicates TOCTOU race condition in _get_semver_parser()"
+        )
+        assert parse_count == 1000
+        assert reset_count == 100
+
 
 class TestPolicyRegistryStressTest:
     """Stress tests for PolicyRegistry under high concurrent load."""

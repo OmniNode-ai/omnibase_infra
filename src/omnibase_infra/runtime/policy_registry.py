@@ -127,7 +127,7 @@ class PolicyRegistry:
         from omnibase_core.container import ModelONEXContainer
         from omnibase_infra.runtime.policy_registry import PolicyRegistry
 
-        # Resolve from container (preferred) - async in omnibase_core 0.4.x+
+        # Resolve from container (preferred) - async in omnibase_core 0.5.6+
         registry = await container.service_registry.resolve_service(PolicyRegistry)
 
         # Or use helper function (also async)
@@ -883,6 +883,9 @@ class PolicyRegistry:
 
         Thread Safety:
             Uses double-checked locking pattern for thread-safe lazy initialization.
+            The fast path stores the cache reference in a local variable to prevent
+            TOCTOU (time-of-check-time-of-use) race conditions where another thread
+            could call _reset_semver_cache() between the None check and the return.
 
         Returns:
             Cached semver parsing function.
@@ -892,8 +895,12 @@ class PolicyRegistry:
             - Subsequent calls: Returns cached function reference (O(1))
         """
         # Fast path: cache already initialized
-        if cls._semver_cache is not None:
-            return cls._semver_cache
+        # CRITICAL: Store in local variable to prevent TOCTOU race condition.
+        # Without this, another thread could call _reset_semver_cache() between
+        # the None check and the return, causing this method to return None.
+        cache = cls._semver_cache
+        if cache is not None:
+            return cache
 
         # Slow path: initialize with lock
         with cls._semver_cache_lock:

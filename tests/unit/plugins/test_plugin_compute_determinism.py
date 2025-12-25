@@ -21,7 +21,6 @@ Requirements:
 
 import concurrent.futures
 import copy
-from typing import Any
 
 from omnibase_infra.plugins.examples.plugin_json_normalizer import PluginJsonNormalizer
 
@@ -107,7 +106,7 @@ class TestRepeatabilityRequirement:
         """Repeatability holds for empty input."""
         # Arrange
         plugin = PluginJsonNormalizer()
-        input_data: dict[str, Any] = {"json": {}}
+        input_data: dict[str, object] = {"json": {}}
         context = {"correlation_id": "test-repeat-empty"}
 
         # Act: Execute 100 times
@@ -466,7 +465,7 @@ class TestEdgeCases:
         """Empty JSON input produces deterministic results."""
         # Arrange
         plugin = PluginJsonNormalizer()
-        input_data: dict[str, Any] = {"json": {}}
+        input_data: dict[str, object] = {"json": {}}
         context = {"correlation_id": "test-empty"}
 
         # Act: Execute multiple times

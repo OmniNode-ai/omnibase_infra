@@ -13,7 +13,6 @@ Tests validate:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -512,7 +511,7 @@ class TestModelNodeRegistrationEdgeCases:
         """Test capabilities with complex nested values."""
         test_node_id = uuid4()
         now = datetime.now(UTC)
-        complex_capabilities: dict[str, Any] = {
+        complex_capabilities: dict[str, object] = {
             "database": True,
             "max_batch": 100,
             "supported_types": ["read", "write", "delete"],
@@ -539,7 +538,7 @@ class TestModelNodeRegistrationEdgeCases:
         test_node_id = uuid4()
         now = datetime.now(UTC)
         # environment is a known field, tags and config are extra fields
-        complex_metadata: dict[str, Any] = {
+        complex_metadata: dict[str, object] = {
             "environment": "production",
             "tags": ["primary", "critical"],
             "nested_config": {"replicas": 3, "region": "us-west-2"},

@@ -405,6 +405,19 @@ pattern_exemptions:
 
     ticket: OMN-888
   # ==========================================================================
+  # Private Class Naming Exemptions (OMN-811)
+  # ==========================================================================
+  # Private helper classes (prefixed with _) follow PascalCase after the underscore.
+  # The pattern validator's regex expects names to start with uppercase, but private
+  # classes correctly use underscore prefix + PascalCase (e.g., _MetricsTimer).
+  - file_pattern: 'registry_compute\.py'
+    class_pattern: "Class name '_MetricsTimer'"
+    violation_pattern: "should use PascalCase"
+    reason: >
+      _MetricsTimer IS valid PascalCase for a private class. The underscore prefix indicates private visibility, and "MetricsTimer" follows PascalCase. The validator regex doesn't account for underscore-prefixed private classes.
+
+    ticket: OMN-811
+  # ==========================================================================
   # Union Reduction Phase 2 Model Exemptions (OMN-1002)
   # ==========================================================================
   # These models use builder patterns with many convenience methods.

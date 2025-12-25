@@ -11,8 +11,6 @@ NOTE: Tests are marked as skipped until PluginComputeBase and PluginJsonNormaliz
 are implemented. Uncomment imports below once implementation is complete.
 """
 
-from typing import Any
-
 import pytest
 
 from omnibase_infra.plugins.examples.plugin_json_normalizer import PluginJsonNormalizer
@@ -269,7 +267,7 @@ class TestPluginJsonNormalizer:
         """Handles empty dictionary edge case."""
         # Arrange
         plugin = PluginJsonNormalizer()
-        input_data: dict[str, Any] = {"json": {}}
+        input_data: dict[str, object] = {"json": {}}
         context = {"correlation_id": "test-123"}
 
         # Act
@@ -338,17 +336,17 @@ class TestValidationHookIntegration:
         execution_order: list[str] = []
 
         class TrackedNormalizer(PluginJsonNormalizer):
-            def validate_input(self, input_data: dict[str, Any]) -> None:
+            def validate_input(self, input_data: dict[str, object]) -> None:
                 execution_order.append("validate_input")
                 super().validate_input(input_data)
 
-            def validate_output(self, output_data: dict[str, Any]) -> None:
+            def validate_output(self, output_data: dict[str, object]) -> None:
                 execution_order.append("validate_output")
                 super().validate_output(output_data)
 
             def execute(
-                self, input_data: dict[str, Any], context: dict
-            ) -> dict[str, Any]:
+                self, input_data: dict[str, object], context: dict[str, object]
+            ) -> dict[str, object]:
                 execution_order.append("execute")
                 return super().execute(input_data, context)
 
@@ -369,7 +367,7 @@ class TestValidationHookIntegration:
 
         # Arrange: Plugin with strict input validation
         class StrictNormalizer(PluginJsonNormalizer):
-            def validate_input(self, input_data: dict[str, Any]) -> None:
+            def validate_input(self, input_data: dict[str, object]) -> None:
                 if not input_data.get("json"):
                     raise ValueError("Input must not be empty")
 
@@ -384,9 +382,9 @@ class TestValidationHookIntegration:
 
         # Arrange: Plugin with strict output validation
         class StrictNormalizer(PluginJsonNormalizer):
-            def validate_output(self, output_data: dict[str, Any]) -> None:
+            def validate_output(self, output_data: dict[str, object]) -> None:
                 normalized = output_data.get("normalized", output_data)
-                if len(normalized) > 5:
+                if isinstance(normalized, dict) and len(normalized) > 5:
                     raise ValueError("Output too large")
 
         plugin = StrictNormalizer()

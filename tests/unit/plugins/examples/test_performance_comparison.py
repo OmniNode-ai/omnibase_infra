@@ -11,7 +11,6 @@ Key Optimizations:
 """
 
 import time
-from typing import Any
 
 import pytest
 
@@ -31,7 +30,7 @@ class TestPerformanceAnalysis:
     def _measure_execution(
         self,
         plugin: PluginJsonNormalizer,
-        test_data: dict[str, Any],
+        test_data: dict[str, object],
         iterations: int = 10,
     ) -> float:
         """Measure average execution time over multiple iterations.
