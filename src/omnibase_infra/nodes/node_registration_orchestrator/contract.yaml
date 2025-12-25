@@ -210,7 +210,7 @@ consumed_events:
   # registration projection. The HandlerNodeHeartbeat processes these events.
   # Note: direct_handler=true indicates this event bypasses the workflow and is
   # handled by a dedicated handler (HandlerNodeHeartbeat) via handle_heartbeat().
-  - topic: "node.heartbeat"
+  - topic: "{env}.{namespace}.onex.evt.node-heartbeat.v1"
     event_type: "ModelNodeHeartbeatEvent"
     description: "Periodic heartbeat from active nodes for liveness tracking"
     direct_handler: true

@@ -61,7 +61,7 @@ class TestInfraValidatorConstants:
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
         assert INFRA_MAX_UNIONS == 600, (
-            "INFRA_MAX_UNIONS should be 600 (OMN-1006 heartbeat handler)"
+            "INFRA_MAX_UNIONS should be 600 (OMN-1006 heartbeat handler + projector update_heartbeat)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

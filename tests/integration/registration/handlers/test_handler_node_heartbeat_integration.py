@@ -584,8 +584,15 @@ class TestHandlerNodeHeartbeatConcurrency:
         final = await reader.get_entity_state(node_id)
         assert final is not None
         assert final.last_heartbeat_at is not None
+
         # The last heartbeat timestamp should be one of the event timestamps
-        # (exact order is non-deterministic with concurrent writes)
+        # (exact order is non-deterministic with concurrent writes, but the
+        # final value must be one of the timestamps we sent)
+        expected_timestamps = {event.timestamp for event in events}
+        assert final.last_heartbeat_at in expected_timestamps, (
+            f"Expected last_heartbeat_at to be one of {len(expected_timestamps)} "
+            f"event timestamps, but got {final.last_heartbeat_at}"
+        )
 
 
 # =============================================================================
