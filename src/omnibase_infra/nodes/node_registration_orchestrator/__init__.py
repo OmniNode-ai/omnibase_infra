@@ -18,6 +18,8 @@ The orchestrator extends NodeOrchestrator from omnibase_core, which provides:
 
 Exports:
     NodeRegistrationOrchestrator: Main orchestrator node implementation (declarative)
+    TimeoutCoordinator: Coordinator for RuntimeTick timeout coordination
+    ModelTimeoutCoordinationResult: Result model for timeout coordinator
     ModelOrchestratorConfig: Configuration model
     ModelOrchestratorInput: Input model
     ModelOrchestratorOutput: Output model
@@ -35,10 +37,17 @@ from omnibase_infra.nodes.node_registration_orchestrator.models import (
 from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
+    ModelTimeoutCoordinationResult,
+    TimeoutCoordinator,
+)
 
 __all__: list[str] = [
     # Primary export - the declarative orchestrator
     "NodeRegistrationOrchestrator",
+    # Coordinators
+    "TimeoutCoordinator",
+    "ModelTimeoutCoordinationResult",
     # Models
     "ModelOrchestratorConfig",
     "ModelOrchestratorInput",
