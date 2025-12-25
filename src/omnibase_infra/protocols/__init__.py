@@ -42,6 +42,7 @@ See Also:
     - OMN-947 (F2) for snapshot publishing design
 """
 
+from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.protocols.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
@@ -51,6 +52,7 @@ from omnibase_infra.protocols.protocol_snapshot_publisher import (
 )
 
 __all__ = [
+    "ProtocolEventBusLike",
     "ProtocolIdempotencyStore",
     "ProtocolPluginCompute",
     "ProtocolSnapshotPublisher",
