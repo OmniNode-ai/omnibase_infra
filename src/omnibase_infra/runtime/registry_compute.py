@@ -76,6 +76,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
+import logging
 import os
 import threading
 import time
@@ -83,6 +84,9 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from omnibase_infra.errors import ComputeRegistryError, ProtocolConfigurationError
+
+# Module-level logger for metrics and registry operations
+logger = logging.getLogger(__name__)
 from omnibase_infra.runtime.models import ModelComputeRegistration
 from omnibase_infra.runtime.models.model_compute_key import ModelComputeKey
 
@@ -301,9 +305,7 @@ class RegistryCompute:
         # Optional metrics collector for production monitoring
         self._metrics: ProtocolRegistryMetrics | None = metrics_collector
 
-    def set_metrics_collector(
-        self, collector: ProtocolRegistryMetrics | None
-    ) -> None:
+    def set_metrics_collector(self, collector: ProtocolRegistryMetrics | None) -> None:
         """Set the metrics collector for production monitoring.
 
         This method allows setting or changing the metrics collector after
@@ -459,7 +461,12 @@ class RegistryCompute:
                 self._metrics.record_registry_size(registry_size)
             except Exception:
                 # Metrics recording should never break registry operations
-                pass
+                # Log at DEBUG level for observability without impacting operations
+                logger.debug(
+                    "Metrics error suppressed during register()",
+                    exc_info=True,
+                    extra={"plugin_id": plugin_id, "version": version},
+                )
 
     def register_plugin(
         self,
@@ -550,7 +557,12 @@ class RegistryCompute:
                             try:
                                 self._metrics.record_error("not_found", plugin_id)
                             except Exception:
-                                pass
+                                # Metrics recording should never break registry operations
+                                logger.debug(
+                                    "Metrics error suppressed during get() not_found",
+                                    exc_info=True,
+                                    extra={"plugin_id": plugin_id},
+                                )
                         # Defer expensive list computation until actually raising error
                         registered = [k.plugin_id for k in self._registry]
                         raise ComputeRegistryError(
@@ -572,7 +584,12 @@ class RegistryCompute:
                                     "version_not_found", plugin_id
                                 )
                             except Exception:
-                                pass
+                                # Metrics recording should never break registry operations
+                                logger.debug(
+                                    "Metrics error suppressed during get() version_not_found",
+                                    exc_info=True,
+                                    extra={"plugin_id": plugin_id, "version": version},
+                                )
                         # Version not found - get versions from candidate_keys
                         available_versions = sorted(
                             [key.version for key in candidate_keys],
@@ -605,7 +622,11 @@ class RegistryCompute:
                     )
                 except Exception:
                     # Metrics recording should never break registry operations
-                    pass
+                    logger.debug(
+                        "Metrics error suppressed during get() latency recording",
+                        exc_info=True,
+                        extra={"plugin_id": plugin_id, "version": version},
+                    )
 
     def list_keys(self) -> list[tuple[str, str]]:
         """List registered plugin keys as (plugin_id, version) tuples.
@@ -739,7 +760,11 @@ class RegistryCompute:
                 self._metrics.record_registry_size(registry_size)
             except Exception:
                 # Metrics recording should never break registry operations
-                pass
+                logger.debug(
+                    "Metrics error suppressed during unregister()",
+                    exc_info=True,
+                    extra={"plugin_id": plugin_id, "version": version},
+                )
 
         return removed_count
 
@@ -961,7 +986,26 @@ class RegistryCompute:
         This should only be used in test fixtures to ensure test isolation.
 
         Thread Safety:
-            This method is thread-safe and uses the class-level lock.
+            This method is thread-safe and uses the class-level lock. The reset
+            operation is atomic - either the cache is fully reset or not at all.
+
+            In-flight Operations:
+                If other threads have already obtained a reference to the cache
+                via _get_semver_parser(), they will continue using the old cache
+                until they complete. This is safe because the old cache remains
+                a valid callable until garbage collected. New operations after
+                reset will get the new cache instance when created.
+
+            Memory Reclamation:
+                The old cache's internal LRU entries are explicitly cleared via
+                cache_clear() before the reference is released. This ensures
+                prompt memory reclamation rather than waiting for garbage
+                collection.
+
+            Concurrent Reset:
+                Multiple concurrent reset calls are safe. Each reset will clear
+                the current cache (if any) and set the reference to None. The
+                lock ensures only one reset executes at a time.
 
         Example:
             >>> # In test fixture
@@ -970,6 +1014,12 @@ class RegistryCompute:
             >>> # Now cache will be initialized with size 64 on next use
         """
         with cls._semver_cache_lock:
+            old_cache = cls._semver_cache
+            if old_cache is not None:
+                # Clear internal LRU cache entries before releasing reference.
+                # This ensures prompt memory reclamation rather than waiting
+                # for garbage collection of the orphaned function object.
+                old_cache.cache_clear()
             cls._semver_cache = None
 
 

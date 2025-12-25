@@ -9,7 +9,13 @@ Tests verify:
 
 NOTE: Tests are marked as skipped until PluginComputeBase and PluginJsonNormalizer
 are implemented. Uncomment imports below once implementation is complete.
+
+Note on Type Annotations:
+    This test module intentionally uses dict types for test plugin implementations
+    and passes raw dict inputs to plugin.execute() for testing purposes.
+    The mypy directives below disable type errors for these intentional patterns.
 """
+# mypy: disable-error-code="override, arg-type, attr-defined, index, return-value"
 
 import pytest
 

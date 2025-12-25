@@ -56,13 +56,18 @@ pattern_exemptions:
   # ==========================================================================
   # The 'execute' method name is a standard plugin architecture pattern.
   # It's intentionally generic as it's the protocol-defined entry point.
+  # Design Doc: CLAUDE.md "ONEX Architecture" section - Protocol-based plugin execution pattern
   - file_pattern: 'protocol_plugin_compute\.py'
     violation_pattern: "Function name 'execute' is too generic"
     reason: Standard plugin architecture pattern - execute is the protocol-defined entry point.
+    documentation:
+      - CLAUDE.md (ONEX Architecture - Protocol Resolution section)
     ticket: null
   - file_pattern: 'plugin_compute_base\.py'
     violation_pattern: "Function name 'execute' is too generic"
     reason: Base class implements protocol pattern - execute is the standard entry point.
+    documentation:
+      - CLAUDE.md (ONEX Architecture - Protocol Resolution section)
     ticket: null
   # ==========================================================================
   # RuntimeHostProcess Exemptions (OMN-756)
@@ -90,17 +95,22 @@ pattern_exemptions:
   # PolicyRegistry Exemptions
   # ==========================================================================
   # Domain registry pattern requires comprehensive policy management operations.
+  # Design Doc: docs/patterns/container_dependency_injection.md - Registry patterns
   - file_pattern: 'policy_registry\.py'
     class_pattern: "Class 'PolicyRegistry'"
     violation_pattern: 'has \d+ methods'
     reason: >
       Central registry pattern requires CRUD operations (register, get, update, remove), query operations (list, filter, search), and lifecycle operations (enable, disable, validate).
-
+    documentation:
+      - docs/patterns/container_dependency_injection.md (Registry patterns)
+      - CLAUDE.md (Container-Based Dependency Injection section)
     ticket: null
   - file_pattern: 'policy_registry\.py'
     method_pattern: "Function 'register_policy'"
     violation_pattern: 'has \d+ parameters'
     reason: Policy registration requires multiple fields for complete policy definition.
+    documentation:
+      - docs/patterns/container_dependency_injection.md
     ticket: null
   # ==========================================================================
   # Policy ID Exemptions (OMN-812)
@@ -145,32 +155,41 @@ pattern_exemptions:
   # ==========================================================================
   # Python ast.NodeVisitor convention uses visit_ClassDef, visit_Call, etc.
   # These follow PEP 8 exception for consistency with stdlib patterns.
+  # Reference: https://docs.python.org/3/library/ast.html#ast.NodeVisitor
   - file_pattern: 'topic_category_validator\.py'
     violation_pattern: "Function name 'visit_ClassDef' should use snake_case"
     reason: >
       Python ast.NodeVisitor convention. visit_ClassDef is a standard AST visitor method name that the ast module dispatches to.
-
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+      - PEP 8 - Exception for stdlib compatibility
     ticket: null
   - file_pattern: 'topic_category_validator\.py'
     violation_pattern: "Function name 'visit_Call' should use snake_case"
     reason: >
       Python ast.NodeVisitor convention. visit_Call is a standard AST visitor method name that the ast module dispatches to.
-
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
     ticket: null
   # ==========================================================================
   # RuntimeShapeValidator Exemptions
   # ==========================================================================
+  # Design Doc: docs/patterns/error_handling_patterns.md - Validation error patterns
   - file_pattern: 'runtime_shape_validator\.py'
     method_pattern: "Function 'validate_handler_output'"
     violation_pattern: 'has \d+ parameters'
     reason: >
       Validation requires multiple context parameters for proper violation reporting: handler_type, output, output_category, source_file, line_number, correlation_id. These are distinct required contexts, not candidates for a model wrapper.
-
+    documentation:
+      - docs/patterns/error_handling_patterns.md (Validation error hierarchy)
+      - CLAUDE.md (ONEX Architecture - Contract-Driven section)
     ticket: null
   - file_pattern: 'runtime_shape_validator\.py'
     method_pattern: "Function 'validate_and_raise'"
     violation_pattern: 'has \d+ parameters'
     reason: Same rationale as validate_handler_output - requires distinct context params.
+    documentation:
+      - docs/patterns/error_handling_patterns.md
     ticket: null
   # ==========================================================================
   # MixinNodeIntrospection Exemptions (OMN-958)
@@ -418,6 +437,19 @@ pattern_exemptions:
 
     ticket: OMN-811
   # ==========================================================================
+  # Plugin Models Exemptions (OMN-811)
+  # ==========================================================================
+  # ModelPluginContext uses str for correlation_id for flexibility - plugins may
+  # receive correlation IDs from various sources as strings. This is intentional
+  # to support diverse plugin use cases without requiring UUID conversion.
+  - file_pattern: 'model_plugin_context\.py'
+    violation_pattern: "Field 'correlation_id' should use UUID"
+    reason: >
+      Plugin context accepts correlation_id as string for flexibility. Plugins may
+      receive correlation IDs from various sources that are not UUIDs. String type
+      allows compatibility with diverse plugin input sources.
+    ticket: OMN-811
+  # ==========================================================================
   # Union Reduction Phase 2 Model Exemptions (OMN-1002)
   # ==========================================================================
   # These models use builder patterns with many convenience methods.
@@ -540,9 +572,12 @@ union_exemptions:
   # ==========================================================================
   # ModelNodeCapabilities Config Field Exemption
   # ==========================================================================
+  # Design Doc: CLAUDE.md "Type Annotation Conventions" section - Union patterns
   - file_pattern: 'model_node_capabilities\.py'
     violation_pattern: 'Union with 4\+ primitive types.*bool.*float.*int.*str'
     reason: >
       The config field uses dict[str, int | str | bool | float] for nested configuration values. This is a standard JSON-like config pattern where values can be any primitive type. Creating a ModelConfigValue wrapper would add unnecessary complexity without real benefit for this infrastructure domain.
-
+    documentation:
+      - CLAUDE.md (Type Annotation Conventions - Union patterns)
+      - Standard JSON config pattern (RFC 8259)
     ticket: null

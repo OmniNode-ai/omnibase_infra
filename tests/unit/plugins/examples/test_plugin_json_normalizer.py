@@ -1,4 +1,11 @@
-"""Tests for PluginJsonNormalizer with performance validation."""
+"""Tests for PluginJsonNormalizer with performance validation.
+
+Note on Type Annotations:
+    This test module intentionally passes raw dict types to plugin.execute() instead of
+    ModelPluginInputData/ModelPluginContext to test the plugin's behavior with raw dict
+    inputs. The mypy directive below disables type errors for these intentional patterns.
+"""
+# mypy: disable-error-code="arg-type, attr-defined, index, var-annotated"
 
 import time
 

@@ -562,6 +562,138 @@ class TestComputeRegistrySemverCacheResetDuringParsing:
         assert reset_count == 100
 
 
+class TestSemverCacheClearOnReset:
+    """Tests for verifying cache_clear() is called during reset.
+
+    These tests verify that the LRU cache's internal entries are properly
+    cleared during reset to ensure prompt memory reclamation.
+    """
+
+    def test_policy_registry_cache_clear_on_reset(self) -> None:
+        """Test that PolicyRegistry clears LRU cache entries on reset."""
+        # Reset to ensure clean state
+        PolicyRegistry._reset_semver_cache()
+
+        # Populate the cache with some entries
+        for i in range(50):
+            PolicyRegistry._parse_semver(f"{i}.0.0")
+
+        # Get cache info before reset
+        parser = PolicyRegistry._get_semver_parser()
+        cache_info_before = parser.cache_info()
+        assert cache_info_before.currsize > 0, "Cache should have entries"
+
+        # Reset the cache
+        PolicyRegistry._reset_semver_cache()
+
+        # Verify cache reference is None
+        assert PolicyRegistry._semver_cache is None
+
+        # Create new cache and verify it's empty
+        new_parser = PolicyRegistry._get_semver_parser()
+        cache_info_after = new_parser.cache_info()
+        assert cache_info_after.currsize == 0, "New cache should be empty after reset"
+
+    def test_compute_registry_cache_clear_on_reset(self) -> None:
+        """Test that RegistryCompute clears LRU cache entries on reset."""
+        # Reset to ensure clean state
+        RegistryCompute._reset_semver_cache()
+
+        # Populate the cache with some entries
+        for i in range(50):
+            RegistryCompute._parse_semver(f"{i}.0.0")
+
+        # Get cache info before reset
+        parser = RegistryCompute._get_semver_parser()
+        cache_info_before = parser.cache_info()
+        assert cache_info_before.currsize > 0, "Cache should have entries"
+
+        # Reset the cache
+        RegistryCompute._reset_semver_cache()
+
+        # Verify cache reference is None
+        assert RegistryCompute._semver_cache is None
+
+        # Create new cache and verify it's empty
+        new_parser = RegistryCompute._get_semver_parser()
+        cache_info_after = new_parser.cache_info()
+        assert cache_info_after.currsize == 0, "New cache should be empty after reset"
+
+    def test_concurrent_cache_clear_no_errors(self) -> None:
+        """Test that concurrent cache_clear() calls during reset don't cause errors.
+
+        This test verifies that calling cache_clear() on an LRU cache while other
+        threads are using it doesn't cause data corruption or exceptions.
+        """
+        RegistryCompute._reset_semver_cache()
+
+        # Populate initial cache
+        for i in range(100):
+            RegistryCompute._parse_semver(f"{i % 20}.{i % 10}.{i % 5}")
+
+        errors: list[Exception] = []
+        parse_count = 0
+        reset_count = 0
+        lock = threading.Lock()
+
+        def heavy_parse() -> None:
+            """Perform many parse operations to stress the cache."""
+            nonlocal parse_count
+            local_count = 0
+            try:
+                for i in range(500):
+                    # Parse versions that may or may not be cached
+                    RegistryCompute._parse_semver(f"{i % 30}.{i % 15}.{i % 10}")
+                    local_count += 1
+            except Exception as e:
+                errors.append(e)
+            finally:
+                with lock:
+                    parse_count += local_count
+
+        def rapid_reset() -> None:
+            """Rapidly reset the cache to stress cache_clear()."""
+            nonlocal reset_count
+            local_count = 0
+            try:
+                for _ in range(25):
+                    RegistryCompute._reset_semver_cache()
+                    local_count += 1
+                    # Very short sleep to maximize interleaving
+                    time.sleep(0.0001)
+            except Exception as e:
+                errors.append(e)
+            finally:
+                with lock:
+                    reset_count += local_count
+
+        # Create threads - more parsers than resetters
+        parsers = [threading.Thread(target=heavy_parse) for _ in range(8)]
+        resetters = [threading.Thread(target=rapid_reset) for _ in range(3)]
+
+        # Start all threads
+        for t in parsers + resetters:
+            t.start()
+        for t in parsers + resetters:
+            t.join()
+
+        # Verify no errors occurred
+        assert len(errors) == 0, (
+            f"Errors during concurrent cache_clear stress test: {errors}"
+        )
+
+        # Verify operations completed
+        assert parse_count == 4000, f"Expected 4000 parses, got {parse_count}"
+        assert reset_count == 75, f"Expected 75 resets, got {reset_count}"
+
+        # Final cache should be in valid state
+        final_parser = RegistryCompute._get_semver_parser()
+        assert final_parser is not None
+        # Should be able to parse after all the stress
+        result = RegistryCompute._parse_semver("1.2.3")
+        assert result == (1, 2, 3, chr(127))  # chr(127) is the release sentinel
+
+
 class TestPolicyRegistryStressTest:
     """Stress tests for PolicyRegistry under high concurrent load."""
 

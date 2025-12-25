@@ -127,7 +127,7 @@ class PolicyRegistry:
         from omnibase_core.container import ModelONEXContainer
         from omnibase_infra.runtime.policy_registry import PolicyRegistry
 
-        # Resolve from container (preferred) - async in omnibase_core 0.5.6+
+        # Resolve from container (preferred) - async in omnibase_core v0.5.6+
         registry = await container.service_registry.resolve_service(PolicyRegistry)
 
         # Or use helper function (also async)
@@ -863,7 +863,26 @@ class PolicyRegistry:
         This should only be used in test fixtures to ensure test isolation.
 
         Thread Safety:
-            This method is thread-safe and uses the class-level lock.
+            This method is thread-safe and uses the class-level lock. The reset
+            operation is atomic - either the cache is fully reset or not at all.
+
+            In-flight Operations:
+                If other threads have already obtained a reference to the cache
+                via _get_semver_parser(), they will continue using the old cache
+                until they complete. This is safe because the old cache remains
+                a valid callable until garbage collected. New operations after
+                reset will get the new cache instance when created.
+
+            Memory Reclamation:
+                The old cache's internal LRU entries are explicitly cleared via
+                cache_clear() before the reference is released. This ensures
+                prompt memory reclamation rather than waiting for garbage
+                collection.
+
+            Concurrent Reset:
+                Multiple concurrent reset calls are safe. Each reset will clear
+                the current cache (if any) and set the reference to None. The
+                lock ensures only one reset executes at a time.
 
         Example:
             >>> # In test fixture
@@ -872,6 +891,12 @@ class PolicyRegistry:
             >>> # Now cache will be initialized with size 64 on next use
         """
         with cls._semver_cache_lock:
+            old_cache = cls._semver_cache
+            if old_cache is not None:
+                # Clear internal LRU cache entries before releasing reference.
+                # This ensures prompt memory reclamation rather than waiting
+                # for garbage collection of the orphaned function object.
+                old_cache.cache_clear()
             cls._semver_cache = None
 
     @classmethod

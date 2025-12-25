@@ -165,7 +165,8 @@ class TestModelNodeRegistrationMutability:
             updated_at=now,
         )
         assert registration.health_endpoint is None
-        registration.health_endpoint = "http://localhost:8080/health"
+        # Assigning str to HttpUrl | None - Pydantic coerces str to HttpUrl at runtime
+        registration.health_endpoint = "http://localhost:8080/health"  # type: ignore[assignment]
         assert registration.health_endpoint == "http://localhost:8080/health"
 
     def test_mutable_model_can_update_last_heartbeat(self) -> None:
@@ -553,8 +554,9 @@ class TestModelNodeRegistrationEdgeCases:
         # Known field accessed via attribute
         assert registration.metadata.environment == "production"
         # Extra fields accessed via model_extra
-        assert registration.metadata.model_extra["tags"] == ["primary", "critical"]
-        assert registration.metadata.model_extra["nested_config"]["replicas"] == 3
+        # model_extra is dict[str, Any] | None, but we know it's set from constructor
+        assert registration.metadata.model_extra["tags"] == ["primary", "critical"]  # type: ignore[index]
+        assert registration.metadata.model_extra["nested_config"]["replicas"] == 3  # type: ignore[index]
 
     def test_unicode_in_node_type_rejected(self) -> None:
         """Test that Unicode node_type is rejected.
@@ -596,7 +598,8 @@ class TestModelNodeRegistrationEdgeCases:
         # description is a known field, accessed via attribute
         assert registration.metadata.description == "Узел обработки"
         # Unicode keys in extra fields accessed via model_extra
-        assert registration.metadata.model_extra["名前"] == "効果ノード"
+        # model_extra is dict[str, Any] | None, but we know it's set from constructor
+        assert registration.metadata.model_extra["名前"] == "効果ノード"  # type: ignore[index]
 
     def test_extra_fields_forbidden(self) -> None:
         """Test that extra fields are forbidden by model config."""

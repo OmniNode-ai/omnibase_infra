@@ -45,7 +45,7 @@ Integration Notes:
 - Uses ModelONEXContainer.service_registry for registration
 - Services registered as global scope (singleton per container)
 - Type-safe resolution via interface types
-- Compatible with omnibase_core 0.5.6+ API
+- Compatible with omnibase_core v0.5.6+ API (async service registry)
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ async def wire_infrastructure_services(
     with the respective class as the interface type.
 
     Note: This function is async because ModelONEXContainer.service_registry.register_instance()
-    is async in omnibase_core 0.5.6+.
+    is async in omnibase_core v0.5.6+ (see omnibase_core.container.ModelONEXContainer).
 
     Args:
         container: ONEX container instance to register services in.
@@ -170,7 +170,7 @@ async def wire_infrastructure_services(
         elif "register_instance" in error_str:
             hint = (
                 "Container.service_registry missing 'register_instance' method. "
-                "Check omnibase_core version compatibility (requires 0.5.6+)."
+                "Check omnibase_core version compatibility (requires v0.5.6+)."
             )
         else:
             hint = f"Missing attribute: '{missing_attr}'"
@@ -269,7 +269,7 @@ async def get_policy_registry_from_container(
     This is the preferred method for accessing PolicyRegistry in container-based code.
 
     Note: This function is async because ModelONEXContainer.service_registry.resolve_service()
-    is async in omnibase_core 0.5.6+.
+    is async in omnibase_core v0.5.6+ (see omnibase_core.container.ModelONEXContainer).
 
     Args:
         container: ONEX container instance with registered PolicyRegistry.
@@ -308,7 +308,7 @@ async def get_policy_registry_from_container(
         elif "resolve_service" in error_str:
             hint = (
                 "Container.service_registry missing 'resolve_service' method. "
-                "Check omnibase_core version compatibility (requires 0.5.6+)."
+                "Check omnibase_core version compatibility (requires v0.5.6+)."
             )
         else:
             hint = f"Missing attribute in resolution chain: {e}"
@@ -358,7 +358,7 @@ async def get_or_create_policy_registry(
     wire_infrastructure_services() yet or when lazy initialization is desired.
 
     Note: This function is async because ModelONEXContainer.service_registry methods
-    (resolve_service and register_instance) are async in omnibase_core 0.5.6+.
+    (resolve_service and register_instance) are async in omnibase_core v0.5.6+.
 
     Args:
         container: ONEX container instance.
@@ -426,7 +426,7 @@ async def get_handler_registry_from_container(
     This is the preferred method for accessing ProtocolBindingRegistry in container-based code.
 
     Note: This function is async because ModelONEXContainer.service_registry.resolve_service()
-    is async in omnibase_core 0.5.6+.
+    is async in omnibase_core v0.5.6+ (see omnibase_core.container.ModelONEXContainer).
 
     Args:
         container: ONEX container instance with registered ProtocolBindingRegistry.
@@ -465,7 +465,7 @@ async def get_handler_registry_from_container(
         elif "resolve_service" in error_str:
             hint = (
                 "Container.service_registry missing 'resolve_service' method. "
-                "Check omnibase_core version compatibility (requires 0.5.6+)."
+                "Check omnibase_core version compatibility (requires v0.5.6+)."
             )
         else:
             hint = f"Missing attribute in resolution chain: {e}"
@@ -511,7 +511,7 @@ async def get_compute_registry_from_container(
     This is the preferred method for accessing RegistryCompute in container-based code.
 
     Note: This function is async because ModelONEXContainer.service_registry.resolve_service()
-    is async in omnibase_core 0.5.6+.
+    is async in omnibase_core v0.5.6+ (see omnibase_core.container.ModelONEXContainer).
 
     Args:
         container: ONEX container instance with registered RegistryCompute.
@@ -550,7 +550,7 @@ async def get_compute_registry_from_container(
         elif "resolve_service" in error_str:
             hint = (
                 "Container.service_registry missing 'resolve_service' method. "
-                "Check omnibase_core version compatibility (requires 0.5.6+)."
+                "Check omnibase_core version compatibility (requires v0.5.6+)."
             )
         else:
             hint = f"Missing attribute in resolution chain: {e}"
@@ -600,7 +600,7 @@ async def get_or_create_compute_registry(
     wire_infrastructure_services() yet or when lazy initialization is desired.
 
     Note: This function is async because ModelONEXContainer.service_registry methods
-    (resolve_service and register_instance) are async in omnibase_core 0.5.6+.
+    (resolve_service and register_instance) are async in omnibase_core v0.5.6+.
 
     Args:
         container: ONEX container instance.

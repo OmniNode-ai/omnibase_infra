@@ -104,100 +104,49 @@ See Also:
 
 from __future__ import annotations
 
-from typing import Protocol, TypedDict, runtime_checkable
+from typing import Protocol, runtime_checkable
+
+from omnibase_infra.plugins.models import (
+    ModelPluginContext,
+    ModelPluginInputData,
+    ModelPluginOutputData,
+)
 
 __all__ = [
     "PluginInputData",
     "PluginContext",
     "PluginOutputData",
+    "ModelPluginInputData",
+    "ModelPluginContext",
+    "ModelPluginOutputData",
     "ProtocolPluginCompute",
 ]
 
+# Type aliases for backwards compatibility
+# These map the legacy TypedDict names to their Pydantic model replacements
+PluginInputData = ModelPluginInputData
+"""Type alias for backwards compatibility.
 
-class PluginInputData(TypedDict, total=False):
-    """Base structure for plugin input data.
+Deprecated: Use ModelPluginInputData directly for new code.
+This alias maps to ModelPluginInputData Pydantic model which replaces
+the former TypedDict definition.
+"""
 
-    This TypedDict defines the expected structure for input_data parameter.
-    Plugins may extend or specialize this structure based on their requirements.
+PluginContext = ModelPluginContext
+"""Type alias for backwards compatibility.
 
-    Attributes:
-        All fields are optional by default (total=False).
-        Concrete plugins should document their required fields.
+Deprecated: Use ModelPluginContext directly for new code.
+This alias maps to ModelPluginContext Pydantic model which replaces
+the former TypedDict definition.
+"""
 
-    Example:
-        ```python
-        class JsonNormalizerInput(TypedDict):
-            json: dict[str, object]  # Required field for JSON normalizer
+PluginOutputData = ModelPluginOutputData
+"""Type alias for backwards compatibility.
 
-        # Runtime validation in validate_input()
-        def validate_input(self, input_data: PluginInputData) -> None:
-            if "json" not in input_data:
-                raise ValueError("Missing required field: json")
-        ```
-
-    Note:
-        This is a base type hint. Runtime validation should be performed
-        in the validate_input() method to ensure type safety.
-    """
-
-
-class PluginContext(TypedDict, total=False):
-    """Base structure for plugin execution context.
-
-    This TypedDict defines the expected structure for context parameter.
-    Common context fields include correlation IDs, timestamps, and configuration.
-
-    Common Fields:
-        correlation_id: UUID for distributed tracing
-        execution_timestamp: When execution started (deterministic if provided)
-        plugin_config: Plugin-specific configuration parameters
-        metadata: Additional metadata for observability
-
-    Example:
-        ```python
-        context: PluginContext = {
-            "correlation_id": uuid4(),
-            "execution_timestamp": "2025-01-15T12:00:00Z",
-            "plugin_config": {"max_depth": 10},
-            "metadata": {"source": "api_gateway"},
-        }
-        ```
-
-    Note:
-        All fields are optional (total=False). Plugins should document
-        which context fields they require in their validate_input() method.
-    """
-
-
-class PluginOutputData(TypedDict, total=False):
-    """Base structure for plugin output data.
-
-    This TypedDict defines the expected structure for return values.
-    Plugins may extend or specialize this structure based on their outputs.
-
-    Common Fields:
-        result: Primary computation result
-        metadata: Output metadata (execution time, version, etc.)
-        errors: List of validation or computation errors
-        warnings: List of non-fatal warnings
-
-    Example:
-        ```python
-        output: PluginOutputData = {
-            "result": {"normalized": {...}},
-            "metadata": {
-                "execution_time_ms": 15,
-                "plugin_version": "1.0.0",
-            },
-            "errors": [],
-            "warnings": [],
-        }
-        ```
-
-    Note:
-        This is a base type hint. Concrete plugins should define their
-        own output structure TypedDict for stronger type safety.
-    """
+Deprecated: Use ModelPluginOutputData directly for new code.
+This alias maps to ModelPluginOutputData Pydantic model which replaces
+the former TypedDict definition.
+"""
 
 
 @runtime_checkable

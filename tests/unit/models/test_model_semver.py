@@ -122,6 +122,26 @@ class TestModelSemVerFromString:
         with pytest.raises(ValueError):
             ModelSemVer.from_string("not-a-version")
 
+    def test_parse_non_string_raises_type_error(self) -> None:
+        """Test parsing non-string input raises TypeError."""
+        with pytest.raises(TypeError, match="version must be a string"):
+            ModelSemVer.from_string(123)  # type: ignore[arg-type]
+
+    def test_parse_none_raises_type_error(self) -> None:
+        """Test parsing None raises TypeError."""
+        with pytest.raises(TypeError, match="version must be a string"):
+            ModelSemVer.from_string(None)  # type: ignore[arg-type]
+
+    def test_parse_empty_string_raises_value_error(self) -> None:
+        """Test parsing empty string raises ValueError."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            ModelSemVer.from_string("")
+
+    def test_parse_whitespace_only_raises_value_error(self) -> None:
+        """Test parsing whitespace-only string raises ValueError."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            ModelSemVer.from_string("   ")
+
 
 class TestModelSemVerComparison:
     """Test ModelSemVer comparison operations."""
@@ -171,6 +191,18 @@ class TestModelSemVerComparison:
         """Test comparison with non-ModelSemVer returns NotImplemented."""
         version = ModelSemVer(major=1, minor=0, patch=0)
         result = version.__lt__("1.0.0")
+        assert result is NotImplemented
+
+    def test_comparison_with_non_semver_raises_type_error(self) -> None:
+        """Test < operator with non-ModelSemVer raises TypeError."""
+        version = ModelSemVer(major=1, minor=0, patch=0)
+        with pytest.raises(TypeError):
+            _ = version < "1.0.0"  # type: ignore[operator]
+
+    def test_eq_with_non_semver_returns_not_implemented(self) -> None:
+        """Test __eq__ with non-ModelSemVer returns NotImplemented."""
+        version = ModelSemVer(major=1, minor=0, patch=0)
+        result = version.__eq__("1.0.0")
         assert result is NotImplemented
 
 
@@ -235,3 +267,204 @@ class TestModelSemVerValidation:
         """Test zero version (0.0.0) is valid."""
         version = ModelSemVer(major=0, minor=0, patch=0)
         assert str(version) == "0.0.0"
+
+
+class TestModelSemVerFromTuple:
+    """Test ModelSemVer.from_tuple() parsing."""
+
+    def test_basic_tuple(self) -> None:
+        """Test creating version from basic tuple."""
+        version = ModelSemVer.from_tuple((1, 2, 3))
+        assert version.major == 1
+        assert version.minor == 2
+        assert version.patch == 3
+        assert version.prerelease is None
+        assert version.build is None
+
+    def test_tuple_with_prerelease(self) -> None:
+        """Test creating version from tuple with prerelease."""
+        version = ModelSemVer.from_tuple((1, 0, 0), prerelease="alpha")
+        assert version.major == 1
+        assert version.minor == 0
+        assert version.patch == 0
+        assert version.prerelease == "alpha"
+
+    def test_tuple_with_build(self) -> None:
+        """Test creating version from tuple with build metadata."""
+        version = ModelSemVer.from_tuple((2, 1, 0), build="build123")
+        assert version.major == 2
+        assert version.minor == 1
+        assert version.patch == 0
+        assert version.build == "build123"
+
+    def test_tuple_with_prerelease_and_build(self) -> None:
+        """Test creating version from tuple with both prerelease and build."""
+        version = ModelSemVer.from_tuple((1, 0, 0), prerelease="beta", build="abc123")
+        assert version.prerelease == "beta"
+        assert version.build == "abc123"
+
+    def test_zero_tuple_valid(self) -> None:
+        """Test zero version tuple (0, 0, 0) is valid."""
+        version = ModelSemVer.from_tuple((0, 0, 0))
+        assert str(version) == "0.0.0"
+
+    def test_wrong_length_tuple_raises_error(self) -> None:
+        """Test tuple with wrong number of elements raises ValueError."""
+        with pytest.raises(ValueError, match="exactly 3 elements"):
+            ModelSemVer.from_tuple((1, 2))  # type: ignore[arg-type]
+
+        with pytest.raises(ValueError, match="exactly 3 elements"):
+            ModelSemVer.from_tuple((1, 2, 3, 4))  # type: ignore[arg-type]
+
+    def test_non_tuple_raises_type_error(self) -> None:
+        """Test non-tuple input raises TypeError."""
+        with pytest.raises(TypeError, match="Expected tuple"):
+            ModelSemVer.from_tuple([1, 2, 3])  # type: ignore[arg-type]
+
+    def test_non_integer_element_raises_type_error(self) -> None:
+        """Test non-integer elements raise TypeError."""
+        with pytest.raises(TypeError, match="must be an integer"):
+            ModelSemVer.from_tuple((1, "2", 3))  # type: ignore[arg-type]
+
+        with pytest.raises(TypeError, match="must be an integer"):
+            ModelSemVer.from_tuple((1.5, 2, 3))  # type: ignore[arg-type]
+
+    def test_negative_element_raises_value_error(self) -> None:
+        """Test negative elements raise ValueError."""
+        with pytest.raises(ValueError, match="must be non-negative"):
+            ModelSemVer.from_tuple((-1, 0, 0))
+
+        with pytest.raises(ValueError, match="must be non-negative"):
+            ModelSemVer.from_tuple((1, -1, 0))
+
+        with pytest.raises(ValueError, match="must be non-negative"):
+            ModelSemVer.from_tuple((1, 0, -1))
+
+
+class TestModelSemVerTotalOrdering:
+    """Test @total_ordering generated comparison operators."""
+
+    def test_less_than_or_equal(self) -> None:
+        """Test __le__ operator (generated by @total_ordering)."""
+        v1 = ModelSemVer(major=1, minor=0, patch=0)
+        v2 = ModelSemVer(major=2, minor=0, patch=0)
+        v3 = ModelSemVer(major=1, minor=0, patch=0)
+
+        assert v1 <= v2
+        assert v1 <= v3
+        assert not (v2 <= v1)
+
+    def test_greater_than(self) -> None:
+        """Test __gt__ operator (generated by @total_ordering)."""
+        v1 = ModelSemVer(major=1, minor=0, patch=0)
+        v2 = ModelSemVer(major=2, minor=0, patch=0)
+
+        assert v2 > v1
+        assert not (v1 > v2)
+
+    def test_greater_than_or_equal(self) -> None:
+        """Test __ge__ operator (generated by @total_ordering)."""
+        v1 = ModelSemVer(major=1, minor=0, patch=0)
+        v2 = ModelSemVer(major=2, minor=0, patch=0)
+        v3 = ModelSemVer(major=2, minor=0, patch=0)
+
+        assert v2 >= v1
+        assert v2 >= v3
+        assert not (v1 >= v2)
+
+    def test_sorting_with_total_ordering(self) -> None:
+        """Test that versions sort correctly using total_ordering operators."""
+        versions = [
+            ModelSemVer(major=2, minor=0, patch=0),
+            ModelSemVer(major=1, minor=1, patch=0),
+            ModelSemVer(major=1, minor=0, patch=0),
+            ModelSemVer(major=1, minor=0, patch=1),
+        ]
+        sorted_versions = sorted(versions)
+        expected = [
+            ModelSemVer(major=1, minor=0, patch=0),
+            ModelSemVer(major=1, minor=0, patch=1),
+            ModelSemVer(major=1, minor=1, patch=0),
+            ModelSemVer(major=2, minor=0, patch=0),
+        ]
+        assert sorted_versions == expected
+
+    def test_prerelease_sorting(self) -> None:
+        """Test sorting with prerelease versions."""
+        versions = [
+            ModelSemVer(major=1, minor=0, patch=0),  # Release
+            ModelSemVer(major=1, minor=0, patch=0, prerelease="beta"),
+            ModelSemVer(major=1, minor=0, patch=0, prerelease="alpha"),
+        ]
+        sorted_versions = sorted(versions)
+        # alpha < beta < release
+        assert sorted_versions[0].prerelease == "alpha"
+        assert sorted_versions[1].prerelease == "beta"
+        assert sorted_versions[2].prerelease is None
+
+
+class TestModelSemVerEquality:
+    """Test ModelSemVer equality and hash operations."""
+
+    def test_equal_versions(self) -> None:
+        """Test equal versions compare as equal."""
+        v1 = ModelSemVer(major=1, minor=2, patch=3)
+        v2 = ModelSemVer(major=1, minor=2, patch=3)
+        assert v1 == v2
+
+    def test_equal_versions_with_prerelease(self) -> None:
+        """Test equal versions with prerelease compare as equal."""
+        v1 = ModelSemVer(major=1, minor=0, patch=0, prerelease="alpha")
+        v2 = ModelSemVer(major=1, minor=0, patch=0, prerelease="alpha")
+        assert v1 == v2
+
+    def test_different_prerelease_not_equal(self) -> None:
+        """Test versions with different prerelease are not equal."""
+        v1 = ModelSemVer(major=1, minor=0, patch=0, prerelease="alpha")
+        v2 = ModelSemVer(major=1, minor=0, patch=0, prerelease="beta")
+        assert v1 != v2
+
+    def test_build_metadata_ignored_in_equality(self) -> None:
+        """Test build metadata is ignored in equality per semver spec."""
+        v1 = ModelSemVer(major=1, minor=0, patch=0, build="build1")
+        v2 = ModelSemVer(major=1, minor=0, patch=0, build="build2")
+        assert v1 == v2
+
+    def test_hash_equal_versions(self) -> None:
+        """Test equal versions have same hash."""
+        v1 = ModelSemVer(major=1, minor=2, patch=3)
+        v2 = ModelSemVer(major=1, minor=2, patch=3)
+        assert hash(v1) == hash(v2)
+
+    def test_hash_different_versions(self) -> None:
+        """Test different versions have different hash (usually)."""
+        v1 = ModelSemVer(major=1, minor=0, patch=0)
+        v2 = ModelSemVer(major=2, minor=0, patch=0)
+        assert hash(v1) != hash(v2)
+
+    def test_usable_in_set(self) -> None:
+        """Test ModelSemVer can be used in sets."""
+        v1 = ModelSemVer(major=1, minor=0, patch=0)
+        v2 = ModelSemVer(major=1, minor=0, patch=0)
+        v3 = ModelSemVer(major=2, minor=0, patch=0)
+
+        version_set = {v1, v2, v3}
+        assert len(version_set) == 2  # v1 and v2 are equal
+
+    def test_usable_as_dict_key(self) -> None:
+        """Test ModelSemVer can be used as dict key."""
+        v1 = ModelSemVer(major=1, minor=0, patch=0)
+        v2 = ModelSemVer(major=1, minor=0, patch=0)
+
+        version_dict = {v1: "first"}
+        version_dict[v2] = "second"
+
+        assert len(version_dict) == 1
+        assert version_dict[v1] == "second"
+
+    def test_equality_with_non_semver_returns_false(self) -> None:
+        """Test equality with non-ModelSemVer returns False via NotImplemented."""
+        version = ModelSemVer(major=1, minor=0, patch=0)
+        assert version != "1.0.0"
+        assert version != 100
+        assert version != (1, 0, 0)
