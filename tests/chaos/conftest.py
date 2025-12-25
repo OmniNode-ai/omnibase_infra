@@ -31,9 +31,8 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -46,10 +45,6 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
 )
 from omnibase_infra.idempotency import InMemoryIdempotencyStore
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
 
 # =============================================================================
 # Chaos Injection Models
@@ -204,10 +199,25 @@ class FailureInjector:
 
 @dataclass
 class NetworkPartitionSimulator:
-    """Simulates network partitions for event bus testing.
+    """Simulator for network partitions in event bus testing.
 
-    This class manages simulated network partition state for testing
-    how the system handles connectivity issues.
+    Manage simulated network partition state for testing how the system
+    handles connectivity issues.
+
+    Thread Safety:
+        This simulator is designed for **single asyncio event loop** usage with
+        cooperative concurrency. It is NOT thread-safe for multi-threaded access.
+
+        The ``asyncio.Lock`` (``self._lock``) protects state mutations in
+        ``simulate_partition_healing`` to prevent race conditions when multiple
+        concurrent calls attempt to modify ``is_partitioned``.
+
+        Lock Scope:
+            - PROTECTED: ``end_partition()`` call (modifies is_partitioned state)
+            - NOT PROTECTED: Reconnection callbacks (may trigger I/O operations)
+
+        Callbacks execute outside the lock to avoid potential deadlocks if callbacks
+        attempt to acquire the same lock or perform long-running I/O.
 
     Attributes:
         is_partitioned: Whether a partition is currently active.
@@ -217,7 +227,10 @@ class NetworkPartitionSimulator:
 
     is_partitioned: bool = False
     partition_start_time: float | None = None
-    reconnection_callbacks: list[AsyncMock] = field(default_factory=list)
+    reconnection_callbacks: list[Callable[[], Awaitable[None]]] = field(
+        default_factory=list
+    )
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def start_partition(self) -> None:
         """Start a network partition simulation."""
@@ -235,20 +248,31 @@ class NetworkPartitionSimulator:
     ) -> None:
         """Simulate partition healing with delay.
 
+        Thread Safety:
+            Acquires ``_lock`` before calling ``end_partition()`` to ensure
+            atomic state transition. Callbacks execute outside the lock to
+            allow concurrent I/O operations without holding the lock.
+
         Args:
             duration_ms: Duration to wait before healing partition.
         """
         await asyncio.sleep(duration_ms / 1000.0)
-        self.end_partition()
-        # Invoke reconnection callbacks
+
+        # Acquire lock for atomic state transition
+        async with self._lock:
+            self.end_partition()
+
+        # Invoke reconnection callbacks outside lock (may trigger I/O)
         for callback in self.reconnection_callbacks:
             await callback()
 
-    def add_reconnection_callback(self, callback: AsyncMock) -> None:
+    def add_reconnection_callback(
+        self, callback: Callable[[], Awaitable[None]]
+    ) -> None:
         """Add a callback to invoke on reconnection.
 
         Args:
-            callback: Async callback to invoke.
+            callback: Async callback to invoke (must be callable returning Awaitable).
         """
         self.reconnection_callbacks.append(callback)
 

@@ -139,10 +139,10 @@ def compare_outputs(
 
 @dataclass
 class OrderingViolation:
-    """Represents an ordering violation in an event sequence.
+    """An ordering violation in an event sequence.
 
-    Used to capture and report violations in event ordering, such as
-    out-of-order timestamps or sequence number gaps.
+    Capture and report violations in event ordering, such as out-of-order
+    timestamps or sequence number gaps.
 
     Attributes:
         position: Index in the sequence where violation occurred.
@@ -373,19 +373,24 @@ class EventFactory:
     Provides methods for creating single events or sequences of events.
 
     Attributes:
-        id_gen: Deterministic UUID generator.
+        seed: Seed for deterministic UUID generation (default: 100).
+        id_gen: Deterministic UUID generator (initialized from seed).
         clock: Deterministic timestamp generator.
 
     Example:
-        >>> factory = EventFactory()
+        >>> factory = EventFactory()  # Uses default seed=100
+        >>> factory = EventFactory(seed=42)  # Custom seed
         >>> event = factory.create_event(node_type="effect")
         >>> events = factory.create_event_sequence(count=5)
     """
 
-    id_gen: DeterministicIdGenerator = field(
-        default_factory=lambda: DeterministicIdGenerator(seed=100)
-    )
+    seed: int = 100
+    id_gen: DeterministicIdGenerator = field(init=False)
     clock: DeterministicClock = field(default_factory=DeterministicClock)
+
+    def __post_init__(self) -> None:
+        """Initialize id_gen with the configured seed."""
+        self.id_gen = DeterministicIdGenerator(seed=self.seed)
 
     def create_event(
         self,
@@ -453,9 +458,10 @@ class EventFactory:
     def reset(self) -> None:
         """Reset the factory's generators to initial state.
 
+        Resets id_gen with the configured seed and clock to initial timestamp.
         Useful for resetting between test cases to ensure reproducibility.
         """
-        self.id_gen.reset(seed=100)
+        self.id_gen.reset(seed=self.seed)
         self.clock.reset()
 
 
@@ -472,9 +478,9 @@ def create_introspection_event(
     node_version: str = "1.0.0",
     endpoints: dict[str, str] | None = None,
 ) -> ModelNodeIntrospectionEvent:
-    """Factory for creating introspection events with controlled parameters.
+    """Create an introspection event with controlled parameters.
 
-    Convenience function for creating events with explicit parameters.
+    Provide a convenience function for creating events with explicit parameters.
     For deterministic testing, use EventFactory instead.
 
     Args:

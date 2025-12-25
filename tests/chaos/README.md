@@ -171,6 +171,26 @@ DLQError: Message moved to DLQ after N retries
 - [Circuit Breaker Implementation](../../docs/patterns/circuit_breaker_implementation.md)
 - [Retry Backoff Compensation Strategy](../../docs/patterns/retry_backoff_compensation_strategy.md)
 
+## CI Optimization
+
+Run only fast tests (excludes slow markers):
+
+```bash
+pytest tests/chaos/ -m "not slow" -v
+```
+
+Run only chaos tests without slow tests:
+
+```bash
+pytest -m "chaos and not slow" -v
+```
+
+Run slow tests separately (useful for nightly builds):
+
+```bash
+pytest tests/chaos/ -m "slow" -v
+```
+
 ## Related Tickets
 
 - OMN-955: Chaos scenario tests

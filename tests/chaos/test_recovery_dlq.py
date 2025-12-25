@@ -50,7 +50,6 @@ Related:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import cast
@@ -163,7 +162,7 @@ class MockDLQStore:
 
     async def send_to_dlq(
         self,
-        original_message: Mapping[str, object],
+        original_message: dict[str, object],
         failure_context: ModelFailureContext,
         dlq_metadata: ModelDLQMetadata,
     ) -> ModelDLQMessage:
@@ -177,10 +176,9 @@ class MockDLQStore:
         Returns:
             The DLQ message that was stored.
         """
-        # Convert Mapping to dict for storage
         dlq_message = ModelDLQMessage(
             message_id=uuid4(),
-            original_message=dict(original_message),
+            original_message=original_message,
             failure_context=failure_context,
             dlq_metadata=dlq_metadata,
         )
@@ -272,7 +270,7 @@ class MessageProcessorWithDLQ:
 
     async def process_message(
         self,
-        message: Mapping[str, object],
+        message: dict[str, object],
         source_topic: str = "test-topic",
         should_fail: bool = False,
         fail_count: int | None = None,
@@ -688,7 +686,7 @@ class TestDLQMetadata:
                 max_retries=max_retries,
             )
 
-            # Explicit type annotation satisfies Mapping[str, object] variance
+            # Explicit type annotation for clarity
             test_message: dict[str, object] = {"test": max_retries}
             await processor.process_message(
                 message=test_message,
