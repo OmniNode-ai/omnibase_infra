@@ -27,7 +27,7 @@ Core intent definitions:
 
 **Dependencies resolved by contract/container**:
 - Consul handler (`ConsulHandler`)
-- DB handler (`DbAdapter`)
+- DB handler (`DbHandler`)
 - Event bus (`ProtocolEventBus` in the contract, implemented by KafkaEventBus/InMemoryEventBus)
 
 ### External systems (executed by the Effect node)

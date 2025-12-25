@@ -986,7 +986,7 @@ if is_open:
 - Protocol definition: OMN-861 (Phase 2 - omnibase_spi)
 - Implementation: `src/omnibase_infra/mixins/mixin_async_circuit_breaker.py`
 - Thread safety docs: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`
-- Example usage: VaultAdapter, KafkaEventBus integration
+- Example usage: VaultHandler, KafkaEventBus integration
 - Error handling: See "Error Recovery Patterns" section above
 
 **Best Practices**:
@@ -1110,7 +1110,7 @@ The mixin includes several filtering mechanisms to limit exposure:
 > **Note on Example Models**: The following example uses simplified `NodeInput` and `NodeOutput`
 > placeholder models for demonstration purposes only. These are **not** production model names.
 > In production ONEX nodes, input/output models follow the `Model<NodeName>Input` and
-> `Model<NodeName>Output` naming convention (e.g., `ModelVaultAdapterInput`, `ModelKafkaAdapterOutput`).
+> `Model<NodeName>Output` naming convention (e.g., `ModelVaultHandlerInput`, `ModelKafkaAdapterOutput`).
 > See the "File & Class Naming Conventions" section above for complete naming rules.
 
 ```python
@@ -1121,8 +1121,8 @@ from omnibase_infra.mixins import MixinNodeIntrospection
 
 # Simplified placeholder models for demonstration purposes.
 # In production ONEX nodes, these would be named following the convention:
-# - Model<NodeName>Input (e.g., ModelVaultAdapterInput, ModelConsulAdapterInput)
-# - Model<NodeName>Output (e.g., ModelVaultAdapterOutput, ModelConsulAdapterOutput)
+# - Model<NodeName>Input (e.g., ModelVaultHandlerInput, ModelConsulAdapterInput)
+# - Model<NodeName>Output (e.g., ModelVaultHandlerOutput, ModelConsulAdapterOutput)
 # See docs/architecture/CURRENT_NODE_ARCHITECTURE.md for full examples.
 
 
@@ -1263,7 +1263,7 @@ Infrastructure tools follow ONEX 4-node architecture:
 |---------|---------|
 | `consul_adapter` | Service discovery |
 | `kafka_adapter` | Event streaming |
-| `vault_adapter` | Secret management |
+| `vault_handler` | Secret management |
 | `postgres_adapter` | Database operations |
 
 ## 🤖 Agent Architecture

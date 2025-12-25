@@ -8,7 +8,7 @@ Note on row typing:
     Database rows are typed as list[dict[str, JsonValue]] because:
     1. Column names are dynamic (determined by SQL query)
     2. Column types are heterogeneous (str, int, float, datetime, etc.)
-    3. The adapter returns generic rows that callers must interpret
+    3. The handler returns generic rows that callers must interpret
 
     For strongly-typed domain models, callers should map these generic
     rows to their specific Pydantic models after retrieval.
