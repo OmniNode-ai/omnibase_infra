@@ -46,6 +46,7 @@ class ModelNodeRegistrationAccepted(BaseModel):
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     causation_id=uuid4(),
+        ...     emitted_at=datetime.now(UTC),
         ...     ack_deadline=datetime.now(UTC) + timedelta(seconds=30),
         ... )
     """

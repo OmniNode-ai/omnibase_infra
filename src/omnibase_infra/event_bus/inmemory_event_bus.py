@@ -47,6 +47,7 @@ import json
 import logging
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -281,6 +282,7 @@ class InMemoryEventBus:
             headers = ModelEventHeaders(
                 source=f"{self._environment}.{self._group}",
                 event_type=topic,
+                timestamp=datetime.now(UTC),
             )
 
         async with self._lock:
@@ -387,6 +389,7 @@ class InMemoryEventBus:
             source=f"{self._environment}.{self._group}",
             event_type=topic,
             content_type="application/json",
+            timestamp=datetime.now(UTC),
         )
 
         await self.publish(topic, None, value, headers)
@@ -484,6 +487,7 @@ class InMemoryEventBus:
             source=f"{self._environment}.{self._group}",
             event_type="broadcast",
             content_type="application/json",
+            timestamp=datetime.now(UTC),
         )
 
         await self.publish(topic, None, value, headers)
@@ -511,6 +515,7 @@ class InMemoryEventBus:
             source=f"{self._environment}.{self._group}",
             event_type="group_command",
             content_type="application/json",
+            timestamp=datetime.now(UTC),
         )
 
         await self.publish(topic, None, value, headers)

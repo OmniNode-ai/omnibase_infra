@@ -21,19 +21,20 @@ Related Tickets:
 
 Exports:
     NodeRegistrationOrchestrator: The registration workflow orchestrator node
-    ModelOrchestratorContext: Context model for orchestrator handlers
     HandlerNodeIntrospected: Handler for NodeIntrospectionEvent
     HandlerNodeRegistrationAcked: Handler for NodeRegistrationAcked command
     HandlerRuntimeTick: Handler for RuntimeTick timeout detection
+
+Note:
+    For orchestrator context, use the canonical ModelOrchestratorContext from
+    omnibase_core.models.orchestrator, which provides time injection and
+    correlation tracking for orchestrator handler execution.
 """
 
 from omnibase_infra.orchestrators.registration.handlers import (
     HandlerNodeIntrospected,
     HandlerNodeRegistrationAcked,
     HandlerRuntimeTick,
-)
-from omnibase_infra.orchestrators.registration.models.model_orchestrator_context import (
-    ModelOrchestratorContext,
 )
 from omnibase_infra.orchestrators.registration.node_registration_orchestrator import (
     NodeRegistrationOrchestrator,
@@ -43,6 +44,5 @@ __all__: list[str] = [
     "HandlerNodeIntrospected",
     "HandlerNodeRegistrationAcked",
     "HandlerRuntimeTick",
-    "ModelOrchestratorContext",
     "NodeRegistrationOrchestrator",
 ]

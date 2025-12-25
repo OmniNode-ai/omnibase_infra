@@ -44,6 +44,7 @@ import logging
 import re
 import threading
 from collections import defaultdict
+from datetime import UTC, datetime
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
@@ -523,6 +524,7 @@ class MessageTypeRegistry:
             allowed_categories=frozenset([category]),
             domain_constraint=constraint,
             description=description,
+            registered_at=datetime.now(UTC),
         )
 
         self.register_message_type(entry)

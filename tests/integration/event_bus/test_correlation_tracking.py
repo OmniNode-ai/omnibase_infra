@@ -93,6 +93,7 @@ class TestCorrelationIdPropagation:
             source="test-publisher",
             event_type="test.correlation",
             correlation_id=original_correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(unique_topic, None, b"test-value", headers)
 
@@ -175,6 +176,7 @@ class TestCorrelationIdPropagation:
             source="test-publisher",
             event_type="test.multi-sub",
             correlation_id=original_correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(unique_topic, None, b"test-value", headers)
 
@@ -205,6 +207,7 @@ class TestCorrelationIdPropagation:
             source="test",
             event_type="test",
             correlation_id=test_correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(unique_topic, None, b"test", headers)
 
@@ -237,6 +240,7 @@ class TestCorrelationIdContextManagement:
             source="test-publisher",
             event_type="test.history",
             correlation_id=original_correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(unique_topic, None, b"test-value", headers)
 
@@ -272,6 +276,7 @@ class TestCorrelationIdContextManagement:
             correlation_id=original_correlation_id,
             trace_id=original_trace_id,
             span_id=original_span_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(unique_topic, None, b"test-value", headers)
 
@@ -304,6 +309,7 @@ class TestCorrelationIdContextManagement:
             trace_id="trace-123",
             span_id="span-child",
             parent_span_id="span-parent",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(unique_topic, None, b"test-value", headers)
 
@@ -342,6 +348,7 @@ class TestMultiHopCorrelationTracking:
                 event_type="test.hop2",
                 correlation_id=msg.headers.correlation_id,
                 trace_id=msg.headers.trace_id,
+                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
             )
             await event_bus.publish(topic2, None, b"processed", headers)
 
@@ -361,6 +368,7 @@ class TestMultiHopCorrelationTracking:
             event_type="test.hop1",
             correlation_id=original_correlation_id,
             trace_id="trace-multi-hop",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(topic1, None, b"initial", headers)
 
@@ -390,6 +398,7 @@ class TestMultiHopCorrelationTracking:
                 source="chain1",
                 event_type="chain2.event",
                 correlation_id=msg.headers.correlation_id,
+                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
             )
             await event_bus.publish(topic2, None, b"hop2", headers)
 
@@ -398,6 +407,7 @@ class TestMultiHopCorrelationTracking:
                 source="chain2",
                 event_type="chain3.event",
                 correlation_id=msg.headers.correlation_id,
+                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
             )
             await event_bus.publish(topic3, None, b"hop3", headers)
 
@@ -416,6 +426,7 @@ class TestMultiHopCorrelationTracking:
             source="originator",
             event_type="chain1.event",
             correlation_id=original_correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(topic1, None, b"start", headers)
 
@@ -449,6 +460,7 @@ class TestMultiHopCorrelationTracking:
                     source="fanout-processor",
                     event_type="fanout.target",
                     correlation_id=msg.headers.correlation_id,
+                    timestamp=datetime(2025, 1, 1, tzinfo=UTC),
                 )
                 await event_bus.publish(target_topic, None, b"fanned", headers)
 
@@ -470,6 +482,7 @@ class TestMultiHopCorrelationTracking:
             source="originator",
             event_type="fanout.source",
             correlation_id=original_correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(source_topic, None, b"start", headers)
 
@@ -520,6 +533,7 @@ class TestErrorScenarioCorrelation:
             source="test-publisher",
             event_type="test.error",
             correlation_id=original_correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(unique_topic, None, b"test-value", headers)
 
@@ -549,6 +563,7 @@ class TestErrorScenarioCorrelation:
             source="test-publisher",
             event_type="test.error-history",
             correlation_id=original_correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(unique_topic, None, b"test-value", headers)
 
@@ -588,6 +603,7 @@ class TestErrorScenarioCorrelation:
                 source="test-publisher",
                 event_type="test.cb",
                 correlation_id=uuid4(),  # Each message gets unique correlation ID
+                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
             )
             await event_bus.publish(unique_topic, None, f"msg-{i}".encode(), headers)
 
@@ -689,6 +705,7 @@ class TestDispatchContextCorrelation:
             dispatcher_id="test-dispatcher",
             correlation_id=correlation_id,
             trace_id=trace_id,
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         assert result.correlation_id == correlation_id
@@ -710,6 +727,7 @@ class TestDispatchContextCorrelation:
             status=EnumDispatchStatus.ROUTED,
             topic="test.dispatch",
             correlation_id=correlation_id,
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         error_result = result.with_error(

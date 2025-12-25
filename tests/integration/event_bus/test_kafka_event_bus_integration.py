@@ -23,6 +23,7 @@ import json
 import os
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -648,6 +649,7 @@ class TestKafkaEventBusHeaders:
             priority="high",
             trace_id="trace-123",
             span_id="span-456",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         await started_kafka_bus.publish(
@@ -709,6 +711,7 @@ class TestKafkaEventBusHeaders:
             source="correlation-test",
             event_type="test.correlation",
             correlation_id=test_correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         await started_kafka_bus.publish(

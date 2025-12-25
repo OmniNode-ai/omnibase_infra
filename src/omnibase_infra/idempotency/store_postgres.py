@@ -61,6 +61,7 @@ Security Note:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import UTC, datetime
@@ -118,7 +119,9 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
 
     Thread Safety:
         This store is thread-safe. The underlying asyncpg pool handles
-        connection management and concurrent access safely.
+        connection management and concurrent access safely. All metrics
+        updates are protected by ``_metrics_lock`` to ensure atomic
+        read-modify-write operations for observability counters.
 
     Example:
         >>> from uuid import uuid4
@@ -153,6 +156,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
         self._pool: asyncpg.Pool | None = None
         self._initialized: bool = False
         self._metrics = ModelIdempotencyStoreMetrics()
+        self._metrics_lock = asyncio.Lock()
 
         # Defense-in-depth: Validate table name at runtime even though
         # Pydantic config already validates it. This protects against:
@@ -166,7 +170,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
         """Return True if the store has been initialized."""
         return self._initialized
 
-    def get_metrics(self) -> ModelIdempotencyStoreMetrics:
+    async def get_metrics(self) -> ModelIdempotencyStoreMetrics:
         """Get current store metrics for observability.
 
         Returns a copy of the current metrics to prevent external mutation.
@@ -180,10 +184,14 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             - last_cleanup_deleted: Records deleted in last cleanup
             - last_cleanup_at: Timestamp of last cleanup
 
+        Thread Safety:
+            This method acquires ``_metrics_lock`` to return a consistent snapshot.
+
         Returns:
             Copy of current metrics.
         """
-        return self._metrics.model_copy()
+        async with self._metrics_lock:
+            return self._metrics.model_copy()
 
     def _validate_table_name(self, table_name: str) -> None:
         """Validate table name for SQL injection prevention (defense-in-depth).
@@ -450,8 +458,9 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 return is_new
 
         except asyncpg.QueryCanceledError as e:
-            self._metrics.total_checks += 1
-            self._metrics.error_count += 1
+            async with self._metrics_lock:
+                self._metrics.total_checks += 1
+                self._metrics.error_count += 1
             metrics_updated = True
             raise InfraTimeoutError(
                 f"Check and record timed out after {self._config.command_timeout}s",
@@ -459,16 +468,18 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 timeout_seconds=self._config.command_timeout,
             ) from e
         except asyncpg.PostgresConnectionError as e:
-            self._metrics.total_checks += 1
-            self._metrics.error_count += 1
+            async with self._metrics_lock:
+                self._metrics.total_checks += 1
+                self._metrics.error_count += 1
             metrics_updated = True
             raise InfraConnectionError(
                 "Database connection lost during check_and_record",
                 context=context,
             ) from e
         except asyncpg.PostgresError as e:
-            self._metrics.total_checks += 1
-            self._metrics.error_count += 1
+            async with self._metrics_lock:
+                self._metrics.total_checks += 1
+                self._metrics.error_count += 1
             metrics_updated = True
             raise RuntimeHostError(
                 f"Database error during check_and_record: {type(e).__name__}",
@@ -479,9 +490,10 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             # Exception handlers above set metrics_updated=True before re-raising,
             # so we only update here for the success path (no exception caught).
             if not metrics_updated:
-                self._metrics.total_checks += 1
-                if not is_new:
-                    self._metrics.duplicate_count += 1
+                async with self._metrics_lock:
+                    self._metrics.total_checks += 1
+                    if not is_new:
+                        self._metrics.duplicate_count += 1
 
     async def is_processed(
         self,
@@ -796,10 +808,11 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                     if batch_removed < effective_batch_size:
                         break
 
-            # Update cleanup metrics
-            self._metrics.total_cleanup_deleted += total_removed
-            self._metrics.last_cleanup_deleted = total_removed
-            self._metrics.last_cleanup_at = datetime.now(UTC)
+            # Update cleanup metrics (protected by lock for thread safety)
+            async with self._metrics_lock:
+                self._metrics.total_cleanup_deleted += total_removed
+                self._metrics.last_cleanup_deleted = total_removed
+                self._metrics.last_cleanup_at = datetime.now(UTC)
 
             logger.info(
                 "Cleaned up expired idempotency records",

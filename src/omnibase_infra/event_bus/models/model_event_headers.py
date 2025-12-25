@@ -6,7 +6,7 @@ ProtocolEventHeaders from omnibase_spi for use with event bus implementations.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -59,7 +59,8 @@ class ModelEventHeaders(BaseModel):
     content_type: str = Field(default="application/json")
     correlation_id: UUID = Field(default_factory=uuid4)
     message_id: UUID = Field(default_factory=uuid4)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
+    timestamp: datetime = Field(..., description="Message creation timestamp (must be explicitly provided)")
     source: str
     event_type: str
     schema_version: str = Field(default="1.0.0")

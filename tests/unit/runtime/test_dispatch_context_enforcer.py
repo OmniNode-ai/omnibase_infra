@@ -70,6 +70,7 @@ class MockMessageDispatcher:
             status=EnumDispatchStatus.SUCCESS,
             topic="test.events",
             dispatcher_id=self._dispatcher_id,
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
 

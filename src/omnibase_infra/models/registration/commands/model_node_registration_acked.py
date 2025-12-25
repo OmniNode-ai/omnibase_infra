@@ -55,6 +55,7 @@ class ModelNodeRegistrationAcked(BaseModel):
         >>> ack = ModelNodeRegistrationAcked(
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
+        ...     timestamp=datetime.now(UTC),
         ... )
         >>> assert ack.command_id is not None
         >>> assert ack.timestamp.tzinfo is not None

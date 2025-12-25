@@ -1216,6 +1216,7 @@ class MixinNodeIntrospection:
             version=self._introspection_version,
             reason="cache_refresh",
             correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
         )
 
         # Update cache - cast the model_dump output to our typed dict since we know

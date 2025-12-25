@@ -173,9 +173,10 @@ class ModelDispatcherRegistration(BaseModel):
     )
 
     # ---- Registration Metadata ----
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     registered_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="Timestamp when this dispatcher was registered (UTC).",
+        ...,
+        description="Timestamp when this dispatcher was registered (UTC, must be explicitly provided).",
     )
     version: str | None = Field(
         default=None,

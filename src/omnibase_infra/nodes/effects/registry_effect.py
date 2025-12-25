@@ -72,6 +72,7 @@ Related:
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from uuid import UUID
 
 from omnibase_infra.nodes.effects.models.model_backend_result import (
@@ -347,6 +348,7 @@ class NodeRegistryEffect:
             correlation_id=correlation_id,
             consul_result=consul_result,
             postgres_result=postgres_result,
+            timestamp=datetime.now(UTC),
         )
 
     async def _register_consul(

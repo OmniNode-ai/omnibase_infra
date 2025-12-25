@@ -20,7 +20,7 @@ Related:
 .. versionadded:: 0.5.0
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -154,9 +154,10 @@ class ModelMessageTypeEntry(BaseModel):
         description="Whether this entry is active. Disabled entries are skipped.",
     )
 
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     registered_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="Timestamp when this entry was registered (UTC).",
+        ...,
+        description="Timestamp when this entry was registered (UTC, must be explicitly provided).",
     )
 
     metadata: dict[str, str] | None = Field(

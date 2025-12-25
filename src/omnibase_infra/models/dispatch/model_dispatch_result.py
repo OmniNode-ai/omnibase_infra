@@ -160,9 +160,10 @@ class ModelDispatchResult(BaseModel):
         description="Time taken for the dispatch operation in milliseconds.",
         ge=0,
     )
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     started_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="Timestamp when the dispatch started (UTC).",
+        ...,
+        description="Timestamp when the dispatch started (UTC, must be explicitly provided).",
     )
     completed_at: datetime | None = Field(
         default=None,

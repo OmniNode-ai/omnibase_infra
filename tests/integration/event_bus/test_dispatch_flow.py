@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -86,6 +87,7 @@ class TestEndToEndDispatchFlow:
         headers = ModelEventHeaders(
             source="test-publisher",
             event_type="user.created",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(topic, b"user-123", b'{"name": "John"}', headers)
 
@@ -114,6 +116,7 @@ class TestEndToEndDispatchFlow:
         headers = ModelEventHeaders(
             source="test-publisher",
             event_type="create.user.command",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(topic, None, b'{"command": "create_user"}', headers)
 
@@ -140,6 +143,7 @@ class TestEndToEndDispatchFlow:
         headers = ModelEventHeaders(
             source="test-publisher",
             event_type="user.wants.checkout",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         await event_bus.publish(topic, None, b'{"intent": "checkout"}', headers)
 
@@ -338,13 +342,13 @@ class TestMessageCategoryRouting:
             event_topic,
             None,
             b"event-payload",
-            ModelEventHeaders(source="test", event_type="user.created"),
+            ModelEventHeaders(source="test", event_type="user.created", timestamp=datetime(2025, 1, 1, tzinfo=UTC)),
         )
         await event_bus.publish(
             command_topic,
             None,
             b"command-payload",
-            ModelEventHeaders(source="test", event_type="create.user"),
+            ModelEventHeaders(source="test", event_type="create.user", timestamp=datetime(2025, 1, 1, tzinfo=UTC)),
         )
 
         assert len(event_messages) == 1
@@ -709,6 +713,7 @@ class TestDispatchResult:
             topic="onex.user.events",
             route_id="user-route",
             dispatcher_id="user-dispatcher",
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         assert result.is_successful()
@@ -728,6 +733,7 @@ class TestDispatchResult:
             status=EnumDispatchStatus.HANDLER_ERROR,
             topic="onex.user.events",
             error_message="Handler failed",
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         assert result.is_error()
@@ -747,6 +753,7 @@ class TestDispatchResult:
             status=EnumDispatchStatus.ROUTED,
             topic="onex.user.events",
             route_id="user-route",
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         error_result = initial.with_error(
@@ -773,6 +780,7 @@ class TestDispatchResult:
             status=EnumDispatchStatus.ROUTED,
             topic="onex.user.events",
             route_id="user-route",
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         success_result = initial.with_success(
@@ -794,6 +802,7 @@ class TestDispatchResult:
         result = ModelDispatchResult(
             status=EnumDispatchStatus.TIMEOUT,
             topic="onex.user.events",
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         assert result.is_error()
@@ -809,17 +818,20 @@ class TestDispatchResult:
         success_result = ModelDispatchResult(
             status=EnumDispatchStatus.SUCCESS,
             topic="onex.user.events",
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         assert success_result.is_terminal()
 
         error_result = ModelDispatchResult(
             status=EnumDispatchStatus.HANDLER_ERROR,
             topic="onex.user.events",
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         assert error_result.is_terminal()
 
         routed_result = ModelDispatchResult(
             status=EnumDispatchStatus.ROUTED,
             topic="onex.user.events",
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         assert not routed_result.is_terminal()

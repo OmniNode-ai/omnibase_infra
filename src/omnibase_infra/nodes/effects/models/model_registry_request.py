@@ -24,7 +24,7 @@ Related:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -109,9 +109,10 @@ class ModelRegistryRequest(BaseModel):
         default=None,
         description="Optional health check configuration for Consul",
     )
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="When this request was created",
+        ...,
+        description="When this request was created (must be explicitly provided)",
     )
 
 

@@ -82,6 +82,7 @@ class TestModelEventHeadersValidation:
         headers = ModelEventHeaders(
             source="test-service",
             event_type="test.event",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         assert headers.source == "test-service"
@@ -142,8 +143,8 @@ class TestModelEventHeadersValidation:
         """Verify correlation_id is auto-generated when not provided."""
         from omnibase_infra.event_bus.models import ModelEventHeaders
 
-        headers1 = ModelEventHeaders(source="test", event_type="event")
-        headers2 = ModelEventHeaders(source="test", event_type="event")
+        headers1 = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
+        headers2 = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
 
         # Each should have unique auto-generated correlation_id
         assert headers1.correlation_id is not None
@@ -155,8 +156,8 @@ class TestModelEventHeadersValidation:
         """Verify message_id is auto-generated when not provided."""
         from omnibase_infra.event_bus.models import ModelEventHeaders
 
-        headers1 = ModelEventHeaders(source="test", event_type="event")
-        headers2 = ModelEventHeaders(source="test", event_type="event")
+        headers1 = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
+        headers2 = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
 
         # Each should have unique auto-generated message_id
         assert headers1.message_id is not None
@@ -164,16 +165,22 @@ class TestModelEventHeadersValidation:
         assert headers1.message_id != headers2.message_id
         assert isinstance(headers1.message_id, UUID)
 
-    def test_headers_default_timestamp_generation(self) -> None:
-        """Verify timestamp is auto-generated when not provided."""
+    def test_headers_timestamp_required(self) -> None:
+        """Verify timestamp is a required field (no default for time injection)."""
         from omnibase_infra.event_bus.models import ModelEventHeaders
 
-        before = datetime.now(UTC)
-        headers = ModelEventHeaders(source="test", event_type="event")
-        after = datetime.now(UTC)
+        # Should fail without timestamp (time injection pattern)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelEventHeaders(source="test", event_type="event")
+        assert "timestamp" in str(exc_info.value).lower()
 
-        assert headers.timestamp is not None
-        assert before <= headers.timestamp <= after
+        # Should work with explicit timestamp
+        headers = ModelEventHeaders(
+            source="test",
+            event_type="event",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+        assert headers.timestamp == datetime(2025, 1, 1, tzinfo=UTC)
 
     def test_headers_priority_validation(self) -> None:
         """Verify priority field only accepts valid values."""
@@ -185,6 +192,7 @@ class TestModelEventHeadersValidation:
                 source="test",
                 event_type="event",
                 priority=priority,
+                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
             )
             assert headers.priority == priority
 
@@ -194,6 +202,7 @@ class TestModelEventHeadersValidation:
                 source="test",
                 event_type="event",
                 priority="invalid",
+                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
             )
         assert "priority" in str(exc_info.value)
 
@@ -204,6 +213,7 @@ class TestModelEventHeadersValidation:
         headers = ModelEventHeaders(
             source="test-service",
             event_type="test.event",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         with pytest.raises(ValidationError):
@@ -217,6 +227,7 @@ class TestModelEventHeadersValidation:
             ModelEventHeaders(
                 source="test",
                 event_type="event",
+                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
                 unknown_field="value",
             )
         assert "extra" in str(exc_info.value).lower()
@@ -230,6 +241,7 @@ class TestModelEventHeadersValidation:
         valid_headers = ModelEventHeaders(
             source="test-service",
             event_type="test.event",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         assert await valid_headers.validate_headers() is True
 
@@ -238,6 +250,7 @@ class TestModelEventHeadersValidation:
             source="test-service",
             event_type="test.event",
             correlation_id=uuid4(),
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         assert await headers_with_corr.validate_headers() is True
 
@@ -254,7 +267,7 @@ class TestModelEventMessageValidation:
         """Verify message can be created with required fields."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
-        headers = ModelEventHeaders(source="test", event_type="event")
+        headers = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
         message = ModelEventMessage(
             topic="test.topic",
             value=b"test-value",
@@ -272,7 +285,7 @@ class TestModelEventMessageValidation:
         """Verify message accepts all valid fields."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
-        headers = ModelEventHeaders(source="test", event_type="event")
+        headers = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
         message = ModelEventMessage(
             topic="test.topic.v1",
             key=b"message-key",
@@ -293,7 +306,7 @@ class TestModelEventMessageValidation:
         """Verify message is immutable after creation."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
-        headers = ModelEventHeaders(source="test", event_type="event")
+        headers = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
         message = ModelEventMessage(
             topic="test.topic",
             value=b"test-value",
@@ -307,7 +320,7 @@ class TestModelEventMessageValidation:
         """Verify extra fields are rejected."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
-        headers = ModelEventHeaders(source="test", event_type="event")
+        headers = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
 
         with pytest.raises(ValidationError) as exc_info:
             ModelEventMessage(
@@ -333,7 +346,7 @@ class TestModelEventMessageValidation:
         """Verify message requires topic field."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
-        headers = ModelEventHeaders(source="test", event_type="event")
+        headers = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
 
         with pytest.raises(ValidationError) as exc_info:
             ModelEventMessage(
@@ -346,7 +359,7 @@ class TestModelEventMessageValidation:
         """Verify message requires value field."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
-        headers = ModelEventHeaders(source="test", event_type="event")
+        headers = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
 
         with pytest.raises(ValidationError) as exc_info:
             ModelEventMessage(
@@ -360,7 +373,7 @@ class TestModelEventMessageValidation:
         """Verify ack() method exists and is callable."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
-        headers = ModelEventHeaders(source="test", event_type="event")
+        headers = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
         message = ModelEventMessage(
             topic="test.topic",
             value=b"test-value",
@@ -410,7 +423,7 @@ class TestInvalidSchemaRejection:
         """Verify message with non-string topic is rejected."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
-        headers = ModelEventHeaders(source="test", event_type="event")
+        headers = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
 
         with pytest.raises(ValidationError):
             ModelEventMessage(
@@ -427,7 +440,7 @@ class TestInvalidSchemaRejection:
         """
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
-        headers = ModelEventHeaders(source="test", event_type="event")
+        headers = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
 
         with pytest.raises(ValidationError):
             ModelEventMessage(
@@ -510,6 +523,7 @@ class TestHeaderCompleteness:
             span_id="span-abc",
             priority="high",
             routing_key="custom.routing.key",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         await started_event_bus.publish(
@@ -596,7 +610,7 @@ class TestHeaderCompleteness:
 # =============================================================================
 
 
-class TestSchemaSerialzation:
+class TestSchemaSerialization:
     """Tests for schema serialization and deserialization."""
 
     def test_headers_json_serialization(self) -> None:
@@ -607,6 +621,7 @@ class TestSchemaSerialzation:
             source="test-service",
             event_type="test.event",
             priority="high",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         # Serialize to dict (JSON-compatible)
@@ -632,6 +647,7 @@ class TestSchemaSerialzation:
             span_id="span-456",
             priority="critical",
             routing_key="orders.priority",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         # Serialize to JSON string and back
@@ -650,7 +666,7 @@ class TestSchemaSerialzation:
         """Verify message can be serialized to JSON-compatible dict."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
-        headers = ModelEventHeaders(source="test", event_type="event")
+        headers = ModelEventHeaders(source="test", event_type="event", timestamp=datetime(2025, 1, 1, tzinfo=UTC))
         message = ModelEventMessage(
             topic="test.topic",
             key=b"key",

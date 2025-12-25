@@ -157,9 +157,10 @@ class ModelNodeIntrospectionEvent(BaseModel):
         description="Correlation ID for distributed tracing (required for idempotency)",
     )
 
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="UTC timestamp of introspection generation",
+        ...,
+        description="UTC timestamp of introspection generation (must be explicitly provided)",
     )
 
     # Design Decision: This model is immutable (frozen=True) because:

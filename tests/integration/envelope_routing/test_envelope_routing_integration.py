@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -871,6 +872,7 @@ class TestCorrelationIdPropagation:
             source="integration-test",
             event_type="envelope.test",
             correlation_id=correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         envelope = {

@@ -967,7 +967,8 @@ class MessageDispatchEngine:
         started_at = datetime.now(UTC)
 
         # Extract correlation/trace IDs for logging (kept as UUID, converted to string at serialization)
-        correlation_id = envelope.correlation_id
+        # Per ONEX guidelines: auto-generate correlation_id if not provided (uuid4())
+        correlation_id = envelope.correlation_id or uuid4()
         trace_id = envelope.trace_id
 
         # Update dispatch count (protected by lock for thread safety)
@@ -1014,7 +1015,7 @@ class MessageDispatchEngine:
                 error_message=f"Cannot infer message category from topic '{topic}'. "
                 "Topic must contain .events, .commands, .intents, or .projections segment.",
                 error_code=EnumCoreErrorCode.VALIDATION_ERROR,
-                correlation_id=envelope.correlation_id,
+                correlation_id=correlation_id,
             )
 
         # Log dispatch start at INFO level
@@ -1111,7 +1112,7 @@ class MessageDispatchEngine:
                 error_message=f"No dispatcher registered for category '{topic_category}' "
                 f"and message type '{message_type}' matching topic '{topic}'.",
                 error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
-                correlation_id=envelope.correlation_id,
+                correlation_id=correlation_id,
             )
 
         # Step 5: Execute dispatchers and collect outputs
@@ -1427,8 +1428,8 @@ class MessageDispatchEngine:
                 error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR
                 if dispatcher_errors
                 else None,
-                correlation_id=envelope.correlation_id,
-                trace_id=envelope.trace_id,
+                correlation_id=correlation_id,
+                trace_id=trace_id,
                 span_id=envelope.span_id,
             )
         except ValidationError as result_validation_error:
@@ -1458,7 +1459,7 @@ class MessageDispatchEngine:
                 duration_ms=duration_ms,
                 error_message=f"Internal error constructing dispatch result: {sanitized_result_error}",
                 error_code=EnumCoreErrorCode.INTERNAL_ERROR,
-                correlation_id=envelope.correlation_id,
+                correlation_id=correlation_id,
             )
 
     def _find_matching_dispatchers(

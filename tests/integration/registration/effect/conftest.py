@@ -17,6 +17,7 @@ Design Principles:
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -113,6 +114,7 @@ def sample_request() -> ModelRegistryRequest:
         tags=["onex", "effect", "test"],
         metadata={"environment": "test"},
         health_check_config={"HTTP": "http://localhost:8080/health"},
+        timestamp=datetime(2025, 1, 1, tzinfo=UTC),
     )
 
 
@@ -145,6 +147,7 @@ def request_factory() -> Callable[..., ModelRegistryRequest]:
             endpoints={"health": "http://localhost:8080/health"},
             tags=["onex", node_type, "test"],
             metadata={"environment": "test"},
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
     return _create_request

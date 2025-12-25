@@ -55,6 +55,7 @@ class ModelNodeRegistrationInitiated(BaseModel):
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     causation_id=uuid4(),
+        ...     emitted_at=datetime.now(UTC),
         ...     registration_attempt_id=uuid4(),
         ... )
     """

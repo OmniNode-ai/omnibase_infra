@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -122,6 +123,7 @@ def sample_headers() -> ModelEventHeaders:
         event_type="benchmark_event",
         priority="normal",
         content_type="application/json",
+        timestamp=datetime(2025, 1, 1, tzinfo=UTC),
     )
 
 
