@@ -37,21 +37,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-from omnibase_infra.mixins import ProtocolEventBusLike
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.projectors.projector_registration import ProjectorRegistration
 from omnibase_infra.services.timeout_scanner import TimeoutScanner
 
 if TYPE_CHECKING:
-    # Import models inside TYPE_CHECKING to avoid circular import.
-    # The circular import occurs because:
-    # 1. services/__init__.py imports timeout_emitter
-    # 2. timeout_emitter imports from node_registration_orchestrator.models
-    # 3. node_registration_orchestrator/__init__.py imports timeout_coordinator
-    # 4. timeout_coordinator imports from services (which is partially initialized)
-    #
-    # Using TYPE_CHECKING defers the import until type-checking time only.
-    # The actual model classes are imported at runtime inside the methods.
+    # Import protocols and models inside TYPE_CHECKING to avoid circular imports.
+    # ProtocolEventBus is used only for type annotations.
+    from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
+
     from omnibase_infra.nodes.node_registration_orchestrator.models.model_node_liveness_expired import (
         ModelNodeLivenessExpired as ModelNodeLivenessExpiredType,
     )
@@ -247,7 +241,7 @@ class TimeoutEmitter:
     def __init__(
         self,
         timeout_query: TimeoutScanner,
-        event_bus: ProtocolEventBusLike,
+        event_bus: ProtocolEventBus,
         projector: ProjectorRegistration,
         config: ModelTimeoutEmissionConfig | None = None,
     ) -> None:
@@ -257,7 +251,7 @@ class TimeoutEmitter:
             timeout_query: Scanner for querying overdue entities.
                 Must be initialized with a ProjectionReaderRegistration.
             event_bus: Event bus for publishing timeout events.
-                Must implement ProtocolEventBusLike (publish_envelope method).
+                Must implement ProtocolEventBus (publish_envelope method).
             projector: Projector for updating emission markers.
                 Must be initialized with an asyncpg connection pool.
             config: Configuration for environment and namespace.
