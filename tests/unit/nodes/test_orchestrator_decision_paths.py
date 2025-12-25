@@ -82,7 +82,20 @@ ALL_PUBLISHED_EVENT_TYPES = DECISION_PATH_EVENT_TYPES + [RESULT_EVENT_TYPE]
 
 # Topic pattern regex: {env}.{namespace}.onex.evt.<slug>.v1
 # The placeholders {env} and {namespace} are variable, followed by literal pattern
-TOPIC_PATTERN_REGEX = re.compile(r"^\{env\}\.\{namespace\}\.onex\.evt\.[a-z0-9-]+\.v1$")
+#
+# Kebab-case slug validation rules:
+#   - Must start with a lowercase letter [a-z]
+#   - Followed by optional lowercase alphanumeric characters [a-z0-9]*
+#   - Optional hyphen-separated segments (-[a-z0-9]+)* where each segment:
+#     - Starts with exactly one hyphen
+#     - Followed by one or more lowercase alphanumeric characters
+#   - No consecutive hyphens (--), no leading hyphen (-slug), no trailing hyphen (slug-)
+#
+# Valid examples: "node-registration-initiated", "node-became-active", "a1b2c3"
+# Invalid examples: "--double", "-leading", "trailing-", "has--double-hyphen"
+TOPIC_PATTERN_REGEX = re.compile(
+    r"^\{env\}\.\{namespace\}\.onex\.evt\.[a-z][a-z0-9]*(-[a-z0-9]+)*\.v1$"
+)
 
 # Event type to expected topic mapping for parametrized tests
 # Each tuple: (event_type, expected_topic, description)
