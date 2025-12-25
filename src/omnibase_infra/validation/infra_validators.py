@@ -369,10 +369,11 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 585 (2025-12-25): OMN-811 ComputeRegistry + node registration orchestrator unions (~5 added)
 # - 586 (2025-12-25): OMN-932 durable timeouts + introspection config migration (~1 added)
 # - 588 (2025-12-25): OMN-811 RegistryCompute merge (+2 unions)
+# - 589 (2025-12-25): OMN-881 PR review fixes - _EventBusType conditional alias (+1 union)
 #
-# Threshold: 588 (buffer above ~586 baseline for codebase growth)
+# Threshold: 589 (buffer above ~588 baseline for codebase growth)
 # Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
-INFRA_MAX_UNIONS = 588
+INFRA_MAX_UNIONS = 589
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

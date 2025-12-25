@@ -29,16 +29,17 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from omnibase_infra.mixins import MixinNodeIntrospection, ModelIntrospectionConfig
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
-from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
-from omnibase_infra.models.discovery.model_introspection_config import (
+from omnibase_infra.mixins import MixinNodeIntrospection
+from omnibase_infra.models.discovery import (
     DEFAULT_HEARTBEAT_TOPIC,
     DEFAULT_INTROSPECTION_TOPIC,
     DEFAULT_REQUEST_INTROSPECTION_TOPIC,
+    ModelIntrospectionConfig,
+    ModelNodeIntrospectionEvent,
 )
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 # Module-level markers
@@ -47,8 +48,7 @@ pytestmark = [
     pytest.mark.asyncio,
 ]
 
-# Test timing constants (in seconds)
-CACHE_TTL_WAIT = 0.15  # Wait for cache TTL expiration (TTL=0.1s + buffer)
+# Test timing constant (in seconds)
 LISTENER_SUBSCRIBE_WAIT = 0.1  # Time for listener to subscribe
 
 
@@ -202,7 +202,7 @@ class ContractDrivenEffectNode(MixinNodeIntrospection):
         # Create introspection config from contract data
         config = ModelIntrospectionConfig(**config_kwargs)
 
-        self.initialize_introspection_from_config(config)
+        self.initialize_introspection(config)
 
     async def execute_effect(
         self, operation: str, payload: dict[str, object]
@@ -249,7 +249,7 @@ class ComputeNodeWithCustomTopics(MixinNodeIntrospection):
             request_introspection_topic=f"onex.{domain}.introspection.requested.v1",
         )
 
-        self.initialize_introspection_from_config(config)
+        self.initialize_introspection(config)
 
     async def process_data(self, data: dict[str, object]) -> dict[str, object]:
         """Mock compute processing.
@@ -313,8 +313,6 @@ class TestContractToIntrospectionIntegration:
 
         # Verify node metadata from contract
         # node_id is now a UUID (generated at initialization)
-        from uuid import UUID
-
         assert isinstance(node._introspection_node_id, UUID)
         assert node._contract_node_name == "test-effect-node"
         assert node._introspection_node_type == "EFFECT"
@@ -988,7 +986,7 @@ class TestSubclassTopicOverrides:
                     heartbeat_topic="onex.tenant1.heartbeat.published.v1",
                     request_introspection_topic="onex.tenant1.introspection.requested.v1",
                 )
-                self.initialize_introspection_from_config(config)
+                self.initialize_introspection(config)
 
         node = TenantSpecificNode(node_id=test_node_id)
 
@@ -1022,7 +1020,7 @@ class TestSubclassTopicOverrides:
                 if introspection_topic is not None:
                     config_kwargs["introspection_topic"] = introspection_topic
                 config = ModelIntrospectionConfig(**config_kwargs)
-                self.initialize_introspection_from_config(config)
+                self.initialize_introspection(config)
 
         # Without topic override - uses model default
         node1 = PartialConfigNode(node_id=test_node_id_1)

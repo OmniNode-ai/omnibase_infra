@@ -616,8 +616,6 @@ class TestMixinNodeIntrospectionCaching:
 
     async def test_get_introspection_data_structure(self, mock_node: MockNode) -> None:
         """Test that get_introspection_data returns expected model."""
-        from uuid import UUID
-
         data = await mock_node.get_introspection_data()
 
         assert isinstance(data, ModelNodeIntrospectionEvent)

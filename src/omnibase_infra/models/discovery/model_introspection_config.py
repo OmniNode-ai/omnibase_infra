@@ -29,6 +29,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 if TYPE_CHECKING:
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
 
+    # Type alias for event_bus field - provides proper type during static analysis
+    type _EventBusType = ProtocolEventBus | None
+else:
+    # At runtime, use object | None for duck typing compatibility with Pydantic
+    # Pydantic cannot resolve TYPE_CHECKING-only imports, so we use object
+    # The mixin enforces protocol compliance at initialization
+    type _EventBusType = object | None
+
 logger = logging.getLogger(__name__)
 
 # Default topic constants following ONEX legacy conventions
@@ -122,10 +130,12 @@ class ModelIntrospectionConfig(BaseModel):
     )
 
     # Event bus for publishing introspection events.
-    # Uses `object | None` for runtime type since ProtocolEventBus is only available
-    # during TYPE_CHECKING. Duck typing is enforced by the mixin at initialization.
+    # Uses _EventBusType which provides:
+    # - ProtocolEventBus | None during static analysis (TYPE_CHECKING)
+    # - object | None at runtime for Pydantic compatibility
+    # Duck typing is enforced by the mixin at initialization.
     # The model config has arbitrary_types_allowed=True to support arbitrary objects.
-    event_bus: object | None = Field(
+    event_bus: _EventBusType = Field(
         default=None,
         description="Optional event bus for publishing introspection events. "
         "Must implement ProtocolEventBus protocol (duck typed).",

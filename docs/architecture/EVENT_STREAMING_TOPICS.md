@@ -841,7 +841,7 @@ The node code reads the contract and initializes `MixinNodeIntrospection` using 
 
 ```python
 # node.py - Initializing MixinNodeIntrospection with configuration
-from uuid import UUID
+from uuid import uuid4
 
 from omnibase_infra.mixins import MixinNodeIntrospection, ModelIntrospectionConfig
 from omnibase_infra.event_bus import KafkaEventBus
@@ -861,7 +861,7 @@ class RegistryEffectNode(MixinNodeIntrospection):
         # - HEARTBEAT_TOPIC = "node.heartbeat"
         # - REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
         config = ModelIntrospectionConfig(
-            node_id=UUID(contract.metadata.name) if isinstance(contract.metadata.name, str) else contract.metadata.name,
+            node_id=uuid4(),  # Generate unique node instance ID
             node_type=contract.metadata.node_type,
             version=contract.metadata.version,
             event_bus=event_bus,

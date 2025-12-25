@@ -96,11 +96,20 @@ class TestVaultAdapterConcurrency:
             # Use cycle() to prevent StopIteration when concurrent requests with
             # retries exhaust a finite list (Python 3.12+ raises TypeError when
             # StopIteration is raised into an async Future context)
-            responses_pattern = [
-                Exception("Connection error"),
-                {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}},
-                Exception("Connection error"),
-                {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}},
+            #
+            # IMPORTANT: Use string markers for errors instead of pre-created
+            # Exception objects. Exception instances are mutable (they carry
+            # __traceback__ state), so reusing the same Exception object across
+            # threads causes race conditions when multiple threads modify the
+            # traceback simultaneously.
+            success_response: dict[str, object] = {
+                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+            }
+            responses_pattern: list[dict[str, object] | str] = [
+                "error:Connection error",  # String marker - creates fresh Exception
+                success_response,
+                "error:Connection error",
+                success_response,
             ]
             response_cycle = cycle(responses_pattern)
 
@@ -114,18 +123,23 @@ class TestVaultAdapterConcurrency:
 
                 When using a callable for side_effect, mock does NOT automatically
                 raise exceptions - it returns them as values. We must explicitly
-                raise Exception items from the cycle.
+                raise exceptions for error markers.
 
-                The entire response retrieval, type check, and return/raise must
-                be atomic to prevent race conditions during concurrent access from
-                the ThreadPoolExecutor. While response is a local variable after
-                next(), keeping all operations in the critical section ensures
-                deterministic behavior and makes thread safety obvious.
+                Thread safety is ensured by:
+                1. Lock protects the shared iterator (response_cycle)
+                2. Fresh Exception instances are created inside the lock
+                3. No mutable state is shared between concurrent calls
+
+                Using string markers ("error:message") instead of pre-created
+                Exception objects ensures each thread gets its own Exception
+                instance with independent __traceback__ state.
                 """
                 with cycle_lock:
                     response = next(response_cycle)
-                    if isinstance(response, Exception):
-                        raise response
+                    if isinstance(response, str) and response.startswith("error:"):
+                        # Create fresh RuntimeError instance for thread safety
+                        # Using RuntimeError instead of base Exception per TRY002
+                        raise RuntimeError(response[6:])
                     return response
 
             mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
