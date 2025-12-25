@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -767,6 +767,192 @@ def correlation_id() -> UUID:
         UUID: A fresh UUID4 for correlation tracking.
     """
     return uuid4()
+
+
+# =============================================================================
+# Common Test Utilities
+# =============================================================================
+
+
+async def gather_with_error_collection(
+    coroutines: list,
+    *,
+    return_exceptions: bool = True,
+) -> tuple[list[object], list[Exception]]:
+    """Execute coroutines concurrently and separate successes from failures.
+
+    This utility simplifies the common pattern of running multiple async
+    operations and classifying their outcomes.
+
+    Args:
+        coroutines: List of coroutines to execute concurrently.
+        return_exceptions: If True, exceptions are captured instead of raised.
+
+    Returns:
+        Tuple of (successful_results, exceptions).
+
+    Example:
+        >>> async def may_fail(i: int) -> str:
+        ...     if i % 2 == 0:
+        ...         raise ValueError("Even number")
+        ...     return f"success_{i}"
+        ...
+        >>> successes, failures = await gather_with_error_collection(
+        ...     [may_fail(i) for i in range(5)]
+        ... )
+        >>> assert len(successes) == 2  # 1, 3
+        >>> assert len(failures) == 3   # 0, 2, 4
+    """
+    results = await asyncio.gather(*coroutines, return_exceptions=return_exceptions)
+
+    successes: list[object] = []
+    failures: list[Exception] = []
+
+    for result in results:
+        if isinstance(result, Exception):
+            failures.append(result)
+        else:
+            successes.append(result)
+
+    return successes, failures
+
+
+def classify_results_by_type(
+    results: list[object | Exception],
+    *,
+    success_type: type = bool,
+) -> dict[str, list]:
+    """Classify mixed results by their type.
+
+    Useful for analyzing results from asyncio.gather(return_exceptions=True).
+
+    Args:
+        results: Mixed list of results and exceptions.
+        success_type: Type to consider as success (default: bool for True values).
+
+    Returns:
+        Dict with keys: 'successes', 'failures', and exception class names.
+
+    Example:
+        >>> results = [True, ValueError("a"), True, InfraTimeoutError("b")]
+        >>> classified = classify_results_by_type(results)
+        >>> classified['successes']  # [True, True]
+        >>> classified['ValueError']  # [ValueError("a")]
+        >>> classified['InfraTimeoutError']  # [InfraTimeoutError("b")]
+    """
+    classified: dict[str, list] = {"successes": [], "failures": []}
+
+    for result in results:
+        if isinstance(result, Exception):
+            classified["failures"].append(result)
+            # Also categorize by exception type
+            exc_type_name = type(result).__name__
+            if exc_type_name not in classified:
+                classified[exc_type_name] = []
+            classified[exc_type_name].append(result)
+        elif (success_type is bool and result is True) or isinstance(
+            result, success_type
+        ):
+            classified["successes"].append(result)
+
+    return classified
+
+
+def assert_failure_rate_within_tolerance(
+    actual_failures: int,
+    total_attempts: int,
+    expected_rate: float,
+    tolerance: float = 0.2,
+    *,
+    context: str = "",
+) -> None:
+    """Assert that observed failure rate is within expected tolerance.
+
+    Useful for chaos tests with probabilistic failure injection.
+
+    Args:
+        actual_failures: Number of observed failures.
+        total_attempts: Total number of attempts.
+        expected_rate: Expected failure rate (0.0-1.0).
+        tolerance: Acceptable deviation from expected (default 0.2 = 20%).
+        context: Optional context string for error message.
+
+    Raises:
+        AssertionError: If failure rate is outside tolerance.
+
+    Example:
+        >>> # With 30% failure rate and 100 attempts, expect ~30 failures
+        >>> # With 20% tolerance, acceptable range is 24-36
+        >>> assert_failure_rate_within_tolerance(
+        ...     actual_failures=28,
+        ...     total_attempts=100,
+        ...     expected_rate=0.3,
+        ...     tolerance=0.2,
+        ...     context="random failure test",
+        ... )
+    """
+    expected_failures = total_attempts * expected_rate
+    min_failures = int(expected_failures * (1 - tolerance))
+    max_failures = int(expected_failures * (1 + tolerance))
+    actual_rate = actual_failures / total_attempts if total_attempts > 0 else 0.0
+
+    context_prefix = f"{context}: " if context else ""
+
+    assert min_failures <= actual_failures <= max_failures, (
+        f"{context_prefix}Failure rate {actual_rate:.1%} ({actual_failures}/{total_attempts}) "
+        f"outside expected range [{min_failures}, {max_failures}] "
+        f"(target: {expected_rate:.0%} +/- {tolerance:.0%})"
+    )
+
+
+async def run_concurrent_with_tracking(
+    operation: Callable[[int], Awaitable[object]],
+    count: int,
+    *,
+    collect_exceptions: bool = True,
+) -> tuple[list[object], list[Exception]]:
+    """Run an async operation multiple times concurrently with result tracking.
+
+    Simplifies the common pattern of running concurrent operations with
+    thread-safe result collection.
+
+    Args:
+        operation: Async callable taking an index and returning a result.
+        count: Number of times to execute the operation.
+        collect_exceptions: If True, collect exceptions instead of raising.
+
+    Returns:
+        Tuple of (successful_results, exceptions).
+
+    Example:
+        >>> async def test_op(i: int) -> str:
+        ...     if i % 3 == 0:
+        ...         raise ValueError(f"Failed at {i}")
+        ...     return f"success_{i}"
+        ...
+        >>> successes, failures = await run_concurrent_with_tracking(
+        ...     test_op, count=10
+        ... )
+        >>> assert len(successes) + len(failures) == 10
+    """
+    results: list[object] = []
+    errors: list[Exception] = []
+    lock = asyncio.Lock()
+
+    async def execute_one(i: int) -> None:
+        try:
+            result = await operation(i)
+            async with lock:
+                results.append(result)
+        except Exception as e:
+            if collect_exceptions:
+                async with lock:
+                    errors.append(e)
+            else:
+                raise
+
+    await asyncio.gather(*[execute_one(i) for i in range(count)])
+    return results, errors
 
 
 # =============================================================================

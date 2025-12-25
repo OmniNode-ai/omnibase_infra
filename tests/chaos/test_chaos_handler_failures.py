@@ -31,7 +31,6 @@ Related Tickets:
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -41,6 +40,8 @@ from tests.chaos.conftest import (
     ChaosConfig,
     ChaosEffectExecutor,
     FailureInjector,
+    assert_failure_rate_within_tolerance,
+    run_concurrent_with_tracking,
 )
 
 # =============================================================================
@@ -267,25 +268,18 @@ class TestHandlerFailurePropagation:
         )
 
         num_concurrent = 20
-        results: list[bool] = []
-        errors: list[Exception] = []
-        lock = asyncio.Lock()
 
-        async def execute_one(i: int) -> None:
-            try:
-                result = await executor.execute_with_chaos(
-                    intent_id=uuid4(),
-                    operation=f"test_operation_{i}",
-                    fail_point="mid",
-                )
-                async with lock:
-                    results.append(result)
-            except ValueError:
-                async with lock:
-                    errors.append(ValueError())
+        async def execute_one(i: int) -> bool:
+            return await executor.execute_with_chaos(
+                intent_id=uuid4(),
+                operation=f"test_operation_{i}",
+                fail_point="mid",
+            )
 
-        # Act - execute concurrently
-        await asyncio.gather(*[execute_one(i) for i in range(num_concurrent)])
+        # Act - execute concurrently using shared utility
+        results, errors = await run_concurrent_with_tracking(
+            execute_one, count=num_concurrent
+        )
 
         # Assert - some succeeded, some failed, but all are tracked
         total = len(results) + len(errors)
@@ -414,7 +408,11 @@ class TestHandlerFailureRandom:
             backend_client=mock_backend_client,
         )
 
-        num_iterations = 100
+        # Use 500 iterations for better statistical power.
+        # With n=500, p=0.3: expected=150, stddev=sqrt(500*0.3*0.7)~=10.25
+        # 20% tolerance gives range [120, 180], which is +/-2.9 stddev from mean.
+        # This makes the test resilient to normal statistical variance.
+        num_iterations = 500
         failure_count = 0
 
         # Act
@@ -429,15 +427,13 @@ class TestHandlerFailureRandom:
                 failure_count += 1
 
         # Assert - failure rate should be roughly 30% (with tolerance)
-        # Using a wide tolerance for statistical variance
-        expected_failures = num_iterations * failure_rate
-        tolerance = 0.2  # 20% tolerance
-        min_failures = int(expected_failures * (1 - tolerance))
-        max_failures = int(expected_failures * (1 + tolerance))
-
-        assert min_failures <= failure_count <= max_failures, (
-            f"Expected {expected_failures} failures (+/- {tolerance * 100}%), "
-            f"got {failure_count}"
+        # Using shared utility for statistical rate assertion
+        assert_failure_rate_within_tolerance(
+            actual_failures=failure_count,
+            total_attempts=num_iterations,
+            expected_rate=failure_rate,
+            tolerance=0.2,
+            context="random failure test",
         )
 
     @pytest.mark.asyncio
