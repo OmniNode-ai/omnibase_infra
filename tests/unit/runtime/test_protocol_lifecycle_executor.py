@@ -619,9 +619,9 @@ class TestProtocolLifecycleExecutorShutdownByPriority:
         # If sequential, it would be ~0.1s
         # CI-friendly threshold: 1.0s catches severe regressions while allowing
         # for variable CI performance (containerization, CPU throttling, etc.)
-        assert total_time < 1.0, (
-            f"Parallel shutdown took too long: {total_time}s (expected < 1.0s)"
-        )
+        assert (
+            total_time < 1.0
+        ), f"Parallel shutdown took too long: {total_time}s (expected < 1.0s)"
 
         # Verify both were called
         assert handler_a.shutdown_called is True
