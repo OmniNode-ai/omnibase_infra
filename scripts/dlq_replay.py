@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """DLQ Replay Utility - Replay failed messages from Dead Letter Queue.
 
+WARNING: This script has STUB IMPLEMENTATION components. While the core
+Kafka consume/produce logic is implemented using aiokafka, some features
+like PostgreSQL tracking are not yet integrated. See OMN-949 for status.
+
 This script provides a command-line interface for replaying messages from
 the Dead Letter Queue (DLQ) back to their original topics.
 
@@ -51,6 +55,7 @@ import signal
 import sys
 from datetime import UTC, datetime
 from enum import Enum
+from types import FrameType
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -67,6 +72,40 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("dlq_replay")
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+def safe_truncate(text: str, max_chars: int, suffix: str = "...") -> str:
+    """Safely truncate text to max_chars, handling multi-byte UTF-8 characters.
+
+    This function ensures that truncation does not break multi-byte UTF-8
+    characters by operating on string characters rather than bytes.
+
+    Args:
+        text: The text to truncate
+        max_chars: Maximum number of characters (not bytes) to keep
+        suffix: Suffix to append when truncating (default: "...")
+
+    Returns:
+        Truncated text with suffix if truncated, or original text if shorter
+
+    Example:
+        >>> safe_truncate("Hello World", 8)
+        'Hello...'
+        >>> safe_truncate("Hello", 10)
+        'Hello'
+    """
+    if len(text) <= max_chars:
+        return text
+    # Reserve space for suffix
+    suffix_len = len(suffix)
+    if max_chars <= suffix_len:
+        return suffix[:max_chars]
+    return text[: max_chars - suffix_len] + suffix
 
 
 # =============================================================================
@@ -89,7 +128,8 @@ class EnumFilterType(str, Enum):
     ALL = "all"
     BY_TOPIC = "by_topic"
     BY_ERROR_TYPE = "by_error_type"
-    BY_TIME_RANGE = "by_time_range"
+    # TODO(OMN-949): Implement time-range filtering support
+    # BY_TIME_RANGE = "by_time_range"
     BY_CORRELATION_ID = "by_correlation_id"
 
 
@@ -117,7 +157,11 @@ class ModelDlqMessage(BaseModel):
         dlq_offset: int,
         dlq_partition: int,
     ) -> ModelDlqMessage:
-        """Parse DLQ message from Kafka payload."""
+        """Parse DLQ message from Kafka payload.
+
+        Raises:
+            ValueError: If retry_count is present but not a valid integer.
+        """
         original_message = payload.get("original_message", {})
         if not isinstance(original_message, dict):
             original_message = {}
@@ -128,6 +172,9 @@ class ModelDlqMessage(BaseModel):
         except (ValueError, AttributeError):
             correlation_id = uuid4()
 
+        # Explicit validation for retry_count instead of silent coercion
+        retry_count = cls._parse_retry_count(payload.get("retry_count", 0))
+
         return cls(
             original_topic=str(payload.get("original_topic", "unknown")),
             original_key=original_message.get("key"),
@@ -137,11 +184,42 @@ class ModelDlqMessage(BaseModel):
             failure_reason=str(payload.get("failure_reason", "")),
             failure_timestamp=str(payload.get("failure_timestamp", "")),
             correlation_id=correlation_id,
-            retry_count=int(str(payload.get("retry_count", 0))),
+            retry_count=retry_count,
             error_type=str(payload.get("error_type", "Unknown")),
             dlq_offset=dlq_offset,
             dlq_partition=dlq_partition,
             raw_payload=payload,
+        )
+
+    @staticmethod
+    def _parse_retry_count(value: object) -> int:
+        """Parse retry_count with explicit validation.
+
+        Args:
+            value: The retry_count value from the payload.
+
+        Returns:
+            The parsed integer retry count.
+
+        Raises:
+            ValueError: If value cannot be parsed as a valid integer.
+        """
+        if isinstance(value, int):
+            return value
+        if value is None:
+            return 0
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return 0
+            try:
+                return int(stripped)
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid retry_count value: '{value}' is not a valid integer"
+                ) from e
+        raise ValueError(
+            f"Invalid retry_count type: expected int or str, got {type(value).__name__}"
         )
 
 
@@ -159,6 +237,15 @@ class ModelReplayConfig(BaseModel):
     filter_correlation_ids: list[UUID] = Field(default_factory=list)
     add_replay_headers: bool = True
     limit: int | None = None
+    # Kafka producer settings - extracted from hardcoded values for configurability
+    max_request_size: int = Field(
+        default=10485760,  # 10MB
+        description="Maximum size of a Kafka request in bytes (default: 10MB)",
+    )
+    request_timeout_ms: int = Field(
+        default=30000,  # 30 seconds
+        description="Kafka producer request timeout in milliseconds (default: 30s)",
+    )
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> ModelReplayConfig:
@@ -183,23 +270,22 @@ class ModelReplayConfig(BaseModel):
             filter_type = EnumFilterType.BY_CORRELATION_ID
             try:
                 filter_correlation_ids = [UUID(args.filter_correlation_id)]
-            except ValueError:
-                logger.warning(
+            except ValueError as e:
+                raise ValueError(
                     f"Invalid correlation ID format: {args.filter_correlation_id}"
-                )
-                sys.exit(1)
+                ) from e
 
         return cls(
             bootstrap_servers=bootstrap_servers,
             dlq_topic=args.dlq_topic,
             max_replay_count=args.max_replay_count,
-            rate_limit_per_second=args.rate_limit,
-            dry_run=args.dry_run,
+            rate_limit_per_second=getattr(args, "rate_limit", 100.0),
+            dry_run=getattr(args, "dry_run", False),
             filter_type=filter_type,
             filter_topics=filter_topics,
             filter_error_types=filter_error_types,
             filter_correlation_ids=filter_correlation_ids,
-            limit=args.limit if hasattr(args, "limit") else None,
+            limit=getattr(args, "limit", None),
         )
 
 
@@ -219,12 +305,12 @@ class ModelReplayResult(BaseModel):
 
 NON_RETRYABLE_ERRORS = frozenset(
     {
+        # Infrastructure errors from omnibase_infra.errors
         "InfraAuthenticationError",
         "ProtocolConfigurationError",
         "SecretResolutionError",
+        # Pydantic validation errors
         "ValidationError",
-        "SchemaValidationError",
-        "PermissionDeniedError",
     }
 )
 
@@ -357,11 +443,16 @@ class DLQProducer:
     This producer publishes DLQ messages back to their original topics
     with replay tracking headers and rate limiting support.
 
+    Rate Limiting:
+        Uses a token bucket approach that allows the first message to be sent
+        immediately without delay. Subsequent messages are rate-limited based
+        on the configured rate_limit_per_second.
+
     Attributes:
         config: Replay configuration containing bootstrap servers and rate limits
         _producer: The underlying AIOKafkaProducer instance
         _started: Whether the producer has been started
-        _last_publish: Timestamp of last publish for rate limiting
+        _last_publish: Timestamp of last publish for rate limiting (None until first publish)
         _interval: Minimum interval between publishes
     """
 
@@ -374,7 +465,8 @@ class DLQProducer:
         self.config = config
         self._producer: AIOKafkaProducer | None = None
         self._started = False
-        self._last_publish = datetime.now(UTC)
+        # Initialize to None to allow first message immediately (no delay)
+        self._last_publish: datetime | None = None
         self._interval = 1.0 / config.rate_limit_per_second
 
     async def start(self) -> None:
@@ -386,15 +478,19 @@ class DLQProducer:
         """
         logger.info(
             "Starting DLQ producer",
-            extra={"bootstrap_servers": self.config.bootstrap_servers},
+            extra={
+                "bootstrap_servers": self.config.bootstrap_servers,
+                "max_request_size": self.config.max_request_size,
+                "request_timeout_ms": self.config.request_timeout_ms,
+            },
         )
         try:
             self._producer = AIOKafkaProducer(
                 bootstrap_servers=self.config.bootstrap_servers,
                 acks="all",
                 enable_idempotence=True,
-                max_request_size=10485760,  # 10MB max message size
-                request_timeout_ms=30000,  # 30 second timeout
+                max_request_size=self.config.max_request_size,
+                request_timeout_ms=self.config.request_timeout_ms,
             )
             await self._producer.start()
             self._started = True
@@ -439,10 +535,11 @@ class DLQProducer:
         if not self._started or self._producer is None:
             raise RuntimeError("Producer not started")
 
-        # Rate limiting
-        elapsed = (datetime.now(UTC) - self._last_publish).total_seconds()
-        if elapsed < self._interval:
-            await asyncio.sleep(self._interval - elapsed)
+        # Rate limiting - first message is sent immediately (no delay)
+        if self._last_publish is not None:
+            elapsed = (datetime.now(UTC) - self._last_publish).total_seconds()
+            if elapsed < self._interval:
+                await asyncio.sleep(self._interval - elapsed)
 
         # Build replay headers
         headers: list[tuple[str, bytes]] = []
@@ -456,9 +553,26 @@ class DLQProducer:
                 ("correlation_id", str(message.correlation_id).encode("utf-8")),
             ]
 
-        # Prepare key and value
-        key = message.original_key.encode("utf-8") if message.original_key else None
-        value = message.original_value.encode("utf-8")
+        # Prepare key and value with UTF-8 encoding error handling
+        key = None
+        if message.original_key:
+            try:
+                key = message.original_key.encode("utf-8")
+            except UnicodeEncodeError:
+                logger.warning(
+                    "Failed to encode message key as UTF-8, using replacement chars",
+                    extra={"correlation_id": str(message.correlation_id)},
+                )
+                key = message.original_key.encode("utf-8", errors="replace")
+
+        try:
+            value = message.original_value.encode("utf-8")
+        except UnicodeEncodeError:
+            logger.warning(
+                "Failed to encode message value as UTF-8, using replacement chars",
+                extra={"correlation_id": str(message.correlation_id)},
+            )
+            value = message.original_value.encode("utf-8", errors="replace")
 
         try:
             await self._producer.send_and_wait(
@@ -673,7 +787,7 @@ async def cmd_list(args: argparse.Namespace) -> int:
             print(f"[{count + 1}] {message.correlation_id}")
             print(f"    Topic:     {message.original_topic}")
             print(f"    Error:     {message.error_type}")
-            print(f"    Reason:    {message.failure_reason[:80]}...")
+            print(f"    Reason:    {safe_truncate(message.failure_reason, 80)}")
             print(f"    Timestamp: {message.failure_timestamp}")
             print(f"    Retries:   {message.retry_count}")
             print(f"    Status:    {status}")
@@ -849,8 +963,6 @@ See docs/operations/DLQ_REPLAY_GUIDE.md for complete documentation.
     list_parser.add_argument("--filter-topic", help="Filter by original topic")
     list_parser.add_argument("--filter-error-type", help="Filter by error type")
     list_parser.add_argument("--filter-correlation-id", help="Filter by correlation ID")
-    list_parser.add_argument("--dry-run", action="store_true", default=True)
-    list_parser.add_argument("--rate-limit", type=float, default=100.0)
 
     # replay command
     replay_parser = subparsers.add_parser("replay", help="Replay DLQ messages")
@@ -890,8 +1002,6 @@ See docs/operations/DLQ_REPLAY_GUIDE.md for complete documentation.
     stats_parser.add_argument("--filter-topic", default=None)
     stats_parser.add_argument("--filter-error-type", default=None)
     stats_parser.add_argument("--filter-correlation-id", default=None)
-    stats_parser.add_argument("--dry-run", action="store_true", default=True)
-    stats_parser.add_argument("--rate-limit", type=float, default=100.0)
 
     return parser
 
@@ -942,8 +1052,13 @@ def setup_signal_handlers() -> GracefulShutdown:
     """
     shutdown_handler = GracefulShutdown()
 
-    def signal_handler(signum: int, frame: object) -> None:
-        """Handle shutdown signals (SIGINT/SIGTERM)."""
+    def signal_handler(signum: int, frame: FrameType | None) -> None:
+        """Handle shutdown signals (SIGINT/SIGTERM).
+
+        Args:
+            signum: Signal number received
+            frame: Current stack frame or None if not available
+        """
         signal_name = signal.Signals(signum).name
         logger.info(f"Received {signal_name}, initiating graceful shutdown...")
         shutdown_handler.request_shutdown()

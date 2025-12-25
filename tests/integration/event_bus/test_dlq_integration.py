@@ -383,16 +383,30 @@ class TestDlqPublishing:
                 dlq_received_event.wait(),
                 timeout=DLQ_PROCESSING_WAIT_SECONDS * 2,
             )
+
+            # Verify handler was called and failed
+            assert handler_call_count >= 1, (
+                "Handler should have been called at least once"
+            )
+
+            # Verify DLQ message was actually received
+            assert len(dlq_messages_received) >= 1, (
+                "DLQ message should have been received after handler failure"
+            )
+
+            # Verify DLQ message contains expected structure
+            dlq_msg = dlq_messages_received[0]
+            assert dlq_msg.value is not None, "DLQ message should have a value"
+
         except TimeoutError:
-            # DLQ message may take time to process
-            pass
+            # DLQ message not received within timeout - this is acceptable for integration tests
+            # as timing depends on Kafka broker state
+            pytest.skip("DLQ message not received within timeout")
 
-        # Verify handler was called and failed
-        assert handler_call_count >= 1, "Handler should have been called at least once"
-
-        # Cleanup
-        await unsubscribe_source()
-        await unsubscribe_dlq()
+        finally:
+            # Cleanup
+            await unsubscribe_source()
+            await unsubscribe_dlq()
 
 
 # =============================================================================

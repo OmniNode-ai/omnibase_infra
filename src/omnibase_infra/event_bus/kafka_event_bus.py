@@ -1924,6 +1924,15 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         dlq_error_message: str | None = None
 
         # Publish to DLQ (without retry - best effort)
+        #
+        # DESIGN NOTE: Producer Lock Pattern
+        # The producer lock is held only during send() initiation, not during the await
+        # of the future. This is intentional because:
+        # 1. send() returns immediately with a FutureRecordMetadata
+        # 2. The actual network I/O happens asynchronously
+        # 3. Awaiting inside the lock would block other producers unnecessarily
+        # 4. The producer is thread-safe for concurrent sends after send() returns
+        # See: aiokafka producer documentation for thread-safety guarantees
         future = None
         try:
             async with self._producer_lock:
@@ -2063,6 +2072,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 await callback(event)
             except Exception as callback_error:
                 # Log callback error but continue with other callbacks
+                # Sanitize callback error message to prevent credential leakage
                 logger.warning(
                     "DLQ callback raised exception",
                     extra={
@@ -2070,7 +2080,9 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                         "correlation_id": str(event.correlation_id),
                         "original_topic": event.original_topic,
                         "callback_error_type": type(callback_error).__name__,
-                        "callback_error_message": str(callback_error),
+                        "callback_error_message": sanitize_error_message(
+                            callback_error
+                        ),
                     },
                     exc_info=True,
                 )
@@ -2123,6 +2135,13 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         error_type = type(error).__name__
         dlq_topic = self._config.dead_letter_topic
 
+        # Sanitize error message to prevent credential leakage in DLQ
+        # This follows ONEX error sanitization guidelines:
+        # - NEVER include: Passwords, API keys, tokens, PII, credentials
+        # - SAFE to include: Error types, correlation IDs, topic names, timestamps
+        # See: docs/patterns/error_sanitization_patterns.md
+        sanitized_failure_reason = sanitize_error_message(error)
+
         # Extract raw data from Kafka message (handles deserialization safely)
         raw_key = getattr(raw_msg, "key", None)
         raw_value = getattr(raw_msg, "value", b"")
@@ -2150,7 +2169,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         except Exception:
             value_str = "<decode_failed>"
 
-        # Build DLQ message with failure metadata
+        # Build DLQ message with failure metadata (use sanitized error message)
         dlq_payload = {
             "original_topic": original_topic,
             "original_message": {
@@ -2159,7 +2178,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 "offset": raw_offset,
                 "partition": raw_partition,
             },
-            "failure_reason": str(error),
+            "failure_reason": sanitized_failure_reason,
             "failure_type": failure_type,
             "failure_timestamp": start_time.isoformat(),
             "correlation_id": str(correlation_id),
@@ -2187,6 +2206,15 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         dlq_error_message: str | None = None
 
         # Publish to DLQ (without retry - best effort)
+        #
+        # DESIGN NOTE: Producer Lock Pattern
+        # The producer lock is held only during send() initiation, not during the await
+        # of the future. This is intentional because:
+        # 1. send() returns immediately with a FutureRecordMetadata
+        # 2. The actual network I/O happens asynchronously
+        # 3. Awaiting inside the lock would block other producers unnecessarily
+        # 4. The producer is thread-safe for concurrent sends after send() returns
+        # See: aiokafka producer documentation for thread-safety guarantees
         future = None
         try:
             async with self._producer_lock:
@@ -2207,12 +2235,15 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     # Continue to metrics/callback handling below
                 else:
                     kafka_headers = self._model_headers_to_kafka(dlq_headers)
-                    # Add DLQ-specific headers
+                    # Add DLQ-specific headers (use sanitized failure reason)
                     kafka_headers.extend(
                         [
                             ("original_topic", original_topic.encode("utf-8")),
                             ("failure_type", failure_type.encode("utf-8")),
-                            ("failure_reason", str(error).encode("utf-8")),
+                            (
+                                "failure_reason",
+                                sanitized_failure_reason.encode("utf-8"),
+                            ),
                             (
                                 "failure_timestamp",
                                 start_time.isoformat().encode("utf-8"),
@@ -2236,9 +2267,9 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 success = True
 
         except Exception as dlq_error:
-            # DLQ publish failed - capture error details
+            # DLQ publish failed - capture error details (sanitized for security)
             dlq_error_type = type(dlq_error).__name__
-            dlq_error_message = str(dlq_error)
+            dlq_error_message = sanitize_error_message(dlq_error)
             # Log at ERROR level for DLQ publish failures (critical - message may be lost)
             logger.exception(
                 "DLQ publish failed for raw message: message may be lost",
@@ -2268,7 +2299,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     "dlq_topic": dlq_topic,
                     "correlation_id": str(correlation_id),
                     "error_type": error_type,
-                    "error_message": str(error),
+                    "error_message": sanitized_failure_reason,
                     "failure_type": failure_type,
                     "message_offset": raw_offset,
                     "message_partition": raw_partition,
@@ -2276,7 +2307,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 },
             )
 
-        # Create DLQ event for metrics and callbacks
+        # Create DLQ event for metrics and callbacks (use sanitized error message)
         # Note: For raw messages, offset may be int or str depending on source
         message_offset_str = str(raw_offset) if raw_offset is not None else None
         dlq_event = ModelDlqEvent(
@@ -2284,7 +2315,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             dlq_topic=dlq_topic,
             correlation_id=correlation_id,
             error_type=error_type,
-            error_message=str(error),
+            error_message=sanitized_failure_reason,
             retry_count=0,  # Raw messages have no retry tracking
             message_offset=message_offset_str,
             message_partition=raw_partition,

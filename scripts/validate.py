@@ -179,7 +179,11 @@ def run_unions(verbose: bool = False) -> bool:
 
 def run_imports(verbose: bool = False) -> bool:
     """Run circular import check."""
-    src_path = Path("src/omnibase_infra/")
+    # Use src/ as the source path so module names are fully qualified
+    # (e.g., "omnibase_infra.clients" instead of just "clients").
+    # The CircularImportValidator creates module names relative to source_path,
+    # so using src/ ensures Python can import them correctly.
+    src_path = Path("src/")
     if not src_path.exists():
         if verbose:
             print("Imports: SKIP (no src directory)")
