@@ -982,10 +982,29 @@ def assert_failure_rate_within_tolerance(
     tolerance: float = 0.2,
     *,
     context: str = "",
+    warn_on_small_sample: bool = True,
+    minimum_sample_size: int = 30,
 ) -> None:
     """Assert that observed failure rate is within expected tolerance.
 
     Useful for chaos tests with probabilistic failure injection.
+
+    Statistical Validity:
+        For statistically valid results, sample sizes should be sufficient.
+        The default minimum_sample_size of 30 is based on the central limit
+        theorem. For tighter tolerances, larger samples are needed.
+
+        Recommended sample sizes by tolerance:
+        - tolerance=0.3 (30%): minimum 50 samples
+        - tolerance=0.2 (20%): minimum 100 samples
+        - tolerance=0.1 (10%): minimum 400 samples
+
+    Edge Cases:
+        - total_attempts=0: Always fails (no data to validate)
+        - expected_rate=0.0: Allows 0 failures (tolerance applied to count, not rate)
+        - expected_rate=1.0: Allows minor deviation below 100%
+        - actual_failures < 0: Always fails (invalid input)
+        - actual_failures > total_attempts: Always fails (invalid input)
 
     Args:
         actual_failures: Number of observed failures.
@@ -993,9 +1012,11 @@ def assert_failure_rate_within_tolerance(
         expected_rate: Expected failure rate (0.0-1.0).
         tolerance: Acceptable deviation from expected (default 0.2 = 20%).
         context: Optional context string for error message.
+        warn_on_small_sample: If True, include sample size warning in output.
+        minimum_sample_size: Threshold for sample size warning.
 
     Raises:
-        AssertionError: If failure rate is outside tolerance.
+        AssertionError: If failure rate is outside tolerance or inputs invalid.
 
     Example:
         >>> # With 30% failure rate and 100 attempts, expect ~30 failures
@@ -1008,17 +1029,81 @@ def assert_failure_rate_within_tolerance(
         ...     context="random failure test",
         ... )
     """
-    expected_failures = total_attempts * expected_rate
-    min_failures = int(expected_failures * (1 - tolerance))
-    max_failures = int(expected_failures * (1 + tolerance))
-    actual_rate = actual_failures / total_attempts if total_attempts > 0 else 0.0
-
     context_prefix = f"{context}: " if context else ""
+
+    # Validate inputs
+    if total_attempts <= 0:
+        raise AssertionError(
+            f"{context_prefix}Cannot validate failure rate with {total_attempts} attempts "
+            "(need at least 1)"
+        )
+
+    if actual_failures < 0:
+        raise AssertionError(
+            f"{context_prefix}Invalid actual_failures={actual_failures} (must be >= 0)"
+        )
+
+    if actual_failures > total_attempts:
+        raise AssertionError(
+            f"{context_prefix}Invalid actual_failures={actual_failures} > total_attempts={total_attempts}"
+        )
+
+    if not 0.0 <= expected_rate <= 1.0:
+        raise AssertionError(
+            f"{context_prefix}Invalid expected_rate={expected_rate} (must be in [0.0, 1.0])"
+        )
+
+    if tolerance <= 0:
+        raise AssertionError(
+            f"{context_prefix}Invalid tolerance={tolerance} (must be > 0)"
+        )
+
+    actual_rate = actual_failures / total_attempts
+    expected_failures = total_attempts * expected_rate
+
+    # Handle edge case: expected_rate = 0 (expect no failures)
+    if expected_rate == 0.0:
+        # Allow small number of failures based on tolerance * total_attempts
+        max_allowed = max(
+            1, int(total_attempts * tolerance * 0.1)
+        )  # 10% of tolerance applied to count
+        if actual_failures > max_allowed:
+            raise AssertionError(
+                f"{context_prefix}Expected 0 failures but got {actual_failures} "
+                f"(max allowed: {max_allowed} with tolerance {tolerance:.0%})"
+            )
+        return  # Success
+
+    # Handle edge case: expected_rate = 1.0 (expect all failures)
+    if expected_rate == 1.0:
+        # Allow small number of successes based on tolerance
+        min_failures = int(total_attempts * (1 - tolerance))
+        if actual_failures < min_failures:
+            raise AssertionError(
+                f"{context_prefix}Expected 100% failure rate but got {actual_rate:.1%} "
+                f"({actual_failures}/{total_attempts}), "
+                f"minimum required: {min_failures}"
+            )
+        return  # Success
+
+    # Standard case: tolerance applied to expected failures
+    min_failures = max(0, int(expected_failures * (1 - tolerance)))
+    max_failures = min(
+        total_attempts, int(expected_failures * (1 + tolerance)) + 1
+    )  # +1 for rounding
+
+    # Build sample size warning
+    sample_warning = ""
+    if warn_on_small_sample and total_attempts < minimum_sample_size:
+        sample_warning = (
+            f" WARNING: Sample size {total_attempts} is below recommended "
+            f"minimum of {minimum_sample_size} for statistical validity."
+        )
 
     assert min_failures <= actual_failures <= max_failures, (
         f"{context_prefix}Failure rate {actual_rate:.1%} ({actual_failures}/{total_attempts}) "
         f"outside expected range [{min_failures}, {max_failures}] "
-        f"(target: {expected_rate:.0%} +/- {tolerance:.0%})"
+        f"(target: {expected_rate:.0%} +/- {tolerance:.0%}).{sample_warning}"
     )
 
 

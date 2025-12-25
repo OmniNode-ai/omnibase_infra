@@ -273,9 +273,9 @@ class TestPartitionDuringConsume:
         - Message content should be preserved
         """
         # Arrange
-        received_messages: list[dict] = []
+        received_messages: list[dict[str, object]] = []
 
-        async def handler(msg: dict) -> None:
+        async def handler(msg: dict[str, object]) -> None:
             received_messages.append(msg)
 
         await started_event_bus_with_partition.subscribe(
@@ -308,9 +308,9 @@ class TestPartitionDuringConsume:
         - No re-subscription should be needed
         """
         # Arrange
-        received_messages: list[dict] = []
+        received_messages: list[dict[str, object]] = []
 
-        async def handler(msg: dict) -> None:
+        async def handler(msg: dict[str, object]) -> None:
             received_messages.append(msg)
 
         await started_event_bus_with_partition.subscribe(

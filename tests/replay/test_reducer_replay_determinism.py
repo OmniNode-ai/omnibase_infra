@@ -129,7 +129,7 @@ class TestSingleEventDeterminism:
         )
 
         # Run 10 times with fresh reducer and state each time
-        outputs: list = []
+        outputs: list[ModelReducerOutput] = []
         for _ in range(10):
             reducer = RegistrationReducer()
             fresh_state = ModelRegistrationState()
@@ -244,14 +244,14 @@ class TestMultiEventSequenceDeterminism:
         events = event_factory.create_event_sequence(count=3)
 
         # Process in forward order
-        forward_outputs: list = []
+        forward_outputs: list[ModelReducerOutput] = []
         for event in events:
             state = ModelRegistrationState()
             output = reducer.reduce(state, event)
             forward_outputs.append(output)
 
         # Process in reverse order (but each with fresh state)
-        reverse_outputs: list = []
+        reverse_outputs: list[ModelReducerOutput] = []
         for event in reversed(events):
             state = ModelRegistrationState()
             output = reducer.reduce(state, event)
@@ -327,7 +327,7 @@ class TestCrossInstanceDeterminism:
         # Create 5 separate reducer instances
         reducers = [RegistrationReducer() for _ in range(5)]
 
-        outputs: list = []
+        outputs: list[ModelReducerOutput] = []
         for reducer in reducers:
             state = ModelRegistrationState()
             output = reducer.reduce(state, event)
@@ -352,14 +352,14 @@ class TestCrossInstanceDeterminism:
         events = event_factory.create_event_sequence(count=10)
 
         # Process all events once with the same reducer
-        first_pass: list = []
+        first_pass: list[ModelReducerOutput] = []
         for event in events:
             state = ModelRegistrationState()
             output = reducer.reduce(state, event)
             first_pass.append(output)
 
         # Process all events again with the same reducer
-        second_pass: list = []
+        second_pass: list[ModelReducerOutput] = []
         for event in events:
             state = ModelRegistrationState()
             output = reducer.reduce(state, event)
@@ -432,7 +432,7 @@ class TestReplayAfterSerialization:
         events = event_factory.create_event_sequence(count=3)
 
         # Process original events
-        original_outputs: list = []
+        original_outputs: list[ModelReducerOutput] = []
         for event in events:
             state = ModelRegistrationState()
             output = reducer.reduce(state, event)
@@ -442,7 +442,7 @@ class TestReplayAfterSerialization:
         json_events = [json.loads(event.model_dump_json()) for event in events]
 
         # Deserialize and process
-        deserialized_outputs: list = []
+        deserialized_outputs: list[ModelReducerOutput] = []
         for event_dict in json_events:
             event = ModelNodeIntrospectionEvent.model_validate(event_dict)
             state = ModelRegistrationState()

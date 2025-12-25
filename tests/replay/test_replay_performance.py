@@ -6,14 +6,21 @@ This module provides performance tests for large event replay sequences.
 These tests measure and validate performance characteristics of the replay
 system under load conditions.
 
+Statistical Rigor:
+    - All performance tests use multiple iterations (not single runs)
+    - Warmup iterations are discarded to eliminate JIT/cache effects
+    - Results are reported using median and percentiles (robust to outliers)
+    - Memory tracking uses tracemalloc for accurate measurement
+    - Deterministic seeding ensures reproducibility
+
 Performance Test Coverage:
     - Large event replay (1000+ events)
     - Replay with deduplication (50% duplicates)
     - Replay with intermittent failures (chaos + replay)
-    - Memory usage during large replay
+    - Memory usage during large replay (with baseline tracking)
 
 Performance Thresholds:
-    - 1000 events should replay in < 5 seconds
+    - 1000 events should replay in < 5 seconds (P95 threshold)
     - Deduplication overhead should be < 20% of base replay time
     - Memory growth should be bounded (< 100MB for 10K events)
 
@@ -30,7 +37,6 @@ Related:
 
 from __future__ import annotations
 
-import sys
 import time
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -46,6 +52,11 @@ from omnibase_infra.models.registration import (
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
+from tests.helpers.statistics_utils import (
+    MemoryTracker,
+    PerformanceStats,
+    run_with_warmup_sync,
+)
 
 if TYPE_CHECKING:
     from tests.replay.conftest import EventFactory
@@ -56,10 +67,16 @@ if TYPE_CHECKING:
 # =============================================================================
 
 # Performance thresholds (configurable for CI environments)
+# These are P95 thresholds - 95% of runs should complete within these times
 REPLAY_1000_EVENTS_THRESHOLD_SECONDS = 5.0
 REPLAY_5000_EVENTS_THRESHOLD_SECONDS = 25.0
 DEDUPLICATION_OVERHEAD_MAX_PERCENT = 50.0  # 50% overhead allowed
 MEMORY_GROWTH_MAX_MB = 100.0  # Max memory growth for 10K events
+
+# Statistical parameters
+DEFAULT_ITERATIONS = 10  # Number of timed iterations per test
+DEFAULT_WARMUP_ITERATIONS = 3  # Warmup iterations (discarded)
+MEMORY_BASELINE_TOLERANCE_MB = 10.0  # Acceptable variance from baseline
 
 
 # =============================================================================
@@ -148,7 +165,14 @@ def generate_events_with_duplicates(
 @pytest.mark.slow  # 1000-5000 events for throughput benchmarks
 @pytest.mark.asyncio
 class TestLargeEventReplayPerformance:
-    """Performance tests for large event replay scenarios."""
+    """Performance tests for large event replay scenarios.
+
+    Statistical Approach:
+        - Each test runs multiple iterations (DEFAULT_ITERATIONS)
+        - Warmup iterations are discarded (DEFAULT_WARMUP_ITERATIONS)
+        - Thresholds are applied to P95 (95th percentile) to handle outliers
+        - Full statistics are reported for analysis
+    """
 
     async def test_replay_1000_events_performance(
         self,
@@ -156,32 +180,45 @@ class TestLargeEventReplayPerformance:
     ) -> None:
         """Test replay performance with 1000 events.
 
+        Statistical Methodology:
+            - Runs 10 iterations with 3 warmup iterations
+            - Uses P95 threshold for statistically valid assertion
+            - Reports full statistics including median, P50, P90, P95, P99
+
         Validates that processing 1000 events completes within the
         acceptable time threshold. This is the baseline performance test.
         """
+        # Pre-generate events once (not part of timing)
         id_generator = DeterministicIdGenerator(seed=42)
         clock = DeterministicClock()
         events = generate_events(1000, id_generator, clock)
 
-        start_time = time.perf_counter()
+        def run_replay() -> None:
+            """Single replay iteration."""
+            for event in events:
+                state = ModelRegistrationState()
+                reducer.reduce(state, event)
 
-        for event in events:
-            state = ModelRegistrationState()
-            reducer.reduce(state, event)
-
-        elapsed = time.perf_counter() - start_time
-
-        # Assert performance threshold
-        assert elapsed < REPLAY_1000_EVENTS_THRESHOLD_SECONDS, (
-            f"Replay of 1000 events took {elapsed:.2f}s, "
-            f"expected < {REPLAY_1000_EVENTS_THRESHOLD_SECONDS}s"
+        # Run with warmup and collect timings
+        timings = run_with_warmup_sync(
+            operation=run_replay,
+            iterations=DEFAULT_ITERATIONS,
+            warmup_iterations=DEFAULT_WARMUP_ITERATIONS,
         )
 
-        # Log performance metrics for visibility
-        events_per_second = 1000 / elapsed
-        print(
-            f"\n[Performance] 1000 events: {elapsed:.3f}s ({events_per_second:.0f} events/s)"
+        stats = PerformanceStats.from_samples(timings)
+
+        # Assert P95 threshold (more robust than single run)
+        assert stats.p95 < REPLAY_1000_EVENTS_THRESHOLD_SECONDS, (
+            f"Replay of 1000 events P95={stats.p95:.2f}s, "
+            f"expected < {REPLAY_1000_EVENTS_THRESHOLD_SECONDS}s\n"
+            f"{stats.format_report('1000 events replay')}"
         )
+
+        # Log comprehensive statistics
+        events_per_second = 1000 / stats.median
+        print(f"\n{stats.format_report('1000 events replay')}")
+        print(f"  Throughput (median): {events_per_second:.0f} events/s")
 
     async def test_replay_5000_events_performance(
         self,
@@ -189,31 +226,44 @@ class TestLargeEventReplayPerformance:
     ) -> None:
         """Test replay performance with 5000 events.
 
+        Statistical Methodology:
+            - Runs 10 iterations with 3 warmup iterations
+            - Uses P95 threshold for statistically valid assertion
+            - Validates linear scaling from 1000 events
+
         Validates linear scaling of replay performance with larger
         event counts.
         """
+        # Pre-generate events once (not part of timing)
         id_generator = DeterministicIdGenerator(seed=42)
         clock = DeterministicClock()
         events = generate_events(5000, id_generator, clock)
 
-        start_time = time.perf_counter()
+        def run_replay() -> None:
+            """Single replay iteration."""
+            for event in events:
+                state = ModelRegistrationState()
+                reducer.reduce(state, event)
 
-        for event in events:
-            state = ModelRegistrationState()
-            reducer.reduce(state, event)
-
-        elapsed = time.perf_counter() - start_time
-
-        # Assert performance threshold
-        assert elapsed < REPLAY_5000_EVENTS_THRESHOLD_SECONDS, (
-            f"Replay of 5000 events took {elapsed:.2f}s, "
-            f"expected < {REPLAY_5000_EVENTS_THRESHOLD_SECONDS}s"
+        # Run with warmup and collect timings
+        timings = run_with_warmup_sync(
+            operation=run_replay,
+            iterations=DEFAULT_ITERATIONS,
+            warmup_iterations=DEFAULT_WARMUP_ITERATIONS,
         )
 
-        events_per_second = 5000 / elapsed
-        print(
-            f"\n[Performance] 5000 events: {elapsed:.3f}s ({events_per_second:.0f} events/s)"
+        stats = PerformanceStats.from_samples(timings)
+
+        # Assert P95 threshold
+        assert stats.p95 < REPLAY_5000_EVENTS_THRESHOLD_SECONDS, (
+            f"Replay of 5000 events P95={stats.p95:.2f}s, "
+            f"expected < {REPLAY_5000_EVENTS_THRESHOLD_SECONDS}s\n"
+            f"{stats.format_report('5000 events replay')}"
         )
+
+        events_per_second = 5000 / stats.median
+        print(f"\n{stats.format_report('5000 events replay')}")
+        print(f"  Throughput (median): {events_per_second:.0f} events/s")
 
 
 # =============================================================================
@@ -501,7 +551,14 @@ class TestChaosReplayPerformance:
 @pytest.mark.slow  # 10000 events for memory measurement
 @pytest.mark.asyncio
 class TestMemoryUsagePerformance:
-    """Performance tests for memory usage during large replay."""
+    """Performance tests for memory usage during large replay.
+
+    Memory Tracking Approach:
+        - Uses tracemalloc for accurate memory measurement (not sys.getsizeof)
+        - Takes snapshots at batch boundaries for growth analysis
+        - Baseline established before test with GC forced
+        - Reports peak memory and growth from baseline
+    """
 
     async def test_memory_usage_10k_events(
         self,
@@ -509,26 +566,29 @@ class TestMemoryUsagePerformance:
     ) -> None:
         """Test memory usage during replay of 10K events.
 
+        Memory Measurement Methodology:
+            - Uses tracemalloc for accurate heap tracking
+            - Forces GC before baseline measurement
+            - Snapshots at each 1K batch boundary
+            - Asserts on peak memory growth, not instantaneous
+
         Validates that memory usage remains bounded during large
         replay operations. This helps detect memory leaks.
         """
-        import gc
-
-        # Force garbage collection before measurement
-        gc.collect()
-        initial_memory = sys.getsizeof(reducer)
+        # Initialize memory tracker with proper tracemalloc
+        tracker = MemoryTracker()
+        tracker.start()
 
         id_generator = DeterministicIdGenerator(seed=42)
         clock = DeterministicClock()
 
-        # Process events in batches to allow GC
+        # Process events in batches to allow GC and snapshots
         batch_size = 1000
         total_events = 10000
-        memory_samples: list[int] = [initial_memory]
 
         start_time = time.perf_counter()
 
-        for batch_start in range(0, total_events, batch_size):
+        for batch_num, batch_start in enumerate(range(0, total_events, batch_size)):
             batch_events = generate_events(
                 count=batch_size,
                 id_generator=id_generator,
@@ -539,49 +599,61 @@ class TestMemoryUsagePerformance:
                 state = ModelRegistrationState()
                 reducer.reduce(state, event)
 
-            # Sample memory after each batch
-            gc.collect()
-            current_memory = sys.getsizeof(reducer)
-            memory_samples.append(current_memory)
+            # Snapshot memory after each batch
+            tracker.snapshot(f"batch_{batch_num}")
 
         elapsed = time.perf_counter() - start_time
 
-        # Calculate memory growth
-        max_memory = max(memory_samples)
-        memory_growth_bytes = max_memory - initial_memory
-        memory_growth_mb = memory_growth_bytes / (1024 * 1024)
+        # Get memory statistics
+        peak_mb = tracker.get_peak_mb()
+        final_growth_mb = tracker.get_growth_mb()
 
-        # Reducer should not accumulate significant state
-        # (it's a pure function with no internal state)
-        assert memory_growth_mb < MEMORY_GROWTH_MAX_MB, (
-            f"Memory growth during 10K event replay: {memory_growth_mb:.2f}MB, "
-            f"expected < {MEMORY_GROWTH_MAX_MB}MB"
+        # Stop tracking before assertions
+        tracker.stop()
+
+        # Memory baseline assertion: peak growth should be bounded
+        assert peak_mb < MEMORY_GROWTH_MAX_MB, (
+            f"Peak memory during 10K event replay: {peak_mb:.2f}MB, "
+            f"expected < {MEMORY_GROWTH_MAX_MB}MB\n"
+            f"{tracker.format_report()}"
+        )
+
+        # Additional assertion: final growth should be reasonable
+        # (reducer should not accumulate permanent state)
+        assert final_growth_mb < MEMORY_BASELINE_TOLERANCE_MB, (
+            f"Final memory growth after 10K events: {final_growth_mb:.2f}MB, "
+            f"expected < {MEMORY_BASELINE_TOLERANCE_MB}MB "
+            "(reducer should not accumulate state)"
         )
 
         events_per_second = total_events / elapsed
         print("\n[Performance] 10K events memory test:")
         print(f"  Time: {elapsed:.3f}s ({events_per_second:.0f} events/s)")
-        print(f"  Initial memory: {initial_memory} bytes")
-        print(f"  Max memory: {max_memory} bytes")
-        print(f"  Memory growth: {memory_growth_mb:.4f}MB")
+        print(f"{tracker.format_report()}")
 
     async def test_idempotency_store_memory_growth(
         self,
     ) -> None:
         """Test memory usage of idempotency store with many records.
 
+        Memory Measurement Methodology:
+            - Uses tracemalloc for accurate heap tracking
+            - Measures before and after adding 10K records
+            - Reports per-record memory consumption
+
         Validates that the in-memory store's memory growth is reasonable
         for large numbers of records.
         """
-        import gc
-
         store = InMemoryIdempotencyStore()
 
-        gc.collect()
+        # Initialize memory tracker
+        tracker = MemoryTracker()
+        tracker.start()
 
         # Measure baseline
         baseline_records = await store.get_all_records()
         assert len(baseline_records) == 0
+        tracker.snapshot("baseline")
 
         # Add 10K records
         event_count = 10000
@@ -595,30 +667,41 @@ class TestMemoryUsagePerformance:
                 correlation_id=uuid4(),
             )
 
+            # Snapshot at intervals for growth tracking
+            if (i + 1) % 2500 == 0:
+                tracker.snapshot(f"records_{i + 1}")
+
         elapsed = time.perf_counter() - start_time
 
         # Verify all records stored
         record_count = await store.get_record_count()
         assert record_count == event_count
 
-        # Get all records to measure size
-        all_records = await store.get_all_records()
-        total_size = sum(sys.getsizeof(r) for r in all_records)
-        size_mb = total_size / (1024 * 1024)
+        # Final memory snapshot
+        tracker.snapshot("final")
+        final_growth_mb = tracker.get_growth_mb("final")
+        peak_mb = tracker.get_peak_mb()
+
+        # Stop tracking
+        tracker.stop()
 
         # Memory should be reasonable for 10K records
         # Each record is small (UUID + timestamp + optional correlation)
-        assert size_mb < 50, (
-            f"Idempotency store memory for 10K records: {size_mb:.2f}MB, "
-            f"expected < 50MB"
+        assert final_growth_mb < 50, (
+            f"Idempotency store memory for 10K records: {final_growth_mb:.2f}MB, "
+            f"expected < 50MB\n"
+            f"{tracker.format_report()}"
         )
 
         ops_per_second = event_count / elapsed
+        per_record_bytes = (final_growth_mb * 1024 * 1024) / event_count
+
         print("\n[Performance] Idempotency store memory (10K records):")
         print(f"  Time: {elapsed:.3f}s ({ops_per_second:.0f} ops/s)")
         print(f"  Records: {record_count}")
-        print(f"  Approximate size: {size_mb:.4f}MB")
-        print(f"  Per-record size: {total_size / event_count:.1f} bytes")
+        print(f"  Final growth: {final_growth_mb:.4f}MB")
+        print(f"  Peak: {peak_mb:.4f}MB")
+        print(f"  Per-record size: {per_record_bytes:.1f} bytes")
 
 
 # =============================================================================
@@ -626,16 +709,29 @@ class TestMemoryUsagePerformance:
 # =============================================================================
 
 
-@pytest.mark.slow  # 5x1000 event batches for throughput stability
+@pytest.mark.slow  # 10x1000 event batches for throughput stability
 @pytest.mark.asyncio
 class TestReplayThroughput:
-    """Throughput benchmark tests for replay operations."""
+    """Throughput benchmark tests for replay operations.
+
+    Statistical Approach:
+        - Uses 10 batches (increased from 5) for better statistical validity
+        - Discards first batch as warmup
+        - Reports coefficient of variation for stability assessment
+        - Uses PerformanceStats for comprehensive analysis
+    """
 
     async def test_sustained_replay_throughput(
         self,
         reducer: RegistrationReducer,
     ) -> None:
         """Test sustained replay throughput over extended period.
+
+        Statistical Methodology:
+            - Runs 10 batches of 1000 events each
+            - First batch is warmup (discarded from statistics)
+            - Coefficient of variation < 0.5 indicates stable throughput
+            - Reports full statistics including P95 for worst-case analysis
 
         Measures whether throughput remains stable during extended
         replay operations.
@@ -644,7 +740,8 @@ class TestReplayThroughput:
         clock = DeterministicClock()
 
         batch_size = 1000
-        num_batches = 5
+        num_batches = 10  # Increased from 5 for better statistics
+        warmup_batches = 1  # First batch is warmup
         batch_times: list[float] = []
 
         for batch_num in range(num_batches):
@@ -657,29 +754,37 @@ class TestReplayThroughput:
                 reducer.reduce(state, event)
 
             elapsed = time.perf_counter() - start_time
-            batch_times.append(elapsed)
 
-        # Calculate throughput statistics
-        avg_time = sum(batch_times) / len(batch_times)
-        max_time = max(batch_times)
-        min_time = min(batch_times)
-        variance = sum((t - avg_time) ** 2 for t in batch_times) / len(batch_times)
+            # Skip warmup batches
+            if batch_num >= warmup_batches:
+                batch_times.append(elapsed)
 
-        # Throughput should be stable (low variance)
-        coefficient_of_variation = (variance**0.5) / avg_time
-        assert coefficient_of_variation < 0.5, (
-            f"Throughput variance too high: CV={coefficient_of_variation:.2f}, "
-            f"expected < 0.5"
+        # Use PerformanceStats for comprehensive analysis
+        stats = PerformanceStats.from_samples(batch_times)
+
+        # Throughput should be stable (low coefficient of variation)
+        assert stats.coefficient_of_variation < 0.5, (
+            f"Throughput variance too high: CV={stats.coefficient_of_variation:.2f}, "
+            f"expected < 0.5\n"
+            f"{stats.format_report('Batch timing')}"
         )
 
-        avg_throughput = batch_size / avg_time
+        # Also assert P95 is within reasonable bounds of median
+        # (no extreme outliers that would indicate instability)
+        p95_to_median_ratio = stats.p95 / stats.median if stats.median > 0 else 0
+        assert p95_to_median_ratio < 2.0, (
+            f"P95/median ratio {p95_to_median_ratio:.2f} indicates instability, "
+            f"expected < 2.0"
+        )
+
+        median_throughput = batch_size / stats.median
         print(
-            f"\n[Performance] Sustained throughput ({num_batches} batches of {batch_size}):"
+            f"\n[Performance] Sustained throughput ({num_batches - warmup_batches} batches of {batch_size}, "
+            f"{warmup_batches} warmup):"
         )
-        print(f"  Avg time per batch: {avg_time:.3f}s")
-        print(f"  Min/Max: {min_time:.3f}s / {max_time:.3f}s")
-        print(f"  Throughput: {avg_throughput:.0f} events/s")
-        print(f"  Coefficient of variation: {coefficient_of_variation:.3f}")
+        print(f"{stats.format_report('Batch timing')}")
+        print(f"  Median throughput: {median_throughput:.0f} events/s")
+        print(f"  P95/median ratio: {p95_to_median_ratio:.2f}")
 
 
 # =============================================================================

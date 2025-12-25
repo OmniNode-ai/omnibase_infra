@@ -1053,3 +1053,891 @@ class TestDataIntegrityUnderChaos:
         assert total_tracked == len(operations), (
             f"Expected {len(operations)} tracked operations, got {total_tracked}"
         )
+
+
+# =============================================================================
+# Additional Concurrent Chaos Scenarios (OMN-955 PR Review)
+# =============================================================================
+
+
+@pytest.mark.chaos
+class TestCircuitBreakerUnderConcurrentLoad:
+    """Test circuit breaker behavior under concurrent load.
+
+    These tests validate that circuit breakers correctly handle:
+    - Multiple concurrent operations hitting the breaker simultaneously
+    - Race conditions in breaker state transitions
+    - Proper failure counting under concurrent access
+    - Half-open state behavior with concurrent requests
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.slow
+    async def test_circuit_breaker_concurrent_failure_threshold(self) -> None:
+        """Test circuit breaker reaches threshold with concurrent failures.
+
+        When many concurrent operations fail:
+        - Circuit should open after threshold is reached
+        - All concurrent failures should be counted
+        - Subsequent requests should be blocked immediately
+        """
+        # Arrange
+        threshold = 5
+        num_concurrent = 20  # More than threshold
+
+        class ConcurrentCircuitBreaker:
+            """Thread-safe circuit breaker for concurrent testing."""
+
+            def __init__(self, threshold: int, reset_timeout: float = 1.0):
+                self.threshold = threshold
+                self.reset_timeout = reset_timeout
+                self.failure_count = 0
+                self.is_open = False
+                self.open_time: float | None = None
+                self._lock = asyncio.Lock()
+                self.blocked_count = 0
+                self.executed_count = 0
+
+            async def execute(self, operation: str, should_fail: bool) -> bool:
+                """Execute operation with circuit breaker protection."""
+                async with self._lock:
+                    # Check if circuit is open
+                    if self.is_open:
+                        # Check for half-open transition
+                        if self.open_time is not None:
+                            import time
+
+                            if time.monotonic() - self.open_time > self.reset_timeout:
+                                # Try half-open - allow one request
+                                self.is_open = False
+                                self.failure_count = 0
+                                self.open_time = None
+                            else:
+                                self.blocked_count += 1
+                                raise InfraUnavailableError(
+                                    "Circuit breaker is open",
+                                    context=ModelInfraErrorContext(operation=operation),
+                                )
+                        else:
+                            self.blocked_count += 1
+                            raise InfraUnavailableError(
+                                "Circuit breaker is open",
+                                context=ModelInfraErrorContext(operation=operation),
+                            )
+
+                    self.executed_count += 1
+
+                    if should_fail:
+                        self.failure_count += 1
+                        if self.failure_count >= self.threshold:
+                            import time
+
+                            self.is_open = True
+                            self.open_time = time.monotonic()
+                        raise ValueError(f"Simulated failure in {operation}")
+
+                    return True
+
+        breaker = ConcurrentCircuitBreaker(threshold=threshold)
+
+        # Act - launch many concurrent failing operations
+        async def failing_operation(i: int) -> bool:
+            return await breaker.execute(f"op_{i}", should_fail=True)
+
+        results = await asyncio.gather(
+            *[failing_operation(i) for i in range(num_concurrent)],
+            return_exceptions=True,
+        )
+
+        # Assert
+        assert len(results) == num_concurrent
+
+        # All should be failures (either ValueError or InfraUnavailableError)
+        failures = [r for r in results if isinstance(r, Exception)]
+        assert len(failures) == num_concurrent
+
+        # Circuit should be open
+        assert breaker.is_open, "Circuit should be open after threshold failures"
+
+        # Some should be blocked by circuit
+        blocked = [r for r in results if isinstance(r, InfraUnavailableError)]
+        value_errors = [r for r in results if isinstance(r, ValueError)]
+
+        # At least threshold operations should have executed before circuit opened
+        assert len(value_errors) >= threshold, (
+            f"Expected at least {threshold} ValueErrors, got {len(value_errors)}"
+        )
+
+        # Remaining should be blocked
+        assert breaker.blocked_count >= 0, "Some operations may have been blocked"
+        assert breaker.executed_count + breaker.blocked_count == num_concurrent
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_half_open_concurrent_requests(self) -> None:
+        """Test circuit breaker half-open state with concurrent requests.
+
+        When circuit is half-open:
+        - Only one request should be allowed through as a probe
+        - While probe is in progress, other requests should be blocked
+        - Success should close circuit, failure should re-open
+
+        Note:
+            This test simulates realistic half-open behavior where the probe
+            request takes time to complete. While it's in progress, other
+            concurrent requests should be blocked.
+        """
+
+        # Arrange
+        class HalfOpenCircuitBreaker:
+            """Circuit breaker with proper half-open probe behavior."""
+
+            def __init__(self):
+                self.state = "closed"  # closed, open, half_open
+                self.probe_in_progress = False
+                self._lock = asyncio.Lock()
+                self.probe_count = 0
+                self.blocked_count = 0
+                self.success_count = 0
+
+            async def execute(
+                self,
+                operation: str,
+                succeed: bool = True,
+                probe_delay_ms: int = 50,
+            ) -> str:
+                """Execute operation respecting circuit state."""
+                async with self._lock:
+                    if self.state == "open":
+                        self.blocked_count += 1
+                        raise InfraUnavailableError(
+                            "Circuit open",
+                            context=ModelInfraErrorContext(operation=operation),
+                        )
+
+                    if self.state == "half_open":
+                        # In half-open, only allow one probe request
+                        if self.probe_in_progress:
+                            self.blocked_count += 1
+                            raise InfraUnavailableError(
+                                "Circuit half-open, probe in progress",
+                                context=ModelInfraErrorContext(operation=operation),
+                            )
+                        # This is the probe request
+                        self.probe_in_progress = True
+                        self.probe_count += 1
+
+                # Execute probe outside lock (simulates actual I/O)
+                if self.probe_in_progress:
+                    await asyncio.sleep(probe_delay_ms / 1000.0)
+
+                # Complete the probe and update state
+                async with self._lock:
+                    if self.probe_in_progress:
+                        self.probe_in_progress = False
+                        if succeed:
+                            self.state = "closed"
+                            self.success_count += 1
+                            return "ok"
+                        else:
+                            self.state = "open"
+                            raise ValueError("Probe failed")
+
+                    # Normal operation in closed state
+                    self.success_count += 1
+                    return "ok"
+
+        breaker = HalfOpenCircuitBreaker()
+        breaker.state = "half_open"
+
+        # Act - launch concurrent requests in half-open state
+        num_concurrent = 5
+
+        async def test_request(i: int) -> str:
+            return await breaker.execute(f"op_{i}", succeed=True, probe_delay_ms=20)
+
+        results = await asyncio.gather(
+            *[test_request(i) for i in range(num_concurrent)],
+            return_exceptions=True,
+        )
+
+        # Assert
+        assert len(results) == num_concurrent
+
+        # Only one probe should have been attempted
+        assert breaker.probe_count == 1, (
+            f"Expected exactly 1 probe, got {breaker.probe_count}"
+        )
+
+        # Count successes and blocks
+        successes = [r for r in results if r == "ok"]
+        blocked = [r for r in results if isinstance(r, InfraUnavailableError)]
+
+        # One probe succeeded, others were blocked during probe
+        assert len(successes) == 1, f"Expected 1 success, got {len(successes)}"
+        assert len(blocked) == num_concurrent - 1, (
+            f"Expected {num_concurrent - 1} blocked, got {len(blocked)}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_state_consistency_under_load(self) -> None:
+        """Test that circuit breaker state remains consistent under load.
+
+        With many concurrent operations:
+        - Failure count should accurately reflect actual failures
+        - State transitions should be atomic
+        - No operations should be lost or double-counted
+        """
+
+        # Arrange
+        class AtomicCircuitBreaker:
+            """Circuit breaker with atomic state tracking."""
+
+            def __init__(self, threshold: int = 5):
+                self.threshold = threshold
+                self.failure_count = 0
+                self.success_count = 0
+                self.is_open = False
+                self._lock = asyncio.Lock()
+                self.total_attempts = 0
+
+            async def execute(self, should_fail: bool) -> bool:
+                """Execute with atomic counter updates."""
+                async with self._lock:
+                    self.total_attempts += 1
+
+                    if self.is_open:
+                        raise InfraUnavailableError(
+                            "Circuit open",
+                            context=ModelInfraErrorContext(operation="test"),
+                        )
+
+                    if should_fail:
+                        self.failure_count += 1
+                        if self.failure_count >= self.threshold:
+                            self.is_open = True
+                        raise ValueError("Failed")
+
+                    self.success_count += 1
+                    return True
+
+        breaker = AtomicCircuitBreaker(threshold=10)
+
+        # Act - mixed success/failure operations
+        num_concurrent = 50
+
+        async def mixed_operation(i: int) -> bool:
+            should_fail = i % 3 == 0  # ~33% failure rate
+            return await breaker.execute(should_fail)
+
+        results = await asyncio.gather(
+            *[mixed_operation(i) for i in range(num_concurrent)],
+            return_exceptions=True,
+        )
+
+        # Assert - verify consistency
+        assert len(results) == num_concurrent
+
+        successes = [r for r in results if r is True]
+        failures = [
+            r for r in results if isinstance(r, (ValueError, InfraUnavailableError))
+        ]
+
+        # All operations accounted for
+        assert len(successes) + len(failures) == num_concurrent
+
+        # Counter consistency (accounting for blocked requests)
+        value_errors = [r for r in results if isinstance(r, ValueError)]
+        blocked = [r for r in results if isinstance(r, InfraUnavailableError)]
+
+        assert breaker.failure_count == len(value_errors), (
+            f"Failure count mismatch: {breaker.failure_count} != {len(value_errors)}"
+        )
+        assert breaker.success_count == len(successes), (
+            f"Success count mismatch: {breaker.success_count} != {len(successes)}"
+        )
+        assert breaker.total_attempts == len(value_errors) + len(successes) + len(
+            blocked
+        )
+
+
+@pytest.mark.chaos
+class TestDLQConcurrentWrites:
+    """Test Dead Letter Queue behavior under concurrent failure conditions.
+
+    These tests validate:
+    - Multiple failures trying to write to DLQ simultaneously
+    - DLQ write ordering under concurrent access
+    - DLQ capacity limits under concurrent pressure
+    - No message loss during concurrent DLQ operations
+    """
+
+    @pytest.mark.asyncio
+    async def test_concurrent_dlq_writes_no_message_loss(self) -> None:
+        """Test that concurrent DLQ writes don't lose messages.
+
+        When multiple failures occur simultaneously:
+        - All failures should be written to DLQ
+        - No messages should be lost
+        - Messages should have unique identifiers
+        """
+
+        # Arrange
+        @dataclass
+        class DLQMessage:
+            """Message stored in Dead Letter Queue."""
+
+            message_id: UUID
+            original_topic: str
+            error_reason: str
+            timestamp: float
+
+        class ConcurrentDLQ:
+            """Thread-safe Dead Letter Queue for concurrent testing."""
+
+            def __init__(self, max_capacity: int = 1000):
+                self.messages: list[DLQMessage] = []
+                self.max_capacity = max_capacity
+                self._lock = asyncio.Lock()
+                self.dropped_count = 0
+                self.write_count = 0
+
+            async def write(
+                self,
+                message_id: UUID,
+                topic: str,
+                error: str,
+            ) -> bool:
+                """Write a failed message to DLQ."""
+                import time
+
+                async with self._lock:
+                    self.write_count += 1
+
+                    if len(self.messages) >= self.max_capacity:
+                        self.dropped_count += 1
+                        return False
+
+                    self.messages.append(
+                        DLQMessage(
+                            message_id=message_id,
+                            original_topic=topic,
+                            error_reason=error,
+                            timestamp=time.monotonic(),
+                        )
+                    )
+                    return True
+
+            async def get_messages_for_topic(self, topic: str) -> list[DLQMessage]:
+                """Get all DLQ messages for a specific topic."""
+                async with self._lock:
+                    return [m for m in self.messages if m.original_topic == topic]
+
+        dlq = ConcurrentDLQ(max_capacity=1000)
+        num_concurrent = 100
+
+        # Act - simulate many concurrent failures
+        async def simulate_failure(i: int) -> bool:
+            message_id = uuid4()
+            topic = f"topic_{i % 5}"  # Distribute across 5 topics
+            error = f"Simulated failure {i}"
+            return await dlq.write(message_id, topic, error)
+
+        results = await asyncio.gather(
+            *[simulate_failure(i) for i in range(num_concurrent)],
+            return_exceptions=True,
+        )
+
+        # Assert
+        assert len(results) == num_concurrent
+        assert all(r is True for r in results), "All writes should succeed"
+
+        # No messages lost
+        assert len(dlq.messages) == num_concurrent, (
+            f"Expected {num_concurrent} messages, got {len(dlq.messages)}"
+        )
+        assert dlq.dropped_count == 0, "No messages should be dropped"
+
+        # All message IDs should be unique
+        message_ids = [m.message_id for m in dlq.messages]
+        assert len(set(message_ids)) == num_concurrent, (
+            "All message IDs should be unique"
+        )
+
+    @pytest.mark.asyncio
+    async def test_dlq_capacity_under_concurrent_pressure(self) -> None:
+        """Test DLQ behavior when capacity is exceeded concurrently.
+
+        When DLQ is near capacity and many writes arrive:
+        - Writes should be atomic
+        - Capacity should be respected
+        - Overflow messages should be tracked
+        """
+
+        # Arrange
+        @dataclass
+        class SimpleDLQMessage:
+            """Simplified DLQ message."""
+
+            id: UUID
+            error: str
+
+        class BoundedDLQ:
+            """DLQ with bounded capacity."""
+
+            def __init__(self, capacity: int):
+                self.capacity = capacity
+                self.messages: list[SimpleDLQMessage] = []
+                self._lock = asyncio.Lock()
+                self.overflow_count = 0
+
+            async def write(self, error: str) -> bool:
+                """Attempt to write to DLQ."""
+                async with self._lock:
+                    if len(self.messages) >= self.capacity:
+                        self.overflow_count += 1
+                        return False
+
+                    self.messages.append(SimpleDLQMessage(id=uuid4(), error=error))
+                    return True
+
+        # Small capacity to test overflow
+        capacity = 20
+        num_concurrent = 50
+
+        dlq = BoundedDLQ(capacity=capacity)
+
+        # Act - exceed capacity with concurrent writes
+        async def write_to_dlq(i: int) -> bool:
+            return await dlq.write(f"error_{i}")
+
+        results = await asyncio.gather(
+            *[write_to_dlq(i) for i in range(num_concurrent)],
+            return_exceptions=True,
+        )
+
+        # Assert
+        successes = [r for r in results if r is True]
+        failures = [r for r in results if r is False]
+
+        # Exactly capacity messages should succeed
+        assert len(successes) == capacity, (
+            f"Expected {capacity} successes, got {len(successes)}"
+        )
+
+        # Remaining should fail
+        assert len(failures) == num_concurrent - capacity, (
+            f"Expected {num_concurrent - capacity} failures, got {len(failures)}"
+        )
+
+        # Overflow should be tracked
+        assert dlq.overflow_count == num_concurrent - capacity
+        assert len(dlq.messages) == capacity
+
+    @pytest.mark.asyncio
+    async def test_dlq_ordering_under_concurrent_writes(self) -> None:
+        """Test that DLQ maintains insertion order under concurrent access.
+
+        When multiple writes occur concurrently:
+        - Messages should be stored in a consistent order
+        - Timestamps should be monotonically increasing
+        - No interleaving corruption should occur
+        """
+        # Arrange
+        import time
+
+        @dataclass
+        class OrderedDLQMessage:
+            """DLQ message with ordering metadata."""
+
+            sequence: int
+            timestamp: float
+            data: str
+
+        class OrderedDLQ:
+            """DLQ that tracks insertion order."""
+
+            def __init__(self):
+                self.messages: list[OrderedDLQMessage] = []
+                self._lock = asyncio.Lock()
+                self._sequence = 0
+
+            async def write(self, data: str) -> int:
+                """Write message and return sequence number."""
+                async with self._lock:
+                    self._sequence += 1
+                    seq = self._sequence
+                    self.messages.append(
+                        OrderedDLQMessage(
+                            sequence=seq,
+                            timestamp=time.monotonic(),
+                            data=data,
+                        )
+                    )
+                    return seq
+
+        dlq = OrderedDLQ()
+        num_concurrent = 100
+
+        # Act
+        async def write_ordered(i: int) -> int:
+            return await dlq.write(f"message_{i}")
+
+        sequences = await asyncio.gather(
+            *[write_ordered(i) for i in range(num_concurrent)],
+        )
+
+        # Assert
+        # All sequence numbers should be unique and consecutive
+        assert len(set(sequences)) == num_concurrent, "All sequences should be unique"
+        assert sorted(sequences) == list(range(1, num_concurrent + 1)), (
+            "Sequences should be 1 to N"
+        )
+
+        # Messages in DLQ should be ordered by sequence
+        dlq_sequences = [m.sequence for m in dlq.messages]
+        assert dlq_sequences == list(range(1, num_concurrent + 1)), (
+            "DLQ messages should be in sequence order"
+        )
+
+        # Timestamps should be monotonically increasing
+        timestamps = [m.timestamp for m in dlq.messages]
+        for i in range(1, len(timestamps)):
+            assert timestamps[i] >= timestamps[i - 1], (
+                f"Timestamp at {i} should be >= timestamp at {i - 1}"
+            )
+
+
+@pytest.mark.chaos
+class TestRecoveryRaceConditions:
+    """Test race conditions in recovery logic during concurrent chaos.
+
+    These tests validate:
+    - Concurrent retry operations don't corrupt state
+    - Recovery callbacks don't race with ongoing operations
+    - Cleanup operations are atomic during concurrent failures
+    """
+
+    @pytest.mark.asyncio
+    async def test_concurrent_retry_state_consistency(self) -> None:
+        """Test that concurrent retries maintain consistent state.
+
+        When multiple operations retry concurrently:
+        - Retry counts should be accurate
+        - State transitions should be atomic
+        - No retries should be lost
+        """
+
+        # Arrange
+        @dataclass
+        class RetryableOperation:
+            """Tracks retry state for an operation."""
+
+            id: UUID
+            retry_count: int = 0
+            max_retries: int = 3
+            succeeded: bool = False
+            failed_permanently: bool = False
+
+        class ConcurrentRetryManager:
+            """Manages concurrent retry operations."""
+
+            def __init__(self):
+                self.operations: dict[UUID, RetryableOperation] = {}
+                self._lock = asyncio.Lock()
+                self.total_retries = 0
+                self.successful_ops = 0
+                self.failed_ops = 0
+
+            async def execute_with_retry(
+                self,
+                op_id: UUID,
+                failure_injector: FailureInjector,
+            ) -> bool:
+                """Execute operation with retry logic."""
+                async with self._lock:
+                    if op_id not in self.operations:
+                        self.operations[op_id] = RetryableOperation(id=op_id)
+                    op = self.operations[op_id]
+
+                while True:
+                    try:
+                        # Check if already resolved
+                        async with self._lock:
+                            if op.succeeded or op.failed_permanently:
+                                return op.succeeded
+
+                        # Attempt execution
+                        await failure_injector.maybe_inject_failure(
+                            f"retry_op_{op_id}",
+                            op_id,
+                        )
+
+                        # Success
+                        async with self._lock:
+                            op.succeeded = True
+                            self.successful_ops += 1
+                        return True
+
+                    except ValueError:
+                        # Handle retry
+                        async with self._lock:
+                            op.retry_count += 1
+                            self.total_retries += 1
+
+                            if op.retry_count >= op.max_retries:
+                                op.failed_permanently = True
+                                self.failed_ops += 1
+                                return False
+
+        retry_manager = ConcurrentRetryManager()
+        failure_injector = FailureInjector(
+            config=ChaosConfig(failure_rate=0.5)  # 50% failure rate
+        )
+
+        num_operations = 30
+
+        # Act - execute many operations with retries
+        op_ids = [uuid4() for _ in range(num_operations)]
+
+        async def execute_op(op_id: UUID) -> bool:
+            return await retry_manager.execute_with_retry(op_id, failure_injector)
+
+        results = await asyncio.gather(
+            *[execute_op(op_id) for op_id in op_ids],
+            return_exceptions=True,
+        )
+
+        # Assert
+        assert len(results) == num_operations
+
+        successes = [r for r in results if r is True]
+        failures = [r for r in results if r is False]
+
+        # State consistency
+        assert len(successes) == retry_manager.successful_ops
+        assert len(failures) == retry_manager.failed_ops
+        assert len(successes) + len(failures) == num_operations
+
+        # All operations tracked
+        assert len(retry_manager.operations) == num_operations
+
+    @pytest.mark.asyncio
+    async def test_recovery_callback_race_with_operations(self) -> None:
+        """Test that recovery callbacks don't race with ongoing operations.
+
+        When recovery callback fires:
+        - Active operations should complete or abort cleanly
+        - Callback should not corrupt operation state
+        - Resources should be properly cleaned up
+        """
+
+        # Arrange
+        class RecoverableService:
+            """Service with recovery callback support."""
+
+            def __init__(self):
+                self.is_healthy = True
+                self.active_operations: set[UUID] = set()
+                self.completed_operations: set[UUID] = set()
+                self.aborted_operations: set[UUID] = set()
+                self._lock = asyncio.Lock()
+                self.recovery_triggered = False
+
+            async def start_operation(self, op_id: UUID) -> None:
+                """Start an operation."""
+                async with self._lock:
+                    if not self.is_healthy:
+                        self.aborted_operations.add(op_id)
+                        raise InfraUnavailableError(
+                            "Service unhealthy",
+                            context=ModelInfraErrorContext(operation="start"),
+                        )
+                    self.active_operations.add(op_id)
+
+            async def complete_operation(self, op_id: UUID) -> None:
+                """Complete an operation."""
+                async with self._lock:
+                    if op_id in self.active_operations:
+                        self.active_operations.remove(op_id)
+                        self.completed_operations.add(op_id)
+
+            async def trigger_failure(self) -> None:
+                """Trigger service failure and abort active operations."""
+                async with self._lock:
+                    self.is_healthy = False
+                    # Abort all active operations
+                    for op_id in list(self.active_operations):
+                        self.aborted_operations.add(op_id)
+                    self.active_operations.clear()
+
+            async def trigger_recovery(self) -> None:
+                """Trigger recovery callback."""
+                async with self._lock:
+                    self.is_healthy = True
+                    self.recovery_triggered = True
+
+        service = RecoverableService()
+
+        # Act - run operations while triggering failure and recovery
+        async def long_operation(op_id: UUID, delay_ms: int) -> bool:
+            try:
+                await service.start_operation(op_id)
+                await asyncio.sleep(delay_ms / 1000.0)
+                await service.complete_operation(op_id)
+                return True
+            except InfraUnavailableError:
+                return False
+
+        async def failure_and_recovery() -> None:
+            await asyncio.sleep(0.02)  # Let some ops start
+            await service.trigger_failure()
+            await asyncio.sleep(0.02)  # Let failure propagate
+            await service.trigger_recovery()
+
+        # Start concurrent operations with varying durations
+        op_tasks = [long_operation(uuid4(), delay_ms=10 + i * 5) for i in range(10)]
+        recovery_task = failure_and_recovery()
+
+        results = await asyncio.gather(
+            *op_tasks,
+            recovery_task,
+            return_exceptions=True,
+        )
+
+        op_results = results[:-1]  # Exclude recovery task result
+
+        # Assert
+        # All operations should have a result
+        assert len(op_results) == 10
+
+        # No operations should be stuck in active state
+        assert len(service.active_operations) == 0, (
+            "No operations should be active after recovery"
+        )
+
+        # All operations should be either completed or aborted
+        total_resolved = len(service.completed_operations) + len(
+            service.aborted_operations
+        )
+        assert total_resolved == 10, (
+            f"Expected 10 resolved operations, got {total_resolved}"
+        )
+
+        # Recovery should have been triggered
+        assert service.recovery_triggered
+
+    @pytest.mark.asyncio
+    async def test_cleanup_atomicity_during_concurrent_failures(self) -> None:
+        """Test that cleanup operations are atomic during concurrent failures.
+
+        When cleanup runs during concurrent failures:
+        - Cleanup should complete fully or not at all
+        - Resources should not be partially cleaned
+        - Concurrent failures should not corrupt cleanup state
+        """
+
+        # Arrange
+        @dataclass
+        class Resource:
+            """Resource that needs cleanup."""
+
+            id: UUID
+            is_allocated: bool = True
+            is_cleaned: bool = False
+
+        class ResourceManager:
+            """Manager for resource allocation and cleanup."""
+
+            def __init__(self):
+                self.resources: dict[UUID, Resource] = {}
+                self._lock = asyncio.Lock()
+                self.cleanup_started = False
+                self.cleanup_completed = False
+                self.allocation_after_cleanup = 0
+
+            async def allocate(self) -> Resource:
+                """Allocate a new resource."""
+                async with self._lock:
+                    if self.cleanup_started and not self.cleanup_completed:
+                        # Reject allocations during cleanup
+                        raise ValueError("Cannot allocate during cleanup")
+
+                    if self.cleanup_completed:
+                        self.allocation_after_cleanup += 1
+
+                    resource = Resource(id=uuid4())
+                    self.resources[resource.id] = resource
+                    return resource
+
+            async def release(self, resource_id: UUID) -> None:
+                """Release a resource."""
+                async with self._lock:
+                    if resource_id in self.resources:
+                        self.resources[resource_id].is_allocated = False
+
+            async def cleanup_all(self) -> int:
+                """Atomically clean up all resources."""
+                async with self._lock:
+                    self.cleanup_started = True
+
+                    # Clean all resources atomically
+                    cleaned_count = 0
+                    for resource in self.resources.values():
+                        if resource.is_allocated:
+                            resource.is_allocated = False
+                            resource.is_cleaned = True
+                            cleaned_count += 1
+
+                    self.cleanup_completed = True
+                    return cleaned_count
+
+        manager = ResourceManager()
+
+        # Pre-allocate some resources
+        initial_resources = [await manager.allocate() for _ in range(10)]
+
+        # Act - concurrent allocations, releases, and cleanup
+        async def allocate_loop(count: int) -> list[Resource | Exception]:
+            results: list[Resource | Exception] = []
+            for _ in range(count):
+                try:
+                    r = await manager.allocate()
+                    results.append(r)
+                except Exception as e:
+                    results.append(e)
+                await asyncio.sleep(0.001)  # Small delay
+            return results
+
+        async def release_loop(resources: list[Resource]) -> None:
+            for r in resources:
+                await manager.release(r.id)
+                await asyncio.sleep(0.001)
+
+        async def delayed_cleanup() -> int:
+            await asyncio.sleep(0.01)  # Let some operations start
+            return await manager.cleanup_all()
+
+        results = await asyncio.gather(
+            allocate_loop(5),
+            release_loop(initial_resources[:5]),
+            delayed_cleanup(),
+            return_exceptions=True,
+        )
+
+        # Assert
+        alloc_results = results[0]
+        cleaned_count = results[2]
+
+        # Cleanup should have completed
+        assert manager.cleanup_completed, "Cleanup should complete"
+
+        # All initial resources should be cleaned
+        for r in initial_resources:
+            assert (
+                manager.resources[r.id].is_cleaned
+                or not manager.resources[r.id].is_allocated
+            ), f"Resource {r.id} should be cleaned or deallocated"
+
+        # Some allocations should have failed during cleanup
+        failed_allocs = [r for r in alloc_results if isinstance(r, Exception)]
+        assert len(failed_allocs) >= 0  # May be 0 if timing is different

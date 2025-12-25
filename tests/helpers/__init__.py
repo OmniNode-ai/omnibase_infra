@@ -36,6 +36,16 @@ Available Utilities:
         - EventSequenceLog: Log of events for replay testing
         - EventFactory: Factory for deterministic event creation
         - create_introspection_event: Helper for creating introspection events
+
+    Statistics (OMN-955):
+        - PerformanceStats: Comprehensive statistics for timing samples
+        - MemoryTracker: tracemalloc-based memory tracking
+        - MemorySnapshot: Memory snapshot at a point in time
+        - BinomialConfidenceInterval: Confidence interval for proportions
+        - calculate_binomial_confidence_interval: Wilson score interval
+        - minimum_sample_size_for_tolerance: Calculate required sample size
+        - run_with_warmup: Async operation timing with warmup
+        - run_with_warmup_sync: Sync operation timing with warmup
 """
 
 from tests.helpers.ast_analysis import (
@@ -63,6 +73,16 @@ from tests.helpers.replay_utils import (
     create_introspection_event,
     detect_sequence_number_violations,
     detect_timestamp_order_violations,
+)
+from tests.helpers.statistics_utils import (
+    BinomialConfidenceInterval,
+    MemorySnapshot,
+    MemoryTracker,
+    PerformanceStats,
+    calculate_binomial_confidence_interval,
+    minimum_sample_size_for_tolerance,
+    run_with_warmup,
+    run_with_warmup_sync,
 )
 
 __all__ = [
@@ -93,4 +113,13 @@ __all__ = [
     "EventFactory",
     "NodeType",
     "create_introspection_event",
+    # Statistics utilities
+    "PerformanceStats",
+    "MemoryTracker",
+    "MemorySnapshot",
+    "BinomialConfidenceInterval",
+    "calculate_binomial_confidence_interval",
+    "minimum_sample_size_for_tolerance",
+    "run_with_warmup",
+    "run_with_warmup_sync",
 ]

@@ -57,6 +57,8 @@ from tests.helpers.replay_utils import (
 )
 
 if TYPE_CHECKING:
+    from omnibase_core.nodes import ModelReducerOutput
+
     from tests.replay.conftest import EventFactory, EventSequenceLog
 
 
@@ -184,7 +186,7 @@ class TestReducerWithOutOfOrderEvents:
         )
 
         # Process in reverse order (each with fresh state)
-        outputs: list = []
+        outputs: list[ModelReducerOutput] = []
         for event in reversed(events):
             state = ModelRegistrationState()
             output = reducer.reduce(state, event)

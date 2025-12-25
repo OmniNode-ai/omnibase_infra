@@ -277,7 +277,7 @@ class EventSequenceLog:
         )
         self.entries.append(entry)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         """Serialize the log to a dictionary for storage/transport.
 
         Returns:
@@ -297,7 +297,7 @@ class EventSequenceLog:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> EventSequenceLog:
+    def from_dict(cls, data: dict[str, object]) -> EventSequenceLog:
         """Deserialize a log from a dictionary.
 
         Args:
