@@ -61,6 +61,7 @@ from omnibase_infra.models.validation.model_coverage_metrics import (
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
+from omnibase_infra.validation.infra_validators import _should_skip_path
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
@@ -597,9 +598,10 @@ def _discover_routes_static(source_directory: Path) -> set[str]:
 
     # Scan all Python files, excluding test files to reduce false positives
     for file_path in source_directory.glob("**/*.py"):
-        path_str = str(file_path)
-        # Skip __pycache__ directories
-        if "__pycache__" in path_str:
+        # Skip files in excluded directories (archive, archived, examples, __pycache__)
+        # Uses exact path component matching to avoid false positives from substring
+        # matching (e.g., "my__pycache__dir" should NOT be skipped)
+        if _should_skip_path(file_path):
             continue
         # Skip test files - they often contain mock registrations that
         # would produce false positives (e.g., `registry.register(MockEvent, ...)`)

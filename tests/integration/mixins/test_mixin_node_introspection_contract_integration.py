@@ -313,9 +313,11 @@ class TestContractToIntrospectionIntegration:
 
         # Verify node metadata from contract
         # node_id is now a UUID (generated at initialization)
+        from omnibase_core.enums import EnumNodeKind
+
         assert isinstance(node._introspection_node_id, UUID)
         assert node._contract_node_name == "test-effect-node"
-        assert node._introspection_node_type == "EFFECT"
+        assert node._introspection_node_type == EnumNodeKind.EFFECT
         assert node._introspection_version == "1.0.0"
 
     async def test_contract_with_custom_domain_topics(self) -> None:
@@ -432,10 +434,13 @@ class TestEndToEndIntrospectionWorkflow:
         assert topic == "onex.workflow.introspection.published.v1"
 
         # Verify envelope content
+        from omnibase_core.enums import EnumNodeKind
+
         assert isinstance(envelope, ModelNodeIntrospectionEvent)
         # node_id is a UUID, verify it matches the node's internal ID
         assert envelope.node_id == node._introspection_node_id
-        assert envelope.node_type == "EFFECT"
+        # node_type is serialized as the enum value (lowercase)
+        assert envelope.node_type == EnumNodeKind.EFFECT.value
         assert envelope.version == "1.5.0"
         assert envelope.reason == "startup"
 
@@ -465,8 +470,11 @@ class TestEndToEndIntrospectionWorkflow:
 
         # Verify node identification
         # node_id is a UUID, verify it matches the node's internal ID
+        from omnibase_core.enums import EnumNodeKind
+
         assert data.node_id == node._introspection_node_id
-        assert data.node_type == "EFFECT"
+        # node_type is serialized as the enum value (lowercase)
+        assert data.node_type == EnumNodeKind.EFFECT.value
         assert data.version == "1.0.0"
 
         # Verify capabilities were discovered

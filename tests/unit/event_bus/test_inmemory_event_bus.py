@@ -12,6 +12,7 @@ import asyncio
 import json
 
 import pytest
+from pydantic import BaseModel
 
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
@@ -754,8 +755,6 @@ class TestInMemoryEventBusPublishEnvelope:
     ) -> None:
         """Test publish_envelope with a Pydantic model."""
         await event_bus.start()
-
-        from pydantic import BaseModel
 
         class TestEnvelope(BaseModel):
             message: str

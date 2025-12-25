@@ -41,7 +41,8 @@ import time
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from pydantic import BaseModel
 
 # Test UUIDs - use deterministic values for reproducible tests
 TEST_NODE_UUID_1 = UUID("00000000-0000-0000-0000-000000000001")
@@ -257,7 +258,7 @@ class TestMixinNodeIntrospectionInit:
         node.initialize_introspection(config)
 
         assert node._introspection_node_id == TEST_NODE_UUID_1
-        assert node._introspection_node_type == "EFFECT"
+        assert node._introspection_node_type == EnumNodeKind.EFFECT
         assert node._introspection_event_bus is None
         assert node._introspection_version == "1.0.0"
         assert node._introspection_start_time is not None
@@ -327,6 +328,8 @@ class TestMixinNodeIntrospectionInit:
         non-UUID string) triggers Pydantic's type validation, which rejects
         invalid UUID formats.
         """
+        from pydantic import ValidationError
+
         node = MockNode()
 
         with pytest.raises(ValidationError):
@@ -338,6 +341,8 @@ class TestMixinNodeIntrospectionInit:
 
     async def test_initialize_introspection_empty_node_type_raises(self) -> None:
         """Test that empty node_type raises validation error."""
+        from pydantic import ValidationError
+
         node = MockNode()
 
         with pytest.raises(ValidationError):
@@ -619,7 +624,7 @@ class TestMixinNodeIntrospectionCaching:
         # node_id is a UUID passed via config
         assert isinstance(data.node_id, UUID)
         assert data.node_id == TEST_NODE_UUID_1
-        assert data.node_type == "EFFECT"
+        assert data.node_type == EnumNodeKind.EFFECT
         assert isinstance(data.capabilities, dict)
         assert isinstance(data.endpoints, dict)
         assert data.version == "1.0.0"
@@ -1829,7 +1834,12 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         assert "execute_task" not in ops2
 
     async def test_default_keywords_not_mutated(self) -> None:
-        """Test that DEFAULT_OPERATION_KEYWORDS is not mutated by instances."""
+        """Test that DEFAULT_OPERATION_KEYWORDS is not mutated by instances.
+
+        With frozenset, the keywords are immutable by design, so we verify:
+        1. Instance keywords are separate from class defaults
+        2. Neither can be mutated (frozenset is immutable)
+        """
         original_defaults = MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS.copy()
         node = MockNode()
         config = ModelIntrospectionConfig(
@@ -1838,9 +1848,13 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
             event_bus=None,
         )
         node.initialize_introspection(config)
-        node._introspection_operation_keywords.add("custom_keyword")
+
+        # Verify instance keywords are a frozenset (immutable by design)
+        assert isinstance(node._introspection_operation_keywords, frozenset)
+
+        # Verify class defaults remain unchanged and are also immutable
         assert original_defaults == MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
-        assert "custom_keyword" not in MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
+        assert isinstance(MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS, frozenset)
 
 
 @pytest.mark.unit

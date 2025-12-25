@@ -29,6 +29,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from pydantic import BaseModel
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
@@ -506,7 +507,6 @@ class TestStandardPydanticBoolComparison:
         This test shows the standard behavior that ONEX models intentionally
         override for more idiomatic conditional checks.
         """
-        from pydantic import BaseModel
 
         class StandardModel(BaseModel):
             value: bool = False

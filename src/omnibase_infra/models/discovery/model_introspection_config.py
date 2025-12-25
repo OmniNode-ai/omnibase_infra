@@ -24,6 +24,7 @@ import re
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 if TYPE_CHECKING:
@@ -69,10 +70,10 @@ class ModelIntrospectionConfig(BaseModel):
             Must implement ``ProtocolEventBus`` protocol.
         version: Node version string. Defaults to "1.0.0".
         cache_ttl: Cache time-to-live in seconds. Defaults to 300.0 (5 minutes).
-        operation_keywords: Optional set of keywords to identify operation methods.
+        operation_keywords: Optional frozenset of keywords to identify operation methods.
             Methods containing these keywords are reported as operations.
             If None, uses MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS.
-        exclude_prefixes: Optional set of prefixes to exclude from capability
+        exclude_prefixes: Optional frozenset of prefixes to exclude from capability
             discovery. Methods starting with these prefixes are filtered out.
             If None, uses MixinNodeIntrospection.DEFAULT_EXCLUDE_PREFIXES.
         introspection_topic: Topic for publishing introspection events.
@@ -108,7 +109,7 @@ class ModelIntrospectionConfig(BaseModel):
                     node_id=node_id or uuid4(),
                     node_type="EFFECT",
                     event_bus=event_bus,
-                    operation_keywords={"fetch", "upload", "download"},
+                    operation_keywords=frozenset({"fetch", "upload", "download"}),
                 )
                 self.initialize_introspection(config)
         ```
@@ -123,10 +124,10 @@ class ModelIntrospectionConfig(BaseModel):
         description="Unique identifier for this node instance",
     )
 
-    node_type: str = Field(
+    node_type: EnumNodeKind = Field(
         ...,
-        min_length=1,
-        description="Node type classification (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)",
+        description="Node type classification (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR). "
+        "Accepts EnumNodeKind directly (preferred) or string (deprecated, will be coerced).",
     )
 
     # Event bus for publishing introspection events.
@@ -152,15 +153,15 @@ class ModelIntrospectionConfig(BaseModel):
         description="Cache time-to-live in seconds",
     )
 
-    operation_keywords: set[str] | None = Field(
+    operation_keywords: frozenset[str] | None = Field(
         default=None,
-        description="Optional set of keywords to identify operation methods. "
+        description="Optional frozenset of keywords to identify operation methods. "
         "If None, uses MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS.",
     )
 
-    exclude_prefixes: set[str] | None = Field(
+    exclude_prefixes: frozenset[str] | None = Field(
         default=None,
-        description="Optional set of prefixes to exclude from capability discovery. "
+        description="Optional frozenset of prefixes to exclude from capability discovery. "
         "If None, uses MixinNodeIntrospection.DEFAULT_EXCLUDE_PREFIXES.",
     )
 
@@ -181,6 +182,34 @@ class ModelIntrospectionConfig(BaseModel):
         description="Topic for receiving introspection request events. "
         "ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).",
     )
+
+    @field_validator("node_type", mode="before")
+    @classmethod
+    def validate_node_type(cls, v: EnumNodeKind | str) -> EnumNodeKind:
+        """Validate and coerce node_type to EnumNodeKind.
+
+        Args:
+            v: Node type value to validate. Accepts EnumNodeKind directly
+               (preferred) or string (deprecated).
+
+        Returns:
+            EnumNodeKind instance.
+
+        Raises:
+            ValueError: If string node type is empty or invalid.
+        """
+        if isinstance(v, EnumNodeKind):
+            return v
+        if not v:
+            raise ValueError("node_type cannot be empty")
+        # Coerce string to EnumNodeKind (handles both "EFFECT" and "effect")
+        try:
+            return EnumNodeKind(v.lower())
+        except ValueError:
+            valid = ", ".join(e.value for e in EnumNodeKind)
+            raise ValueError(
+                f"Invalid node_type '{v}'. Must be one of: {valid}"
+            ) from None
 
     @field_validator(
         "introspection_topic", "heartbeat_topic", "request_introspection_topic"

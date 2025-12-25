@@ -173,6 +173,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
+from omnibase_core.enums import EnumNodeKind
+
 from omnibase_infra.models.discovery import (
     ModelIntrospectionConfig,
     ModelNodeIntrospectionEvent,
@@ -459,14 +461,14 @@ class MixinNodeIntrospection:
 
     # Configuration attributes
     _introspection_node_id: UUID | None
-    _introspection_node_type: str | None
+    _introspection_node_type: EnumNodeKind | None
     _introspection_event_bus: ProtocolEventBus | None
     _introspection_version: str
     _introspection_start_time: float | None
 
     # Capability discovery configuration
-    _introspection_operation_keywords: set[str]
-    _introspection_exclude_prefixes: set[str]
+    _introspection_operation_keywords: frozenset[str]
+    _introspection_exclude_prefixes: frozenset[str]
 
     # Registry listener callback error tracking (instance-level)
     # Used for rate-limiting error logging to prevent log spam during
@@ -480,24 +482,28 @@ class MixinNodeIntrospection:
     _introspection_last_metrics: IntrospectionPerformanceMetrics | None
 
     # Default operation keywords for capability discovery
-    DEFAULT_OPERATION_KEYWORDS: ClassVar[set[str]] = {
-        "execute",
-        "handle",
-        "process",
-        "run",
-        "invoke",
-        "call",
-    }
+    DEFAULT_OPERATION_KEYWORDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "execute",
+            "handle",
+            "process",
+            "run",
+            "invoke",
+            "call",
+        }
+    )
 
     # Default prefixes to exclude from capability discovery
-    DEFAULT_EXCLUDE_PREFIXES: ClassVar[set[str]] = {
-        "_",
-        "get_",
-        "set_",
-        "initialize",
-        "start_",
-        "stop_",
-    }
+    DEFAULT_EXCLUDE_PREFIXES: ClassVar[frozenset[str]] = frozenset(
+        {
+            "_",
+            "get_",
+            "set_",
+            "initialize",
+            "start_",
+            "stop_",
+        }
+    )
 
     # Node-type-specific operation keyword suggestions
     NODE_TYPE_OPERATION_KEYWORDS: ClassVar[dict[str, set[str]]] = {
@@ -586,7 +592,7 @@ class MixinNodeIntrospection:
                         node_id=node_config.node_id,
                         node_type="EFFECT",
                         event_bus=node_config.event_bus,
-                        operation_keywords={"fetch", "upload", "download"},
+                        operation_keywords=frozenset({"fetch", "upload", "download"}),
                     )
                     self.initialize_introspection(config)
             ```
@@ -603,16 +609,16 @@ class MixinNodeIntrospection:
         self._introspection_version = config.version
         self._introspection_cache_ttl = config.cache_ttl
 
-        # Capability discovery configuration - use copies to avoid mutation
+        # Capability discovery configuration - frozensets are immutable, no copy needed
         self._introspection_operation_keywords = (
             config.operation_keywords
             if config.operation_keywords is not None
-            else self.DEFAULT_OPERATION_KEYWORDS.copy()
+            else self.DEFAULT_OPERATION_KEYWORDS
         )
         self._introspection_exclude_prefixes = (
             config.exclude_prefixes
             if config.exclude_prefixes is not None
-            else self.DEFAULT_EXCLUDE_PREFIXES.copy()
+            else self.DEFAULT_EXCLUDE_PREFIXES
         )
 
         # Topic configuration - extract from config model
@@ -1192,14 +1198,14 @@ class MixinNodeIntrospection:
         node_type = self._introspection_node_type
         if node_type is None:
             logger.warning(
-                "Node type not initialized, using 'unknown' - "
+                "Node type not initialized, using EFFECT as fallback - "
                 "ensure initialize_introspection() was called correctly",
                 extra={
                     "node_id": str(node_id_uuid),
                     "operation": "get_introspection_data",
                 },
             )
-            node_type = "unknown"
+            node_type = EnumNodeKind.EFFECT
 
         # Extract operations list with proper type narrowing
         operations_value = capabilities.get("operations", [])
@@ -1404,11 +1410,11 @@ class MixinNodeIntrospection:
             node_type = self._introspection_node_type
             if node_type is None:
                 logger.warning(
-                    "Node type not initialized, using 'unknown' in heartbeat - "
+                    "Node type not initialized, using EFFECT in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
                     extra={"node_id": str(node_id), "operation": "_publish_heartbeat"},
                 )
-                node_type = "unknown"
+                node_type = EnumNodeKind.EFFECT
 
             # Create heartbeat event
             heartbeat = ModelNodeHeartbeatEvent(

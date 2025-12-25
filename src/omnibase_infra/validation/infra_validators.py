@@ -801,13 +801,16 @@ def _should_skip_path(path: Path) -> bool:
     Check if a path should be skipped for union validation.
 
     Uses exact path component matching to avoid false positives from substring
-    matching. A path is skipped if ANY of its directory components match a
-    known skip directory name exactly.
+    matching. A path is skipped if ANY of its PARENT directory components match
+    a known skip directory name exactly. The filename itself is NOT checked
+    to avoid false positives from files that happen to share names with skip
+    directories (e.g., `archive.py` should not be skipped).
 
     This approach prevents false positives like:
-    - /foo/archived_feature.py - NOT skipped (no "archived" directory component)
-    - /foo/archive_manager.py - NOT skipped (no "archive" directory component)
-    - /foo/examples_utils.py - NOT skipped (no "examples" directory component)
+    - /foo/archived_feature/bar.py - NOT skipped ("archived_feature" != "archived")
+    - /foo/archive_manager.py - NOT skipped (only checks parent dirs, not filename)
+    - /foo/examples_utils.py - NOT skipped (only checks parent dirs, not filename)
+    - /foo/my_archive/bar.py - NOT skipped ("my_archive" != "archive")
 
     While correctly skipping:
     - /foo/archived/bar.py - Skipped (has "archived" directory component)
@@ -821,10 +824,18 @@ def _should_skip_path(path: Path) -> bool:
     Returns:
         True if the path should be skipped, False otherwise.
     """
-    # Check each path component (directory names and filename) individually
-    # This prevents false positives from substring matching
-    # Example: "/foo/archived/bar.py" -> ["foo", "archived", "bar.py"]
-    return any(_is_skip_directory(part) for part in path.parts)
+    # Check PARENT directory components only (exclude the filename)
+    # This prevents false positives from files named like skip directories
+    # (e.g., archive.py, examples.py)
+    #
+    # path.parts includes all components including filename:
+    # "/foo/archived/bar.py" -> ('/', 'foo', 'archived', 'bar.py')
+    #
+    # path.parent.parts excludes the filename:
+    # "/foo/archived/bar.py" -> ('/', 'foo', 'archived')
+    #
+    # Using parent.parts ensures we only match DIRECTORY names, not filenames
+    return any(_is_skip_directory(part) for part in path.parent.parts)
 
 
 def _count_non_optional_unions(directory: Path) -> tuple[int, int, list[str]]:
@@ -1085,6 +1096,9 @@ __all__ = [
     "get_pattern_exemptions",
     "get_union_exemptions",
     "get_architecture_exemptions",
+    # Path utilities
+    "_is_skip_directory",
+    "_should_skip_path",
     # Validators
     "validate_infra_architecture",
     "validate_infra_contracts",

@@ -68,23 +68,51 @@ class TestModelNodeHeartbeatEventBasicInstantiation:
         assert event.correlation_id == correlation_id
         assert event.timestamp == timestamp
 
-    def test_valid_node_type_string_values(self) -> None:
-        """Test that node_type accepts any string (not constrained like introspection)."""
+    def test_valid_node_type_enum_values(self) -> None:
+        """Test that node_type accepts all EnumNodeKind values."""
+        from omnibase_core.enums import EnumNodeKind
+
+        # Test with enum values directly
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
-        assert event.node_type == "effect"
+        assert event.node_type == EnumNodeKind.EFFECT
 
-        test_node_id2 = uuid4()
-        event2 = ModelNodeHeartbeatEvent(
-            node_id=test_node_id2,
-            node_type="custom_type",  # Heartbeat allows any string
+        # Test all valid node types
+        for node_kind in EnumNodeKind:
+            test_node_id = uuid4()
+            event = ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type=node_kind,
+                uptime_seconds=100.0,
+            )
+            assert event.node_type == node_kind
+
+    def test_valid_node_type_lowercase_string_coercion(self) -> None:
+        """Test that lowercase strings are coerced to EnumNodeKind."""
+        from omnibase_core.enums import EnumNodeKind
+
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",  # lowercase string
             uptime_seconds=100.0,
         )
-        assert event2.node_type == "custom_type"
+        assert event.node_type == EnumNodeKind.EFFECT
+
+    def test_invalid_node_type_string_raises_error(self) -> None:
+        """Test that invalid node_type strings raise ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="custom_type",  # Invalid - not a valid EnumNodeKind
+                uptime_seconds=100.0,
+            )
+        assert "node_type" in str(exc_info.value)
 
 
 class TestModelNodeHeartbeatEventNodeVersion:
@@ -867,26 +895,34 @@ class TestModelNodeHeartbeatEventEdgeCases:
                 uptime_seconds=100.0,
             )
 
-    def test_empty_string_node_type(self) -> None:
-        """Test that empty string is allowed for node_type."""
-        test_node_id = uuid4()
-        event = ModelNodeHeartbeatEvent(
-            node_id=test_node_id,
-            node_type="",
-            uptime_seconds=100.0,
-        )
-        assert event.node_type == ""
+    def test_empty_string_node_type_raises_error(self) -> None:
+        """Test that empty string for node_type raises ValidationError.
 
-    def test_unicode_in_node_type(self) -> None:
-        """Test Unicode characters in string fields."""
+        Since node_type is now EnumNodeKind, empty string is not valid.
+        """
         test_node_id = uuid4()
-        event = ModelNodeHeartbeatEvent(
-            node_id=test_node_id,
-            node_type="效果节点",
-            uptime_seconds=100.0,
-        )
-        assert event.node_id == test_node_id
-        assert event.node_type == "效果节点"
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="",  # type: ignore[arg-type]
+                uptime_seconds=100.0,
+            )
+        assert "node_type" in str(exc_info.value)
+
+    def test_invalid_unicode_node_type_raises_error(self) -> None:
+        """Test that Unicode characters in node_type raise ValidationError.
+
+        Since node_type is now EnumNodeKind, Unicode strings are not valid
+        unless they match a valid enum value.
+        """
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="效果节点",  # type: ignore[arg-type]
+                uptime_seconds=100.0,
+            )
+        assert "node_type" in str(exc_info.value)
 
     def test_extra_fields_forbidden(self) -> None:
         """Test that extra fields are forbidden by model config."""
