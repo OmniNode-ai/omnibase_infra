@@ -223,11 +223,13 @@ class ProtocolSnapshotPublisher(Protocol):
 
         Example:
             ```python
+            from omnibase_core.enums import EnumNodeKind
+
             snapshot = ModelRegistrationProjection(
                 entity_id=uuid4(),
                 domain="registration",
                 current_state=EnumRegistrationState.ACTIVE,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 last_applied_event_id=uuid4(),
                 registered_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),

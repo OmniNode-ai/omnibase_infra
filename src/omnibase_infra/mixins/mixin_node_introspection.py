@@ -114,6 +114,7 @@ Security Considerations:
 
 Usage:
     ```python
+    from omnibase_core.enums import EnumNodeKind
     from omnibase_infra.mixins import MixinNodeIntrospection
     from omnibase_infra.models.discovery import ModelIntrospectionConfig
 
@@ -121,7 +122,7 @@ Usage:
         def __init__(self, node_config, event_bus=None):
             config = ModelIntrospectionConfig(
                 node_id=node_config.node_id,
-                node_type="EFFECT",
+                node_type=EnumNodeKind.EFFECT,
                 event_bus=event_bus,
             )
             self.initialize_introspection(config)
@@ -416,13 +417,14 @@ class MixinNodeIntrospection:
     Example:
         ```python
         from uuid import UUID
+        from omnibase_core.enums import EnumNodeKind
         from omnibase_infra.models.discovery import ModelIntrospectionConfig
 
         class PostgresAdapter(MixinNodeIntrospection):
             def __init__(self, node_id: UUID, adapter_config):
                 config = ModelIntrospectionConfig(
                     node_id=node_id,
-                    node_type="EFFECT",
+                    node_type=EnumNodeKind.EFFECT,
                     event_bus=adapter_config.event_bus,
                 )
                 self.initialize_introspection(config)
@@ -573,13 +575,14 @@ class MixinNodeIntrospection:
 
         Example:
             ```python
+            from omnibase_core.enums import EnumNodeKind
             from omnibase_infra.models.discovery import ModelIntrospectionConfig
 
             class MyNode(MixinNodeIntrospection):
                 def __init__(self, node_config):
                     config = ModelIntrospectionConfig(
                         node_id=node_config.node_id,
-                        node_type="EFFECT",
+                        node_type=EnumNodeKind.EFFECT,
                         event_bus=node_config.event_bus,
                         version="1.2.0",
                     )
@@ -590,7 +593,7 @@ class MixinNodeIntrospection:
                 def __init__(self, node_config):
                     config = ModelIntrospectionConfig(
                         node_id=node_config.node_id,
-                        node_type="EFFECT",
+                        node_type=EnumNodeKind.EFFECT,
                         event_bus=node_config.event_bus,
                         operation_keywords=frozenset({"fetch", "upload", "download"}),
                     )
@@ -1197,6 +1200,11 @@ class MixinNodeIntrospection:
 
         node_type = self._introspection_node_type
         if node_type is None:
+            # Design Note: EnumNodeKind.EFFECT is the intended sentinel/default value
+            # when node_type is uninitialized. EFFECT is chosen because:
+            # 1. It's the most common node type in the ONEX ecosystem
+            # 2. Effect nodes have the broadest capability expectations
+            # 3. Fallback to EFFECT is safer than ORCHESTRATOR (avoids privilege escalation)
             logger.warning(
                 "Node type not initialized, using EFFECT as fallback - "
                 "ensure initialize_introspection() was called correctly",
@@ -1409,6 +1417,8 @@ class MixinNodeIntrospection:
 
             node_type = self._introspection_node_type
             if node_type is None:
+                # Design Note: EnumNodeKind.EFFECT is the intended sentinel/default value.
+                # See get_introspection_data() for detailed rationale.
                 logger.warning(
                     "Node type not initialized, using EFFECT in heartbeat - "
                     "ensure initialize_introspection() was called correctly",

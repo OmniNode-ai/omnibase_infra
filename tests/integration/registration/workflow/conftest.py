@@ -17,8 +17,7 @@ Design Principles:
 
 from __future__ import annotations
 
-import logging
-from collections.abc import AsyncGenerator, Callable, Iterator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
@@ -452,7 +451,7 @@ def sample_introspection_event() -> ModelNodeIntrospectionEvent:
     """
     return ModelNodeIntrospectionEvent(
         node_id=uuid4(),
-        node_type="effect",
+        node_type=EnumNodeKind.EFFECT,
         node_version="1.0.0",
         correlation_id=uuid4(),
         endpoints={"health": "http://localhost:8080/health"},
@@ -468,7 +467,7 @@ def introspection_event_factory() -> Callable[..., ModelNodeIntrospectionEvent]:
     """
 
     def _create_event(
-        node_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
+        node_type: EnumNodeKind = EnumNodeKind.EFFECT,
         node_version: str = "1.0.0",
         correlation_id: UUID | None = None,
         node_id: UUID | None = None,
@@ -1167,7 +1166,7 @@ def deterministic_introspection_event_factory(
     from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
 
     def _create_event(
-        node_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
+        node_type: EnumNodeKind = EnumNodeKind.EFFECT,
         node_version: str = "1.0.0",
         endpoints: dict[str, str] | None = None,
         capabilities: ModelNodeCapabilities | None = None,
@@ -1178,7 +1177,7 @@ def deterministic_introspection_event_factory(
         """Create an introspection event with deterministic values.
 
         Args:
-            node_type: ONEX node type.
+            node_type: ONEX node type (EnumNodeKind).
             node_version: Semantic version.
             endpoints: Endpoint URLs.
             capabilities: Node capabilities.
@@ -1222,7 +1221,7 @@ def registry_request_factory(
     """
 
     def _create_request(
-        node_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
+        node_type: EnumNodeKind = EnumNodeKind.EFFECT,
         node_version: str = "1.0.0",
         endpoints: dict[str, str] | None = None,
         tags: list[str] | None = None,
@@ -1233,7 +1232,7 @@ def registry_request_factory(
         """Create a registry request with deterministic values.
 
         Args:
-            node_type: ONEX node type.
+            node_type: ONEX node type (EnumNodeKind).
             node_version: Semantic version.
             endpoints: Endpoint URLs.
             tags: Service tags.
@@ -1244,14 +1243,15 @@ def registry_request_factory(
         Returns:
             ModelRegistryRequest with deterministic values.
         """
+        node_type_str = node_type.value
         return ModelRegistryRequest(
             node_id=node_id or uuid_generator.next(),
-            node_type=node_type,
+            node_type=node_type_str,
             node_version=node_version,
             correlation_id=correlation_id or uuid_generator.next(),
-            service_name=f"onex-{node_type}",
+            service_name=f"onex-{node_type_str}",
             endpoints=endpoints or {"health": "http://localhost:8080/health"},
-            tags=tags or ["onex", node_type, "test"],
+            tags=tags or ["onex", node_type_str, "test"],
             metadata=metadata or {"environment": "test"},
             timestamp=deterministic_clock.now(),
         )

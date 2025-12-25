@@ -36,16 +36,16 @@ Related:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
-
-from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 if TYPE_CHECKING:
     from omnibase_core.models.reducer.model_intent import ModelIntent
 
+from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.effects.models import ModelRegistryRequest
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 
@@ -252,11 +252,11 @@ class TestA3OrchestratedDualRegistration:
         Verifies the workflow handles effect, compute, reducer, and
         orchestrator node types correctly.
         """
-        node_types: list[Literal["effect", "compute", "reducer", "orchestrator"]] = [
-            "effect",
-            "compute",
-            "reducer",
-            "orchestrator",
+        node_types: list[EnumNodeKind] = [
+            EnumNodeKind.EFFECT,
+            EnumNodeKind.COMPUTE,
+            EnumNodeKind.REDUCER,
+            EnumNodeKind.ORCHESTRATOR,
         ]
 
         for node_type in node_types:
@@ -668,10 +668,19 @@ class TestOrchestratedWorkflowIntegration:
 
         # Verify correlation ID in intents
         for intent in reducer_output.intents:
-            # Payload is a dict with correlation_id
-            assert str(expected_correlation_id) in str(
-                intent.payload.get("correlation_id", "")
-            )
+            # Payload is a dict with correlation_id - use equality check
+            payload_correlation_id = intent.payload.get("correlation_id")
+            # Handle both UUID and string representations
+            if isinstance(payload_correlation_id, str):
+                assert payload_correlation_id == str(expected_correlation_id), (
+                    f"Expected correlation_id {expected_correlation_id}, "
+                    f"got {payload_correlation_id}"
+                )
+            else:
+                assert payload_correlation_id == expected_correlation_id, (
+                    f"Expected correlation_id {expected_correlation_id}, "
+                    f"got {payload_correlation_id}"
+                )
 
         # Verify correlation ID in response
         assert response.correlation_id == expected_correlation_id

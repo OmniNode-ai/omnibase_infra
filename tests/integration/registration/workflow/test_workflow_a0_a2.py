@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Literal
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
@@ -628,9 +629,9 @@ class TestA2TwoWayIntrospectionLoop:
         """
         # Arrange - create multiple nodes
         nodes = [
-            test_node_factory(node_type="effect"),
-            test_node_factory(node_type="compute"),
-            test_node_factory(node_type="reducer"),
+            test_node_factory(node_type=EnumNodeKind.EFFECT),
+            test_node_factory(node_type=EnumNodeKind.COMPUTE),
+            test_node_factory(node_type=EnumNodeKind.REDUCER),
         ]
 
         # Clear history
