@@ -48,6 +48,9 @@ from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 
+# Import deterministic utilities from test helpers
+from tests.helpers.deterministic import DeterministicClock
+
 # Import test doubles from sibling package
 from tests.integration.registration.effect.test_doubles import (
     StubConsulClient,
@@ -548,87 +551,7 @@ def initial_state() -> ModelRegistrationState:
 # =============================================================================
 # Deterministic Clock Fixture
 # =============================================================================
-
-
-@dataclass
-class DeterministicClock:
-    """Clock with controllable time for deterministic testing.
-
-    Provides a fixed starting point and methods to advance time,
-    enabling reproducible tests that depend on timestamps.
-
-    Attributes:
-        _current_time: Current simulated time.
-        _tick_count: Number of times now() has been called.
-
-    Example:
-        >>> clock = DeterministicClock()
-        >>> t1 = clock.now()
-        >>> clock.advance(seconds=10)
-        >>> t2 = clock.now()
-        >>> assert (t2 - t1).total_seconds() == 10
-    """
-
-    _current_time: datetime = field(
-        default_factory=lambda: datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
-    )
-    _tick_count: int = field(default=0)
-
-    def now(self) -> datetime:
-        """Get current simulated time.
-
-        Returns:
-            Current datetime in UTC.
-        """
-        self._tick_count += 1
-        return self._current_time
-
-    def advance(
-        self,
-        seconds: float = 0,
-        minutes: float = 0,
-        hours: float = 0,
-        days: float = 0,
-    ) -> datetime:
-        """Advance simulated time.
-
-        Args:
-            seconds: Seconds to advance.
-            minutes: Minutes to advance.
-            hours: Hours to advance.
-            days: Days to advance.
-
-        Returns:
-            New current time after advancement.
-        """
-        from datetime import timedelta
-
-        delta = timedelta(
-            seconds=seconds,
-            minutes=minutes,
-            hours=hours,
-            days=days,
-        )
-        self._current_time = self._current_time + delta
-        return self._current_time
-
-    def set_time(self, time: datetime) -> None:
-        """Set current time to a specific value.
-
-        Args:
-            time: New current time.
-        """
-        self._current_time = time
-
-    def reset(self) -> None:
-        """Reset clock to initial state."""
-        self._current_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
-        self._tick_count = 0
-
-    @property
-    def tick_count(self) -> int:
-        """Get the number of times now() has been called."""
-        return self._tick_count
+# Note: DeterministicClock class is imported from tests.helpers.deterministic
 
 
 @pytest.fixture

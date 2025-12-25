@@ -467,8 +467,8 @@ class MixinNodeIntrospection:
     _introspection_start_time: float | None
 
     # Capability discovery configuration
-    _introspection_operation_keywords: set[str]
-    _introspection_exclude_prefixes: set[str]
+    _introspection_operation_keywords: frozenset[str]
+    _introspection_exclude_prefixes: frozenset[str]
 
     # Registry listener callback error tracking (instance-level)
     # Used for rate-limiting error logging to prevent log spam during
@@ -482,24 +482,28 @@ class MixinNodeIntrospection:
     _introspection_last_metrics: IntrospectionPerformanceMetrics | None
 
     # Default operation keywords for capability discovery
-    DEFAULT_OPERATION_KEYWORDS: ClassVar[set[str]] = {
-        "execute",
-        "handle",
-        "process",
-        "run",
-        "invoke",
-        "call",
-    }
+    DEFAULT_OPERATION_KEYWORDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "execute",
+            "handle",
+            "process",
+            "run",
+            "invoke",
+            "call",
+        }
+    )
 
     # Default prefixes to exclude from capability discovery
-    DEFAULT_EXCLUDE_PREFIXES: ClassVar[set[str]] = {
-        "_",
-        "get_",
-        "set_",
-        "initialize",
-        "start_",
-        "stop_",
-    }
+    DEFAULT_EXCLUDE_PREFIXES: ClassVar[frozenset[str]] = frozenset(
+        {
+            "_",
+            "get_",
+            "set_",
+            "initialize",
+            "start_",
+            "stop_",
+        }
+    )
 
     # Node-type-specific operation keyword suggestions
     NODE_TYPE_OPERATION_KEYWORDS: ClassVar[dict[str, set[str]]] = {
@@ -588,7 +592,7 @@ class MixinNodeIntrospection:
                         node_id=node_config.node_id,
                         node_type="EFFECT",
                         event_bus=node_config.event_bus,
-                        operation_keywords={"fetch", "upload", "download"},
+                        operation_keywords=frozenset({"fetch", "upload", "download"}),
                     )
                     self.initialize_introspection(config)
             ```
@@ -600,26 +604,21 @@ class MixinNodeIntrospection:
 
         # Configuration - extract from config model
         self._introspection_node_id = config.node_id
-        # Convert string node_type to EnumNodeKind if needed, handling both
-        # EnumNodeKind instances and string formats (uppercase legacy, lowercase)
-        if isinstance(config.node_type, EnumNodeKind):
-            self._introspection_node_type = config.node_type
-        else:
-            self._introspection_node_type = EnumNodeKind(config.node_type.lower())
+        self._introspection_node_type = config.node_type
         self._introspection_event_bus = config.event_bus
         self._introspection_version = config.version
         self._introspection_cache_ttl = config.cache_ttl
 
-        # Capability discovery configuration - use copies to avoid mutation
+        # Capability discovery configuration - frozensets are immutable, no copy needed
         self._introspection_operation_keywords = (
             config.operation_keywords
             if config.operation_keywords is not None
-            else self.DEFAULT_OPERATION_KEYWORDS.copy()
+            else self.DEFAULT_OPERATION_KEYWORDS
         )
         self._introspection_exclude_prefixes = (
             config.exclude_prefixes
             if config.exclude_prefixes is not None
-            else self.DEFAULT_EXCLUDE_PREFIXES.copy()
+            else self.DEFAULT_EXCLUDE_PREFIXES
         )
 
         # Topic configuration - extract from config model
@@ -1196,8 +1195,8 @@ class MixinNodeIntrospection:
             # Use nil UUID (all zeros) as sentinel for uninitialized node
             node_id_uuid = UUID("00000000-0000-0000-0000-000000000000")
 
-        node_type_enum = self._introspection_node_type
-        if node_type_enum is None:
+        node_type = self._introspection_node_type
+        if node_type is None:
             logger.warning(
                 "Node type not initialized, using EFFECT as fallback - "
                 "ensure initialize_introspection() was called correctly",
@@ -1206,7 +1205,7 @@ class MixinNodeIntrospection:
                     "operation": "get_introspection_data",
                 },
             )
-            node_type_enum = EnumNodeKind.EFFECT
+            node_type = EnumNodeKind.EFFECT
 
         # Extract operations list with proper type narrowing
         operations_value = capabilities.get("operations", [])
@@ -1234,7 +1233,7 @@ class MixinNodeIntrospection:
         # Create event with performance metrics included
         event = ModelNodeIntrospectionEvent(
             node_id=node_id_uuid,
-            node_type=node_type_enum,
+            node_type=node_type,
             capabilities=capabilities,
             endpoints=endpoints,
             current_state=current_state,
@@ -1408,22 +1407,19 @@ class MixinNodeIntrospection:
                 # Use nil UUID (all zeros) as sentinel for uninitialized node
                 node_id = UUID("00000000-0000-0000-0000-000000000000")
 
-            node_type_enum = self._introspection_node_type
-            if node_type_enum is None:
+            node_type = self._introspection_node_type
+            if node_type is None:
                 logger.warning(
-                    "Node type not initialized, using 'effect' in heartbeat - "
+                    "Node type not initialized, using EFFECT in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
                     extra={"node_id": str(node_id), "operation": "_publish_heartbeat"},
                 )
-                node_type_str = "effect"
-            else:
-                # Convert EnumNodeKind to string for ModelNodeHeartbeatEvent
-                node_type_str = node_type_enum.value
+                node_type = EnumNodeKind.EFFECT
 
             # Create heartbeat event
             heartbeat = ModelNodeHeartbeatEvent(
                 node_id=node_id,
-                node_type=node_type_str,
+                node_type=node_type,
                 uptime_seconds=uptime_seconds,
                 # TODO(ACTIVE-OP-TRACKING): Implement active operation tracking
                 # Ticket: Create Linear ticket for active operation tracking implementation

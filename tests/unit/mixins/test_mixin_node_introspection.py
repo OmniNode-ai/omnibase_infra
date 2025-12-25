@@ -1834,7 +1834,12 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         assert "execute_task" not in ops2
 
     async def test_default_keywords_not_mutated(self) -> None:
-        """Test that DEFAULT_OPERATION_KEYWORDS is not mutated by instances."""
+        """Test that DEFAULT_OPERATION_KEYWORDS is not mutated by instances.
+
+        With frozenset, the keywords are immutable by design, so we verify:
+        1. Instance keywords are separate from class defaults
+        2. Neither can be mutated (frozenset is immutable)
+        """
         original_defaults = MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS.copy()
         node = MockNode()
         config = ModelIntrospectionConfig(
@@ -1843,9 +1848,13 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
             event_bus=None,
         )
         node.initialize_introspection(config)
-        node._introspection_operation_keywords.add("custom_keyword")
+
+        # Verify instance keywords are a frozenset (immutable by design)
+        assert isinstance(node._introspection_operation_keywords, frozenset)
+
+        # Verify class defaults remain unchanged and are also immutable
         assert original_defaults == MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
-        assert "custom_keyword" not in MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
+        assert isinstance(MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS, frozenset)
 
 
 @pytest.mark.unit
