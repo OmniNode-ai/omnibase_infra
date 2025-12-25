@@ -86,7 +86,7 @@ Understanding which component lives where is critical. This diagram shows the de
 |  |  | RuntimeHost    |  | Handlers       |  | EventBus         |   |  |
 |  |  | Process        |  | - HttpHandler  |  | - InMemoryBus    |   |  |
 |  |  |                |  | - DbHandler    |  | - KafkaBus (Beta)|   |  |
-|  |  | Owns event     |  | - VaultAdapter |  |                  |   |  |
+|  |  | Owns event     |  | - VaultHandler |  |                  |   |  |
 |  |  | loop + wiring  |  |   (Beta)       |  | Transport layer  |   |  |
 |  |  +----------------+  +----------------+  +------------------+   |  |
 |  +------------------------------------------------------------------+  |

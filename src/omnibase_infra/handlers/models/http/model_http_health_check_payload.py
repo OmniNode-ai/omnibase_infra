@@ -25,7 +25,10 @@ class ModelHttpHealthCheckPayload(BaseModel):
         operation_type: Discriminator set to "health_check"
         healthy: Whether the HTTP client is healthy
         initialized: Whether the handler has been initialized
-        adapter_type: Handler type identifier (e.g., "http")
+        adapter_type: Handler type identifier (e.g., "http").
+            Note: This field uses legacy naming (adapter_type) for backwards
+            compatibility. Other handler models use handler_type. The semantics
+            are identical - it identifies the handler type.
         timeout_seconds: Configured timeout in seconds
         max_request_size: Maximum request body size in bytes
         max_response_size: Maximum response body size in bytes

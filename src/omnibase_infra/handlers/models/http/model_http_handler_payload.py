@@ -58,7 +58,7 @@ class ModelHttpHandlerPayload(BaseModel):
     """Wrapper model for HTTP handler payloads.
 
     Contains the discriminated union of all possible HTTP operation payloads.
-    This allows the HttpRestAdapter to return a consistent payload wrapper while
+    This allows the HttpRestHandler to return a consistent payload wrapper while
     the actual payload type varies based on the operation.
 
     Attributes:

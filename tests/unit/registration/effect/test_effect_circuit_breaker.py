@@ -97,7 +97,7 @@ class MockConsulEffect(MixinAsyncCircuitBreaker):
     """Mock Consul effect with circuit breaker integration.
 
     Simulates a real infrastructure effect that uses the circuit breaker
-    mixin for fault tolerance, similar to ConsulHandler or VaultAdapter.
+    mixin for fault tolerance, similar to ConsulHandler or VaultHandler.
     """
 
     def __init__(
@@ -125,7 +125,7 @@ class MockConsulEffect(MixinAsyncCircuitBreaker):
     ) -> dict[str, str]:
         """Register service with circuit breaker protection.
 
-        This follows the pattern used by ConsulHandler and VaultAdapter.
+        This follows the pattern used by ConsulHandler and VaultHandler.
         """
         if correlation_id is None:
             correlation_id = uuid4()

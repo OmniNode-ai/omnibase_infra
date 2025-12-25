@@ -6,7 +6,7 @@ Operational runbooks and guides for deploying and managing omnibase_infra in pro
 
 | Document | Description |
 |----------|-------------|
-| [Thread Pool Tuning](THREAD_POOL_TUNING_RUNBOOK.md) | Guide for tuning thread pool configurations in VaultAdapter and other components |
+| [Thread Pool Tuning](THREAD_POOL_TUNING_RUNBOOK.md) | Guide for tuning thread pool configurations in VaultHandler and other components |
 
 ## Purpose
 

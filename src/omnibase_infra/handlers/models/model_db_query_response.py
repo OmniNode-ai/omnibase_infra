@@ -3,7 +3,7 @@
 """Database Query Response Model.
 
 This module provides the Pydantic model for database query response envelopes
-used by the DbAdapter.
+used by the DbHandler.
 """
 
 from __future__ import annotations
