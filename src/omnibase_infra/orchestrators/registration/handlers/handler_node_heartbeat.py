@@ -25,6 +25,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraTimeoutError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
@@ -279,7 +281,14 @@ class HandlerNodeHeartbeat:
                 correlation_id=correlation_id,
             )
 
+        except InfraConnectionError:
+            # Re-raise infrastructure connection errors directly (preserve error type)
+            raise
+        except InfraTimeoutError:
+            # Re-raise infrastructure timeout errors directly (preserve error type)
+            raise
         except Exception as e:
+            # Wrap non-infrastructure errors in RuntimeHostError
             logger.exception(
                 "Failed to update heartbeat",
                 extra={

@@ -1,73 +1,34 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Health Check Result Model.
+"""Deprecated: Health Check Result Model.
 
-This module provides the Pydantic model for health check results from
-idempotency stores, replacing untyped dict[str, object] returns with
-strongly-typed model instances.
+.. deprecated:: 0.7.0
+    This module is deprecated. Use
+    ``omnibase_infra.idempotency.models.model_idempotency_store_health_check_result``
+    instead. This module is preserved for backward compatibility only.
+
+The model has been renamed to ``ModelIdempotencyStoreHealthCheckResult`` to avoid
+naming conflicts with ``omnibase_infra.runtime.models.ModelHealthCheckResult``.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+import warnings
 
-from pydantic import BaseModel, ConfigDict, Field
+from omnibase_infra.idempotency.models.model_idempotency_store_health_check_result import (
+    ModelIdempotencyStoreHealthCheckResult,
+)
 
+# Issue deprecation warning on module import
+warnings.warn(
+    "omnibase_infra.idempotency.models.model_health_check_result is deprecated. "
+    "Use omnibase_infra.idempotency.models.model_idempotency_store_health_check_result "
+    "or import ModelIdempotencyStoreHealthCheckResult from omnibase_infra.idempotency.models.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-class ModelHealthCheckResult(BaseModel):
-    """Result of an idempotency store health check.
-
-    This model represents the outcome of a health check operation on an
-    idempotency store, providing structured diagnostics about the store's
-    operational status.
-
-    Attributes:
-        healthy: Whether the store is healthy and operational.
-            When True, the store can accept operations normally.
-            When False, consult the reason field for diagnostics.
-        reason: Descriptive reason for the health status.
-            - "ok": Store is healthy and operational
-            - "not_initialized": Store has not been initialized
-            - "table_not_found": Required database table does not exist
-            - "check_failed": Health check encountered an exception
-        error_type: Exception type name if health check failed.
-            Only populated when reason is "check_failed".
-            Useful for debugging and categorizing failures.
-
-    Example:
-        >>> # Healthy store
-        >>> result = ModelHealthCheckResult(healthy=True, reason="ok")
-        >>> if result.healthy:
-        ...     print("Store is operational")
-        Store is operational
-
-        >>> # Failed health check
-        >>> result = ModelHealthCheckResult(
-        ...     healthy=False,
-        ...     reason="check_failed",
-        ...     error_type="ConnectionRefusedError",
-        ... )
-        >>> if not result.healthy:
-        ...     print(f"Store unhealthy: {result.reason} ({result.error_type})")
-        Store unhealthy: check_failed (ConnectionRefusedError)
-    """
-
-    model_config = ConfigDict(
-        frozen=True,
-        extra="forbid",
-        from_attributes=True,
-    )
-
-    healthy: bool = Field(
-        description="Whether the store is healthy and operational",
-    )
-    reason: Literal["ok", "not_initialized", "table_not_found", "check_failed"] = Field(
-        description="Reason for the health status",
-    )
-    error_type: str | None = Field(
-        default=None,
-        description="Exception type name if health check failed",
-    )
-
+# Backward compatibility alias
+ModelHealthCheckResult = ModelIdempotencyStoreHealthCheckResult
 
 __all__: list[str] = ["ModelHealthCheckResult"]
