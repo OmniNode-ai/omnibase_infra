@@ -896,7 +896,10 @@ class PolicyRegistry:
                 # Clear internal LRU cache entries before releasing reference.
                 # This ensures prompt memory reclamation rather than waiting
                 # for garbage collection of the orphaned function object.
-                old_cache.cache_clear()
+                # Note: cache_clear() is added by @lru_cache decorator but not
+                # reflected in Callable type annotation. This is a known mypy
+                # limitation with lru_cache wrappers.
+                old_cache.cache_clear()  # type: ignore[attr-defined]
             cls._semver_cache = None
 
     @classmethod
