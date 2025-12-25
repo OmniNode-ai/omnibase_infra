@@ -31,9 +31,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import (
@@ -58,7 +60,7 @@ from omnibase_infra.services import (
 
 def create_mock_tick(
     now: datetime | None = None,
-    tick_id: None = None,
+    tick_id: UUID | None = None,
     sequence_number: int = 1,
     scheduler_id: str = "test-scheduler",
 ) -> ModelRuntimeTick:
@@ -86,7 +88,7 @@ def create_mock_projection(
         entity_id=uuid4(),
         domain="registration",
         current_state=state,
-        node_type="effect",
+        node_type=EnumNodeKind.EFFECT.value,
         node_version="1.0.0",
         capabilities=ModelNodeCapabilities(),
         ack_deadline=ack_deadline,
@@ -119,8 +121,8 @@ def create_mock_emission_result(
     liveness_emitted: int = 0,
     markers_updated: int = 0,
     errors: list[str] | None = None,
-    tick_id: None = None,
-    correlation_id: None = None,
+    tick_id: UUID | None = None,
+    correlation_id: UUID | None = None,
 ) -> ModelTimeoutEmissionResult:
     """Create a mock emission result."""
     return ModelTimeoutEmissionResult(
@@ -612,12 +614,12 @@ class TestModelTimeoutCoordinationResult:
             coordination_time_ms=10.0,
         )
 
-        with pytest.raises(Exception):  # Pydantic validation error
+        with pytest.raises(ValidationError):
             result.coordination_time_ms = 999.0  # type: ignore[misc]
 
     def test_result_model_rejects_negative_counts(self) -> None:
         """Test result model rejects negative count values."""
-        with pytest.raises(Exception):  # Pydantic validation error
+        with pytest.raises(ValidationError):
             ModelTimeoutCoordinationResult(
                 tick_id=uuid4(),
                 tick_now=datetime.now(UTC),
@@ -627,7 +629,7 @@ class TestModelTimeoutCoordinationResult:
 
     def test_result_model_rejects_negative_coordination_time(self) -> None:
         """Test result model rejects negative coordination time."""
-        with pytest.raises(Exception):  # Pydantic validation error
+        with pytest.raises(ValidationError):
             ModelTimeoutCoordinationResult(
                 tick_id=uuid4(),
                 tick_now=datetime.now(UTC),

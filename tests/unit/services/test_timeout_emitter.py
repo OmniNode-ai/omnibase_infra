@@ -40,9 +40,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import (
@@ -88,7 +90,7 @@ def create_mock_projection(
     liveness_deadline: datetime | None = None,
     ack_timeout_emitted_at: datetime | None = None,
     liveness_timeout_emitted_at: datetime | None = None,
-    entity_id: None = None,
+    entity_id: UUID | None = None,
 ) -> ModelRegistrationProjection:
     """Create a mock projection with sensible defaults."""
     now = datetime.now(UTC)
@@ -96,7 +98,7 @@ def create_mock_projection(
         entity_id=entity_id or uuid4(),
         domain="registration",
         current_state=state,
-        node_type="effect",
+        node_type=EnumNodeKind.EFFECT.value,
         node_version="1.0.0",
         capabilities=ModelNodeCapabilities(),
         ack_deadline=ack_deadline,
@@ -673,7 +675,17 @@ class TestTimeoutEmitterErrorHandling:
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
-        """Test that atomic marker update failure is captured as error."""
+        """Test that marker update failure treats the whole operation as failed.
+
+        This test validates the atomic counting semantics:
+        - When marker update fails, counters are NOT incremented
+        - Even though the event WAS published to Kafka
+        - This is intentional for exactly-once semantics from the system's perspective
+        - The entity will be re-processed on next tick (marker still NULL)
+        - Downstream consumers should deduplicate by event_id if needed
+
+        See ModelTimeoutEmissionResult docstring for full counter semantics.
+        """
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
@@ -707,7 +719,9 @@ class TestTimeoutEmitterErrorHandling:
             correlation_id=correlation_id,
         )
 
-        # Counted as failure since marker update failed
+        # Counters NOT incremented even though event was published to Kafka.
+        # This is intentional - operation is atomic (publish + marker update).
+        # Entity will be re-processed on next tick since marker is still NULL.
         assert result.ack_timeouts_emitted == 0
         assert result.markers_updated == 0
         assert len(result.errors) == 1
@@ -935,12 +949,12 @@ class TestModelTimeoutEmissionResult:
             correlation_id=uuid4(),
         )
 
-        with pytest.raises(Exception):  # Pydantic validation error
+        with pytest.raises(ValidationError):
             result.ack_timeouts_emitted = 999  # type: ignore[misc]
 
     def test_result_model_rejects_negative_values(self) -> None:
         """Test result model rejects negative counts."""
-        with pytest.raises(Exception):  # Pydantic validation error
+        with pytest.raises(ValidationError):
             ModelTimeoutEmissionResult(
                 ack_timeouts_emitted=-1,
                 processing_time_ms=1.0,
@@ -974,7 +988,7 @@ class TestModelTimeoutEmissionConfig:
         """Test config model is immutable."""
         config = ModelTimeoutEmissionConfig()
 
-        with pytest.raises(Exception):  # Pydantic validation error
+        with pytest.raises(ValidationError):
             config.environment = "changed"  # type: ignore[misc]
 
 

@@ -69,12 +69,34 @@ class ModelTimeoutEmissionResult(BaseModel):
     and monitoring. This model is returned by process_timeouts() to inform
     callers about what was emitted and any errors encountered.
 
+    Counter Semantics (Important):
+        All counters track **fully completed operations**, not partial successes.
+        An operation is counted as successful only when BOTH the event publish
+        AND the marker update succeed. This is intentional for exactly-once
+        semantics from the system's perspective.
+
+        If event publish succeeds but marker update fails:
+        - The counter is NOT incremented (operation treated as failed)
+        - The event WAS published to Kafka (at-least-once delivery)
+        - The entity will be re-processed on next tick (marker still NULL)
+        - Downstream consumers should deduplicate by event_id if needed
+
+        This atomic counting ensures that `markers_updated` always equals
+        `ack_timeouts_emitted + liveness_expirations_emitted` for successful
+        operations, making monitoring and alerting straightforward.
+
     Attributes:
-        ack_timeouts_emitted: Number of ack timeout events successfully emitted.
-        liveness_expirations_emitted: Number of liveness expiry events emitted.
+        ack_timeouts_emitted: Number of ack timeout operations fully completed
+            (event published AND marker updated). Does not count partial
+            successes where publish succeeded but marker update failed.
+        liveness_expirations_emitted: Number of liveness expiry operations
+            fully completed (event published AND marker updated).
         markers_updated: Number of projection markers successfully updated.
+            Always equals ack_timeouts_emitted + liveness_expirations_emitted
+            for successful operations.
         errors: List of error messages for failed emissions. Each error
-            includes the node_id and reason for failure.
+            includes the node_id and reason for failure. Note: an error
+            may indicate the event was published but marker update failed.
         processing_time_ms: Total processing time in milliseconds.
         tick_id: The RuntimeTick ID that triggered this processing.
         correlation_id: Correlation ID for distributed tracing.
@@ -94,17 +116,17 @@ class ModelTimeoutEmissionResult(BaseModel):
     ack_timeouts_emitted: int = Field(
         default=0,
         ge=0,
-        description="Number of ack timeout events successfully emitted",
+        description="Number of ack timeout operations fully completed (publish + marker update)",
     )
     liveness_expirations_emitted: int = Field(
         default=0,
         ge=0,
-        description="Number of liveness expiry events successfully emitted",
+        description="Number of liveness expiry operations fully completed (publish + marker update)",
     )
     markers_updated: int = Field(
         default=0,
         ge=0,
-        description="Number of projection markers successfully updated",
+        description="Number of projection markers successfully updated (equals sum of emitted counts)",
     )
     errors: list[str] = Field(
         default_factory=list,
@@ -367,6 +389,9 @@ class TimeoutEmitter:
                     tick_id=tick_id,
                     correlation_id=correlation_id,
                 )
+                # Counters increment ONLY after full operation succeeds (publish + marker).
+                # If marker update fails, _emit_ack_timeout raises and we skip these lines.
+                # See ModelTimeoutEmissionResult docstring for counter semantics.
                 ack_emitted += 1
                 markers_updated += 1
             except Exception as e:
@@ -393,6 +418,9 @@ class TimeoutEmitter:
                     tick_id=tick_id,
                     correlation_id=correlation_id,
                 )
+                # Counters increment ONLY after full operation succeeds (publish + marker).
+                # If marker update fails, _emit_liveness_expiration raises and we skip these lines.
+                # See ModelTimeoutEmissionResult docstring for counter semantics.
                 liveness_emitted += 1
                 markers_updated += 1
             except Exception as e:
