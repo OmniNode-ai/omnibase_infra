@@ -10,6 +10,7 @@ and concurrent operation handling under production load scenarios.
 from __future__ import annotations
 
 import asyncio
+import threading
 from itertools import cycle
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
@@ -103,14 +104,20 @@ class TestVaultAdapterConcurrency:
             ]
             response_cycle = cycle(responses_pattern)
 
+            # Lock for thread-safe cycle access - VaultAdapter.execute() runs hvac
+            # client calls in a ThreadPoolExecutor, so multiple threads may
+            # concurrently call get_response() which accesses the shared iterator
+            cycle_lock = threading.Lock()
+
             def get_response(*args: object, **kwargs: object) -> dict[str, object]:
-                """Return next response from cycle - raises exceptions, returns dicts.
+                """Return next response from cycle - thread-safe with lock.
 
                 When using a callable for side_effect, mock does NOT automatically
                 raise exceptions - it returns them as values. We must explicitly
                 raise Exception items from the cycle.
                 """
-                response = next(response_cycle)
+                with cycle_lock:
+                    response = next(response_cycle)
                 if isinstance(response, Exception):
                     raise response
                 return response

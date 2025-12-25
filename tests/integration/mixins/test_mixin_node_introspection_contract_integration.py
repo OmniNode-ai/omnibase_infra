@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -846,7 +846,7 @@ class TestContractIntegrationPerformance:
 
         assert metrics2 is not None
         assert metrics2.cache_hit is True
-        # Cache hit should be faster
+        # Cache hit should be reasonably fast - allow up to 2x variance to avoid CI flakiness
         assert metrics2.total_introspection_ms <= metrics1.total_introspection_ms * 2
 
 
@@ -924,7 +924,7 @@ class TestSubclassTopicOverrides:
         class TenantSpecificNode(MixinNodeIntrospection):
             """Node that explicitly configures tenant-specific topics."""
 
-            def __init__(self, node_id: str) -> None:
+            def __init__(self, node_id: UUID) -> None:
                 """Initialize tenant-specific node with explicit topic config."""
                 self._state = "ready"
                 config = ModelIntrospectionConfig(
@@ -936,7 +936,7 @@ class TestSubclassTopicOverrides:
                 )
                 self.initialize_introspection_from_config(config)
 
-        node = TenantSpecificNode(node_id=str(test_node_id))
+        node = TenantSpecificNode(node_id=test_node_id)
 
         # Verify explicitly configured topics are used
         assert node._introspection_topic == "onex.tenant1.introspection.published.v1"
@@ -956,7 +956,7 @@ class TestSubclassTopicOverrides:
             """Node with partial topic configuration."""
 
             def __init__(
-                self, node_id: str, introspection_topic: str | None = None
+                self, node_id: UUID, introspection_topic: str | None = None
             ) -> None:
                 """Initialize with optional topic override."""
                 self._state = "ready"
@@ -971,12 +971,12 @@ class TestSubclassTopicOverrides:
                 self.initialize_introspection_from_config(config)
 
         # Without topic override - uses model default
-        node1 = PartialConfigNode(node_id=str(test_node_id_1))
+        node1 = PartialConfigNode(node_id=test_node_id_1)
         assert node1._introspection_topic == DEFAULT_INTROSPECTION_TOPIC
 
         # With topic override - uses provided value
         node2 = PartialConfigNode(
-            node_id=str(test_node_id_2),
+            node_id=test_node_id_2,
             introspection_topic="onex.override.introspection.published.v1",
         )
         assert node2._introspection_topic == "onex.override.introspection.published.v1"
