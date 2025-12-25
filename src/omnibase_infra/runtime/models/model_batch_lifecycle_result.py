@@ -71,6 +71,7 @@ class ModelBatchLifecycleResult(BaseModel):
     """
 
     model_config = ConfigDict(
+        strict=True,
         frozen=True,
         extra="forbid",
         from_attributes=True,
@@ -198,6 +199,19 @@ class ModelBatchLifecycleResult(BaseModel):
             {'db': 'Timeout', 'cache': 'Connection refused'}
         """
         return {r.handler_type: r.error_message for r in self.failed_handlers}
+
+    def __str__(self) -> str:
+        """Return a human-readable string representation for debugging.
+
+        Returns:
+            String format showing succeeded and failed counts.
+        """
+        return (
+            f"ModelBatchLifecycleResult("
+            f"total={self.total_count}, "
+            f"succeeded={self.success_count}, "
+            f"failed={self.failure_count})"
+        )
 
 
 __all__ = ["ModelBatchLifecycleResult"]

@@ -13,7 +13,7 @@ Note:
 
 Exports:
     ModelBatchLifecycleResult: Result of batch lifecycle operations
-    ModelHandlerHealthCheckResult: Result of a handler health check operation
+    ModelHealthCheckResult: Result of a handler health check operation
     ModelLifecycleResult: Result of a single lifecycle operation
 
 .. versionadded:: 0.6.0
@@ -27,17 +27,17 @@ Exports:
 from omnibase_infra.runtime.models.model_batch_lifecycle_result import (
     ModelBatchLifecycleResult,
 )
-from omnibase_infra.runtime.models.model_handler_health_check_result import (
-    ModelHandlerHealthCheckResult,
+from omnibase_infra.runtime.models.model_health_check_result import (
+    ModelHealthCheckResult,
 )
 from omnibase_infra.runtime.models.model_lifecycle_result import ModelLifecycleResult
 
-# Alias for backward compatibility with code importing ModelHealthCheckResult
-ModelHealthCheckResult = ModelHandlerHealthCheckResult
+# Alias for backward compatibility with code importing ModelHandlerHealthCheckResult
+ModelHandlerHealthCheckResult = ModelHealthCheckResult
 
 __all__ = [
     "ModelBatchLifecycleResult",
-    "ModelHandlerHealthCheckResult",
-    "ModelHealthCheckResult",  # Backward compatibility alias
+    "ModelHandlerHealthCheckResult",  # Backward compatibility alias
+    "ModelHealthCheckResult",
     "ModelLifecycleResult",
 ]

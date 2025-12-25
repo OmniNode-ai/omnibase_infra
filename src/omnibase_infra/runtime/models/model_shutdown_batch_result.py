@@ -32,9 +32,9 @@ class ModelShutdownBatchResult(BaseModel):
         default_factory=list,
         description="Component types that shutdown successfully",
     )
-    failed_components: list[tuple[str, str | None]] = Field(
+    failed_components: list[tuple[str, str]] = Field(
         default_factory=list,
-        description="Component types that failed with error messages",
+        description="Component types that failed with error messages (empty string if no message)",
     )
 
     def __str__(self) -> str:

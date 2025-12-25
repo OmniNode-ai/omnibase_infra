@@ -63,7 +63,9 @@ class ModelExecutionShapeValidationResult(BaseModel):
     )
 
     model_config = ConfigDict(
+        strict=True,
         frozen=True,
+        extra="forbid",
         str_strip_whitespace=True,
     )
 
@@ -240,6 +242,22 @@ class ModelExecutionShapeValidationResult(BaseModel):
         .. versionadded:: 0.6.0
         """
         return self.passed
+
+    def __str__(self) -> str:
+        """Return a human-readable string representation for debugging.
+
+        Returns:
+            String format showing pass/fail status and violation counts.
+
+        .. versionadded:: 0.6.0
+        """
+        status = "passed" if self.passed else "failed"
+        return (
+            f"ModelExecutionShapeValidationResult("
+            f"{status}, "
+            f"violations={self.violation_count}, "
+            f"blocking={self.blocking_count})"
+        )
 
 
 __all__ = ["ModelExecutionShapeValidationResult"]
