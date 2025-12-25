@@ -39,6 +39,7 @@ import pytest
 from omnibase_core.enums import EnumReductionType, EnumStreamingMode
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
+from pydantic import ValidationError
 
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
@@ -5174,8 +5175,6 @@ class TestBoundaryConditions:
 
         This test documents the validation behavior as a boundary condition.
         """
-        from pydantic import ValidationError
-
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeIntrospectionEvent(
                 node_id=uuid4(),

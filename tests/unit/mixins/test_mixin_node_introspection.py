@@ -41,7 +41,7 @@ import time
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 # Test UUIDs - use deterministic values for reproducible tests
 TEST_NODE_UUID_1 = UUID("00000000-0000-0000-0000-000000000001")
@@ -327,8 +327,6 @@ class TestMixinNodeIntrospectionInit:
         non-UUID string) triggers Pydantic's type validation, which rejects
         invalid UUID formats.
         """
-        from pydantic import ValidationError
-
         node = MockNode()
 
         with pytest.raises(ValidationError):
@@ -340,8 +338,6 @@ class TestMixinNodeIntrospectionInit:
 
     async def test_initialize_introspection_empty_node_type_raises(self) -> None:
         """Test that empty node_type raises validation error."""
-        from pydantic import ValidationError
-
         node = MockNode()
 
         with pytest.raises(ValidationError):

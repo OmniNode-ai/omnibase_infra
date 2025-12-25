@@ -8,10 +8,10 @@ Replaces primitive tuple[str, str, str] pattern.
 
 from __future__ import annotations
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumPolicyType
-from omnibase_infra.models.model_semver import ModelSemVer
 from omnibase_infra.utils.util_semver import validate_version_lenient
 
 
@@ -72,8 +72,8 @@ class ModelPolicyKey(BaseModel):
             2. Strip leading 'v' or 'V' prefix (e.g., "v1.0.0" -> "1.0.0")
             3. Validate format with validate_version_lenient (accepts 1, 1.0, 1.0.0)
             4. Expand to three-part version (e.g., "1" -> "1.0.0", "1.2" -> "1.2.0")
-            5. Parse with ModelSemVer.from_string() for final validation
-            6. Return normalized string via str(ModelSemVer)
+            5. Parse with ModelSemVer.parse() for final validation
+            6. Return normalized string via ModelSemVer.to_string()
 
         Args:
             v: The version string to normalize
@@ -117,13 +117,22 @@ class ModelPolicyKey(BaseModel):
             version_nums.append("0")
         expanded_version = ".".join(version_nums)
 
-        # Re-add prerelease if present
-        if prerelease:
-            expanded_version = f"{expanded_version}-{prerelease}"
+        # Parse base version with ModelSemVer for validation
+        # Uses parse() from omnibase_core ModelSemVer (replaces from_string())
+        # Note: core ModelSemVer strips prerelease from to_string(), so we
+        # must preserve and re-add the prerelease suffix manually
+        try:
+            semver = ModelSemVer.parse(expanded_version)
+        except Exception as e:
+            # Convert ModelOnexError to ValueError for Pydantic field validation
+            raise ValueError(str(e)) from e
+        normalized = semver.to_string()
 
-        # Parse with ModelSemVer for final validation and canonical form
-        semver = ModelSemVer.from_string(expanded_version)
-        return str(semver)
+        # Re-add prerelease if present (core ModelSemVer strips it from to_string)
+        if prerelease:
+            normalized = f"{normalized}-{prerelease}"
+
+        return normalized
 
     @field_validator("policy_type")
     @classmethod

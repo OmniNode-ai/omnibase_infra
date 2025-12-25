@@ -5,6 +5,7 @@
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.runtime.registry.model_domain_constraint import (
@@ -245,8 +246,6 @@ class TestModelMessageTypeEntryValidation:
         A message type with no allowed categories is invalid because it can
         never be routed - there is no valid topic category where it could appear.
         """
-        from pydantic import ValidationError
-
         with pytest.raises(ValidationError) as exc_info:
             ModelMessageTypeEntry(
                 message_type="InvalidType",

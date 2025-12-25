@@ -182,6 +182,36 @@ class ModelLifecycleResult(BaseModel):
     def __bool__(self) -> bool:
         """Allow using result in boolean context.
 
+        Warning:
+            **Non-standard __bool__ behavior**: This model overrides ``__bool__`` to
+            return ``True`` only when ``success`` is True. This differs from typical
+            Pydantic model behavior where ``bool(model)`` always returns ``True`` for
+            any valid model instance.
+
+            This design enables idiomatic lifecycle operation checks::
+
+                if result:
+                    # Operation succeeded - continue
+                    continue_shutdown_sequence()
+                else:
+                    # Operation failed - handle error
+                    log_error(result.error_message)
+                    raise LifecycleError(result.error_message)
+
+            If you need to check model validity instead, use explicit attribute access::
+
+                # Check for success (uses __bool__)
+                if result:
+                    ...
+
+                # Check model is valid (always True for constructed instance)
+                if result is not None:
+                    ...
+
+                # Explicit success check (preferred for clarity)
+                if result.success:
+                    ...
+
         Returns:
             True if operation succeeded, False otherwise.
 

@@ -86,6 +86,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
@@ -738,8 +739,6 @@ class PolicyRegistry:
             ...     version="1.0.0",
             ... )
         """
-        from pydantic import ValidationError
-
         try:
             registration = ModelPolicyRegistration(
                 policy_id=policy_id,

@@ -750,15 +750,70 @@ def _is_simple_optional(pattern: ModelUnionPattern) -> bool:
     return len(pattern.types) == 2 and "None" in pattern.types
 
 
+# ==============================================================================
+# Path Skipping Configuration
+# ==============================================================================
+#
+# These directories are excluded from validation because:
+# - archive/archived: Historical code not subject to current validation rules
+# - examples: Demo code that may intentionally show anti-patterns
+# - __pycache__: Compiled Python bytecode, not source code
+#
+# The set is used for O(1) lookup when checking path components.
+SKIP_DIRECTORY_NAMES: frozenset[str] = frozenset(
+    {
+        "archive",
+        "archived",
+        "examples",
+        "__pycache__",
+    }
+)
+
+
+def _is_skip_directory(component: str) -> bool:
+    """
+    Check if a path component is a directory that should be skipped.
+
+    This predicate is extracted for reuse and testability. It checks if the
+    given component matches one of the known skip directory names exactly.
+
+    Args:
+        component: A single path component (directory or file name).
+
+    Returns:
+        True if the component is a skip directory name, False otherwise.
+
+    Examples:
+        >>> _is_skip_directory("archived")
+        True
+        >>> _is_skip_directory("archive")
+        True
+        >>> _is_skip_directory("archived_feature")  # Not a skip dir
+        False
+        >>> _is_skip_directory("my_archive")  # Not a skip dir
+        False
+    """
+    return component in SKIP_DIRECTORY_NAMES
+
+
 def _should_skip_path(path: Path) -> bool:
     """
     Check if a path should be skipped for union validation.
 
-    Skips archive directories, examples, and __pycache__ directories.
-    These are excluded because:
-    - Archive/archived: Historical code not subject to current validation rules
-    - Examples: Demo code that may intentionally show anti-patterns
-    - __pycache__: Compiled Python files, not source code
+    Uses exact path component matching to avoid false positives from substring
+    matching. A path is skipped if ANY of its directory components match a
+    known skip directory name exactly.
+
+    This approach prevents false positives like:
+    - /foo/archived_feature.py - NOT skipped (no "archived" directory component)
+    - /foo/archive_manager.py - NOT skipped (no "archive" directory component)
+    - /foo/examples_utils.py - NOT skipped (no "examples" directory component)
+
+    While correctly skipping:
+    - /foo/archived/bar.py - Skipped (has "archived" directory component)
+    - /foo/archive/bar.py - Skipped (has "archive" directory component)
+    - /foo/examples/bar.py - Skipped (has "examples" directory component)
+    - /foo/__pycache__/bar.pyc - Skipped (has "__pycache__" directory component)
 
     Args:
         path: The file path to check.
@@ -766,19 +821,10 @@ def _should_skip_path(path: Path) -> bool:
     Returns:
         True if the path should be skipped, False otherwise.
     """
-    path_str = str(path)
-    return any(
-        part in path_str
-        for part in [
-            "/archived/",
-            "archived",
-            "/archive/",
-            "archive",
-            "/examples/",
-            "examples",
-            "__pycache__",
-        ]
-    )
+    # Check each path component (directory names and filename) individually
+    # This prevents false positives from substring matching
+    # Example: "/foo/archived/bar.py" -> ["foo", "archived", "bar.py"]
+    return any(_is_skip_directory(part) for part in path.parts)
 
 
 def _count_non_optional_unions(directory: Path) -> tuple[int, int, list[str]]:
@@ -1034,6 +1080,7 @@ __all__ = [
     "INFRA_PATTERNS_STRICT",
     "INFRA_UNIONS_STRICT",
     "EXEMPTIONS_YAML_PATH",
+    "SKIP_DIRECTORY_NAMES",
     # Exemption loaders
     "get_pattern_exemptions",
     "get_union_exemptions",

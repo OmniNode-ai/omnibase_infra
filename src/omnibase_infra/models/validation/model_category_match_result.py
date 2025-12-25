@@ -73,6 +73,34 @@ class ModelCategoryMatchResult(BaseModel):
         category: The matched category (EnumMessageCategory or EnumNodeOutputType),
             or None if no specific category was identified.
 
+    Warning:
+        **Non-standard __bool__ behavior**: This model overrides ``__bool__`` to return
+        ``True`` only when ``matched`` is True. This differs from typical Pydantic model
+        behavior where ``bool(model)`` always returns ``True`` for any valid instance.
+
+        This design enables idiomatic conditional checks for category matching::
+
+            if result:
+                # Category was matched - process it
+                handle_category(result.category)
+            else:
+                # No match found - skip processing
+                pass
+
+        If you need to check model validity instead, use explicit attribute access::
+
+            # Check for match (uses __bool__)
+            if result:
+                ...
+
+            # Check model is valid (always True for constructed instance)
+            if result is not None:
+                ...
+
+            # Explicit match check (preferred for clarity)
+            if result.matched:
+                ...
+
     Example:
         >>> # Event category match
         >>> result = ModelCategoryMatchResult.matched_with_category(
@@ -265,6 +293,35 @@ class ModelCategoryMatchResult(BaseModel):
 
         Returns True if the matching operation was successful (matched=True),
         regardless of whether a specific category was identified.
+
+        Warning:
+            **Non-standard __bool__ behavior**: This model overrides ``__bool__`` to
+            return ``True`` only when ``matched`` is True. This differs from typical
+            Pydantic model behavior where ``bool(model)`` always returns ``True`` for
+            any valid model instance.
+
+            This design enables idiomatic conditional checks for match results::
+
+                if result:
+                    # Category was matched - process it
+                    handle_category(result.category)
+                else:
+                    # No match found - skip processing
+                    pass
+
+            If you need to check model validity instead, use explicit attribute access::
+
+                # Check for match (uses __bool__)
+                if result:
+                    ...
+
+                # Check model is valid (always True for constructed instance)
+                if result is not None:
+                    ...
+
+                # Explicit match check (preferred for clarity)
+                if result.matched:
+                    ...
 
         Returns:
             True if matched, False otherwise.

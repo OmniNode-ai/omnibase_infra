@@ -2,15 +2,39 @@
 # Copyright (c) 2025 OmniNode Team
 """Semantic version model for ONEX infrastructure.
 
+.. deprecated::
+    This module is DEPRECATED. Use ``omnibase_core.models.primitives.model_semver``
+    instead for all new code.
+
+    Migration guide:
+        - Replace ``from omnibase_infra.models.model_semver import ModelSemVer``
+          with ``from omnibase_core.models.primitives.model_semver import ModelSemVer``
+        - Replace ``ModelSemVer.from_string(...)`` with ``ModelSemVer.parse(...)``
+        - Replace ``str(semver)`` with ``semver.to_string()`` (both work, but to_string() is preferred)
+        - Create SEMVER_DEFAULT inline: ``SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")``
+
+    This file is kept for backwards compatibility with existing code and tests.
+    It will be removed in a future version.
+
 Provides a strongly-typed Pydantic model for semantic versioning,
 replacing raw string usage with validated, structured version data.
 """
 
 from __future__ import annotations
 
+import warnings
 from functools import total_ordering
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Issue deprecation warning at import time
+warnings.warn(
+    "omnibase_infra.models.model_semver is deprecated. "
+    "Use omnibase_core.models.primitives.model_semver instead. "
+    "Replace from_string() with parse() and str() with to_string().",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from omnibase_infra.utils.util_semver import validate_semver
 

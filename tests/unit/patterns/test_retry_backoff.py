@@ -25,6 +25,7 @@ from typing import TypeVar
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.handlers.model_consul_retry_config import ModelConsulRetryConfig
 from omnibase_infra.handlers.model_vault_retry_config import ModelVaultRetryConfig
@@ -238,8 +239,6 @@ class TestVaultRetryConfig:
 
     def test_max_attempts_bounds(self) -> None:
         """Test max_attempts validation bounds (1-10)."""
-        from pydantic import ValidationError
-
         # Valid minimum
         config = ModelVaultRetryConfig(max_attempts=1)
         assert config.max_attempts == 1
@@ -260,8 +259,6 @@ class TestVaultRetryConfig:
 
     def test_exponential_base_bounds(self) -> None:
         """Test exponential_base validation bounds (1.5-4.0)."""
-        from pydantic import ValidationError
-
         # Valid minimum
         config = ModelVaultRetryConfig(exponential_base=1.5)
         assert config.exponential_base == 1.5

@@ -201,6 +201,35 @@ class ModelValidationOutcome(BaseModel):
     def __bool__(self) -> bool:
         """Allow using outcome in boolean context.
 
+        Warning:
+            **Non-standard __bool__ behavior**: This model overrides ``__bool__`` to
+            return ``True`` only when ``is_valid`` is True. This differs from typical
+            Pydantic model behavior where ``bool(model)`` always returns ``True`` for
+            any valid model instance.
+
+            This design enables idiomatic conditional checks for validation results::
+
+                if outcome:
+                    # Validation passed - proceed
+                    continue_processing()
+                else:
+                    # Validation failed - handle error
+                    print(outcome.error_message)
+
+            If you need to check model validity instead, use explicit attribute access::
+
+                # Check for validation success (uses __bool__)
+                if outcome:
+                    ...
+
+                # Check model is valid (always True for constructed instance)
+                if outcome is not None:
+                    ...
+
+                # Explicit validation check (preferred for clarity)
+                if outcome.is_valid:
+                    ...
+
         Returns:
             True if validation passed, False otherwise.
 
