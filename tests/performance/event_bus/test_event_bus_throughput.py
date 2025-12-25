@@ -32,14 +32,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from statistics import mean
-from typing import TYPE_CHECKING
-from uuid import uuid4
 
 import pytest
 
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
-from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+from omnibase_infra.event_bus.models import ModelEventMessage
 from tests.performance.event_bus.conftest import generate_unique_topic
 
 # -----------------------------------------------------------------------------

@@ -19,6 +19,7 @@ Related:
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -166,8 +167,6 @@ def latency_tracking_handler() -> tuple[
     Returns:
         Tuple of (handler_callback, get_timestamps_function).
     """
-    import time
-
     timestamps: list[float] = []
     lock = asyncio.Lock()
 

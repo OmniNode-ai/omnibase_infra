@@ -15,6 +15,7 @@ This follows the testing patterns established in test_policy_registry.py.
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
@@ -1932,8 +1933,6 @@ class TestStressAndPerformance:
 
         Threshold: 1000 registrations < 1000ms (< 1ms per registration)
         """
-        import time
-
         RegistryCompute._reset_semver_cache()
         registry = RegistryCompute()
 
@@ -1969,8 +1968,6 @@ class TestStressAndPerformance:
 
         Threshold: 100 registrations < 200ms
         """
-        import time
-
         RegistryCompute._reset_semver_cache()
         registry = RegistryCompute()
 
@@ -2010,7 +2007,6 @@ class TestStressAndPerformance:
         Threshold: 1000 lookups < 100ms (< 0.1ms per lookup on average)
         """
         import random
-        import time
 
         # Warm up cache
         _ = large_registry.get("plugin_0500")
@@ -2043,7 +2039,6 @@ class TestStressAndPerformance:
         Threshold: P99 < 1ms
         """
         import statistics
-        import time
 
         # Warm up
         for _ in range(10):
@@ -2080,8 +2075,6 @@ class TestStressAndPerformance:
 
         Threshold: list_keys() < 100ms for 1000 entries
         """
-        import time
-
         start_time = time.perf_counter()
         keys = large_registry.list_keys()
         elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -2107,8 +2100,6 @@ class TestStressAndPerformance:
 
         Threshold: 1000 list_versions() calls < 500ms
         """
-        import time
-
         start_time = time.perf_counter()
         for _ in range(1000):
             versions = many_versions_registry.list_versions("versioned_plugin")
@@ -2129,8 +2120,6 @@ class TestStressAndPerformance:
 
         Threshold: 500 unregistrations < 500ms
         """
-        import time
-
         RegistryCompute._reset_semver_cache()
         registry = RegistryCompute()
 
@@ -2295,9 +2284,6 @@ class TestStressAndPerformance:
 
         Threshold: 1000 concurrent operations < 2 seconds
         """
-        import threading
-        import time
-
         RegistryCompute._reset_semver_cache()
         registry = RegistryCompute()
 
@@ -2377,8 +2363,6 @@ class TestStressAndPerformance:
 
         Threshold: 1000 get() calls < 200ms
         """
-        import time
-
         # Warm up
         _ = many_versions_registry.get("versioned_plugin")
 
@@ -2409,8 +2393,6 @@ class TestStressAndPerformance:
 
         Threshold: 1000 is_registered() calls < 50ms (< 0.05ms per call)
         """
-        import time
-
         start_time = time.perf_counter()
         for i in range(1000):
             plugin_id = f"plugin_{i:04d}"
@@ -2503,8 +2485,6 @@ class TestStressAndPerformance:
 
         Strategy: Compare cold cache vs warm cache performance.
         """
-        import time
-
         RegistryCompute._reset_semver_cache()
 
         # Generate version strings

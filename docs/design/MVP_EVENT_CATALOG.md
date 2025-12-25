@@ -1,11 +1,13 @@
 # MVP Event Catalog
 
 > **Status**: Living Document
-> **Document Version**: 1.0.0
+> **Document Version**: 1.0.1
 > **Phase**: 9 (Event Bus Integration)
 > **Ticket**: OMN-57
-> **Last Updated**: 2025-12-24
+> **Last Updated**: 2025-12-25
 > **Author**: ONEX Infrastructure Team
+> **Scope**: Event schemas, topic conventions, and dispatch patterns for ONEX infrastructure
+> **Audience**: Infrastructure developers, service integrators
 
 ## Overview
 
@@ -540,13 +542,39 @@ Node introspection events for service discovery (separate from registration life
 
 ### ModelNodeIntrospectionEvent (Discovery)
 
-**Purpose**: Node capability discovery and catalog maintenance.
+**Purpose**: Node capability discovery and catalog maintenance via runtime reflection.
 
 **Topic**: `onex.discovery.events` or `node.introspection`
 
 **Category**: EVENT
 
-This uses the same model as registration but serves a different purpose - populating the service catalog for routing and capability-based discovery.
+**Note**: This is a **distinct model** from the registration `ModelNodeIntrospectionEvent`. The discovery variant is designed for dynamic capability discovery via `MixinNodeIntrospection`, with:
+- Reflection-based capabilities (`CapabilitiesTypedDict`): operations, protocols, has_fsm, method_signatures
+- Flexible `node_type` (str instead of strict Literal)
+- Runtime state fields: `current_state`, `reason`
+- No URL validation (deferred to consumers)
+
+For the registration variant used in the 2-way registration pattern, see the [Registration Domain Events](#registration-domain-events) section.
+
+```python
+class ModelNodeIntrospectionEvent(BaseModel):
+    # Identity
+    node_id: UUID                            # Unique node identifier
+    node_type: str                           # Node type (flexible string)
+    version: str = "1.0.0"
+
+    # Reflection-based capabilities
+    capabilities: CapabilitiesTypedDict      # Operations, protocols, has_fsm, signatures
+    endpoints: dict[str, str]                # Exposed endpoints (name -> URL)
+
+    # State
+    current_state: str | None = None         # FSM state if applicable
+    reason: str = "startup"                  # Event reason (startup, shutdown, request)
+
+    # Tracing
+    correlation_id: UUID                     # Required for idempotency
+    timestamp: datetime                      # Event timestamp (injected)
+```
 
 **Source File**: `src/omnibase_infra/models/discovery/model_node_introspection_event.py`
 
@@ -753,7 +781,9 @@ new_field: str  # Breaks existing consumers
 | Registration | `ModelNodeRegistrationAckTimedOut` | EVENT | `onex.registration.events` |
 | Registration | `ModelNodeLivenessExpired` | EVENT | `onex.registration.events` |
 | Registration | `ModelNodeRegistrationAcked` | COMMAND | `onex.registration.commands` |
-| Discovery | `ModelNodeIntrospectionEvent` | EVENT | `onex.discovery.events` |
+| Discovery | `ModelNodeIntrospectionEvent` (distinct) | EVENT | `onex.discovery.events` |
+
+**Note**: The Registration and Discovery domains each have their own `ModelNodeIntrospectionEvent` with different schemas. Import from the appropriate module based on use case.
 
 ### Import Paths
 
@@ -774,6 +804,11 @@ from omnibase_infra.models.registration import (
 # Registration Commands
 from omnibase_infra.models.registration.commands import (
     ModelNodeRegistrationAcked,
+)
+
+# Discovery Events (distinct from registration ModelNodeIntrospectionEvent)
+from omnibase_infra.models.discovery import (
+    ModelNodeIntrospectionEvent as DiscoveryIntrospectionEvent,
 )
 
 # Dispatch Models
@@ -814,4 +849,5 @@ from omnibase_infra.enums import (
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.0.1 | 2025-12-25 | Clarified distinct registration vs discovery ModelNodeIntrospectionEvent schemas; completed metadata |
 | 1.0.0 | 2025-12-24 | Initial MVP catalog |

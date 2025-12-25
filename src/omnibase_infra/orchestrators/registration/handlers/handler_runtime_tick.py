@@ -260,22 +260,16 @@ class HandlerRuntimeTick:
 
             # Determine last heartbeat time for the event.
             #
-            # Fallback Logic (per timeout detection requirements):
-            #   1. Use projection.last_heartbeat_at if available (forward-compatible)
-            #   2. Fall back to registered_at if no heartbeats received
-            #
-            # Why registered_at is the correct fallback:
-            #   - For nodes that register but never heartbeat, registered_at is the
-            #     correct baseline for "last known activity"
-            #   - The liveness timeout window effectively starts from registration
-            #   - Using None would provide no useful timing information to consumers
-            #   - Using now would defeat timeout detection (would always look recent)
+            # Semantic Note (per ModelNodeLivenessExpired contract):
+            #   - last_heartbeat_at should be None if no heartbeats were ever received
+            #   - This is semantically different from registration time
+            #   - Using registered_at as fallback would falsely imply a heartbeat
+            #     was received at registration, which is incorrect
             #
             # When ModelRegistrationProjection adds last_heartbeat_at field, this code
-            # will automatically prefer it over registered_at.
-            last_heartbeat_at: datetime = (
-                getattr(projection, "last_heartbeat_at", None)
-                or projection.registered_at
+            # will automatically use it. Until then, None indicates no heartbeat.
+            last_heartbeat_at: datetime | None = getattr(
+                projection, "last_heartbeat_at", None
             )
 
             event = ModelNodeLivenessExpired(

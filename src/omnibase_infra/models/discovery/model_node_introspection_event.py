@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import TypedDict
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CapabilitiesTypedDict(TypedDict, total=False):
@@ -162,6 +162,27 @@ class ModelNodeIntrospectionEvent(BaseModel):
         ...,
         description="UTC timestamp of introspection generation (must be explicitly provided)",
     )
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
+        """Validate that timestamp is timezone-aware.
+
+        Args:
+            v: The timestamp value to validate.
+
+        Returns:
+            The validated timestamp.
+
+        Raises:
+            ValueError: If timestamp is naive (no timezone info).
+        """
+        if v.tzinfo is None:
+            raise ValueError(
+                "timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            )
+        return v
 
     # Design Decision: This model is immutable (frozen=True) because:
     # 1. Introspection events are snapshots of node state at a point in time
