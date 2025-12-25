@@ -219,24 +219,24 @@ class TestDeterminismGates:
         result2 = reducer.reduce(state2, event)
 
         # Compare outputs (excluding non-deterministic fields like operation_id)
-        assert result1.result.status == result2.result.status, (
-            "Reducer produced different status for same input"
-        )
-        assert result1.result.node_id == result2.result.node_id, (
-            "Reducer produced different node_id for same input"
-        )
-        assert len(result1.intents) == len(result2.intents), (
-            "Reducer produced different number of intents for same input"
-        )
+        assert (
+            result1.result.status == result2.result.status
+        ), "Reducer produced different status for same input"
+        assert (
+            result1.result.node_id == result2.result.node_id
+        ), "Reducer produced different node_id for same input"
+        assert len(result1.intents) == len(
+            result2.intents
+        ), "Reducer produced different number of intents for same input"
 
         # Compare intent types and targets
         for intent1, intent2 in zip(result1.intents, result2.intents, strict=True):
-            assert intent1.intent_type == intent2.intent_type, (
-                f"Intent type mismatch: {intent1.intent_type} != {intent2.intent_type}"
-            )
-            assert intent1.target == intent2.target, (
-                f"Intent target mismatch: {intent1.target} != {intent2.target}"
-            )
+            assert (
+                intent1.intent_type == intent2.intent_type
+            ), f"Intent type mismatch: {intent1.intent_type} != {intent2.intent_type}"
+            assert (
+                intent1.target == intent2.target
+            ), f"Intent target mismatch: {intent1.target} != {intent2.target}"
 
     def test_reducer_idempotency(self) -> None:
         """Re-processing same event must not change state.
@@ -268,9 +268,9 @@ class TestDeterminismGates:
 
         # First processing - should transition state
         result1 = reducer.reduce(initial_state, event)
-        assert result1.result.status == "pending", (
-            "First reduce should transition to pending"
-        )
+        assert (
+            result1.result.status == "pending"
+        ), "First reduce should transition to pending"
         assert len(result1.intents) == 2, "First reduce should emit 2 intents"
 
         # Second processing with SAME event on the NEW state
@@ -278,9 +278,9 @@ class TestDeterminismGates:
         result2 = reducer.reduce(result1.result, event)
 
         # Idempotency: second run should return same state with no intents
-        assert result2.result.status == result1.result.status, (
-            "Idempotent replay changed state"
-        )
+        assert (
+            result2.result.status == result1.result.status
+        ), "Idempotent replay changed state"
         assert len(result2.intents) == 0, "Idempotent replay should emit no intents"
 
     def test_reducer_deterministic_event_id_derivation(self) -> None:
@@ -327,9 +327,9 @@ class TestDeterminismGates:
         id1 = reducer._derive_deterministic_event_id(event1)
         id2 = reducer._derive_deterministic_event_id(event2)
 
-        assert id1 == id2, (
-            f"Deterministic ID derivation produced different IDs: {id1} != {id2}"
-        )
+        assert (
+            id1 == id2
+        ), f"Deterministic ID derivation produced different IDs: {id1} != {id2}"
 
         # Different event should produce different ID
         event3 = ModelNodeIntrospectionEvent(
@@ -429,9 +429,9 @@ class TestDeterminismGates:
         )
         id_special1 = reducer._derive_deterministic_event_id(event_special_chars)
         id_special2 = reducer._derive_deterministic_event_id(event_special_chars)
-        assert id_special1 == id_special2, (
-            "Special characters in URLs should not break determinism"
-        )
+        assert (
+            id_special1 == id_special2
+        ), "Special characters in URLs should not break determinism"
 
         # ---------------------------------------------------------------------
         # Test 4: Unicode characters in endpoint URLs
@@ -450,9 +450,9 @@ class TestDeterminismGates:
         )
         id_unicode1 = reducer._derive_deterministic_event_id(event_unicode)
         id_unicode2 = reducer._derive_deterministic_event_id(event_unicode)
-        assert id_unicode1 == id_unicode2, (
-            "Unicode in URLs should not break determinism"
-        )
+        assert (
+            id_unicode1 == id_unicode2
+        ), "Unicode in URLs should not break determinism"
 
         # ---------------------------------------------------------------------
         # Test 5: Timestamps affect derived ID
@@ -527,9 +527,9 @@ class TestDeterminismGates:
                 correlation_id=fixed_correlation_id,
             )
             derived_id = reducer._derive_deterministic_event_id(event_type)
-            assert isinstance(derived_id, UUID), (
-                f"Node type '{node_type}' should produce valid UUID"
-            )
+            assert isinstance(
+                derived_id, UUID
+            ), f"Node type '{node_type}' should produce valid UUID"
 
         # Different node types should produce different IDs
         ids_by_type = {}
@@ -544,9 +544,9 @@ class TestDeterminismGates:
             )
             ids_by_type[node_type] = reducer._derive_deterministic_event_id(event_type)
 
-        assert len(set(ids_by_type.values())) == 4, (
-            "Each node type should produce a unique derived ID"
-        )
+        assert (
+            len(set(ids_by_type.values())) == 4
+        ), "Each node type should produce a unique derived ID"
 
         # ---------------------------------------------------------------------
         # Test 8: Edge case node_version values
@@ -572,12 +572,12 @@ class TestDeterminismGates:
             )
             id_v1 = reducer._derive_deterministic_event_id(event_version)
             id_v2 = reducer._derive_deterministic_event_id(event_version)
-            assert id_v1 == id_v2, (
-                f"Version '{version}' should produce deterministic ID"
-            )
-            assert isinstance(id_v1, UUID), (
-                f"Version '{version}' should produce valid UUID"
-            )
+            assert (
+                id_v1 == id_v2
+            ), f"Version '{version}' should produce deterministic ID"
+            assert isinstance(
+                id_v1, UUID
+            ), f"Version '{version}' should produce valid UUID"
 
         # ---------------------------------------------------------------------
         # Test 9: Microsecond precision in timestamps
@@ -604,9 +604,9 @@ class TestDeterminismGates:
         )
         id_micro1 = reducer._derive_deterministic_event_id(event_micro1)
         id_micro2 = reducer._derive_deterministic_event_id(event_micro2)
-        assert id_micro1 != id_micro2, (
-            "Microsecond timestamp differences should produce different IDs"
-        )
+        assert (
+            id_micro1 != id_micro2
+        ), "Microsecond timestamp differences should produce different IDs"
 
         # ---------------------------------------------------------------------
         # Test 10: Large endpoint dictionaries
@@ -727,18 +727,18 @@ class TestDeterminismGates:
 
         # Verify input state was NOT mutated
         # Compare all fields of the state before and after reduce()
-        assert initial_state.status == state_before.status, (
-            f"Input state.status was mutated: {state_before.status} -> {initial_state.status}"
-        )
-        assert initial_state.node_id == state_before.node_id, (
-            "Input state.node_id was mutated"
-        )
-        assert initial_state.consul_confirmed == state_before.consul_confirmed, (
-            "Input state.consul_confirmed was mutated"
-        )
-        assert initial_state.postgres_confirmed == state_before.postgres_confirmed, (
-            "Input state.postgres_confirmed was mutated"
-        )
+        assert (
+            initial_state.status == state_before.status
+        ), f"Input state.status was mutated: {state_before.status} -> {initial_state.status}"
+        assert (
+            initial_state.node_id == state_before.node_id
+        ), "Input state.node_id was mutated"
+        assert (
+            initial_state.consul_confirmed == state_before.consul_confirmed
+        ), "Input state.consul_confirmed was mutated"
+        assert (
+            initial_state.postgres_confirmed == state_before.postgres_confirmed
+        ), "Input state.postgres_confirmed was mutated"
         assert (
             initial_state.last_processed_event_id
             == state_before.last_processed_event_id
@@ -1264,7 +1264,7 @@ class TestAdditionalBehavioralGates:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, (property, classmethod, staticmethod))
+            and not isinstance(value, property | classmethod | staticmethod)
         }
 
         # Check for mutable types
@@ -1315,7 +1315,7 @@ class TestAdditionalBehavioralGates:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, (property, classmethod, staticmethod))
+            and not isinstance(value, property | classmethod | staticmethod)
         }
 
         # Create first reducer instance and run reduce
@@ -1350,7 +1350,7 @@ class TestAdditionalBehavioralGates:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, (property, classmethod, staticmethod))
+            and not isinstance(value, property | classmethod | staticmethod)
         }
 
         assert class_vars_before == class_vars_after, (
@@ -1379,12 +1379,12 @@ class TestAdditionalBehavioralGates:
         for idx, (intent1, intent2) in enumerate(
             zip(result1.intents, result2.intents, strict=True)
         ):
-            assert intent1.intent_type == intent2.intent_type, (
-                f"Intent {idx} type mismatch: {intent1.intent_type} != {intent2.intent_type}"
-            )
-            assert intent1.target == intent2.target, (
-                f"Intent {idx} target mismatch: {intent1.target} != {intent2.target}"
-            )
+            assert (
+                intent1.intent_type == intent2.intent_type
+            ), f"Intent {idx} type mismatch: {intent1.intent_type} != {intent2.intent_type}"
+            assert (
+                intent1.target == intent2.target
+            ), f"Intent {idx} target mismatch: {intent1.target} != {intent2.target}"
 
 
 # =============================================================================
@@ -1594,9 +1594,9 @@ class TestSecurityGates:
         result = reducer.reduce(state, event)
 
         # Verify intents were emitted
-        assert len(result.intents) == 2, (
-            f"Expected 2 intents (Consul + PostgreSQL), got {len(result.intents)}"
-        )
+        assert (
+            len(result.intents) == 2
+        ), f"Expected 2 intents (Consul + PostgreSQL), got {len(result.intents)}"
 
         # Check each intent payload for sensitive data
         all_violations: list[str] = []

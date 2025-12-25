@@ -595,7 +595,9 @@ class TestTimeoutEmitterLivenessExpiration:
             liveness_deadline=None,  # Missing deadline
         )
 
-        with pytest.raises(ProtocolConfigurationError, match="liveness_deadline is None"):
+        with pytest.raises(
+            ProtocolConfigurationError, match="liveness_deadline is None"
+        ):
             await processor._emit_liveness_expiration(
                 projection=projection,
                 detected_at=datetime.now(UTC),

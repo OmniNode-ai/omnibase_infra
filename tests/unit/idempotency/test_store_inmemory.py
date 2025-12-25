@@ -48,12 +48,12 @@ class TestInMemoryIdempotencyStoreProtocol:
             "cleanup_expired",
         ]
         for method_name in required_methods:
-            assert hasattr(store, method_name), (
-                f"Store must have '{method_name}' method"
-            )
-            assert callable(getattr(store, method_name)), (
-                f"'{method_name}' must be callable"
-            )
+            assert hasattr(
+                store, method_name
+            ), f"Store must have '{method_name}' method"
+            assert callable(
+                getattr(store, method_name)
+            ), f"'{method_name}' must be callable"
 
 
 class TestCheckAndRecord:
