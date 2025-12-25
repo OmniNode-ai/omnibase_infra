@@ -40,7 +40,7 @@ class TestInfraValidatorConstants:
 
         OMN-983: Strict validation mode enabled.
 
-        Current baseline (~580 unions as of 2025-12-23):
+        Current baseline (~590 unions as of 2025-12-25):
         - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
@@ -51,12 +51,13 @@ class TestInfraValidatorConstants:
         - 540 (2025-12-23): OMN-950 comprehensive reducer tests
         - 544 (2025-12-23): OMN-954 effect idempotency and retry tests (PR #78)
         - 580 (2025-12-23): OMN-888 + PR #57 + OMN-954 merge
+        - 590 (2025-12-25): OMN-949 DLQ configuration
 
-        Threshold: 580 (buffer above ~569 combined baseline for codebase growth)
+        Threshold: 590 (buffer above ~584 current baseline for codebase growth)
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 580, (
-            "INFRA_MAX_UNIONS should be 580 (OMN-888 + PR #57 + OMN-954 merge)"
+        assert INFRA_MAX_UNIONS == 590, (
+            "INFRA_MAX_UNIONS should be 590 (OMN-949 DLQ configuration)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

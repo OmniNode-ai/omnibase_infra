@@ -366,10 +366,11 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 540 (2025-12-23): OMN-950 comprehensive reducer tests (~25 unions from type annotations)
 # - 544 (2025-12-23): OMN-954 effect idempotency and retry tests (PR #78) (~4 unions added)
 # - 580 (2025-12-23): OMN-888 + PR #57 + OMN-954 merge (~36 additional unions combined)
+# - 590 (2025-12-25): OMN-949 DLQ configuration (~10 unions from DLQ models and replay script)
 #
-# Threshold: 580 (buffer above ~569 combined baseline for codebase growth)
+# Threshold: 590 (buffer above ~584 current baseline for codebase growth)
 # Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
-INFRA_MAX_UNIONS = 580
+INFRA_MAX_UNIONS = 590
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
