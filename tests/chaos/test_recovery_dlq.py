@@ -50,14 +50,49 @@ Related:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
+
+# =============================================================================
+# Sample Message Models (Typed fixtures for testing)
+# =============================================================================
+
+
+class ModelSampleMessagePayload(BaseModel):
+    """Typed payload for sample test messages.
+
+    This model provides strong typing for the payload portion of sample
+    messages used in DLQ testing. Following ONEX guidelines, we use
+    explicit types rather than `Any`.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    data: str = Field(description="Test data string")
+    value: int = Field(description="Test numeric value")
+
+
+class ModelSampleMessage(BaseModel):
+    """Typed sample message for DLQ testing.
+
+    This model represents a standard event message structure used
+    in DLQ tests. All fields are explicitly typed per ONEX requirements.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    event_id: str = Field(description="Unique event identifier")
+    event_type: str = Field(description="Event type identifier")
+    payload: ModelSampleMessagePayload = Field(description="Event payload")
+    timestamp: str = Field(description="ISO-8601 formatted timestamp")
+
 
 # =============================================================================
 # DLQ Models
@@ -93,12 +128,19 @@ class ModelDLQMetadata(BaseModel):
 
 
 class ModelDLQMessage(BaseModel):
-    """Complete DLQ message with original content and failure context."""
+    """Complete DLQ message with original content and failure context.
+
+    Note on `original_message` typing:
+        Uses `dict[str, object]` instead of `dict[str, Any]` per ONEX guidelines.
+        The `object` type explicitly indicates "any Python object" while satisfying
+        the "no Any types" policy. DLQ must preserve arbitrary message payloads
+        from different sources, so the value type cannot be more specific.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     message_id: UUID = Field(description="Unique DLQ message ID")
-    original_message: dict[str, Any] = Field(description="Original message payload")
+    original_message: dict[str, object] = Field(description="Original message payload")
     failure_context: ModelFailureContext = Field(description="Failure information")
     dlq_metadata: ModelDLQMetadata = Field(description="DLQ capture metadata")
 
@@ -121,7 +163,7 @@ class MockDLQStore:
 
     async def send_to_dlq(
         self,
-        original_message: dict[str, Any],
+        original_message: Mapping[str, object],
         failure_context: ModelFailureContext,
         dlq_metadata: ModelDLQMetadata,
     ) -> ModelDLQMessage:
@@ -135,9 +177,10 @@ class MockDLQStore:
         Returns:
             The DLQ message that was stored.
         """
+        # Convert Mapping to dict for storage
         dlq_message = ModelDLQMessage(
             message_id=uuid4(),
-            original_message=original_message,
+            original_message=dict(original_message),
             failure_context=failure_context,
             dlq_metadata=dlq_metadata,
         )
@@ -229,7 +272,7 @@ class MessageProcessorWithDLQ:
 
     async def process_message(
         self,
-        message: dict[str, Any],
+        message: Mapping[str, object],
         source_topic: str = "test-topic",
         should_fail: bool = False,
         fail_count: int | None = None,
@@ -322,17 +365,22 @@ def processor(dlq_store: MockDLQStore) -> MessageProcessorWithDLQ:
 
 
 @pytest.fixture
-def sample_message() -> dict[str, Any]:
-    """Create a sample message for testing."""
-    return {
-        "event_id": str(uuid4()),
-        "event_type": "test.event",
-        "payload": {
-            "data": "test_data",
-            "value": 123,
-        },
-        "timestamp": datetime.now(UTC).isoformat(),
-    }
+def sample_message() -> ModelSampleMessage:
+    """Create a sample message for testing.
+
+    Returns a typed ModelSampleMessage following ONEX guidelines.
+    Tests use .model_dump() when passing to process_message() to convert
+    to dict[str, object] format expected by the processor.
+    """
+    return ModelSampleMessage(
+        event_id=str(uuid4()),
+        event_type="test.event",
+        payload=ModelSampleMessagePayload(
+            data="test_data",
+            value=123,
+        ),
+        timestamp=datetime.now(UTC).isoformat(),
+    )
 
 
 @pytest.fixture
@@ -356,7 +404,7 @@ class TestDLQCapture:
         self,
         processor: MessageProcessorWithDLQ,
         dlq_store: MockDLQStore,
-        sample_message: dict[str, Any],
+        sample_message: ModelSampleMessage,
     ) -> None:
         """Test message is sent to DLQ after exhausting all retries.
 
@@ -366,7 +414,7 @@ class TestDLQCapture:
             3. Message is sent to DLQ
         """
         result = await processor.process_message(
-            message=sample_message,
+            message=sample_message.model_dump(),
             should_fail=True,
         )
 
@@ -386,11 +434,11 @@ class TestDLQCapture:
         self,
         processor: MessageProcessorWithDLQ,
         dlq_store: MockDLQStore,
-        sample_message: dict[str, Any],
+        sample_message: ModelSampleMessage,
     ) -> None:
         """Test successful message is NOT sent to DLQ."""
         result = await processor.process_message(
-            message=sample_message,
+            message=sample_message.model_dump(),
             should_fail=False,
         )
 
@@ -410,7 +458,7 @@ class TestDLQCapture:
         self,
         processor: MessageProcessorWithDLQ,
         dlq_store: MockDLQStore,
-        sample_message: dict[str, Any],
+        sample_message: ModelSampleMessage,
     ) -> None:
         """Test transient failures don't cause DLQ if eventual success.
 
@@ -420,7 +468,7 @@ class TestDLQCapture:
             3. Message is NOT sent to DLQ
         """
         result = await processor.process_message(
-            message=sample_message,
+            message=sample_message.model_dump(),
             fail_count=2,  # Fail first 2, succeed on 3rd
         )
 
@@ -436,7 +484,7 @@ class TestDLQCapture:
         self,
         processor: MessageProcessorWithDLQ,
         dlq_store: MockDLQStore,
-        sample_message: dict[str, Any],
+        sample_message: ModelSampleMessage,
     ) -> None:
         """Test failure on last retry attempt still goes to DLQ.
 
@@ -445,7 +493,7 @@ class TestDLQCapture:
             2. Message goes to DLQ
         """
         result = await processor.process_message(
-            message=sample_message,
+            message=sample_message.model_dump(),
             fail_count=4,  # Fail all attempts
         )
 
@@ -467,11 +515,11 @@ class TestDLQMessageFormat:
         self,
         processor: MessageProcessorWithDLQ,
         dlq_store: MockDLQStore,
-        sample_message: dict[str, Any],
+        sample_message: ModelSampleMessage,
     ) -> None:
         """Test DLQ message contains all required fields."""
         await processor.process_message(
-            message=sample_message,
+            message=sample_message.model_dump(),
             should_fail=True,
         )
 
@@ -491,12 +539,12 @@ class TestDLQMessageFormat:
         self,
         processor: MessageProcessorWithDLQ,
         dlq_store: MockDLQStore,
-        sample_message: dict[str, Any],
+        sample_message: ModelSampleMessage,
         correlation_id: UUID,
     ) -> None:
         """Test failure context includes error type and message."""
         await processor.process_message(
-            message=sample_message,
+            message=sample_message.model_dump(),
             should_fail=True,
             correlation_id=correlation_id,
         )
@@ -515,11 +563,11 @@ class TestDLQMessageFormat:
         self,
         processor: MessageProcessorWithDLQ,
         dlq_store: MockDLQStore,
-        sample_message: dict[str, Any],
+        sample_message: ModelSampleMessage,
     ) -> None:
         """Test failure context includes timing information."""
         await processor.process_message(
-            message=sample_message,
+            message=sample_message.model_dump(),
             should_fail=True,
         )
 
@@ -536,13 +584,13 @@ class TestDLQMessageFormat:
         self,
         processor: MessageProcessorWithDLQ,
         dlq_store: MockDLQStore,
-        sample_message: dict[str, Any],
+        sample_message: ModelSampleMessage,
     ) -> None:
         """Test DLQ metadata includes source topic and handler."""
         source_topic = "orders.created"
 
         await processor.process_message(
-            message=sample_message,
+            message=sample_message.model_dump(),
             source_topic=source_topic,
             should_fail=True,
         )
@@ -566,11 +614,12 @@ class TestDLQPreservesOriginal:
         self,
         processor: MessageProcessorWithDLQ,
         dlq_store: MockDLQStore,
-        sample_message: dict[str, Any],
+        sample_message: ModelSampleMessage,
     ) -> None:
         """Test original message is preserved without modification."""
+        message_dict = sample_message.model_dump()
         await processor.process_message(
-            message=sample_message,
+            message=message_dict,
             should_fail=True,
         )
 
@@ -578,7 +627,7 @@ class TestDLQPreservesOriginal:
         preserved = messages[0].original_message
 
         # Verify original is preserved exactly
-        assert preserved == sample_message
+        assert preserved == message_dict
 
     @pytest.mark.asyncio
     async def test_complex_message_preserved(
@@ -587,7 +636,7 @@ class TestDLQPreservesOriginal:
         dlq_store: MockDLQStore,
     ) -> None:
         """Test complex nested message is preserved correctly."""
-        complex_message = {
+        complex_message: dict[str, object] = {
             "event_id": str(uuid4()),
             "nested": {
                 "level1": {
@@ -612,7 +661,11 @@ class TestDLQPreservesOriginal:
 
         # Verify complex structure is preserved
         assert preserved == complex_message
-        assert preserved["nested"]["level1"]["level2"]["value"] == "deep"
+        # Use nested access via cast for type-safe deep value verification
+        nested = cast(dict[str, object], preserved["nested"])
+        level1 = cast(dict[str, object], nested["level1"])
+        level2 = cast(dict[str, str], level1["level2"])
+        assert level2["value"] == "deep"
         assert preserved["array"] == [1, 2, 3, {"key": "value"}]
 
 
@@ -635,8 +688,10 @@ class TestDLQMetadata:
                 max_retries=max_retries,
             )
 
+            # Explicit type annotation satisfies Mapping[str, object] variance
+            test_message: dict[str, object] = {"test": max_retries}
             await processor.process_message(
-                message={"test": max_retries},
+                message=test_message,
                 should_fail=True,
             )
 
@@ -648,13 +703,13 @@ class TestDLQMetadata:
         self,
         processor: MessageProcessorWithDLQ,
         dlq_store: MockDLQStore,
-        sample_message: dict[str, Any],
+        sample_message: ModelSampleMessage,
     ) -> None:
         """Test correlation ID is tracked through DLQ."""
         correlation_id = uuid4()
 
         await processor.process_message(
-            message=sample_message,
+            message=sample_message.model_dump(),
             should_fail=True,
             correlation_id=correlation_id,
         )
@@ -678,12 +733,14 @@ class TestDLQMetadata:
         )
 
         # Both handlers fail messages
+        msg_a: dict[str, object] = {"from": "a"}
+        msg_b: dict[str, object] = {"from": "b"}
         await processor_a.process_message(
-            message={"from": "a"},
+            message=msg_a,
             should_fail=True,
         )
         await processor_b.process_message(
-            message={"from": "b"},
+            message=msg_b,
             should_fail=True,
         )
 
@@ -703,13 +760,15 @@ class TestDLQMetadata:
         dlq_store: MockDLQStore,
     ) -> None:
         """Test DLQ correctly tracks messages from different topics."""
+        orders_msg: dict[str, object] = {"topic": "orders"}
+        payments_msg: dict[str, object] = {"topic": "payments"}
         await processor.process_message(
-            message={"topic": "orders"},
+            message=orders_msg,
             source_topic="orders.created",
             should_fail=True,
         )
         await processor.process_message(
-            message={"topic": "payments"},
+            message=payments_msg,
             source_topic="payments.processed",
             should_fail=True,
         )
@@ -742,7 +801,8 @@ class TestDLQConcurrency:
 
         # Process many failing messages concurrently
         num_messages = 50
-        messages = [{"id": i} for i in range(num_messages)]
+        # Explicit type annotation for list of messages
+        messages: list[dict[str, object]] = [{"id": i} for i in range(num_messages)]
 
         tasks = [
             processor.process_message(message=msg, should_fail=True) for msg in messages
@@ -762,8 +822,9 @@ class TestDLQConcurrency:
         """Test each DLQ message has a unique ID."""
         # Send multiple messages to DLQ
         for i in range(10):
+            msg: dict[str, object] = {"id": i}
             await processor.process_message(
-                message={"id": i},
+                message=msg,
                 should_fail=True,
             )
 
@@ -775,11 +836,17 @@ class TestDLQConcurrency:
 
 
 __all__ = [
+    # Sample message models
+    "ModelSampleMessagePayload",
+    "ModelSampleMessage",
+    # DLQ models
     "ModelFailureContext",
     "ModelDLQMetadata",
     "ModelDLQMessage",
+    # Mock infrastructure
     "MockDLQStore",
     "MessageProcessorWithDLQ",
+    # Test classes
     "TestDLQCapture",
     "TestDLQMessageFormat",
     "TestDLQPreservesOriginal",

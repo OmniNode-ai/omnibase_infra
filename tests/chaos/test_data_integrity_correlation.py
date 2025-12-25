@@ -41,15 +41,9 @@ Related:
 from __future__ import annotations
 
 import asyncio
-import random
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.validation.chain_propagation_validator import (
@@ -60,251 +54,12 @@ from omnibase_infra.validation.chain_propagation_validator import (
     validate_linear_message_chain,
     validate_message_chain,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-
-# -----------------------------------------------------------------------------
-# Test Models and Helpers
-# -----------------------------------------------------------------------------
-
-
-@dataclass
-class ChaosChasinConfig:
-    """Configuration for chaos injection in chain tests.
-
-    Attributes:
-        failure_rate: Probability of failure (0.0 to 1.0).
-        max_chain_length: Maximum length of message chains to test.
-        break_correlation_rate: Rate at which to break correlation_id.
-        break_causation_rate: Rate at which to break causation_id.
-    """
-
-    failure_rate: float = 0.2
-    max_chain_length: int = 10
-    break_correlation_rate: float = 0.1
-    break_causation_rate: float = 0.1
-
-
-@dataclass
-class ChainedMessage:
-    """A message in a chain with correlation and causation tracking.
-
-    Attributes:
-        message_id: Unique identifier for this message.
-        correlation_id: Shared workflow correlation ID.
-        causation_id: Parent message ID (None for root).
-        payload: Message payload.
-        position: Position in the chain (0 = root).
-    """
-
-    message_id: UUID
-    correlation_id: UUID
-    causation_id: UUID | None
-    payload: dict[str, str | int]
-    position: int
-
-
-def create_envelope_from_chained_message(
-    message: ChainedMessage,
-) -> ModelEventEnvelope[dict[str, str | int]]:
-    """Create ModelEventEnvelope from ChainedMessage.
-
-    Args:
-        message: ChainedMessage to convert.
-
-    Returns:
-        ModelEventEnvelope with proper correlation and causation.
-    """
-    tags: dict[str, str] = {}
-    if message.causation_id is not None:
-        tags["causation_id"] = str(message.causation_id)
-
-    metadata = ModelEnvelopeMetadata(
-        tags=tags,
-    )
-
-    return ModelEventEnvelope(
-        envelope_id=message.message_id,
-        correlation_id=message.correlation_id,
-        payload=message.payload,
-        metadata=metadata,
-    )
-
-
-class ChainBuilder:
-    """Builder for creating message chains with optional chaos injection.
-
-    Creates chains of messages with proper correlation and causation,
-    optionally injecting chaos (broken chains, missing IDs, etc.).
-
-    Attributes:
-        chaos_config: Configuration for chaos injection.
-        rng: Random number generator for reproducibility.
-        validator: Chain validation instance.
-    """
-
-    def __init__(
-        self,
-        chaos_config: ChaosChasinConfig | None = None,
-        seed: int | None = None,
-    ) -> None:
-        """Initialize chain builder.
-
-        Args:
-            chaos_config: Optional chaos configuration.
-            seed: Random seed for reproducibility.
-        """
-        self.chaos_config = chaos_config or ChaosChasinConfig()
-        self.rng = random.Random(seed)
-        self.validator = ChainPropagationValidator()
-
-    def build_valid_chain(
-        self,
-        length: int,
-        correlation_id: UUID | None = None,
-    ) -> list[ChainedMessage]:
-        """Build a valid message chain with proper propagation.
-
-        Args:
-            length: Number of messages in chain.
-            correlation_id: Optional correlation ID (generates if None).
-
-        Returns:
-            List of ChainedMessage forming a valid chain.
-        """
-        correlation_id = correlation_id or uuid4()
-        chain: list[ChainedMessage] = []
-
-        for i in range(length):
-            message = ChainedMessage(
-                message_id=uuid4(),
-                correlation_id=correlation_id,
-                causation_id=chain[i - 1].message_id if i > 0 else None,
-                payload={"position": i, "type": "chain_message"},
-                position=i,
-            )
-            chain.append(message)
-
-        return chain
-
-    def build_chain_with_correlation_break(
-        self,
-        length: int,
-        break_at: int,
-    ) -> list[ChainedMessage]:
-        """Build a chain with correlation_id break at specified position.
-
-        Args:
-            length: Number of messages in chain.
-            break_at: Position where correlation breaks.
-
-        Returns:
-            List of ChainedMessage with broken correlation at break_at.
-        """
-        correlation_id = uuid4()
-        broken_correlation_id = uuid4()
-        chain: list[ChainedMessage] = []
-
-        for i in range(length):
-            # Break correlation at specified position
-            current_correlation = (
-                broken_correlation_id if i >= break_at else correlation_id
-            )
-
-            message = ChainedMessage(
-                message_id=uuid4(),
-                correlation_id=current_correlation,
-                causation_id=chain[i - 1].message_id if i > 0 else None,
-                payload={"position": i, "type": "chain_message"},
-                position=i,
-            )
-            chain.append(message)
-
-        return chain
-
-    def build_chain_with_causation_break(
-        self,
-        length: int,
-        break_at: int,
-    ) -> list[ChainedMessage]:
-        """Build a chain with causation_id break at specified position.
-
-        Args:
-            length: Number of messages in chain.
-            break_at: Position where causation breaks.
-
-        Returns:
-            List of ChainedMessage with broken causation at break_at.
-        """
-        correlation_id = uuid4()
-        chain: list[ChainedMessage] = []
-
-        for i in range(length):
-            if i == 0:
-                causation_id = None
-            elif i == break_at:
-                # Break causation by using wrong parent ID
-                causation_id = uuid4()  # Random ID instead of parent
-            else:
-                causation_id = chain[i - 1].message_id
-
-            message = ChainedMessage(
-                message_id=uuid4(),
-                correlation_id=correlation_id,
-                causation_id=causation_id,
-                payload={"position": i, "type": "chain_message"},
-                position=i,
-            )
-            chain.append(message)
-
-        return chain
-
-    def build_chain_with_random_chaos(
-        self,
-        length: int,
-    ) -> tuple[list[ChainedMessage], list[int]]:
-        """Build a chain with random chaos injection.
-
-        Randomly breaks correlation and/or causation based on config rates.
-
-        Args:
-            length: Number of messages in chain.
-
-        Returns:
-            Tuple of (chain, list of break positions).
-        """
-        correlation_id = uuid4()
-        chain: list[ChainedMessage] = []
-        break_positions: list[int] = []
-
-        for i in range(length):
-            current_correlation = correlation_id
-            causation_id = chain[i - 1].message_id if i > 0 else None
-
-            # Randomly break correlation
-            if i > 0 and self.rng.random() < self.chaos_config.break_correlation_rate:
-                current_correlation = uuid4()
-                break_positions.append(i)
-
-            # Randomly break causation
-            if i > 0 and self.rng.random() < self.chaos_config.break_causation_rate:
-                causation_id = uuid4()
-                if i not in break_positions:
-                    break_positions.append(i)
-
-            message = ChainedMessage(
-                message_id=uuid4(),
-                correlation_id=current_correlation,
-                causation_id=causation_id,
-                payload={"position": i, "type": "chain_message"},
-                position=i,
-            )
-            chain.append(message)
-
-        return chain, sorted(break_positions)
-
+from tests.helpers.chaos_utils import (
+    ChainBuilder,
+    ChainedMessage,
+    ChaosChainConfig,
+    create_envelope_from_chained_message,
+)
 
 # -----------------------------------------------------------------------------
 # Fixtures
@@ -680,7 +435,7 @@ class TestRandomChaosChainValidation:
             3. Verify violations detected at break points
         """
         # Arrange - higher break rates for test
-        chaos_config = ChaosChasinConfig(
+        chaos_config = ChaosChainConfig(
             break_correlation_rate=0.2,
             break_causation_rate=0.2,
         )
@@ -714,7 +469,7 @@ class TestRandomChaosChainValidation:
             3. Verify no violations
         """
         # Arrange - no chaos
-        no_chaos_config = ChaosChasinConfig(
+        no_chaos_config = ChaosChainConfig(
             break_correlation_rate=0.0,
             break_causation_rate=0.0,
         )

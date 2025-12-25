@@ -264,6 +264,65 @@ class ChaosEffectExecutor:
     This class wraps effect execution with configurable chaos injection,
     allowing tests to simulate various failure scenarios.
 
+    Thread Safety:
+        This executor is designed for **single asyncio event loop** usage with
+        cooperative concurrency. It is NOT thread-safe for multi-threaded access.
+
+        The ``asyncio.Lock`` (``self._lock``) provides atomicity for counter updates
+        ONLY. The lock is NOT held during the entire ``execute_with_chaos`` operation,
+        meaning concurrent coroutines can interleave their execution phases.
+
+        Lock Scope:
+            - PROTECTED: ``execution_count`` and ``failed_count`` increments
+            - NOT PROTECTED: Idempotency checks, chaos injection, backend execution
+
+    Concurrency Considerations:
+        Multiple concurrent calls to ``execute_with_chaos`` are supported within
+        a single asyncio event loop. Each call will:
+
+        1. Independently check idempotency (no lock held)
+        2. Execute backend operations concurrently (no lock held)
+        3. Atomically update counters (lock acquired/released per update)
+
+        This design prioritizes throughput over strict serialization. If you need
+        strictly ordered execution, serialize calls externally.
+
+    Counter Accuracy:
+        Counters are **eventually accurate** - they correctly reflect the total
+        number of successes and failures, but assertions on counter values during
+        active concurrent execution may observe intermediate states.
+
+        Warning:
+            In concurrent test scenarios, avoid asserting on counters until ALL
+            concurrent operations have completed. Use ``asyncio.gather()`` to
+            await all operations before checking counters.
+
+    Test Isolation Recommendation:
+        For deterministic testing, prefer one of these patterns:
+
+        1. **Sequential execution**: Await each ``execute_with_chaos`` individually
+        2. **Gather then assert**: Use ``asyncio.gather()`` for concurrent ops,
+           then assert on counters after gather completes
+        3. **Fresh executor per test**: Use the ``chaos_effect_executor`` fixture
+           which provides a fresh instance per test
+
+    Example - Safe Concurrent Testing::
+
+        # CORRECT: Wait for all operations before asserting
+        results = await asyncio.gather(
+            executor.execute_with_chaos(uuid4(), "op1", ...),
+            executor.execute_with_chaos(uuid4(), "op2", ...),
+            executor.execute_with_chaos(uuid4(), "op3", ...),
+            return_exceptions=True,
+        )
+        # Now counters are stable
+        assert executor.execution_count + executor.failed_count == 3
+
+        # INCORRECT: Asserting during active execution
+        task = asyncio.create_task(executor.execute_with_chaos(...))
+        assert executor.execution_count == 0  # May be 0 or 1 - race condition!
+        await task
+
     Attributes:
         idempotency_store: Store for idempotency checking.
         failure_injector: Injector for failure simulation.
@@ -290,6 +349,8 @@ class ChaosEffectExecutor:
         self.backend_client = backend_client
         self.execution_count = 0
         self.failed_count = 0
+        # Lock for atomic counter updates only. NOT held during execution.
+        # See class docstring "Thread Safety" section for details.
         self._lock = asyncio.Lock()
 
     async def execute_with_chaos(
@@ -316,7 +377,9 @@ class ChaosEffectExecutor:
             ValueError: If chaos injection triggers failure.
             InfraTimeoutError: If chaos injection triggers timeout.
         """
-        # Pre-execution chaos injection
+        # --- PHASE 1: Pre-execution chaos injection (NO LOCK HELD) ---
+        # Multiple concurrent calls can reach this point simultaneously.
+        # Chaos injection is intentionally non-atomic to simulate real failures.
         if fail_point == "pre":
             await self.failure_injector.maybe_inject_failure(
                 f"{operation}:pre",
@@ -327,7 +390,10 @@ class ChaosEffectExecutor:
                 correlation_id,
             )
 
-        # Check idempotency
+        # --- PHASE 2: Idempotency check (NO LOCK HELD) ---
+        # The idempotency store has its own internal synchronization.
+        # Concurrent calls with different intent_ids will proceed independently.
+        # Concurrent calls with the SAME intent_id rely on store atomicity.
         is_new = await self.idempotency_store.check_and_record(
             message_id=intent_id,
             domain=domain,
@@ -335,9 +401,13 @@ class ChaosEffectExecutor:
         )
 
         if not is_new:
-            # Duplicate - skip execution
+            # Duplicate detected - skip execution, no counter update needed.
+            # This is an early return; counters only track actual execution attempts.
             return True
 
+        # --- PHASE 3: Execution with chaos (NO LOCK HELD) ---
+        # Main execution phase runs without lock to allow concurrent operations.
+        # Lock is only acquired briefly for counter updates.
         try:
             # Mid-execution chaos injection (inside try block to track failures)
             if fail_point == "mid":
@@ -350,16 +420,20 @@ class ChaosEffectExecutor:
                     correlation_id,
                 )
 
-            # Inject latency if configured
+            # Inject latency if configured (simulates slow operations)
             await self.failure_injector.maybe_inject_latency()
 
-            # Execute backend operation
+            # Execute backend operation (actual effect - may take significant time)
             await self.backend_client.execute(operation, intent_id)
 
+            # --- COUNTER UPDATE: Lock acquired briefly for atomic increment ---
+            # Lock scope: ONLY the counter increment, NOT the surrounding code.
+            # Lock is released immediately after increment completes.
             async with self._lock:
                 self.execution_count += 1
+            # --- Lock released here ---
 
-            # Post-execution chaos injection
+            # Post-execution chaos injection (after success counter updated)
             if fail_point == "post":
                 await self.failure_injector.maybe_inject_failure(
                     f"{operation}:post",
@@ -373,12 +447,25 @@ class ChaosEffectExecutor:
             return True
 
         except Exception:
+            # --- FAILURE COUNTER UPDATE: Lock acquired briefly for atomic increment ---
+            # Even on failure, we atomically update the failure counter.
+            # Note: If post-execution chaos triggers AFTER success counter was
+            # incremented, both counters may be updated for the same operation.
             async with self._lock:
                 self.failed_count += 1
+            # --- Lock released here ---
             raise
 
     def reset_counts(self) -> None:
-        """Reset execution counters."""
+        """Reset execution counters.
+
+        Warning:
+            This method is NOT thread-safe. Only call when no concurrent
+            ``execute_with_chaos`` operations are in progress. Typically
+            called at test setup/teardown boundaries.
+        """
+        # No lock acquired - caller must ensure no concurrent operations.
+        # Safe to call between test cases when executor is idle.
         self.execution_count = 0
         self.failed_count = 0
 

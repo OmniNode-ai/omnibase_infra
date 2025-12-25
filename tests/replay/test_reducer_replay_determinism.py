@@ -47,6 +47,7 @@ from omnibase_infra.models.registration import (
 )
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from tests.helpers.replay_utils import compare_outputs
 
 if TYPE_CHECKING:
     from omnibase_core.nodes import ModelReducerOutput
@@ -59,76 +60,6 @@ if TYPE_CHECKING:
 # =============================================================================
 
 EXPECTED_REGISTRATION_INTENTS = 2
-
-
-# =============================================================================
-# Helper Functions
-# =============================================================================
-
-
-def compare_outputs(
-    output1: ModelReducerOutput,
-    output2: ModelReducerOutput,
-) -> tuple[bool, list[str]]:
-    """Compare two reducer outputs for equality.
-
-    Args:
-        output1: First output to compare.
-        output2: Second output to compare.
-
-    Returns:
-        Tuple of (are_equal, list of differences).
-    """
-
-    differences: list[str] = []
-
-    # Compare result state
-    if output1.result.status != output2.result.status:
-        differences.append(
-            f"Status mismatch: {output1.result.status} != {output2.result.status}"
-        )
-
-    if output1.result.node_id != output2.result.node_id:
-        differences.append(
-            f"Node ID mismatch: {output1.result.node_id} != {output2.result.node_id}"
-        )
-
-    if output1.result.consul_confirmed != output2.result.consul_confirmed:
-        differences.append(
-            f"Consul confirmed mismatch: "
-            f"{output1.result.consul_confirmed} != {output2.result.consul_confirmed}"
-        )
-
-    if output1.result.postgres_confirmed != output2.result.postgres_confirmed:
-        differences.append(
-            f"Postgres confirmed mismatch: "
-            f"{output1.result.postgres_confirmed} != {output2.result.postgres_confirmed}"
-        )
-
-    # Compare intents
-    if len(output1.intents) != len(output2.intents):
-        differences.append(
-            f"Intent count mismatch: {len(output1.intents)} != {len(output2.intents)}"
-        )
-    else:
-        for i, (intent1, intent2) in enumerate(
-            zip(output1.intents, output2.intents, strict=True)
-        ):
-            if intent1.intent_type != intent2.intent_type:
-                differences.append(
-                    f"Intent {i} type mismatch: "
-                    f"{intent1.intent_type} != {intent2.intent_type}"
-                )
-            if intent1.target != intent2.target:
-                differences.append(
-                    f"Intent {i} target mismatch: {intent1.target} != {intent2.target}"
-                )
-            if intent1.payload.get("correlation_id") != intent2.payload.get(
-                "correlation_id"
-            ):
-                differences.append(f"Intent {i} correlation_id mismatch")
-
-    return len(differences) == 0, differences
 
 
 # =============================================================================

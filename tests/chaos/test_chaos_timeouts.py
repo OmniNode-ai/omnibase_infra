@@ -250,6 +250,7 @@ class TestTimeoutDetection:
         assert fast_timeout_executor.execution_count == 1
         assert fast_timeout_executor.timeout_count == 0
 
+    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_operation_exceeds_timeout(
         self,
@@ -277,6 +278,7 @@ class TestTimeoutDetection:
         assert fast_timeout_executor.timeout_count == 1
         assert fast_timeout_executor.execution_count == 0
 
+    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_timeout_includes_operation_name(
         self,
@@ -301,6 +303,7 @@ class TestTimeoutDetection:
 
         assert operation_name in str(exc_info.value)
 
+    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_timeout_includes_correlation_id(
         self,
@@ -334,6 +337,7 @@ class TestTimeoutDetection:
 class TestTimeoutHandling:
     """Test proper handling of timeouts."""
 
+    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_timeout_does_not_prevent_retry(
         self,
@@ -374,6 +378,7 @@ class TestTimeoutHandling:
         assert result is True
         assert executor.execution_count == 1
 
+    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_concurrent_timeouts_are_independent(
         self,
@@ -460,6 +465,7 @@ class TestTimeoutHandling:
 class TestTimeoutCleanup:
     """Test resource cleanup after timeouts."""
 
+    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_backend_not_called_after_timeout(
         self,
@@ -499,6 +505,7 @@ class TestTimeoutCleanup:
         # Assert - backend call was cancelled
         assert call_count == 0
 
+    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_executor_state_consistent_after_timeout(
         self,
@@ -576,6 +583,7 @@ class TestTimeoutWithIdempotency:
         mock_backend.execute.assert_not_called()
         assert executor.timeout_count == 0
 
+    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_timeout_after_idempotency_records_attempt(
         self,
@@ -665,6 +673,7 @@ class TestTimeoutWithIdempotency:
         assert result is True
         assert elapsed_ms >= 10  # At least min latency
 
+    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_timeout_counter_tracks_all_timeouts(
         self,

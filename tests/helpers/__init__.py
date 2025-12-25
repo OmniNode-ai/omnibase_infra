@@ -20,6 +20,22 @@ Available Utilities:
         - find_time_module_calls: Find time.time()/monotonic() calls
         - find_io_method_calls: Find I/O method calls matching patterns
         - is_docstring: Check if a statement is a docstring
+
+    Chaos Testing (OMN-955):
+        - ChaosChainConfig: Configuration for chaos injection in chain tests
+        - ChainedMessage: Message model with correlation/causation tracking
+        - ChainBuilder: Builder for message chains with chaos injection
+        - create_envelope_from_chained_message: Convert ChainedMessage to envelope
+
+    Replay Testing (OMN-955):
+        - compare_outputs: Compare reducer outputs for determinism verification
+        - OrderingViolation: Model for ordering violations in event sequences
+        - detect_timestamp_order_violations: Detect timestamp ordering issues
+        - detect_sequence_number_violations: Detect sequence number gaps
+        - EventSequenceEntry: Entry in an event sequence log
+        - EventSequenceLog: Log of events for replay testing
+        - EventFactory: Factory for deterministic event creation
+        - create_introspection_event: Helper for creating introspection events
 """
 
 from tests.helpers.ast_analysis import (
@@ -29,8 +45,25 @@ from tests.helpers.ast_analysis import (
     get_imported_root_modules,
     is_docstring,
 )
+from tests.helpers.chaos_utils import (
+    ChainBuilder,
+    ChainedMessage,
+    ChaosChainConfig,
+    create_envelope_from_chained_message,
+)
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
 from tests.helpers.log_helpers import filter_handler_warnings, get_warning_messages
+from tests.helpers.replay_utils import (
+    EventFactory,
+    EventSequenceEntry,
+    EventSequenceLog,
+    NodeType,
+    OrderingViolation,
+    compare_outputs,
+    create_introspection_event,
+    detect_sequence_number_violations,
+    detect_timestamp_order_violations,
+)
 
 __all__ = [
     # Deterministic utilities
@@ -45,4 +78,19 @@ __all__ = [
     "find_time_module_calls",
     "get_imported_root_modules",
     "is_docstring",
+    # Chaos testing utilities
+    "ChaosChainConfig",
+    "ChainedMessage",
+    "ChainBuilder",
+    "create_envelope_from_chained_message",
+    # Replay testing utilities
+    "compare_outputs",
+    "OrderingViolation",
+    "detect_timestamp_order_violations",
+    "detect_sequence_number_violations",
+    "EventSequenceEntry",
+    "EventSequenceLog",
+    "EventFactory",
+    "NodeType",
+    "create_introspection_event",
 ]

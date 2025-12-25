@@ -37,8 +37,7 @@ Related:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -51,102 +50,14 @@ from omnibase_infra.models.registration import (
 )
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from tests.helpers.replay_utils import (
+    OrderingViolation,
+    detect_sequence_number_violations,
+    detect_timestamp_order_violations,
+)
 
 if TYPE_CHECKING:
     from tests.replay.conftest import EventFactory, EventSequenceLog
-
-
-# =============================================================================
-# Out-of-Order Detection Models
-# =============================================================================
-
-
-@dataclass
-class OrderingViolation:
-    """Represents an ordering violation in an event sequence.
-
-    Attributes:
-        position: Index in the sequence where violation occurred.
-        event_timestamp: Timestamp of the violating event.
-        previous_timestamp: Timestamp of the previous event.
-        violation_type: Type of ordering violation.
-    """
-
-    position: int
-    event_timestamp: datetime
-    previous_timestamp: datetime
-    violation_type: str
-
-
-def detect_timestamp_order_violations(
-    events: list[ModelNodeIntrospectionEvent],
-) -> list[OrderingViolation]:
-    """Detect timestamp ordering violations in an event sequence.
-
-    Args:
-        events: List of events to check.
-
-    Returns:
-        List of OrderingViolation instances for each violation found.
-    """
-    violations: list[OrderingViolation] = []
-
-    for i in range(1, len(events)):
-        current = events[i]
-        previous = events[i - 1]
-
-        if current.timestamp < previous.timestamp:
-            violations.append(
-                OrderingViolation(
-                    position=i,
-                    event_timestamp=current.timestamp,
-                    previous_timestamp=previous.timestamp,
-                    violation_type="timestamp_reorder",
-                )
-            )
-        elif current.timestamp == previous.timestamp:
-            violations.append(
-                OrderingViolation(
-                    position=i,
-                    event_timestamp=current.timestamp,
-                    previous_timestamp=previous.timestamp,
-                    violation_type="timestamp_duplicate",
-                )
-            )
-
-    return violations
-
-
-def detect_sequence_number_violations(
-    log: EventSequenceLog,
-) -> list[OrderingViolation]:
-    """Detect sequence number ordering violations in an event log.
-
-    Args:
-        log: Event sequence log to check.
-
-    Returns:
-        List of OrderingViolation instances for each violation found.
-    """
-    violations: list[OrderingViolation] = []
-
-    for i, entry in enumerate(log.entries):
-        expected_seq = i + 1
-        if entry.sequence_number != expected_seq:
-            violations.append(
-                OrderingViolation(
-                    position=i,
-                    event_timestamp=entry.event.timestamp,
-                    previous_timestamp=(
-                        log.entries[i - 1].event.timestamp
-                        if i > 0
-                        else entry.event.timestamp
-                    ),
-                    violation_type=f"sequence_mismatch (expected {expected_seq}, got {entry.sequence_number})",
-                )
-            )
-
-    return violations
 
 
 # =============================================================================
