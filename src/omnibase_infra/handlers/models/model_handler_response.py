@@ -10,9 +10,9 @@ Usage Pattern:
     Each handler defines its own payload model and uses ModelHandlerResponse[PayloadType]:
 
     - ConsulHandler: ModelHandlerResponse[ModelConsulHandlerPayload]
-    - DbAdapter: ModelHandlerResponse[ModelDbQueryPayload]
-    - VaultAdapter: ModelHandlerResponse[ModelVaultHandlerPayload]
-    - HttpRestAdapter: ModelHandlerResponse[ModelHttpHandlerPayload]
+    - DbHandler: ModelHandlerResponse[ModelDbQueryPayload]
+    - VaultHandler: ModelHandlerResponse[ModelVaultHandlerPayload]
+    - HttpRestHandler: ModelHandlerResponse[ModelHttpHandlerPayload]
 
 This replaces raw dict[str, JsonValue] responses with strongly-typed models,
 ensuring consistent access patterns (response.status, response.payload, etc.)

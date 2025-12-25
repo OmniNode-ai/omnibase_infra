@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -927,7 +928,6 @@ class TestBehavioralPurityGates:
         import socket
         from datetime import UTC, datetime
         from unittest.mock import patch
-        from uuid import uuid4
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
         from omnibase_infra.nodes.reducers import RegistrationReducer
@@ -966,7 +966,6 @@ class TestBehavioralPurityGates:
         import traceback
         from datetime import UTC, datetime
         from unittest.mock import patch
-        from uuid import uuid4
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
         from omnibase_infra.nodes.reducers import RegistrationReducer
@@ -1055,7 +1054,6 @@ class TestAdditionalBehavioralGates:
         import subprocess
         from datetime import UTC, datetime
         from unittest.mock import patch
-        from uuid import uuid4
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
         from omnibase_infra.nodes.reducers import RegistrationReducer
@@ -1091,7 +1089,6 @@ class TestAdditionalBehavioralGates:
         import urllib.request
         from datetime import UTC, datetime
         from unittest.mock import patch
-        from uuid import uuid4
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
         from omnibase_infra.nodes.reducers import RegistrationReducer

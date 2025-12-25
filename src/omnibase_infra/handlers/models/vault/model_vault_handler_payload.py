@@ -70,7 +70,7 @@ class ModelVaultHandlerPayload(BaseModel):
     """Wrapper model for Vault handler payloads.
 
     Contains the discriminated union of all possible Vault operation payloads.
-    This allows the VaultAdapter to return a consistent payload wrapper while
+    This allows the VaultHandler to return a consistent payload wrapper while
     the actual payload type varies based on the operation.
 
     Attributes:

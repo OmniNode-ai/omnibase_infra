@@ -40,7 +40,7 @@ class TestInfraValidatorConstants:
 
         OMN-983: Strict validation mode enabled.
 
-        Current baseline (~583 unions as of 2025-12-25):
+        Current baseline (~586 unions as of 2025-12-25):
         - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
@@ -53,12 +53,14 @@ class TestInfraValidatorConstants:
         - 580 (2025-12-23): OMN-888 + PR #57 + OMN-954 merge
         - 585 (2025-12-25): OMN-811 ComputeRegistry + node registration orchestrator unions
         - 586 (2025-12-25): OMN-932 durable timeouts + introspection config migration
+        - 588 (2025-12-25): OMN-881 Kafka integration test fixes + typing updates
+        - 589 (2025-12-25): OMN-881 PR review fixes - _EventBusType conditional alias
 
-        Threshold: 586 (buffer above ~584 baseline for codebase growth)
+        Threshold: 589 (buffer above ~588 baseline for codebase growth)
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 586, (
-            "INFRA_MAX_UNIONS should be 586 (OMN-932 durable timeouts)"
+        assert INFRA_MAX_UNIONS == 589, (
+            "INFRA_MAX_UNIONS should be 589 (OMN-881 PR review fixes)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

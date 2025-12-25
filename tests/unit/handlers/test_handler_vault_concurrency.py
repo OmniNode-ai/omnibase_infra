@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # mypy: disable-error-code="index, operator, arg-type, return-value"
-"""Concurrency tests for VaultAdapter.
+"""Concurrency tests for VaultHandler.
 
 These tests verify thread safety of circuit breaker state variables
 and concurrent operation handling under production load scenarios.
@@ -10,6 +10,7 @@ and concurrent operation handling under production load scenarios.
 from __future__ import annotations
 
 import asyncio
+import threading
 from itertools import cycle
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
@@ -21,7 +22,7 @@ from omnibase_infra.errors import (
     InfraUnavailableError,
     RuntimeHostError,
 )
-from omnibase_infra.handlers.handler_vault import VaultAdapter
+from omnibase_infra.handlers.handler_vault import VaultHandler
 
 # Type alias for vault config dict values (str, int, float, bool, dict)
 VaultConfigValue = str | int | float | bool | dict[str, str | int | float | bool]
@@ -67,8 +68,8 @@ def mock_hvac_client() -> MagicMock:
     return client
 
 
-class TestVaultAdapterConcurrency:
-    """Test VaultAdapter concurrent operation handling and thread safety."""
+class TestVaultHandlerConcurrency:
+    """Test VaultHandler concurrent operation handling and thread safety."""
 
     @pytest.mark.asyncio
     async def test_concurrent_circuit_breaker_state_updates(
@@ -84,33 +85,65 @@ class TestVaultAdapterConcurrency:
         2. Verifying the circuit breaker failure count matches observed failures
         3. Ensuring no RuntimeError from race conditions occurs
         """
-        handler = VaultAdapter()
+        handler = VaultHandler()
 
         vault_config["circuit_breaker_failure_threshold"] = 10
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
 
-            # Mix of failures and successes - create a predictable pattern
-            # Use cycle to ensure responses never run out (circuit breaker retries
-            # can cause more calls than expected, and StopIteration in async
-            # context causes Python 3.12+ issues with futures)
-            response_pattern = [
-                Exception("Connection error"),
-                {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}},
-                Exception("Connection error"),
-                {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}},
+            # Mix of failures and successes - create a predictable cycling pattern
+            # Use cycle() to prevent StopIteration when concurrent requests with
+            # retries exhaust a finite list (Python 3.12+ raises TypeError when
+            # StopIteration is raised into an async Future context)
+            #
+            # IMPORTANT: Use string markers for errors instead of pre-created
+            # Exception objects. Exception instances are mutable (they carry
+            # __traceback__ state), so reusing the same Exception object across
+            # threads causes race conditions when multiple threads modify the
+            # traceback simultaneously.
+            success_response: dict[str, object] = {
+                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+            }
+            responses_pattern: list[dict[str, object] | str] = [
+                "error:Connection error",  # String marker - creates fresh Exception
+                success_response,
+                "error:Connection error",
+                success_response,
             ]
-            response_cycle = cycle(response_pattern)
+            response_cycle = cycle(responses_pattern)
 
-            def mock_read_secret(*args, **kwargs):
-                response = next(response_cycle)
-                if isinstance(response, Exception):
-                    raise response
-                return response
+            # Lock for thread-safe cycle access - VaultHandler.execute() runs hvac
+            # client calls in a ThreadPoolExecutor, so multiple threads may
+            # concurrently call get_response() which accesses the shared iterator
+            cycle_lock = threading.Lock()
+
+            def get_response(*args: object, **kwargs: object) -> dict[str, object]:
+                """Return next response from cycle - thread-safe with lock.
+
+                When using a callable for side_effect, mock does NOT automatically
+                raise exceptions - it returns them as values. We must explicitly
+                raise exceptions for error markers.
+
+                Thread safety is ensured by:
+                1. Lock protects the shared iterator (response_cycle)
+                2. Fresh Exception instances are created inside the lock
+                3. No mutable state is shared between concurrent calls
+
+                Using string markers ("error:message") instead of pre-created
+                Exception objects ensures each thread gets its own Exception
+                instance with independent __traceback__ state.
+                """
+                with cycle_lock:
+                    response = next(response_cycle)
+                    if isinstance(response, str) and response.startswith("error:"):
+                        # Create fresh RuntimeError instance for thread safety
+                        # Using RuntimeError instead of base Exception per TRY002
+                        raise RuntimeError(response[6:])
+                    return response
 
             mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
-                mock_read_secret
+                get_response
             )
 
             await handler.initialize(vault_config)
@@ -173,7 +206,7 @@ class TestVaultAdapterConcurrency:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent successful operations don't cause race conditions."""
-        handler = VaultAdapter()
+        handler = VaultHandler()
 
         # Configure larger queue size to handle concurrent requests
         vault_config["max_concurrent_operations"] = 20
@@ -215,7 +248,7 @@ class TestVaultAdapterConcurrency:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent failures correctly trigger circuit breaker."""
-        handler = VaultAdapter()
+        handler = VaultHandler()
 
         vault_config["circuit_breaker_failure_threshold"] = 3
 
@@ -255,7 +288,7 @@ class TestVaultAdapterConcurrency:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent write operations are thread-safe."""
-        handler = VaultAdapter()
+        handler = VaultHandler()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -296,7 +329,7 @@ class TestVaultAdapterConcurrency:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent health checks are thread-safe."""
-        handler = VaultAdapter()
+        handler = VaultHandler()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -330,7 +363,7 @@ class TestVaultAdapterConcurrency:
         3. Handler state is properly cleaned up after shutdown
         4. All tasks complete (either successfully or with expected errors)
         """
-        handler = VaultAdapter()
+        handler = VaultHandler()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -415,7 +448,7 @@ class TestVaultAdapterConcurrency:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool correctly handles concurrent operation load."""
-        handler = VaultAdapter()
+        handler = VaultHandler()
 
         # Set thread pool size to 5 and queue multiplier to handle 25 requests
         # Queue size = 5 * 10 = 50, which can handle 25 concurrent requests
@@ -456,7 +489,7 @@ class TestVaultAdapterConcurrency:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test asyncio.Lock prevents race conditions in circuit breaker state updates."""
-        handler = VaultAdapter()
+        handler = VaultHandler()
 
         vault_config["circuit_breaker_failure_threshold"] = 5
 
@@ -507,7 +540,7 @@ class TestVaultAdapterConcurrency:
         does not cause race conditions when multiple concurrent requests attempt
         to transition the circuit breaker state after the reset timeout.
         """
-        handler = VaultAdapter()
+        handler = VaultHandler()
 
         vault_config["circuit_breaker_failure_threshold"] = 1
         vault_config["circuit_breaker_reset_timeout_seconds"] = (
@@ -606,7 +639,7 @@ class TestVaultAdapterConcurrency:
         3. Shutdown is safe even when tasks are in progress
         4. Double shutdown is handled gracefully
         """
-        handler = VaultAdapter()
+        handler = VaultHandler()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -657,7 +690,7 @@ class TestVaultAdapterConcurrency:
         in HALF_OPEN state simultaneously, only one succeeds in transitioning
         the circuit back to CLOSED state without race conditions.
         """
-        handler = VaultAdapter()
+        handler = VaultHandler()
 
         vault_config["circuit_breaker_failure_threshold"] = 1
         vault_config["circuit_breaker_reset_timeout_seconds"] = (

@@ -60,10 +60,11 @@ def mock_consul_client() -> AsyncMock:
 
 @pytest.fixture
 def mock_postgres_handler() -> AsyncMock:
-    """Create a mock PostgreSQL adapter for testing.
+    """Create a mock PostgreSQL handler for testing.
 
     Returns:
-        AsyncMock implementing ProtocolPostgresAdapter interface.
+        AsyncMock implementing ProtocolPostgresAdapter interface
+        (adapter protocol for database operations).
     """
     mock = AsyncMock()
     mock.upsert = AsyncMock(return_value=ModelBackendResult(success=True))

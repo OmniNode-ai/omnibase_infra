@@ -9,6 +9,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
+> **IMPORTANT**: This section documents API changes that may require code modifications when upgrading. Review each item carefully before upgrading.
+
+#### MixinNodeIntrospection API (OMN-881, PR #54)
+
+##### 1. Cache Invalidation Method Signature Change
+
+**`invalidate_introspection_cache()` is now synchronous (was async)**
+
+This is a **breaking change** for any code that awaits this method.
+
+| Aspect | Details |
+|--------|---------|
+| **What changed** | Method signature changed from `async def` to `def` (synchronous) |
+| **Why it changed** | Cache invalidation is a simple in-memory operation (setting `_introspection_cache = None`) that does not require async I/O. Synchronous semantics simplify usage and avoid unnecessary coroutine overhead. |
+| **Error if not migrated** | `TypeError: object NoneType can't be used in 'await' expression` |
+
+**Migration Steps**:
+
+```python
+# BEFORE (will cause TypeError after upgrade)
+await node.invalidate_introspection_cache()
+
+# AFTER (correct usage)
+node.invalidate_introspection_cache()
+```
+
+**Search pattern** to find affected code:
+```bash
+grep -r "await.*invalidate_introspection_cache" --include="*.py"
+```
+
+##### 2. Configuration Model API
+
+**`initialize_introspection()` requires `ModelIntrospectionConfig`**
+
+The initialization method uses a typed configuration model for all parameters.
+
+| Aspect | Details |
+|--------|---------|
+| **What changed** | `initialize_introspection(config: ModelIntrospectionConfig)` is the initialization API |
+| **Why** | Typed configuration model provides validation, IDE support, and extensibility |
+| **Model location** | `omnibase_infra.models.discovery.ModelIntrospectionConfig` |
+
+**Usage Example**:
+
+```python
+from uuid import uuid4
+from omnibase_infra.models.discovery import ModelIntrospectionConfig
+from omnibase_infra.mixins import MixinNodeIntrospection
+
+class MyNode(MixinNodeIntrospection):
+    def __init__(self, event_bus=None):
+        config = ModelIntrospectionConfig(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=event_bus,
+            version="1.0.0",
+            cache_ttl=300.0,
+        )
+        self.initialize_introspection(config)
+
+    async def shutdown(self):
+        # Note: invalidate_introspection_cache() is now SYNC (see above)
+        self.invalidate_introspection_cache()
+```
+
 #### Error Code for Unhandled node_kind (OMN-990, PR #73)
 - **Error code changed from `VALIDATION_ERROR` to `INTERNAL_ERROR`**: When `DispatchContextEnforcer.create_context_for_dispatcher()` encounters an unhandled `node_kind` value, it now raises `ModelOnexError` with `INTERNAL_ERROR` instead of `VALIDATION_ERROR`.
   - **Old**: `error_code=EnumCoreErrorCode.VALIDATION_ERROR`
@@ -24,6 +90,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Rationale**: Valkey is the correct service name for the Redis-compatible cache used in the infrastructure. This aligns the codebase with the actual service naming.
 
 ### Added
+
+#### Node Introspection (OMN-881, PR #54)
+- **ModelIntrospectionConfig**: Configuration model for `MixinNodeIntrospection` that provides typed configuration
+  - `node_id` (required): Unique identifier for this node instance (UUID)
+  - `node_type` (required): Type of node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR). Cannot be empty (min_length=1).
+  - `event_bus`: Optional event bus for publishing introspection and heartbeat events. Uses duck typing (`object | None`) to accept any object implementing `ProtocolEventBus` protocol.
+  - `version`: Node version string (default: `"1.0.0"`)
+  - `cache_ttl`: Cache time-to-live in seconds (default: `300.0`, minimum: `0.0`)
+  - `operation_keywords`: Optional set of keywords to identify operation methods. If None, uses `MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS`.
+  - `exclude_prefixes`: Optional set of prefixes to exclude from capability discovery. If None, uses `MixinNodeIntrospection.DEFAULT_EXCLUDE_PREFIXES`.
+  - `introspection_topic`: Topic for publishing introspection events (default: `"node.introspection"`). ONEX topics (starting with `onex.`) require version suffix (e.g., `.v1`).
+  - `heartbeat_topic`: Topic for publishing heartbeat events (default: `"node.heartbeat"`). ONEX topics require version suffix.
+  - `request_introspection_topic`: Topic for receiving introspection requests (default: `"node.request_introspection"`). ONEX topics require version suffix.
+  - Model is frozen and forbids extra fields for immutability and strict validation.
+- **Performance Metrics Tracking**:
+  - Added `IntrospectionPerformanceMetrics` dataclass (internal) and `ModelIntrospectionPerformanceMetrics` Pydantic model (for event payloads)
+  - Added `get_performance_metrics()` method for monitoring introspection operation timing and threshold violations
+  - Performance thresholds: `get_capabilities` <50ms, `discover_capabilities` <30ms, `total_introspection` <50ms, `cache_hit` <1ms
+- **Topic Default Constants**: Exported constants for default topic names:
+  - `DEFAULT_INTROSPECTION_TOPIC = "node.introspection"`
+  - `DEFAULT_HEARTBEAT_TOPIC = "node.heartbeat"`
+  - `DEFAULT_REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"`
 
 #### Handlers
 - **HttpHandler** (OMN-237, PR #26): HTTP REST protocol handler for MVP
@@ -124,7 +212,7 @@ This version represents the MVP (Minimum Viable Product) for ONEX Runtime Host I
 ### Deferred to Beta (v0.2.0)
 
 - KafkaEventBus with backpressure
-- VaultAdapter and ConsulAdapter
+- VaultHandler and ConsulAdapter
 - Retry logic and rate limiting
 - Full graceful shutdown with drain
 - Integration tests with real services

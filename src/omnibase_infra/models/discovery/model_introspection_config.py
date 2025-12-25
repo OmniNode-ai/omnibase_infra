@@ -5,13 +5,53 @@
 This module provides the configuration model used to initialize the
 MixinNodeIntrospection mixin. Grouping parameters into a configuration
 model follows ONEX patterns for reducing function parameter count.
+
+Topic Validation:
+    Topics must follow ONEX naming conventions:
+    - Must start with a lowercase letter
+    - Can contain lowercase alphanumeric characters, dots, hyphens, and underscores
+    - ONEX topics (starting with 'onex.') require a version suffix (.v1, .v2, etc.)
+    - Legacy topics (not starting with 'onex.') are allowed for flexibility
+
+See Also:
+    - docs/architecture/EVENT_STREAMING_TOPICS.md: Topic naming conventions
 """
 
 from __future__ import annotations
 
+import logging
+import re
+from typing import TYPE_CHECKING
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+if TYPE_CHECKING:
+    from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
+
+    # Type alias for event_bus field - provides proper type during static analysis
+    type _EventBusType = ProtocolEventBus | None
+else:
+    # At runtime, use object | None for duck typing compatibility with Pydantic
+    # Pydantic cannot resolve TYPE_CHECKING-only imports, so we use object
+    # The mixin enforces protocol compliance at initialization
+    type _EventBusType = object | None
+
+logger = logging.getLogger(__name__)
+
+# Default topic constants following ONEX legacy conventions
+# Note: These use the legacy "node." prefix for backward compatibility
+DEFAULT_INTROSPECTION_TOPIC = "node.introspection"
+DEFAULT_HEARTBEAT_TOPIC = "node.heartbeat"
+DEFAULT_REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
+
+# Topic validation patterns
+# Matches valid topic characters: lowercase alphanumeric, dots, hyphens, underscores
+TOPIC_PATTERN = re.compile(r"^[a-z][a-z0-9._-]*[a-z0-9]$|^[a-z]$")
+# Invalid characters that should never appear in topic names
+INVALID_TOPIC_CHARS = set("@#$%^&*()+=[]{}|\\:;\"'<>,?/! \t\n\r")
+# Version suffix pattern for ONEX topics
+VERSION_SUFFIX_PATTERN = re.compile(r"\.v[0-9]+$")
 
 
 class ModelIntrospectionConfig(BaseModel):
@@ -26,7 +66,7 @@ class ModelIntrospectionConfig(BaseModel):
         node_type: Node type classification (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
             Cannot be empty.
         event_bus: Optional event bus for publishing introspection events.
-            Must have ``publish_envelope()`` method if provided.
+            Must implement ``ProtocolEventBus`` protocol.
         version: Node version string. Defaults to "1.0.0".
         cache_ttl: Cache time-to-live in seconds. Defaults to 300.0 (5 minutes).
         operation_keywords: Optional set of keywords to identify operation methods.
@@ -35,6 +75,15 @@ class ModelIntrospectionConfig(BaseModel):
         exclude_prefixes: Optional set of prefixes to exclude from capability
             discovery. Methods starting with these prefixes are filtered out.
             If None, uses MixinNodeIntrospection.DEFAULT_EXCLUDE_PREFIXES.
+        introspection_topic: Topic for publishing introspection events.
+            Defaults to "node.introspection". ONEX topics (onex.*) require
+            version suffix (.v1, .v2, etc.).
+        heartbeat_topic: Topic for publishing heartbeat events.
+            Defaults to "node.heartbeat". ONEX topics (onex.*) require
+            version suffix (.v1, .v2, etc.).
+        request_introspection_topic: Topic for receiving introspection requests.
+            Defaults to "node.request_introspection". ONEX topics (onex.*)
+            require version suffix (.v1, .v2, etc.).
 
     Example:
         ```python
@@ -80,13 +129,16 @@ class ModelIntrospectionConfig(BaseModel):
         description="Node type classification (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)",
     )
 
-    # Duck-typed event bus - accepts any object with publish_envelope() method.
-    # Type annotation uses object for Pydantic runtime compatibility while
-    # allowing static type checkers to infer ProtocolEventBus via duck typing.
-    event_bus: object | None = Field(
+    # Event bus for publishing introspection events.
+    # Uses _EventBusType which provides:
+    # - ProtocolEventBus | None during static analysis (TYPE_CHECKING)
+    # - object | None at runtime for Pydantic compatibility
+    # Duck typing is enforced by the mixin at initialization.
+    # The model config has arbitrary_types_allowed=True to support arbitrary objects.
+    event_bus: _EventBusType = Field(
         default=None,
         description="Optional event bus for publishing introspection events. "
-        "Must have publish_envelope() method if provided.",
+        "Must implement ProtocolEventBus protocol (duck typed).",
     )
 
     version: str = Field(
@@ -112,6 +164,72 @@ class ModelIntrospectionConfig(BaseModel):
         "If None, uses MixinNodeIntrospection.DEFAULT_EXCLUDE_PREFIXES.",
     )
 
+    introspection_topic: str = Field(
+        default=DEFAULT_INTROSPECTION_TOPIC,
+        description="Topic for publishing introspection events. "
+        "ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).",
+    )
+
+    heartbeat_topic: str = Field(
+        default=DEFAULT_HEARTBEAT_TOPIC,
+        description="Topic for publishing heartbeat events. "
+        "ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).",
+    )
+
+    request_introspection_topic: str = Field(
+        default=DEFAULT_REQUEST_INTROSPECTION_TOPIC,
+        description="Topic for receiving introspection request events. "
+        "ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).",
+    )
+
+    @field_validator(
+        "introspection_topic", "heartbeat_topic", "request_introspection_topic"
+    )
+    @classmethod
+    def validate_topic_name(cls, v: str) -> str:
+        """Validate topic name follows ONEX conventions.
+
+        Args:
+            v: Topic name to validate.
+
+        Returns:
+            Validated topic name.
+
+        Raises:
+            ValueError: If topic name is invalid.
+        """
+        if not v:
+            raise ValueError("Topic name cannot be empty")
+
+        # Check for invalid characters first
+        invalid_found = set(v) & INVALID_TOPIC_CHARS
+        if invalid_found:
+            raise ValueError(f"Topic name contains invalid characters: {invalid_found}")
+
+        # Check pattern (must start with lowercase, valid characters)
+        if not TOPIC_PATTERN.match(v):
+            if v[0].isupper():
+                raise ValueError(f"Topic name must start with a lowercase letter: {v}")
+            if v.endswith("."):
+                raise ValueError(
+                    f"Topic name can only lowercase alphanumeric, dot, hyphen, "
+                    f"underscore, and must not end with a dot: {v}"
+                )
+            raise ValueError(
+                f"Topic name must contain only lowercase alphanumeric, "
+                f"dot, hyphen, underscore characters: {v}"
+            )
+
+        # ONEX topics require version suffix
+        if v.startswith("onex."):
+            if not VERSION_SUFFIX_PATTERN.search(v):
+                raise ValueError(
+                    f"ONEX topic must have version suffix (.v1, .v2, etc.): {v}"
+                )
+        # Legacy topics (not starting with 'onex.') are allowed without version suffix
+
+        return v
+
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
@@ -126,6 +244,9 @@ class ModelIntrospectionConfig(BaseModel):
                     "cache_ttl": 300.0,
                     "operation_keywords": None,
                     "exclude_prefixes": None,
+                    "introspection_topic": "node.introspection",
+                    "heartbeat_topic": "node.heartbeat",
+                    "request_introspection_topic": "node.request_introspection",
                 },
                 {
                     "node_id": "550e8400-e29b-41d4-a716-446655440001",
@@ -135,10 +256,21 @@ class ModelIntrospectionConfig(BaseModel):
                     "cache_ttl": 120.0,
                     "operation_keywords": ["process", "transform", "analyze"],
                     "exclude_prefixes": ["_internal", "_private"],
+                    "introspection_topic": "onex.node.introspection.published.v1",
+                    "heartbeat_topic": "onex.node.heartbeat.published.v1",
+                    "request_introspection_topic": "onex.registry.introspection.requested.v1",
                 },
             ]
         },
     )
 
 
-__all__ = ["ModelIntrospectionConfig"]
+__all__ = [
+    "ModelIntrospectionConfig",
+    "DEFAULT_INTROSPECTION_TOPIC",
+    "DEFAULT_HEARTBEAT_TOPIC",
+    "DEFAULT_REQUEST_INTROSPECTION_TOPIC",
+    "TOPIC_PATTERN",
+    "VERSION_SUFFIX_PATTERN",
+    "INVALID_TOPIC_CHARS",
+]
