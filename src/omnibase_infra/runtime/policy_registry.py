@@ -85,6 +85,8 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
 from omnibase_infra.runtime.models import ModelPolicyKey, ModelPolicyRegistration
@@ -96,12 +98,6 @@ if TYPE_CHECKING:
 # =============================================================================
 # Policy Registry
 # =============================================================================
-
-# Semver sorting sentinel value
-# High ASCII value (127) ensures stable sorting when version components are missing.
-# Used in semantic version comparison to pad shorter version tuples for consistent
-# lexicographic sorting (e.g., "1.0" becomes ("1", "0", chr(127)) to sort after "1.0.0-alpha").
-_SEMVER_SORT_SENTINEL = chr(127)
 
 
 class PolicyRegistry:
@@ -446,7 +442,7 @@ class PolicyRegistry:
     SEMVER_CACHE_SIZE: int = 128
 
     # Cached semver parser function (lazily initialized)
-    _semver_cache: Callable[[str], tuple[int, int, int, str]] | None = None
+    _semver_cache: Callable[[str], ModelSemVer] | None = None
 
     # Lock for thread-safe cache initialization
     _semver_cache_lock: threading.Lock = threading.Lock()
@@ -875,7 +871,7 @@ class PolicyRegistry:
             cls._semver_cache = None
 
     @classmethod
-    def _get_semver_parser(cls) -> Callable[[str], tuple[int, int, int, str]]:
+    def _get_semver_parser(cls) -> Callable[[str], ModelSemVer]:
         """Get or create the semver parser with configured cache size.
 
         This method implements lazy initialization of the LRU-cached semver parser.
@@ -885,7 +881,7 @@ class PolicyRegistry:
             Uses double-checked locking pattern for thread-safe lazy initialization.
 
         Returns:
-            Cached semver parsing function.
+            Cached semver parsing function that returns ModelSemVer instances.
 
         Performance:
             - First call: Creates LRU-cached function (one-time cost)
@@ -903,84 +899,79 @@ class PolicyRegistry:
 
             # Create LRU-cached parser with configured size
             @functools.lru_cache(maxsize=cls.SEMVER_CACHE_SIZE)
-            def _parse_semver_impl(version: str) -> tuple[int, int, int, str]:
-                """Parse semantic version string into comparable tuple.
+            def _parse_semver_impl(version: str) -> ModelSemVer:
+                """Parse semantic version string into ModelSemVer.
 
                 Implementation moved here to support configurable cache size.
                 See _parse_semver docstring for full documentation.
+
+                Uses ModelSemVer.parse() from omnibase_core for actual parsing,
+                with preprocessing to handle:
+                - Whitespace trimming (core requires clean input)
+                - Partial versions: "1" -> "1.0.0", "1.2" -> "1.2.0"
+                - Empty prerelease suffix: "1.0.0-" is invalid
+
+                Wraps ModelOnexError as ProtocolConfigurationError for
+                consistency with existing error handling.
                 """
-                # Validate non-empty version string
-                if not version or not version.strip():
+                from omnibase_core.models.errors import ModelOnexError
+
+                # Preprocess: trim whitespace
+                cleaned = version.strip()
+
+                # Validate not empty after trimming
+                if not cleaned:
                     raise ProtocolConfigurationError(
-                        "Invalid semantic version format: empty version string",
+                        "Version string cannot be empty or whitespace-only",
                         version=version,
                     )
 
-                # Trim whitespace BEFORE any split operations
-                # This handles inputs like " 1.2.3 ", "1.2.3\n", "\t1.2.3\t"
-                version = version.strip()
+                # Handle empty prerelease suffix (e.g., "1.0.0-")
+                if cleaned.endswith("-"):
+                    raise ProtocolConfigurationError(
+                        "Prerelease suffix cannot be empty after hyphen",
+                        version=version,
+                    )
 
-                # Split off prerelease suffix (e.g., "1.0.0-alpha" -> "1.0.0", "alpha")
-                if "-" in version:
-                    version_part, prerelease = version.split("-", 1)
-                    # Validate prerelease is non-empty when dash is present
-                    if not prerelease:
-                        raise ProtocolConfigurationError(
-                            f"Invalid semantic version format: '{version}'. "
-                            f"Prerelease suffix cannot be empty when '-' is specified. "
-                            f"Use '1.2.3' for release versions or '1.2.3-alpha' for prereleases.",
-                            version=version,
-                        )
+                # Normalize partial versions to x.y.z format
+                # Core ModelSemVer requires full format
+                parts = cleaned.split("-", 1)  # Split on first hyphen for prerelease
+                version_part = parts[0]
+                prerelease = parts[1] if len(parts) > 1 else ""
+
+                version_nums = version_part.split(".")
+                if len(version_nums) == 1:
+                    # "1" -> "1.0.0"
+                    cleaned = f"{version_nums[0]}.0.0"
+                elif len(version_nums) == 2:
+                    # "1.2" -> "1.2.0"
+                    cleaned = f"{version_nums[0]}.{version_nums[1]}.0"
                 else:
-                    version_part, prerelease = version, ""
+                    cleaned = version_part
 
-                # Parse major.minor.patch
-                parts = version_part.split(".")
-
-                # Validate version format (must have 1-3 parts, no empty parts)
-                if (
-                    len(parts) < 1
-                    or len(parts) > 3
-                    or any(not p.strip() for p in parts)
-                ):
-                    raise ProtocolConfigurationError(
-                        f"Invalid semantic version format: '{version}'. "
-                        f"Expected format: 'major.minor.patch' or "
-                        f"'major.minor.patch-prerelease'",
-                        version=version,
-                    )
+                # Re-add prerelease if present
+                if prerelease:
+                    cleaned = f"{cleaned}-{prerelease}"
 
                 try:
-                    major = int(parts[0])
-                    minor = int(parts[1]) if len(parts) > 1 else 0
-                    patch = int(parts[2]) if len(parts) > 2 else 0
-                except (ValueError, IndexError) as e:
+                    return ModelSemVer.parse(cleaned)
+                except ModelOnexError as e:
                     raise ProtocolConfigurationError(
-                        f"Invalid semantic version format: '{version}'. "
-                        f"Version components must be integers (e.g., '1.2.3')",
+                        str(e),
                         version=version,
                     ) from e
-
-                # Validate non-negative integers
-                if major < 0 or minor < 0 or patch < 0:
+                except ValueError as e:
                     raise ProtocolConfigurationError(
-                        f"Invalid semantic version format: '{version}'. "
-                        f"Version components must be non-negative integers",
+                        str(e),
                         version=version,
-                    )
-
-                # Empty prerelease sorts after non-empty (release > prerelease)
-                # Use sentinel value for empty to sort after any prerelease string
-                sort_prerelease = prerelease if prerelease else _SEMVER_SORT_SENTINEL
-
-                return (major, minor, patch, sort_prerelease)
+                    ) from e
 
             cls._semver_cache = _parse_semver_impl
             return cls._semver_cache
 
     @classmethod
-    def _parse_semver(cls, version: str) -> tuple[int, int, int, str]:
-        """Parse semantic version string into comparable tuple with INTEGER components.
+    def _parse_semver(cls, version: str) -> ModelSemVer:
+        """Parse semantic version string into ModelSemVer for comparison.
 
         This method implements SEMANTIC VERSION SORTING, not lexicographic sorting.
         This is critical for correct "latest version" selection.
@@ -995,9 +986,8 @@ class PolicyRegistry:
                 10.0.0 > 2.0.0 CORRECT (because 10 > 2 as integers)
 
         Implementation:
-            - Parses version components as INTEGERS (not strings)
-            - Returns tuple (major: int, minor: int, patch: int, prerelease: str)
-            - Python's tuple comparison then works correctly: (1, 10, 0) > (1, 9, 0)
+            - Returns ModelSemVer instance with integer major, minor, patch
+            - ModelSemVer implements comparison operators for correct ordering
             - Prerelease versions sort before release: "1.0.0-alpha" < "1.0.0"
 
         Supported Formats:
@@ -1023,8 +1013,8 @@ class PolicyRegistry:
             Cache Size Rationale (default 128):
                 - Typical registry: 10-50 unique policy versions
                 - Peak scenarios: 50-100 versions across multiple policy types
-                - Each cache entry: ~100 bytes (string key + tuple value)
-                - Total memory: ~12.8KB worst case (negligible overhead)
+                - Each cache entry: ~200 bytes (string key + ModelSemVer instance)
+                - Total memory: ~25.6KB worst case (negligible overhead)
                 - Hit rate: >95% for repeated get() calls with version comparisons
                 - Eviction: Rare in practice, LRU ensures least-used versions purged
 
@@ -1032,7 +1022,7 @@ class PolicyRegistry:
             version: Semantic version string (e.g., "1.2.3" or "1.0.0-beta")
 
         Returns:
-            Tuple of (major, minor, patch, prerelease) for comparison.
+            ModelSemVer instance for comparison.
             Components are INTEGERS (not strings) for correct semantic sorting.
             Prerelease is empty string for release versions (sorts after prereleases).
 
@@ -1041,15 +1031,15 @@ class PolicyRegistry:
 
         Examples:
             >>> PolicyRegistry._parse_semver("1.9.0")
-            (1, 9, 0, '\\x7f')
+            ModelSemVer(major=1, minor=9, patch=0, prerelease='')
             >>> PolicyRegistry._parse_semver("1.10.0")
-            (1, 10, 0, '\\x7f')
+            ModelSemVer(major=1, minor=10, patch=0, prerelease='')
             >>> PolicyRegistry._parse_semver("1.10.0") > PolicyRegistry._parse_semver("1.9.0")
             True
             >>> PolicyRegistry._parse_semver("10.0.0") > PolicyRegistry._parse_semver("2.0.0")
             True
             >>> PolicyRegistry._parse_semver("1.0.0-alpha")
-            (1, 0, 0, 'alpha')
+            ModelSemVer(major=1, minor=0, patch=0, prerelease='alpha')
             >>> PolicyRegistry._parse_semver("1.0.0-alpha") < PolicyRegistry._parse_semver("1.0.0")
             True
         """

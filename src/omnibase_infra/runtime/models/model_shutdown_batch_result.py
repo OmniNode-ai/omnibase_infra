@@ -3,11 +3,18 @@
 """Shutdown Batch Result Model.
 
 This module provides the Pydantic model for batch shutdown operation results.
+
+Migration Notes:
+    The failed_components field was migrated from list[tuple[str, str]] to
+    list[ModelFailedComponent] as part of OMN-1007 tuple-to-model conversion.
+    This provides better type safety and semantic clarity for failure tracking.
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.runtime.models.model_failed_component import ModelFailedComponent
 
 
 class ModelShutdownBatchResult(BaseModel):
@@ -18,7 +25,22 @@ class ModelShutdownBatchResult(BaseModel):
 
     Attributes:
         succeeded_components: List of component types that shutdown successfully.
-        failed_components: List of (component_type, error_message) tuples for failures.
+        failed_components: List of ModelFailedComponent instances for failures.
+
+    Example:
+        >>> from omnibase_infra.runtime.models import (
+        ...     ModelShutdownBatchResult,
+        ...     ModelFailedComponent,
+        ... )
+        >>> result = ModelShutdownBatchResult(
+        ...     succeeded_components=["ConsulAdapter", "VaultAdapter"],
+        ...     failed_components=[
+        ...         ModelFailedComponent(
+        ...             component_name="KafkaEventBus",
+        ...             error_message="Connection timeout"
+        ...         )
+        ...     ]
+        ... )
     """
 
     model_config = ConfigDict(
@@ -32,9 +54,9 @@ class ModelShutdownBatchResult(BaseModel):
         default_factory=list,
         description="Component types that shutdown successfully",
     )
-    failed_components: list[tuple[str, str]] = Field(
+    failed_components: list[ModelFailedComponent] = Field(
         default_factory=list,
-        description="Component types that failed with error messages (empty string if no message)",
+        description="Components that failed during shutdown with error details",
     )
 
     def __str__(self) -> str:

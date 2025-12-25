@@ -35,6 +35,7 @@ import yaml
 
 # Module-level logger for validation operations
 logger = logging.getLogger(__name__)
+from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
 from omnibase_core.validation import (
     CircularImportValidationResult,
     CircularImportValidator,
@@ -45,6 +46,7 @@ from omnibase_core.validation import (
     validate_contracts,
     validate_patterns,
     validate_union_usage,
+    validate_union_usage_file,
 )
 
 # Type alias for cleaner return types in infrastructure validators
@@ -352,24 +354,31 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # ============================================================================
 
 # Maximum allowed union count in infrastructure code.
-# This is a COUNT threshold, not a violation threshold. The validator counts all
-# unions including the ONEX-preferred `X | None` patterns, which are valid.
+# This threshold counts ONLY non-optional unions (excluding `X | None` patterns).
 #
-# Current baseline (544 unions as of 2025-12-23):
-# - Most unions are legitimate `X | None` nullable patterns
-# - These are NOT flagged as violations, just counted
-# - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
+# Simple optional patterns (`X | None`) are excluded from this count because:
+# - `X | None` is the ONEX-preferred idiomatic Python pattern for nullable types
+# - Per PEP 604, this is the standard way to express optionality
+# - These are NOT problematic - only complex unions like `str | int | float` are flagged
 #
-# Threshold history:
-# - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
-# - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots (~24 unions added)
-# - 540 (2025-12-23): OMN-950 comprehensive reducer tests (~25 unions from type annotations)
-# - 544 (2025-12-23): OMN-954 effect idempotency and retry tests (PR #78) (~4 unions added)
-# - 580 (2025-12-23): OMN-888 + PR #57 + OMN-954 merge (~36 additional unions combined)
+# What IS counted (threshold applies to):
+# - Multi-type unions: `str | int`, `A | B | C`
+# - Complex patterns: `dict[str, str | int]` (nested unions)
+# - Unions with 3+ types (potential "primitive soup")
 #
-# Threshold: 580 (buffer above ~569 combined baseline for codebase growth)
-# Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
-INFRA_MAX_UNIONS = 580
+# What is NOT counted (excluded from threshold):
+# - Simple optionals: `str | None`, `int | None`, `ModelFoo | None`
+# - These are idiomatic Python nullable patterns, not complexity concerns
+#
+# Threshold history (after exclusion logic):
+# - 120 (2025-12-25): Initial threshold after excluding ~470 `X | None` patterns
+#   - ~568 total unions in codebase
+#   - ~468 are simple `X | None` optionals (82%)
+#   - ~100 non-optional unions remain
+#   - Buffer of 20 above baseline for codebase growth
+#
+# Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+INFRA_MAX_UNIONS = 120
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
@@ -694,6 +703,93 @@ def validate_infra_contract_deep(
 _contract_validator = ProtocolContractValidator()
 
 
+def _is_simple_optional(pattern: ModelUnionPattern) -> bool:
+    """
+    Determine if a union pattern is a simple optional (`X | None`).
+
+    Simple optionals are the ONEX-preferred pattern for nullable types and should
+    NOT count toward the union complexity threshold. They represent:
+    - `str | None` - nullable string
+    - `int | None` - nullable integer
+    - `ModelFoo | None` - nullable model
+    - `list[str] | None` - nullable list
+
+    These are NOT considered complex unions because:
+    1. They are idiomatic Python (PEP 604)
+    2. They express optionality, not type ambiguity
+    3. They don't require complex type narrowing logic
+
+    Args:
+        pattern: The ModelUnionPattern to check.
+
+    Returns:
+        True if the pattern is a simple optional (`X | None`), False otherwise.
+
+    Examples:
+        >>> _is_simple_optional(ModelUnionPattern(["str", "None"], 1, "test.py"))
+        True
+        >>> _is_simple_optional(ModelUnionPattern(["int", "None"], 1, "test.py"))
+        True
+        >>> _is_simple_optional(ModelUnionPattern(["str", "int"], 1, "test.py"))
+        False
+        >>> _is_simple_optional(ModelUnionPattern(["str", "int", "None"], 1, "test.py"))
+        False
+    """
+    # Simple optional: exactly 2 types, one of which is None
+    return len(pattern.types) == 2 and "None" in pattern.types
+
+
+def _count_non_optional_unions(directory: Path) -> tuple[int, int, list[str]]:
+    """
+    Count unions in a directory, excluding simple optional patterns (`X | None`).
+
+    This function provides accurate union counting for threshold checks by
+    excluding idiomatic `X | None` patterns that are valid ONEX style.
+
+    Args:
+        directory: Directory to scan for Python files.
+
+    Returns:
+        Tuple of (non_optional_count, total_count, issues):
+        - non_optional_count: Count of unions excluding `X | None` patterns
+        - total_count: Total count of all unions (for reporting)
+        - issues: List of validation issues found
+    """
+    total_unions = 0
+    non_optional_unions = 0
+    all_issues: list[str] = []
+
+    for py_file in directory.rglob("*.py"):
+        # Filter out archived files and __pycache__
+        if any(
+            part in str(py_file)
+            for part in [
+                "/archived/",
+                "archived",
+                "/archive/",
+                "archive",
+                "/examples/",
+                "examples",
+                "__pycache__",
+            ]
+        ):
+            continue
+
+        union_count, issues, patterns = validate_union_usage_file(py_file)
+        total_unions += union_count
+
+        # Count non-optional patterns
+        for pattern in patterns:
+            if not _is_simple_optional(pattern):
+                non_optional_unions += 1
+
+        # Prefix issues with file path
+        if issues:
+            all_issues.extend([f"{py_file}: {issue}" for issue in issues])
+
+    return non_optional_unions, total_unions, all_issues
+
+
 def validate_infra_union_usage(
     directory: str | Path = INFRA_SRC_PATH,
     max_unions: int = INFRA_MAX_UNIONS,
@@ -704,6 +800,19 @@ def validate_infra_union_usage(
 
     Prevents overly complex union types that complicate infrastructure code.
 
+    This validator EXCLUDES simple optional patterns (`X | None`) from the count
+    because they are the ONEX-preferred idiomatic pattern for nullable types.
+    Only actual complex unions (like `str | int | float`) count toward the threshold.
+
+    What IS counted (threshold applies to):
+        - Multi-type unions: `str | int`, `A | B | C`
+        - Complex patterns: unions with 3+ types
+        - Non-optional unions: any union without `None` as one of exactly 2 types
+
+    What is NOT counted (excluded from threshold):
+        - Simple optionals: `X | None` where X is any single type
+        - These are idiomatic Python for nullable types, not complexity concerns
+
     Exemptions:
         Exemption patterns are loaded from validation_exemptions.yaml (union_exemptions section).
         See that file for the complete list of exemptions with rationale.
@@ -713,26 +822,76 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum union count threshold. Defaults to INFRA_MAX_UNIONS.
+        max_unions: Maximum NON-OPTIONAL union count threshold. Defaults to INFRA_MAX_UNIONS.
+            Note: This threshold applies only to non-optional unions (`X | None` excluded).
         strict: Enable strict mode. Defaults to INFRA_UNIONS_STRICT (True).
 
     Returns:
         ModelValidationResult with validation status and any errors.
+        The metadata includes both total_unions (all unions) and non_optional_unions
+        (excluding `X | None` patterns) for transparency.
     """
-    # Run base validation
-    base_result = validate_union_usage(
-        str(directory), max_unions=max_unions, strict=strict
+    from omnibase_core.models.common.model_validation_metadata import (
+        ModelValidationMetadata,
     )
 
+    # Convert to Path if string
+    dir_path = Path(directory) if isinstance(directory, str) else directory
+
+    # Count unions with exclusion of simple optionals
+    non_optional_count, total_count, issues = _count_non_optional_unions(dir_path)
+
     # Load exemption patterns from YAML configuration
-    # See validation_exemptions.yaml for pattern definitions and rationale
     exempted_patterns = get_union_exemptions()
 
     # Filter errors using regex-based pattern matching
-    filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
+    filtered_issues = _filter_exempted_errors(issues, exempted_patterns)
 
-    # Create wrapper result (avoid mutation)
-    return _create_filtered_result(base_result, filtered_errors)
+    # Determine validity: non-optional count must be within threshold
+    # and no issues in strict mode
+    is_valid = (non_optional_count <= max_unions) and (
+        not filtered_issues or not strict
+    )
+
+    # Count Python files for metadata
+    python_files = list(dir_path.rglob("*.py"))
+    files_processed = len(
+        [
+            f
+            for f in python_files
+            if not any(
+                part in str(f)
+                for part in [
+                    "/archived/",
+                    "archived",
+                    "/archive/",
+                    "archive",
+                    "/examples/",
+                    "examples",
+                    "__pycache__",
+                ]
+            )
+        ]
+    )
+
+    # Create result with enhanced metadata showing both counts
+    return ModelValidationResult(
+        is_valid=is_valid,
+        errors=filtered_issues,
+        metadata=ModelValidationMetadata(
+            validation_type="union_usage",
+            files_processed=files_processed,
+            violations_found=len(filtered_issues),
+            # Total unions (all patterns including X | None)
+            total_unions=total_count,
+            # Non-optional unions (excluding X | None) - this is what threshold checks
+            non_optional_unions=non_optional_count,
+            # How many simple optionals were excluded
+            optional_unions_excluded=total_count - non_optional_count,
+            max_unions=max_unions,
+            strict_mode=strict,
+        ),
+    )
 
 
 def validate_infra_circular_imports(

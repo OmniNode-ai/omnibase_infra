@@ -52,6 +52,9 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.models.validation.model_category_match_result import (
+    ModelCategoryMatchResult,
+)
 from omnibase_infra.models.validation.model_coverage_metrics import (
     ModelCoverageMetrics,
 )
@@ -205,14 +208,27 @@ def _get_category_from_base(
 
 def _has_message_decorator(
     node: ast.ClassDef,
-) -> tuple[bool, EnumMessageCategory | EnumNodeOutputType | None]:
+) -> ModelCategoryMatchResult:
     """Check if class has a message type decorator.
 
     Args:
         node: AST ClassDef node to analyze.
 
     Returns:
-        Tuple of (has_decorator, category_if_found).
+        ModelCategoryMatchResult indicating whether a decorator was found
+        and, if so, which category it represents.
+
+    Example:
+        >>> # For a class with @event_type decorator
+        >>> result = _has_message_decorator(class_node)
+        >>> result.matched
+        True
+        >>> result.category
+        <EnumMessageCategory.EVENT: 'event'>
+
+    .. versionchanged:: 0.6.1
+        Changed return type from tuple[bool, EnumMessageCategory | EnumNodeOutputType | None]
+        to ModelCategoryMatchResult (OMN-1007).
     """
     for decorator in node.decorator_list:
         decorator_name = ""
@@ -227,17 +243,25 @@ def _has_message_decorator(
         if decorator_name in _MESSAGE_DECORATOR_PATTERNS:
             # Try to infer category from decorator name
             if "event" in decorator_name.lower():
-                return True, EnumMessageCategory.EVENT
+                return ModelCategoryMatchResult.matched_with_category(
+                    EnumMessageCategory.EVENT
+                )
             if "command" in decorator_name.lower():
-                return True, EnumMessageCategory.COMMAND
+                return ModelCategoryMatchResult.matched_with_category(
+                    EnumMessageCategory.COMMAND
+                )
             if "intent" in decorator_name.lower():
-                return True, EnumMessageCategory.INTENT
+                return ModelCategoryMatchResult.matched_with_category(
+                    EnumMessageCategory.INTENT
+                )
             if "projection" in decorator_name.lower():
-                return True, EnumNodeOutputType.PROJECTION
+                return ModelCategoryMatchResult.matched_with_category(
+                    EnumNodeOutputType.PROJECTION
+                )
             # Generic message_type decorator
-            return True, None
+            return ModelCategoryMatchResult.matched_without_category()
 
-    return False, None
+    return ModelCategoryMatchResult.not_matched()
 
 
 def _get_base_classes(node: ast.ClassDef) -> list[str]:
@@ -369,9 +393,9 @@ def discover_message_types(
 
             # Strategy 2: Check for message type decorators
             if category is None:
-                has_decorator, decorator_category = _has_message_decorator(node)
-                if has_decorator:
-                    category = decorator_category
+                match_result = _has_message_decorator(node)
+                if match_result.matched:
+                    category = match_result.category
 
             # Strategy 3: Check base class inheritance
             if category is None:

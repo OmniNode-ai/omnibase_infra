@@ -68,6 +68,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_execution_result import (
+    ModelReducerExecutionResult,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_state import (
     ModelReducerState,
 )
@@ -120,13 +123,14 @@ class ProtocolReducer(Protocol):
                 self,
                 state: ModelReducerState,
                 event: ModelNodeIntrospectionEvent,
-            ) -> tuple[ModelReducerState, list[ModelRegistrationIntent]]:
+            ) -> ModelReducerExecutionResult:
                 # Validate event - use sanitized error messages
                 if not event.node_id:
                     raise ValueError("Missing required field: node_id")
 
                 if event.node_id in state.processed_node_ids:
-                    return state, []  # Already processed, no-op
+                    # Already processed - return no_change result
+                    return ModelReducerExecutionResult.no_change(state)
 
                 # Propagate correlation_id with uuid4() fallback for tracing.
                 # This ensures every intent has a valid correlation_id even if
@@ -134,7 +138,7 @@ class ProtocolReducer(Protocol):
                 correlation_id = event.correlation_id or uuid4()
 
                 # Generate intents with typed payloads
-                intents: list[ModelRegistrationIntent] = [
+                intents = [
                     ModelConsulRegistrationIntent(
                         operation="register",
                         node_id=event.node_id,
@@ -171,7 +175,7 @@ class ProtocolReducer(Protocol):
                     pending_registrations=state.pending_registrations + len(intents),
                 )
 
-                return new_state, intents
+                return ModelReducerExecutionResult.with_intents(new_state, intents)
         ```
     """
 
@@ -179,10 +183,11 @@ class ProtocolReducer(Protocol):
         self,
         state: ModelReducerState,
         event: ModelNodeIntrospectionEvent,
-    ) -> tuple[ModelReducerState, list[ModelRegistrationIntent]]:
+    ) -> ModelReducerExecutionResult:
         """Reduce an introspection event to state and intents.
 
-        This method processes an incoming introspection event and produces:
+        This method processes an incoming introspection event and produces
+        a ModelReducerExecutionResult containing:
         1. Updated reducer state (for deduplication, rate limiting, etc.)
         2. A list of intents describing infrastructure operations to perform
 
@@ -212,10 +217,15 @@ class ProtocolReducer(Protocol):
                 that MUST NOT appear in error messages.
 
         Returns:
-            A tuple of (new_state, intents) where:
-                - new_state: NEW reducer state instance (do not mutate input)
+            ModelReducerExecutionResult containing:
+                - state: NEW reducer state instance (do not mutate input)
                 - intents: List of intents for the effect node to execute.
                   May be empty if the event should be filtered.
+
+            Use factory methods for common patterns:
+                - ModelReducerExecutionResult.no_change(state) for filtered events
+                - ModelReducerExecutionResult.with_intents(state, intents) for normal flow
+                - ModelReducerExecutionResult.empty() for initial/reset state
 
         Raises:
             ValueError: If the event is malformed or cannot be processed.

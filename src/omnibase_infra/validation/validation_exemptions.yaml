@@ -422,6 +422,18 @@ pattern_exemptions:
 
     ticket: OMN-1002
   # ==========================================================================
+  # Failed Component Model Exemptions (OMN-1007)
+  # ==========================================================================
+  # component_name in ModelFailedComponent is a simple string identifier for
+  # the component that failed during shutdown (e.g., "KafkaEventBus", "VaultAdapter").
+  # It is NOT an entity reference requiring UUID + display_name pattern.
+  - file_pattern: 'model_failed_component\.py'
+    violation_pattern: "Field 'component_name' might reference an entity"
+    reason: >
+      component_name is a simple string identifier for the failed component (e.g., "KafkaEventBus"). This is a shutdown tracking field, not an entity reference. The component is identified by its type name, not by a UUID.
+
+    ticket: OMN-1007
+  # ==========================================================================
   # Union Reduction Phase 3 Result Model Exemptions (OMN-1003)
   # ==========================================================================
   # Result models use comprehensive APIs with factory methods, computed properties,
