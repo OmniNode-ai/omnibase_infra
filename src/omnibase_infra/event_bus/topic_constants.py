@@ -127,6 +127,20 @@ Example matches:
     - staging.dlq.commands.v2
 """
 
+# ==============================================================================
+# Environment Validation Pattern
+# ==============================================================================
+# Validates environment identifier: alphanumeric with underscores/hyphens only.
+# This is the same pattern used in DLQ_TOPIC_PATTERN for the env group.
+
+ENV_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[\w-]+$")
+"""
+Regex pattern for validating environment identifiers.
+
+Valid examples: 'dev', 'prod', 'staging', 'test-1', 'my_env'
+Invalid examples: 'env.name', 'env name', 'env@name', ''
+"""
+
 
 def build_dlq_topic(
     environment: str,
@@ -152,7 +166,8 @@ def build_dlq_topic(
         Fully-qualified DLQ topic name.
 
     Raises:
-        ValueError: If environment is empty/whitespace or category is invalid.
+        ValueError: If environment is empty/whitespace, has invalid format,
+            or category is invalid.
 
     Example:
         >>> build_dlq_topic("dev", "intents")
@@ -163,11 +178,24 @@ def build_dlq_topic(
         'staging.dlq.events.v2'
         >>> build_dlq_topic("test-env", "commands")
         'test-env.dlq.commands.v1'
+        >>> build_dlq_topic("my_env", "intents")  # Underscores allowed
+        'my_env.dlq.intents.v1'
+
+    Test cases for environment validation:
+        - Valid: 'dev', 'prod', 'staging', 'test-1', 'my_env', 'env123'
+        - Invalid: 'env.name' (dots), 'env name' (spaces), 'env@name' (special chars)
+        - Invalid: '' (empty), '   ' (whitespace only)
     """
     # Validate environment
     env = environment.strip()
     if not env:
         raise ValueError("environment cannot be empty")
+
+    if not ENV_PATTERN.match(env):
+        raise ValueError(
+            f"Invalid environment '{environment}'. "
+            "Must be alphanumeric with optional underscores or hyphens (pattern: [\\w-]+)."
+        )
 
     # Normalize category to lowercase and look up suffix
     cat_lower = category.lower().strip()
@@ -314,6 +342,7 @@ __all__ = [
     "DLQ_COMMAND_TOPIC_SUFFIX",
     "DLQ_CATEGORY_SUFFIXES",
     "DLQ_TOPIC_PATTERN",
+    "ENV_PATTERN",
     # Functions
     "build_dlq_topic",
     "parse_dlq_topic",

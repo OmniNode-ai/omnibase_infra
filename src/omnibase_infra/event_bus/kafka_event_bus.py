@@ -197,6 +197,7 @@ from omnibase_infra.event_bus.models import (
 )
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.utils import sanitize_error_message
 
 # Type alias for DLQ callback functions
 DlqCallbackType = Callable[[ModelDlqEvent], Awaitable[None]]
@@ -1879,6 +1880,13 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         error_type = type(error).__name__
         dlq_topic = self._config.dead_letter_topic
 
+        # Sanitize error message to prevent credential leakage in DLQ
+        # This follows ONEX error sanitization guidelines:
+        # - NEVER include: Passwords, API keys, tokens, PII, credentials
+        # - SAFE to include: Error types, correlation IDs, topic names, timestamps
+        # See: docs/patterns/error_sanitization_patterns.md
+        sanitized_failure_reason = sanitize_error_message(error)
+
         # Build DLQ message with failure metadata
         dlq_payload = {
             "original_topic": original_topic,
@@ -1892,7 +1900,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 "offset": failed_message.offset,
                 "partition": failed_message.partition,
             },
-            "failure_reason": str(error),
+            "failure_reason": sanitized_failure_reason,
             "failure_timestamp": start_time.isoformat(),
             "correlation_id": str(correlation_id),
             "retry_count": failed_message.headers.retry_count,
@@ -1916,6 +1924,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         dlq_error_message: str | None = None
 
         # Publish to DLQ (without retry - best effort)
+        future = None
         try:
             async with self._producer_lock:
                 if self._producer is None:
@@ -1935,11 +1944,14 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     # Continue to metrics/callback handling below
                 else:
                     kafka_headers = self._model_headers_to_kafka(dlq_headers)
-                    # Add DLQ-specific headers
+                    # Add DLQ-specific headers (use sanitized failure reason)
                     kafka_headers.extend(
                         [
                             ("original_topic", original_topic.encode("utf-8")),
-                            ("failure_reason", str(error).encode("utf-8")),
+                            (
+                                "failure_reason",
+                                sanitized_failure_reason.encode("utf-8"),
+                            ),
                             (
                                 "failure_timestamp",
                                 start_time.isoformat().encode("utf-8"),
@@ -1954,17 +1966,18 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                         headers=kafka_headers,
                     )
 
-                    # Wait for completion with timeout (outside producer lock)
-                    await asyncio.wait_for(
-                        future,
-                        timeout=self._timeout_seconds,
-                    )
-                    success = True
+            # Wait for completion with timeout (outside producer lock)
+            if future is not None:
+                await asyncio.wait_for(
+                    future,
+                    timeout=self._timeout_seconds,
+                )
+                success = True
 
         except Exception as dlq_error:
-            # DLQ publish failed - capture error details
+            # DLQ publish failed - capture error details (sanitized for security)
             dlq_error_type = type(dlq_error).__name__
-            dlq_error_message = str(dlq_error)
+            dlq_error_message = sanitize_error_message(dlq_error)
             # Log at ERROR level for DLQ publish failures (critical - message may be lost)
             logger.exception(
                 "DLQ publish failed: message may be lost",
@@ -1994,7 +2007,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     "dlq_topic": dlq_topic,
                     "correlation_id": str(correlation_id),
                     "error_type": error_type,
-                    "error_message": str(error),
+                    "error_message": sanitized_failure_reason,
                     "retry_count": failed_message.headers.retry_count,
                     "message_offset": failed_message.offset,
                     "message_partition": failed_message.partition,
@@ -2008,7 +2021,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             dlq_topic=dlq_topic,
             correlation_id=correlation_id,
             error_type=error_type,
-            error_message=str(error),
+            error_message=sanitized_failure_reason,
             retry_count=failed_message.headers.retry_count,
             message_offset=failed_message.offset,
             message_partition=failed_message.partition,
@@ -2076,6 +2089,12 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         a ModelEventMessage. It extracts raw data directly from the Kafka
         ConsumerRecord for DLQ payload construction.
 
+        Features:
+            - Structured logging with appropriate log levels (WARNING/ERROR)
+            - Metrics tracking (dlq.messages.published, dlq.messages.failed)
+            - Callback hooks for custom alerting integration
+            - Correlation ID included in all log entries for tracing
+
         Args:
             original_topic: Original topic where message was consumed from
             raw_msg: Raw Kafka ConsumerRecord that failed conversion
@@ -2098,6 +2117,11 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 },
             )
             return
+
+        # Track timing for metrics
+        start_time = datetime.now(UTC)
+        error_type = type(error).__name__
+        dlq_topic = self._config.dead_letter_topic
 
         # Extract raw data from Kafka message (handles deserialization safely)
         raw_key = getattr(raw_msg, "key", None)
@@ -2137,10 +2161,10 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             },
             "failure_reason": str(error),
             "failure_type": failure_type,
-            "failure_timestamp": datetime.now(UTC).isoformat(),
+            "failure_timestamp": start_time.isoformat(),
             "correlation_id": str(correlation_id),
             "retry_count": 0,  # Raw messages have no retry tracking
-            "error_type": type(error).__name__,
+            "error_type": error_type,
         }
 
         # Create DLQ headers with failure metadata
@@ -2157,73 +2181,132 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         # Convert key to bytes for DLQ
         dlq_key = raw_key if isinstance(raw_key, bytes) else None
 
+        # Variables for event creation
+        success = False
+        dlq_error_type: str | None = None
+        dlq_error_message: str | None = None
+
         # Publish to DLQ (without retry - best effort)
+        future = None
         try:
             async with self._producer_lock:
                 if self._producer is None:
-                    logger.warning(
-                        "Producer not available, cannot publish raw message to DLQ",
+                    # Producer not available - create event and emit metrics
+                    dlq_error_type = "ProducerUnavailable"
+                    dlq_error_message = "Producer not initialized or closed"
+                    logger.error(
+                        "DLQ publish failed: producer not available for raw message",
                         extra={
                             "original_topic": original_topic,
-                            "dlq_topic": self._config.dead_letter_topic,
+                            "dlq_topic": dlq_topic,
                             "correlation_id": str(correlation_id),
+                            "error_type": error_type,
                             "failure_type": failure_type,
                         },
                     )
-                    return
+                    # Continue to metrics/callback handling below
+                else:
+                    kafka_headers = self._model_headers_to_kafka(dlq_headers)
+                    # Add DLQ-specific headers
+                    kafka_headers.extend(
+                        [
+                            ("original_topic", original_topic.encode("utf-8")),
+                            ("failure_type", failure_type.encode("utf-8")),
+                            ("failure_reason", str(error).encode("utf-8")),
+                            (
+                                "failure_timestamp",
+                                start_time.isoformat().encode("utf-8"),
+                            ),
+                        ]
+                    )
 
-                kafka_headers = self._model_headers_to_kafka(dlq_headers)
-                # Add DLQ-specific headers
-                kafka_headers.extend(
-                    [
-                        ("original_topic", original_topic.encode("utf-8")),
-                        ("failure_type", failure_type.encode("utf-8")),
-                        ("failure_reason", str(error).encode("utf-8")),
-                        (
-                            "failure_timestamp",
-                            datetime.now(UTC).isoformat().encode("utf-8"),
-                        ),
-                    ]
+                    future = await self._producer.send(
+                        dlq_topic,
+                        value=dlq_value,
+                        key=dlq_key,
+                        headers=kafka_headers,
+                    )
+
+            # Wait for completion with timeout (outside producer lock)
+            if future is not None:
+                await asyncio.wait_for(
+                    future,
+                    timeout=self._timeout_seconds,
                 )
-
-                future = await self._producer.send(
-                    self._config.dead_letter_topic,
-                    value=dlq_value,
-                    key=dlq_key,
-                    headers=kafka_headers,
-                )
-
-            # Wait for completion with timeout
-            await asyncio.wait_for(
-                future,
-                timeout=self._timeout_seconds,
-            )
-
-            logger.info(
-                f"Published raw failed message to DLQ: {self._config.dead_letter_topic}",
-                extra={
-                    "original_topic": original_topic,
-                    "dlq_topic": self._config.dead_letter_topic,
-                    "correlation_id": str(correlation_id),
-                    "failure_type": failure_type,
-                    "error_type": type(error).__name__,
-                },
-            )
+                success = True
 
         except Exception as dlq_error:
-            # Log DLQ publish failure but do not raise to prevent consumer crash
+            # DLQ publish failed - capture error details
+            dlq_error_type = type(dlq_error).__name__
+            dlq_error_message = str(dlq_error)
+            # Log at ERROR level for DLQ publish failures (critical - message may be lost)
             logger.exception(
-                f"Failed to publish raw message to DLQ topic {self._config.dead_letter_topic}",
+                "DLQ publish failed for raw message: message may be lost",
                 extra={
                     "original_topic": original_topic,
-                    "dlq_topic": self._config.dead_letter_topic,
+                    "dlq_topic": dlq_topic,
                     "correlation_id": str(correlation_id),
+                    "error_type": error_type,
                     "failure_type": failure_type,
-                    "dlq_error": str(dlq_error),
-                    "dlq_error_type": type(dlq_error).__name__,
-                    "original_error": str(error),
+                    "dlq_error_type": dlq_error_type,
+                    "dlq_error_message": dlq_error_message,
+                    "message_offset": raw_offset,
+                    "message_partition": raw_partition,
                 },
             )
+
+        # Calculate duration for metrics
+        end_time = datetime.now(UTC)
+        duration_ms = (end_time - start_time).total_seconds() * 1000
+
+        # Log successful DLQ publish at WARNING level (indicates processing failure)
+        if success:
+            logger.warning(
+                "Raw message published to DLQ due to deserialization/validation failure",
+                extra={
+                    "original_topic": original_topic,
+                    "dlq_topic": dlq_topic,
+                    "correlation_id": str(correlation_id),
+                    "error_type": error_type,
+                    "error_message": str(error),
+                    "failure_type": failure_type,
+                    "message_offset": raw_offset,
+                    "message_partition": raw_partition,
+                    "duration_ms": round(duration_ms, 2),
+                },
+            )
+
+        # Create DLQ event for metrics and callbacks
+        # Note: For raw messages, offset may be int or str depending on source
+        message_offset_str = str(raw_offset) if raw_offset is not None else None
+        dlq_event = ModelDlqEvent(
+            original_topic=original_topic,
+            dlq_topic=dlq_topic,
+            correlation_id=correlation_id,
+            error_type=error_type,
+            error_message=str(error),
+            retry_count=0,  # Raw messages have no retry tracking
+            message_offset=message_offset_str,
+            message_partition=raw_partition,
+            success=success,
+            dlq_error_type=dlq_error_type,
+            dlq_error_message=dlq_error_message,
+            timestamp=end_time,
+            environment=self._environment,
+            consumer_group=self._group,
+        )
+
+        # Update DLQ metrics (copy-on-write pattern)
+        async with self._dlq_metrics_lock:
+            self._dlq_metrics = self._dlq_metrics.record_dlq_publish(
+                original_topic=original_topic,
+                error_type=error_type,
+                success=success,
+                duration_ms=duration_ms,
+            )
+
+        # Invoke DLQ callbacks for custom alerting
+        await self._invoke_dlq_callbacks(dlq_event)
 
 
 __all__: list[str] = ["KafkaEventBus"]

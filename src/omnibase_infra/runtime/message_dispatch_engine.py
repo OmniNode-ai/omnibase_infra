@@ -146,86 +146,12 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from pydantic import ValidationError
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
+from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
+from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_core.enums.enum_node_kind import EnumNodeKind
-
-# Patterns that may indicate sensitive data in error messages
-# These patterns are checked case-insensitively
-_SENSITIVE_PATTERNS = (
-    "password",
-    "passwd",
-    "secret",
-    "token",
-    "api_key",
-    "apikey",
-    "api-key",
-    "credential",
-    "auth",
-    "bearer",
-    "private_key",
-    "privatekey",
-    "private-key",
-    "connection_string",
-    "connectionstring",
-    "connection-string",
-    "mongodb://",
-    "postgres://",
-    "postgresql://",
-    "mysql://",
-    "redis://",
-    "amqp://",
-    "kafka://",
-)
-
-
-def _sanitize_error_message(exception: Exception, max_length: int = 500) -> str:
-    """
-    Sanitize an exception message for safe inclusion in dispatch results.
-
-    This function removes or masks potentially sensitive information from
-    exception messages before they are stored in ModelDispatchResult or logged.
-
-    Sanitization rules:
-        1. Truncate long messages to prevent excessive data exposure
-        2. Check for common patterns indicating credentials/connection strings
-        3. If sensitive patterns detected, return generic error type only
-        4. Otherwise, return truncated exception message
-
-    Args:
-        exception: The exception to sanitize
-        max_length: Maximum length of the sanitized message (default 500)
-
-    Returns:
-        Sanitized error message safe for storage and logging
-
-    Example:
-        >>> try:
-        ...     raise ValueError("Failed with password=secret123")
-        ... except Exception as e:
-        ...     safe_msg = _sanitize_error_message(e)
-        >>> "password" not in safe_msg.lower()
-        True
-    """
-    exception_type = type(exception).__name__
-    exception_str = str(exception)
-
-    # Check for sensitive patterns in the exception message
-    exception_lower = exception_str.lower()
-    for pattern in _SENSITIVE_PATTERNS:
-        if pattern in exception_lower:
-            # Sensitive data detected - return only the exception type
-            return f"{exception_type}: [REDACTED - potentially sensitive data]"
-
-    # Truncate long messages
-    if len(exception_str) > max_length:
-        exception_str = exception_str[:max_length] + "... [truncated]"
-
-    return f"{exception_type}: {exception_str}"
-
-
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_log_context import (
     ModelDispatchLogContext,
@@ -1219,7 +1145,7 @@ class MessageDispatchEngine:
                 ) * 1000
                 # Sanitize exception message to prevent credential leakage
                 # (e.g., connection strings with passwords, API keys in URLs)
-                sanitized_error = _sanitize_error_message(e)
+                sanitized_error = sanitize_error_message(e)
                 error_msg = (
                     f"Dispatcher '{dispatcher_entry.dispatcher_id}' "
                     f"failed: {sanitized_error}"
@@ -1377,9 +1303,9 @@ class MessageDispatchEngine:
                 dispatch_outputs = ModelDispatchOutputs(topics=outputs)
             except (ValueError, ValidationError) as validation_error:
                 # Log validation failure with context (no secrets in topic names)
-                # Note: Using _sanitize_error_message for consistency, though topic
+                # Note: Using sanitize_error_message for consistency, though topic
                 # validation errors typically don't contain sensitive data
-                sanitized_validation_error = _sanitize_error_message(validation_error)
+                sanitized_validation_error = sanitize_error_message(validation_error)
                 # TRY400: Intentionally using error() instead of exception() for security
                 # - exception() would log stack trace which may expose internal paths
                 # - sanitized_validation_error already contains safe error details
@@ -1434,7 +1360,7 @@ class MessageDispatchEngine:
         except ValidationError as result_validation_error:
             # Pydantic validation failed during result construction
             # This is a critical internal error - log and return a minimal error result
-            sanitized_result_error = _sanitize_error_message(result_validation_error)
+            sanitized_result_error = sanitize_error_message(result_validation_error)
             # TRY400: Intentionally using error() instead of exception() for security
             self._logger.error(  # noqa: TRY400
                 "Failed to construct ModelDispatchResult: %s",

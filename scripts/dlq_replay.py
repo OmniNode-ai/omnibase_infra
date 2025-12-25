@@ -26,6 +26,20 @@ SPDX-License-Identifier: MIT
 Copyright (c) 2025 OmniNode Team
 """
 
+# =========================================================================
+# IMPLEMENTATION STATUS
+# =========================================================================
+# This script provides a complete DLQ replay utility with aiokafka.
+#
+# Current state:
+#   - CLI parsing and configuration: IMPLEMENTED
+#   - Message filtering logic: IMPLEMENTED
+#   - Kafka consume/produce: IMPLEMENTED (aiokafka)
+#   - Graceful shutdown: IMPLEMENTED
+#
+# See: OMN-949 - DLQ Replay Mechanism
+# =========================================================================
+
 from __future__ import annotations
 
 import argparse
@@ -33,12 +47,16 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import sys
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
+
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from aiokafka.errors import KafkaConnectionError, KafkaError
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -75,8 +93,7 @@ class EnumFilterType(str, Enum):
     BY_CORRELATION_ID = "by_correlation_id"
 
 
-@dataclass
-class DLQMessage:
+class ModelDlqMessage(BaseModel):
     """Parsed DLQ message with metadata."""
 
     original_topic: str
@@ -99,7 +116,7 @@ class DLQMessage:
         payload: dict[str, object],
         dlq_offset: int,
         dlq_partition: int,
-    ) -> DLQMessage:
+    ) -> ModelDlqMessage:
         """Parse DLQ message from Kafka payload."""
         original_message = payload.get("original_message", {})
         if not isinstance(original_message, dict):
@@ -120,7 +137,7 @@ class DLQMessage:
             failure_reason=str(payload.get("failure_reason", "")),
             failure_timestamp=str(payload.get("failure_timestamp", "")),
             correlation_id=correlation_id,
-            retry_count=int(payload.get("retry_count", 0)),
+            retry_count=int(str(payload.get("retry_count", 0))),
             error_type=str(payload.get("error_type", "Unknown")),
             dlq_offset=dlq_offset,
             dlq_partition=dlq_partition,
@@ -128,8 +145,7 @@ class DLQMessage:
         )
 
 
-@dataclass
-class ReplayConfig:
+class ModelReplayConfig(BaseModel):
     """Configuration for DLQ replay operation."""
 
     bootstrap_servers: str = "localhost:9092"
@@ -138,14 +154,14 @@ class ReplayConfig:
     rate_limit_per_second: float = 100.0
     dry_run: bool = False
     filter_type: EnumFilterType = EnumFilterType.ALL
-    filter_topics: list[str] = field(default_factory=list)
-    filter_error_types: list[str] = field(default_factory=list)
-    filter_correlation_ids: list[UUID] = field(default_factory=list)
+    filter_topics: list[str] = Field(default_factory=list)
+    filter_error_types: list[str] = Field(default_factory=list)
+    filter_correlation_ids: list[UUID] = Field(default_factory=list)
     add_replay_headers: bool = True
     limit: int | None = None
 
     @classmethod
-    def from_args(cls, args: argparse.Namespace) -> ReplayConfig:
+    def from_args(cls, args: argparse.Namespace) -> ModelReplayConfig:
         """Create config from command line arguments."""
         bootstrap_servers = os.environ.get(
             "KAFKA_BOOTSTRAP_SERVERS",
@@ -187,8 +203,7 @@ class ReplayConfig:
         )
 
 
-@dataclass
-class ReplayResult:
+class ModelReplayResult(BaseModel):
     """Result of a replay operation."""
 
     correlation_id: UUID
@@ -215,114 +230,200 @@ NON_RETRYABLE_ERRORS = frozenset(
 
 
 # =============================================================================
-# DLQ Consumer (Stub Implementation)
+# DLQ Consumer
 # =============================================================================
 
 
 class DLQConsumer:
-    """Consumer for reading DLQ messages.
+    """Consumer for reading DLQ messages using aiokafka.
 
-    This is a stub implementation. In production, use aiokafka.AIOKafkaConsumer.
+    This consumer reads messages from the Dead Letter Queue topic and yields
+    parsed ModelDlqMessage instances for processing.
+
+    Attributes:
+        config: Replay configuration containing bootstrap servers and topic
+        _consumer: The underlying AIOKafkaConsumer instance
+        _started: Whether the consumer has been started
     """
 
-    def __init__(self, config: ReplayConfig) -> None:
-        """Initialize DLQ consumer."""
+    def __init__(self, config: ModelReplayConfig) -> None:
+        """Initialize DLQ consumer.
+
+        Args:
+            config: Replay configuration with Kafka connection details
+        """
         self.config = config
+        self._consumer: AIOKafkaConsumer | None = None
         self._started = False
 
     async def start(self) -> None:
-        """Start the consumer."""
+        """Start the consumer and connect to Kafka.
+
+        Raises:
+            KafkaConnectionError: If unable to connect to Kafka brokers
+            KafkaError: For other Kafka-related errors
+        """
         logger.info(
             f"Starting DLQ consumer for topic: {self.config.dlq_topic}",
             extra={"bootstrap_servers": self.config.bootstrap_servers},
         )
-        # TODO: Initialize aiokafka.AIOKafkaConsumer
-        # self._consumer = AIOKafkaConsumer(
-        #     self.config.dlq_topic,
-        #     bootstrap_servers=self.config.bootstrap_servers,
-        #     auto_offset_reset="earliest",
-        #     enable_auto_commit=False,
-        # )
-        # await self._consumer.start()
-        self._started = True
+        try:
+            self._consumer = AIOKafkaConsumer(
+                self.config.dlq_topic,
+                bootstrap_servers=self.config.bootstrap_servers,
+                auto_offset_reset="earliest",
+                enable_auto_commit=False,
+                group_id=f"dlq-replay-{os.getpid()}",
+                consumer_timeout_ms=5000,
+            )
+            await self._consumer.start()
+            self._started = True
+            logger.info("DLQ consumer started successfully")
+        except KafkaConnectionError:
+            logger.exception(
+                "Failed to connect to Kafka",
+                extra={"bootstrap_servers": self.config.bootstrap_servers},
+            )
+            raise
+        except KafkaError:
+            logger.exception("Kafka error during consumer start")
+            raise
 
     async def stop(self) -> None:
-        """Stop the consumer."""
-        if self._started:
-            # TODO: await self._consumer.stop()
-            self._started = False
-            logger.info("DLQ consumer stopped")
+        """Stop the consumer and disconnect from Kafka."""
+        if self._started and self._consumer is not None:
+            try:
+                await self._consumer.stop()
+                logger.info("DLQ consumer stopped")
+            except KafkaError as e:
+                logger.warning(f"Error stopping consumer: {e}")
+            finally:
+                self._started = False
+                self._consumer = None
 
-    async def consume_messages(self) -> AsyncIterator[DLQMessage]:
+    async def consume_messages(self) -> AsyncIterator[ModelDlqMessage]:
         """Consume and yield DLQ messages.
 
         Yields:
-            DLQMessage instances parsed from DLQ topic
+            ModelDlqMessage instances parsed from DLQ topic
+
+        Raises:
+            RuntimeError: If consumer has not been started
         """
-        if not self._started:
+        if not self._started or self._consumer is None:
             raise RuntimeError("Consumer not started")
 
-        # TODO: Replace with actual Kafka consumption
-        # async for msg in self._consumer:
-        #     try:
-        #         payload = json.loads(msg.value.decode("utf-8"))
-        #         yield DLQMessage.from_kafka_message(
-        #             payload=payload,
-        #             dlq_offset=msg.offset,
-        #             dlq_partition=msg.partition,
-        #         )
-        #     except json.JSONDecodeError as e:
-        #         logger.warning(f"Failed to parse DLQ message: {e}")
-        #         continue
+        try:
+            async for msg in self._consumer:
+                try:
+                    if msg.value is None:
+                        logger.warning(
+                            f"Received message with null value at offset {msg.offset}"
+                        )
+                        continue
 
-        # Stub: Yield no messages (for skeleton)
-        return
-        yield  # Make this a generator
+                    payload = json.loads(msg.value.decode("utf-8"))
+                    yield ModelDlqMessage.from_kafka_message(
+                        payload=payload,
+                        dlq_offset=msg.offset,
+                        dlq_partition=msg.partition,
+                    )
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        f"Failed to parse DLQ message at offset {msg.offset}: {e}"
+                    )
+                    continue
+                except Exception as e:
+                    logger.warning(
+                        f"Error processing message at offset {msg.offset}: {e}"
+                    )
+                    continue
+        except asyncio.CancelledError:
+            logger.info("Message consumption cancelled")
+            raise
+        except KafkaError:
+            logger.exception("Kafka error during message consumption")
+            raise
 
 
 # =============================================================================
-# DLQ Producer (Stub Implementation)
+# DLQ Producer
 # =============================================================================
 
 
 class DLQProducer:
-    """Producer for replaying messages to original topics.
+    """Producer for replaying messages to original topics using aiokafka.
 
-    This is a stub implementation. In production, use aiokafka.AIOKafkaProducer.
+    This producer publishes DLQ messages back to their original topics
+    with replay tracking headers and rate limiting support.
+
+    Attributes:
+        config: Replay configuration containing bootstrap servers and rate limits
+        _producer: The underlying AIOKafkaProducer instance
+        _started: Whether the producer has been started
+        _last_publish: Timestamp of last publish for rate limiting
+        _interval: Minimum interval between publishes
     """
 
-    def __init__(self, config: ReplayConfig) -> None:
-        """Initialize DLQ producer."""
+    def __init__(self, config: ModelReplayConfig) -> None:
+        """Initialize DLQ producer.
+
+        Args:
+            config: Replay configuration with Kafka connection details
+        """
         self.config = config
+        self._producer: AIOKafkaProducer | None = None
         self._started = False
         self._last_publish = datetime.now(UTC)
         self._interval = 1.0 / config.rate_limit_per_second
 
     async def start(self) -> None:
-        """Start the producer."""
+        """Start the producer and connect to Kafka.
+
+        Raises:
+            KafkaConnectionError: If unable to connect to Kafka brokers
+            KafkaError: For other Kafka-related errors
+        """
         logger.info(
             "Starting DLQ producer",
             extra={"bootstrap_servers": self.config.bootstrap_servers},
         )
-        # TODO: Initialize aiokafka.AIOKafkaProducer
-        # self._producer = AIOKafkaProducer(
-        #     bootstrap_servers=self.config.bootstrap_servers,
-        #     acks="all",
-        #     enable_idempotence=True,
-        # )
-        # await self._producer.start()
-        self._started = True
+        try:
+            self._producer = AIOKafkaProducer(
+                bootstrap_servers=self.config.bootstrap_servers,
+                acks="all",
+                enable_idempotence=True,
+                max_request_size=10485760,  # 10MB max message size
+                request_timeout_ms=30000,  # 30 second timeout
+            )
+            await self._producer.start()
+            self._started = True
+            logger.info("DLQ producer started successfully")
+        except KafkaConnectionError:
+            logger.exception(
+                "Failed to connect to Kafka",
+                extra={"bootstrap_servers": self.config.bootstrap_servers},
+            )
+            raise
+        except KafkaError:
+            logger.exception("Kafka error during producer start")
+            raise
 
     async def stop(self) -> None:
-        """Stop the producer."""
-        if self._started:
-            # TODO: await self._producer.stop()
-            self._started = False
-            logger.info("DLQ producer stopped")
+        """Stop the producer and disconnect from Kafka."""
+        if self._started and self._producer is not None:
+            try:
+                await self._producer.stop()
+                logger.info("DLQ producer stopped")
+            except KafkaError as e:
+                logger.warning(f"Error stopping producer: {e}")
+            finally:
+                self._started = False
+                self._producer = None
 
     async def replay_message(
         self,
-        message: DLQMessage,
+        message: ModelDlqMessage,
         replay_correlation_id: UUID,
     ) -> None:
         """Replay a message to its original topic with rate limiting.
@@ -330,8 +431,12 @@ class DLQProducer:
         Args:
             message: DLQ message to replay
             replay_correlation_id: New correlation ID for replay tracking
+
+        Raises:
+            RuntimeError: If producer has not been started
+            KafkaError: If unable to publish to Kafka
         """
-        if not self._started:
+        if not self._started or self._producer is None:
             raise RuntimeError("Producer not started")
 
         # Rate limiting
@@ -351,24 +456,33 @@ class DLQProducer:
                 ("correlation_id", str(message.correlation_id).encode("utf-8")),
             ]
 
-        # TODO: Replace with actual Kafka publish
-        # key = message.original_key.encode("utf-8") if message.original_key else None
-        # value = message.original_value.encode("utf-8")
-        # await self._producer.send(
-        #     message.original_topic,
-        #     value=value,
-        #     key=key,
-        #     headers=headers,
-        # )
+        # Prepare key and value
+        key = message.original_key.encode("utf-8") if message.original_key else None
+        value = message.original_value.encode("utf-8")
 
-        self._last_publish = datetime.now(UTC)
-        logger.debug(
-            f"Replayed message to {message.original_topic}",
-            extra={
-                "correlation_id": str(message.correlation_id),
-                "replay_correlation_id": str(replay_correlation_id),
-            },
-        )
+        try:
+            await self._producer.send_and_wait(
+                message.original_topic,
+                value=value,
+                key=key,
+                headers=headers,
+            )
+            self._last_publish = datetime.now(UTC)
+            logger.debug(
+                f"Replayed message to {message.original_topic}",
+                extra={
+                    "correlation_id": str(message.correlation_id),
+                    "replay_correlation_id": str(replay_correlation_id),
+                },
+            )
+        except KafkaError:
+            logger.exception(
+                f"Failed to replay message to {message.original_topic}",
+                extra={
+                    "correlation_id": str(message.correlation_id),
+                },
+            )
+            raise
 
 
 # =============================================================================
@@ -376,7 +490,9 @@ class DLQProducer:
 # =============================================================================
 
 
-def should_replay(message: DLQMessage, config: ReplayConfig) -> tuple[bool, str]:
+def should_replay(
+    message: ModelDlqMessage, config: ModelReplayConfig
+) -> tuple[bool, str]:
     """Determine if a DLQ message should be replayed.
 
     Args:
@@ -421,12 +537,12 @@ def should_replay(message: DLQMessage, config: ReplayConfig) -> tuple[bool, str]
 class DLQReplayExecutor:
     """Executor for DLQ replay operations."""
 
-    def __init__(self, config: ReplayConfig) -> None:
+    def __init__(self, config: ModelReplayConfig) -> None:
         """Initialize replay executor."""
         self.config = config
         self.consumer = DLQConsumer(config)
         self.producer = DLQProducer(config)
-        self.results: list[ReplayResult] = []
+        self.results: list[ModelReplayResult] = []
 
     async def start(self) -> None:
         """Start consumer and producer."""
@@ -440,7 +556,7 @@ class DLQReplayExecutor:
         if not self.config.dry_run:
             await self.producer.stop()
 
-    async def execute(self) -> list[ReplayResult]:
+    async def execute(self) -> list[ModelReplayResult]:
         """Execute the replay operation.
 
         Returns:
@@ -456,7 +572,7 @@ class DLQReplayExecutor:
             should, reason = should_replay(message, self.config)
 
             if not should:
-                result = ReplayResult(
+                result = ModelReplayResult(
                     correlation_id=message.correlation_id,
                     original_topic=message.original_topic,
                     status=EnumReplayStatus.SKIPPED,
@@ -475,7 +591,7 @@ class DLQReplayExecutor:
             replay_correlation_id = uuid4()
 
             if self.config.dry_run:
-                result = ReplayResult(
+                result = ModelReplayResult(
                     correlation_id=message.correlation_id,
                     original_topic=message.original_topic,
                     status=EnumReplayStatus.PENDING,
@@ -492,7 +608,7 @@ class DLQReplayExecutor:
             else:
                 try:
                     await self.producer.replay_message(message, replay_correlation_id)
-                    result = ReplayResult(
+                    result = ModelReplayResult(
                         correlation_id=message.correlation_id,
                         original_topic=message.original_topic,
                         status=EnumReplayStatus.COMPLETED,
@@ -506,7 +622,7 @@ class DLQReplayExecutor:
                         },
                     )
                 except Exception as e:
-                    result = ReplayResult(
+                    result = ModelReplayResult(
                         correlation_id=message.correlation_id,
                         original_topic=message.original_topic,
                         status=EnumReplayStatus.FAILED,
@@ -533,7 +649,7 @@ class DLQReplayExecutor:
 
 async def cmd_list(args: argparse.Namespace) -> int:
     """List messages in the DLQ."""
-    config = ReplayConfig.from_args(args)
+    config = ModelReplayConfig.from_args(args)
     consumer = DLQConsumer(config)
 
     try:
@@ -574,7 +690,7 @@ async def cmd_list(args: argparse.Namespace) -> int:
 
 async def cmd_replay(args: argparse.Namespace) -> int:
     """Execute DLQ replay operation."""
-    config = ReplayConfig.from_args(args)
+    config = ModelReplayConfig.from_args(args)
     executor = DLQReplayExecutor(config)
 
     try:
@@ -606,7 +722,7 @@ async def cmd_replay(args: argparse.Namespace) -> int:
 
 async def cmd_stats(args: argparse.Namespace) -> int:
     """Show DLQ statistics."""
-    config = ReplayConfig.from_args(args)
+    config = ModelReplayConfig.from_args(args)
     consumer = DLQConsumer(config)
 
     try:
@@ -781,12 +897,71 @@ See docs/operations/DLQ_REPLAY_GUIDE.md for complete documentation.
 
 
 # =============================================================================
+# Graceful Shutdown Handler
+# =============================================================================
+
+
+class GracefulShutdown:
+    """Handler for graceful shutdown on SIGINT/SIGTERM.
+
+    This class manages shutdown signals and provides a mechanism for
+    async tasks to check if shutdown has been requested.
+
+    Attributes:
+        _shutdown_event: Event that is set when shutdown is requested
+        _shutdown_requested: Flag indicating shutdown was requested
+    """
+
+    def __init__(self) -> None:
+        """Initialize shutdown handler."""
+        self._shutdown_event = asyncio.Event()
+        self._shutdown_requested = False
+
+    @property
+    def is_shutdown_requested(self) -> bool:
+        """Check if shutdown has been requested."""
+        return self._shutdown_requested
+
+    def request_shutdown(self) -> None:
+        """Request graceful shutdown."""
+        if not self._shutdown_requested:
+            self._shutdown_requested = True
+            self._shutdown_event.set()
+            logger.info("Shutdown requested, cleaning up...")
+
+    async def wait_for_shutdown(self) -> None:
+        """Wait until shutdown is requested."""
+        await self._shutdown_event.wait()
+
+
+def setup_signal_handlers() -> GracefulShutdown:
+    """Set up signal handlers for graceful shutdown.
+
+    Returns:
+        GracefulShutdown instance for monitoring shutdown state
+    """
+    shutdown_handler = GracefulShutdown()
+
+    def signal_handler(signum: int, frame: object) -> None:
+        """Handle shutdown signals (SIGINT/SIGTERM)."""
+        signal_name = signal.Signals(signum).name
+        logger.info(f"Received {signal_name}, initiating graceful shutdown...")
+        shutdown_handler.request_shutdown()
+
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    return shutdown_handler
+
+
+# =============================================================================
 # Main Entry Point
 # =============================================================================
 
 
 async def main() -> int:
-    """Main entry point."""
+    """Main entry point with graceful shutdown handling."""
     parser = create_parser()
     args = parser.parse_args()
 
@@ -808,7 +983,35 @@ async def main() -> int:
         parser.print_help()
         return 1
 
-    return await handler(args)
+    # Set up signal handlers for graceful shutdown
+    shutdown_handler = setup_signal_handlers()
+
+    try:
+        return await handler(args)
+    except asyncio.CancelledError:
+        logger.info("Operation cancelled")
+        return 130  # Standard exit code for SIGINT
+    except KafkaConnectionError:
+        logger.exception("Failed to connect to Kafka")
+        print(
+            f"\nError: Could not connect to Kafka at {args.bootstrap_servers}",
+            file=sys.stderr,
+        )
+        print("Please verify:", file=sys.stderr)
+        print("  1. Kafka/Redpanda is running", file=sys.stderr)
+        print("  2. Bootstrap servers are correct", file=sys.stderr)
+        print(
+            "  3. Network connectivity to the broker",
+            file=sys.stderr,
+        )
+        return 1
+    except KafkaError:
+        logger.exception("Kafka error occurred")
+        print("\nKafka error occurred. See log for details.", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+        return 130
 
 
 if __name__ == "__main__":

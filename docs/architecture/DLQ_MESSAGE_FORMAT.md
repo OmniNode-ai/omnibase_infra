@@ -338,16 +338,42 @@ For automated reprocessing, ensure:
 
 ### Sanitization
 
-DLQ messages inherit the ONEX error sanitization guidelines:
+DLQ messages follow the ONEX error sanitization guidelines via `sanitize_error_message()`:
 
-- **DO NOT include**: Passwords, API keys, tokens, PII, credentials
-- **SAFE to include**: Error types, correlation IDs, topic names, timestamps
+**Error Message Sanitization**:
+The `failure_reason` field in both the DLQ payload and Kafka headers is automatically sanitized
+before publishing. If the error message contains any of the following patterns, the entire
+message is replaced with `"{ExceptionType}: [REDACTED - potentially sensitive data]"`:
+
+- Credentials: `password`, `secret`, `token`, `api_key`, `bearer`, `credential`
+- Connection strings: `postgres://`, `mongodb://`, `mysql://`, `redis://`
+- Key material: `-----BEGIN`, `private_key`
+- And other sensitive patterns (see `SENSITIVE_PATTERNS` in `utils/util_error_sanitization.py`)
+
+**What IS sanitized in DLQ**:
+- `failure_reason` field in payload (sanitized error message)
+- `failure_reason` header in Kafka message
+- `error_message` field in `ModelDlqEvent` (for callbacks)
+- Log entries related to DLQ publishing
+
+**What is NOT sanitized in DLQ**:
+- `original_message.value` - The original message payload is preserved for debugging.
+  If your messages contain sensitive data, ensure proper access control on DLQ topics.
+
+**Sanitization Example**:
+```json
+{
+  "failure_reason": "ConnectionError: [REDACTED - potentially sensitive data]",
+  "error_type": "ConnectionError"
+}
+```
 
 ### Access Control
 
 - DLQ topics should have restricted access (ACLs)
 - Only authorized operators should consume from DLQ
 - Consider encryption for sensitive message payloads
+- Original message payloads in DLQ retain their original content
 
 ---
 
@@ -356,7 +382,10 @@ DLQ messages inherit the ONEX error sanitization guidelines:
 The DLQ implementation is located in:
 
 - **KafkaEventBus**: `src/omnibase_infra/event_bus/kafka_event_bus.py`
-  - `_publish_to_dlq()` method (lines 1765-1860)
+  - `_publish_to_dlq()` method
+- **Error Sanitization**: `src/omnibase_infra/utils/util_error_sanitization.py`
+  - `sanitize_error_message()` function
+  - `SENSITIVE_PATTERNS` constant
 - **ModelEventHeaders**: `src/omnibase_infra/event_bus/models/model_event_headers.py`
 - **Configuration**: `src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py`
 
@@ -366,4 +395,5 @@ The DLQ implementation is located in:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1.0 | 2025-01 | Added error message sanitization for DLQ payloads and headers |
 | 1.0.0 | 2024-01 | Initial DLQ message format specification |
