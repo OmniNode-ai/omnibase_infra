@@ -23,6 +23,7 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -484,6 +485,234 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("is_stale", corr_id)
             raise RuntimeHostError(
                 f"Failed to check staleness: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def update_ack_timeout_marker(
+        self,
+        entity_id: UUID,
+        domain: str,
+        emitted_at: datetime,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Update ack timeout emission marker to prevent duplicate events.
+
+        Sets the ack_timeout_emitted_at column to mark that an ack timeout
+        event has been emitted for this entity. This prevents duplicate
+        emission during restarts or retry scenarios.
+
+        This method is called AFTER successful event publish to ensure
+        exactly-once semantics. If publish succeeded but this fails,
+        the event may be duplicated on retry (at-least-once delivery).
+
+        Args:
+            entity_id: Node UUID to update
+            domain: Domain namespace
+            emitted_at: Timestamp when the timeout event was emitted
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            True if marker was updated, False if entity not found
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If update times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> await projector.update_ack_timeout_marker(
+            ...     entity_id=node_id,
+            ...     domain="registration",
+            ...     emitted_at=datetime.now(UTC),
+            ... )
+        """
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="update_ack_timeout_marker",
+            target_name="projector.registration",
+            correlation_id=corr_id,
+        )
+
+        # Check circuit breaker
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("update_ack_timeout_marker", corr_id)
+
+        update_sql = """
+            UPDATE registration_projections
+            SET ack_timeout_emitted_at = $3,
+                updated_at = $3
+            WHERE entity_id = $1 AND domain = $2
+            RETURNING entity_id
+        """
+
+        try:
+            async with self._pool.acquire() as conn:
+                result = await conn.fetchrow(update_sql, entity_id, domain, emitted_at)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            if result:
+                logger.debug(
+                    "Ack timeout marker updated",
+                    extra={
+                        "entity_id": str(entity_id),
+                        "domain": domain,
+                        "emitted_at": emitted_at.isoformat(),
+                        "correlation_id": str(corr_id),
+                    },
+                )
+                return True
+
+            logger.warning(
+                "Entity not found for ack timeout marker update",
+                extra={
+                    "entity_id": str(entity_id),
+                    "domain": domain,
+                    "correlation_id": str(corr_id),
+                },
+            )
+            return False
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("update_ack_timeout_marker", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for marker update",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("update_ack_timeout_marker", corr_id)
+            raise InfraTimeoutError(
+                "Marker update timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("update_ack_timeout_marker", corr_id)
+            raise RuntimeHostError(
+                f"Failed to update ack timeout marker: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def update_liveness_timeout_marker(
+        self,
+        entity_id: UUID,
+        domain: str,
+        emitted_at: datetime,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Update liveness timeout emission marker to prevent duplicate events.
+
+        Sets the liveness_timeout_emitted_at column to mark that a liveness
+        expiration event has been emitted for this entity. This prevents
+        duplicate emission during restarts or retry scenarios.
+
+        This method is called AFTER successful event publish to ensure
+        exactly-once semantics. If publish succeeded but this fails,
+        the event may be duplicated on retry (at-least-once delivery).
+
+        Args:
+            entity_id: Node UUID to update
+            domain: Domain namespace
+            emitted_at: Timestamp when the expiration event was emitted
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            True if marker was updated, False if entity not found
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If update times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> await projector.update_liveness_timeout_marker(
+            ...     entity_id=node_id,
+            ...     domain="registration",
+            ...     emitted_at=datetime.now(UTC),
+            ... )
+        """
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="update_liveness_timeout_marker",
+            target_name="projector.registration",
+            correlation_id=corr_id,
+        )
+
+        # Check circuit breaker
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("update_liveness_timeout_marker", corr_id)
+
+        update_sql = """
+            UPDATE registration_projections
+            SET liveness_timeout_emitted_at = $3,
+                updated_at = $3
+            WHERE entity_id = $1 AND domain = $2
+            RETURNING entity_id
+        """
+
+        try:
+            async with self._pool.acquire() as conn:
+                result = await conn.fetchrow(update_sql, entity_id, domain, emitted_at)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            if result:
+                logger.debug(
+                    "Liveness timeout marker updated",
+                    extra={
+                        "entity_id": str(entity_id),
+                        "domain": domain,
+                        "emitted_at": emitted_at.isoformat(),
+                        "correlation_id": str(corr_id),
+                    },
+                )
+                return True
+
+            logger.warning(
+                "Entity not found for liveness timeout marker update",
+                extra={
+                    "entity_id": str(entity_id),
+                    "domain": domain,
+                    "correlation_id": str(corr_id),
+                },
+            )
+            return False
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "update_liveness_timeout_marker", corr_id
+                )
+            raise InfraConnectionError(
+                "Failed to connect to database for marker update",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "update_liveness_timeout_marker", corr_id
+                )
+            raise InfraTimeoutError(
+                "Marker update timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "update_liveness_timeout_marker", corr_id
+                )
+            raise RuntimeHostError(
+                f"Failed to update liveness timeout marker: {type(e).__name__}",
                 context=ctx,
             ) from e
 
