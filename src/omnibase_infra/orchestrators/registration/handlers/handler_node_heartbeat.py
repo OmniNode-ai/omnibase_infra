@@ -25,8 +25,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
-    InfraConnectionError,
-    InfraTimeoutError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
@@ -175,9 +173,12 @@ class HandlerNodeHeartbeat:
             ModelHeartbeatHandlerResult with processing outcome.
 
         Raises:
-            InfraConnectionError: If database connection fails.
-            InfraTimeoutError: If database operation times out.
-            RuntimeHostError: For other infrastructure errors.
+            RuntimeHostError: Base class for all infrastructure errors. Specific
+                subclasses are preserved and can be caught by callers:
+                - InfraConnectionError: Database connection failures
+                - InfraTimeoutError: Operation timeout exceeded
+                - InfraAuthenticationError: Authentication/authorization failures
+                - InfraUnavailableError: Resource temporarily unavailable
 
         Example:
             >>> result = await handler.handle(heartbeat_event)
@@ -281,23 +282,25 @@ class HandlerNodeHeartbeat:
                 correlation_id=correlation_id,
             )
 
-        except InfraConnectionError:
-            # Re-raise infrastructure connection errors directly (preserve error type)
-            raise
-        except InfraTimeoutError:
-            # Re-raise infrastructure timeout errors directly (preserve error type)
+        except RuntimeHostError:
+            # Re-raise all infrastructure errors directly (preserves error type)
+            # This includes InfraConnectionError, InfraTimeoutError,
+            # InfraAuthenticationError, InfraUnavailableError, etc.
+            # Callers can catch specific error types for differentiated handling
             raise
         except Exception as e:
-            # Wrap non-infrastructure errors in RuntimeHostError
+            # Wrap only non-infrastructure errors in RuntimeHostError
+            # This should be rare - most errors from projector are infrastructure errors
             logger.exception(
-                "Failed to update heartbeat",
+                "Unexpected error updating heartbeat",
                 extra={
                     "node_id": str(event.node_id),
                     "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
                 },
             )
             raise RuntimeHostError(
-                f"Failed to update heartbeat: {type(e).__name__}",
+                f"Unexpected error updating heartbeat: {type(e).__name__}",
                 context=ctx,
             ) from e
 

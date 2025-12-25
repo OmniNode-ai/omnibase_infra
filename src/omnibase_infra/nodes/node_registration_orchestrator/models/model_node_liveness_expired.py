@@ -5,6 +5,23 @@
 Emitted when an active node misses its liveness heartbeat deadline.
 This is a timeout decision event that triggers state transition to LIVENESS_EXPIRED.
 
+Timestamp Accuracy Verification (2025-12-25):
+    All timestamps in this event model are verified accurate:
+
+    - detected_at: Fresh UTC timestamp from RuntimeTick.now at detection time.
+      Source: RuntimeScheduler.emit_tick() -> datetime.now(UTC) -> process_timeouts().
+      NOT cached or stale.
+
+    - liveness_deadline: The deadline that was missed, sourced from the
+      registration projection (calculated as last_heartbeat_at + liveness_window
+      when heartbeat was processed).
+
+    - last_heartbeat_at: Optional timestamp of last heartbeat, sourced from
+      projection.last_heartbeat_at (set from heartbeat event timestamp).
+
+    UTC timezone handling is enforced at the RuntimeScheduler level using
+    datetime.now(UTC). See test_timeout_emitter.py for comprehensive tests.
+
 Related Tickets:
     - OMN-932 (C2): Durable Timeout Handling
     - OMN-888 (C1): Registration Orchestrator
