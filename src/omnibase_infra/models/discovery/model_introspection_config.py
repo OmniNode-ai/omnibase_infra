@@ -113,7 +113,7 @@ class ModelIntrospectionConfig(BaseModel):
     )
 
     model_config = ConfigDict(
-        frozen=False,
+        frozen=True,
         extra="forbid",
         arbitrary_types_allowed=True,  # Allow arbitrary types for event_bus
         json_schema_extra={

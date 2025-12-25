@@ -183,6 +183,8 @@ from omnibase_infra.models.discovery.model_node_introspection_event import (
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 if TYPE_CHECKING:
+    from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
+
     from omnibase_infra.event_bus.models import ModelEventMessage
 
 logger = logging.getLogger(__name__)
@@ -422,7 +424,7 @@ class MixinNodeIntrospection:
     # Configuration attributes
     _introspection_node_id: UUID | None
     _introspection_node_type: str | None
-    _introspection_event_bus: object | None
+    _introspection_event_bus: ProtocolEventBus | None
     _introspection_version: str
     _introspection_start_time: float | None
 

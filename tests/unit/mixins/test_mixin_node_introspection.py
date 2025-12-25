@@ -317,15 +317,20 @@ class TestMixinNodeIntrospectionInit:
         assert node._introspection_cache is None
         assert node._introspection_cached_at is None
 
-    async def test_initialize_introspection_empty_node_id_raises(self) -> None:
-        """Test that empty node_id raises validation error."""
+    async def test_initialize_introspection_invalid_node_id_format_raises(self) -> None:
+        """Test that invalid UUID format for node_id raises validation error.
+
+        The node_id field expects a UUID type. Passing an empty string (or any
+        non-UUID string) triggers Pydantic's type validation, which rejects
+        invalid UUID formats.
+        """
         from pydantic import ValidationError
 
         node = MockNode()
 
         with pytest.raises(ValidationError):
             config = ModelIntrospectionConfig(
-                node_id="",
+                node_id="",  # Empty string is not a valid UUID format
                 node_type="EFFECT",
             )
             node.initialize_introspection(config)
