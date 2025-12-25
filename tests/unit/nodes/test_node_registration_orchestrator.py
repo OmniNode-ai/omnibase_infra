@@ -435,10 +435,8 @@ class TestTimeoutHandling:
         self, mock_container: MagicMock
     ) -> None:
         """Test that set_timeout_coordinator updates has_timeout_coordinator."""
-        from unittest.mock import MagicMock as MM
-
         orchestrator = NodeRegistrationOrchestrator(mock_container)
-        mock_coordinator = MM()
+        mock_coordinator = MagicMock()
 
         orchestrator.set_timeout_coordinator(mock_coordinator)
 
@@ -450,11 +448,10 @@ class TestTimeoutHandling:
     ) -> None:
         """Test that handle_runtime_tick raises RuntimeError without coordinator."""
         from datetime import UTC, datetime
-        from unittest.mock import MagicMock as MM
         from uuid import uuid4
 
         # Create a minimal tick mock
-        tick = MM()
+        tick = MagicMock()
         tick.now = datetime.now(UTC)
         tick.tick_id = uuid4()
         tick.correlation_id = uuid4()
@@ -472,18 +469,18 @@ class TestTimeoutHandling:
     ) -> None:
         """Test that handle_runtime_tick delegates to the configured coordinator."""
         from datetime import UTC, datetime
-        from unittest.mock import AsyncMock, MagicMock as MM
+        from unittest.mock import AsyncMock
         from uuid import uuid4
 
         # Create a mock tick
-        tick = MM()
+        tick = MagicMock()
         tick.now = datetime.now(UTC)
         tick.tick_id = uuid4()
         tick.correlation_id = uuid4()
 
         # Create a mock coordinator with async coordinate method
-        mock_coordinator = MM()
-        mock_result = MM()
+        mock_coordinator = MagicMock()
+        mock_result = MagicMock()
         mock_coordinator.coordinate = AsyncMock(return_value=mock_result)
 
         orchestrator = NodeRegistrationOrchestrator(mock_container)
@@ -500,16 +497,16 @@ class TestTimeoutHandling:
     ) -> None:
         """Test that handle_runtime_tick passes custom domain to coordinator."""
         from datetime import UTC, datetime
-        from unittest.mock import AsyncMock, MagicMock as MM
+        from unittest.mock import AsyncMock
         from uuid import uuid4
 
-        tick = MM()
+        tick = MagicMock()
         tick.now = datetime.now(UTC)
         tick.tick_id = uuid4()
         tick.correlation_id = uuid4()
 
-        mock_coordinator = MM()
-        mock_coordinator.coordinate = AsyncMock(return_value=MM())
+        mock_coordinator = MagicMock()
+        mock_coordinator.coordinate = AsyncMock(return_value=MagicMock())
 
         orchestrator = NodeRegistrationOrchestrator(mock_container)
         orchestrator.set_timeout_coordinator(mock_coordinator)
