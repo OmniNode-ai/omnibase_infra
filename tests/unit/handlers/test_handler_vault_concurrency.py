@@ -10,6 +10,7 @@ and concurrent operation handling under production load scenarios.
 from __future__ import annotations
 
 import asyncio
+from itertools import cycle
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -91,14 +92,26 @@ class TestVaultAdapterConcurrency:
             MockClient.return_value = mock_hvac_client
 
             # Mix of failures and successes - create a predictable pattern
-            responses = [
+            # Use cycle to ensure responses never run out (circuit breaker retries
+            # can cause more calls than expected, and StopIteration in async
+            # context causes Python 3.12+ issues with futures)
+            response_pattern = [
                 Exception("Connection error"),
                 {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}},
                 Exception("Connection error"),
                 {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}},
-            ] * 5
+            ]
+            response_cycle = cycle(response_pattern)
 
-            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = responses
+            def mock_read_secret(*args, **kwargs):
+                response = next(response_cycle)
+                if isinstance(response, Exception):
+                    raise response
+                return response
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
+                mock_read_secret
+            )
 
             await handler.initialize(vault_config)
 

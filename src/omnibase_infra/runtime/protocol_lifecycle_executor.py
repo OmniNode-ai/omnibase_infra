@@ -18,14 +18,21 @@ Example Usage:
 
     executor = ProtocolLifecycleExecutor(health_check_timeout_seconds=10.0)
 
-    # Check handler health
-    handler_type, health = await executor.check_handler_health("http", handler)
+    # Check handler health - returns ModelHealthCheckResult
+    result = await executor.check_handler_health("http", handler)
+    print(f"Handler: {result.handler_type}, Healthy: {result.healthy}")
 
-    # Shutdown handler
-    handler_type, success, error = await executor.shutdown_handler("http", handler)
+    # Shutdown handler - returns ModelLifecycleResult
+    result = await executor.shutdown_handler("http", handler)
+    if result.success:
+        print(f"Handler {result.handler_type} shutdown successfully")
+    else:
+        print(f"Handler failed: {result.error_message}")
 
-    # Shutdown all handlers by priority
-    succeeded, failed = await executor.shutdown_handlers_by_priority(handlers)
+    # Shutdown all handlers by priority - returns ModelBatchLifecycleResult
+    batch_result = await executor.shutdown_handlers_by_priority(handlers)
+    print(f"Succeeded: {batch_result.succeeded_handlers}")
+    print(f"Failed: {batch_result.failure_count}")
     ```
 """
 
@@ -35,8 +42,13 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from omnibase_infra.runtime.models import (
+    ModelBatchLifecycleResult,
+    ModelHealthCheckResult,
+    ModelLifecycleResult,
+)
+
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
 logger = logging.getLogger(__name__)
@@ -102,11 +114,17 @@ class ProtocolLifecycleExecutor:
         # Get shutdown priority for ordering
         priority = ProtocolLifecycleExecutor.get_shutdown_priority(handler)
 
-        # Check individual handler health
-        handler_type, health = await executor.check_handler_health("db", handler)
+        # Check individual handler health - returns ModelHealthCheckResult
+        result = await executor.check_handler_health("db", handler)
+        if result.healthy:
+            print(f"Handler {result.handler_type} is healthy")
 
-        # Shutdown with error handling
-        handler_type, success, error = await executor.shutdown_handler("db", handler)
+        # Shutdown with error handling - returns ModelLifecycleResult
+        result = await executor.shutdown_handler("db", handler)
+        if result.success:
+            print(f"Shutdown complete for {result.handler_type}")
+        else:
+            print(f"Shutdown failed: {result.error_message}")
         ```
     """
 
@@ -208,7 +226,7 @@ class ProtocolLifecycleExecutor:
         self,
         handler_type: str,
         handler: ProtocolHandler,
-    ) -> tuple[str, bool, str | None]:
+    ) -> ModelLifecycleResult:
         """Shutdown a single handler with error handling.
 
         This method performs individual handler shutdown with comprehensive error
@@ -219,10 +237,8 @@ class ProtocolLifecycleExecutor:
             handler: The handler instance to shutdown.
 
         Returns:
-            Tuple of (handler_type, success, error_message) where:
-                - handler_type: The handler type identifier for result tracking
-                - success: True if shutdown completed successfully, False otherwise
-                - error_message: None if successful, error description if failed
+            ModelLifecycleResult with handler_type, success status, and optional
+            error_message if the shutdown failed.
         """
         try:
             if hasattr(handler, "shutdown"):
@@ -231,14 +247,14 @@ class ProtocolLifecycleExecutor:
                     "Handler shutdown completed",
                     extra={"handler_type": handler_type},
                 )
-                return handler_type, True, None
+                return ModelLifecycleResult.succeeded(handler_type)
             else:
                 # Handler doesn't implement shutdown - considered successful
                 logger.debug(
                     "Handler has no shutdown method, skipping",
                     extra={"handler_type": handler_type},
                 )
-                return handler_type, True, None
+                return ModelLifecycleResult.succeeded(handler_type)
         except Exception as e:
             # Log exception but return failure status instead of raising
             # This ensures all handlers get a chance to cleanup even if one fails
@@ -246,14 +262,14 @@ class ProtocolLifecycleExecutor:
                 "Error shutting down handler",
                 extra={"handler_type": handler_type, "error": str(e)},
             )
-            return handler_type, False, str(e)
+            return ModelLifecycleResult.failed(handler_type, str(e))
 
     async def check_handler_health(
         self,
         handler_type: str,
         handler: ProtocolHandler,
         timeout_seconds: float = -1.0,
-    ) -> tuple[str, JsonValue]:
+    ) -> ModelHealthCheckResult:
         """Check health of a single handler with timeout.
 
         This method performs an individual handler health check with a configurable
@@ -266,8 +282,7 @@ class ProtocolLifecycleExecutor:
                 (default: -1.0), uses the configured health_check_timeout_seconds.
 
         Returns:
-            Tuple of (handler_type, health_result_dict) where health_result_dict
-            contains at minimum a "healthy" boolean key.
+            ModelHealthCheckResult with handler_type, healthy status, and details.
         """
         # Use provided timeout or fall back to configured instance timeout
         # Negative value signals "use default from config"
@@ -283,13 +298,13 @@ class ProtocolLifecycleExecutor:
                     handler.health_check(),
                     timeout=effective_timeout,
                 )
-                return handler_type, handler_health
+                return ModelHealthCheckResult.from_handler_response(
+                    handler_type=handler_type,
+                    health_response=handler_health,
+                )
             else:
                 # Handler doesn't implement health_check - assume healthy
-                return handler_type, {
-                    "healthy": True,
-                    "note": "no health_check method",
-                }
+                return ModelHealthCheckResult.no_health_check_result(handler_type)
         except TimeoutError:
             logger.warning(
                 "Handler health check timed out",
@@ -298,24 +313,24 @@ class ProtocolLifecycleExecutor:
                     "timeout_seconds": effective_timeout,
                 },
             )
-            return handler_type, {
-                "healthy": False,
-                "error": f"health check timeout after {effective_timeout}s",
-            }
+            return ModelHealthCheckResult.timeout_result(
+                handler_type=handler_type,
+                timeout_seconds=effective_timeout,
+            )
         except Exception as e:
             logger.warning(
                 "Handler health check failed",
                 extra={"handler_type": handler_type, "error": str(e)},
             )
-            return handler_type, {
-                "healthy": False,
-                "error": str(e),
-            }
+            return ModelHealthCheckResult.error_result(
+                handler_type=handler_type,
+                error=str(e),
+            )
 
     async def shutdown_handlers_by_priority(
         self,
         handlers: dict[str, ProtocolHandler],
-    ) -> tuple[list[str], list[tuple[str, str | None]]]:
+    ) -> ModelBatchLifecycleResult:
         """Shutdown all handlers grouped by priority (higher first, parallel within group).
 
         Handlers are shutdown in priority order, with higher priority handlers
@@ -337,12 +352,11 @@ class ProtocolLifecycleExecutor:
             handlers: Dict mapping handler_type to handler instance.
 
         Returns:
-            Tuple of (succeeded_handlers, failed_handlers) where:
-                - succeeded_handlers: List of handler_types that shutdown successfully
-                - failed_handlers: List of (handler_type, error_message) tuples for failures
+            ModelBatchLifecycleResult with all results, succeeded_handlers,
+            and failed_handlers categorized.
         """
         if not handlers:
-            return [], []
+            return ModelBatchLifecycleResult.empty()
 
         # Group handlers by priority
         priority_groups: dict[int, list[tuple[str, ProtocolHandler]]] = {}
@@ -355,9 +369,8 @@ class ProtocolLifecycleExecutor:
         # Sort priorities in descending order (higher priority first)
         sorted_priorities = sorted(priority_groups.keys(), reverse=True)
 
-        # Track overall results
-        all_succeeded: list[str] = []
-        all_failed: list[tuple[str, str | None]] = []
+        # Track all results
+        all_results: list[ModelLifecycleResult] = []
 
         # Shutdown each priority group sequentially, handlers within group in parallel
         for priority in sorted_priorities:
@@ -378,28 +391,32 @@ class ProtocolLifecycleExecutor:
             results = await asyncio.gather(*shutdown_tasks)
 
             # Collect results
-            for handler_type, success, error_msg in results:
-                if success:
-                    all_succeeded.append(handler_type)
-                else:
-                    all_failed.append((handler_type, error_msg))
+            all_results.extend(results)
+
+        # Build batch result
+        batch_result = ModelBatchLifecycleResult.from_results(all_results)
 
         # Log summary
-        if all_failed:
-            for handler_type, error_msg in all_failed:
+        if batch_result.has_failures:
+            for failed in batch_result.failed_handlers:
                 logger.error(
                     "Handler shutdown failed",
-                    extra={"handler_type": handler_type, "error": error_msg},
+                    extra={
+                        "handler_type": failed.handler_type,
+                        "error": failed.error_message,
+                    },
                 )
 
         logger.info(
             "Priority-based handler shutdown completed",
             extra={
-                "succeeded_handlers": all_succeeded,
-                "failed_handlers": [f[0] for f in all_failed],
-                "total_handlers": len(all_succeeded) + len(all_failed),
-                "success_count": len(all_succeeded),
-                "failure_count": len(all_failed),
+                "succeeded_handlers": batch_result.succeeded_handlers,
+                "failed_handlers": [
+                    f.handler_type for f in batch_result.failed_handlers
+                ],
+                "total_handlers": batch_result.total_count,
+                "success_count": batch_result.success_count,
+                "failure_count": batch_result.failure_count,
                 "priority_groups": {
                     p: [h[0] for h in handlers_in_group]
                     for p, handlers_in_group in priority_groups.items()
@@ -407,7 +424,7 @@ class ProtocolLifecycleExecutor:
             },
         )
 
-        return all_succeeded, all_failed
+        return batch_result
 
 
 __all__: list[str] = [
