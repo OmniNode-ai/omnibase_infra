@@ -161,7 +161,7 @@ class TestDecisionPathEvents:
 
         assert not missing_events, (
             f"Missing decision path event types in published_events: {missing_events}\n"
-            f"Expected all 7: {DECISION_PATH_EVENT_TYPES}\n"
+            f"Expected all {len(DECISION_PATH_EVENT_TYPES)}: {DECISION_PATH_EVENT_TYPES}\n"
             f"Found: {list(event_types_map.keys())}"
         )
 
@@ -201,15 +201,21 @@ class TestDecisionPathEvents:
         # Verify event exists in published_events
         assert event_type in event_types_map, (
             f"{event_type} must be defined in published_events.\n"
-            f"Description: {description}"
+            f"Description: {description}\n\n"
+            f"HOW TO FIX: Add {event_type} to contract.yaml published_events section:\n"
+            f"  - event_type: {event_type}\n"
+            f"    topic: {expected_topic}"
         )
 
         # Verify topic matches expected pattern
         event = event_types_map[event_type]
         assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', "
-            f"got '{event['topic']}'.\n"
-            f"Description: {description}"
+            f"{event_type} topic mismatch.\n"
+            f"Expected: '{expected_topic}'\n"
+            f"Got: '{event['topic']}'\n"
+            f"Description: {description}\n\n"
+            f"HOW TO FIX: Update the topic for {event_type} in contract.yaml to:\n"
+            f"  topic: {expected_topic}"
         )
 
     def test_all_decision_events_follow_topic_convention(
@@ -244,8 +250,12 @@ class TestDecisionPathEvents:
                 )
 
         assert not non_conforming_events, (
-            "Events with non-conforming topic patterns:\n"
+            "Decision path events have non-conforming topic patterns.\n"
             + "\n".join(f"  - {e}" for e in non_conforming_events)
+            + "\n\n"
+            + "HOW TO FIX: Update topics in contract.yaml to follow ONEX convention:\n"
+            + "  {env}.{namespace}.onex.evt.<kebab-case-slug>.v1\n"
+            + "  Example: {env}.{namespace}.onex.evt.node-registration-initiated.v1"
         )
 
     def test_decision_event_count_is_exactly_8(
@@ -261,11 +271,12 @@ class TestDecisionPathEvents:
         Having more or fewer events indicates a contract definition error.
         """
         actual_count = len(published_events)
-        expected_count = 8
+        expected_count = len(ALL_PUBLISHED_EVENT_TYPES)  # 7 decision + 1 result
 
         assert actual_count == expected_count, (
             f"published_events must have exactly {expected_count} entries "
-            f"(7 decision events + 1 result event), found {actual_count}.\n"
+            f"({len(DECISION_PATH_EVENT_TYPES)} decision events + 1 result event), "
+            f"found {actual_count}.\n"
             f"Expected event types: {ALL_PUBLISHED_EVENT_TYPES}\n"
             f"Found event types: {[e['event_type'] for e in published_events]}"
         )
@@ -277,8 +288,19 @@ class TestDecisionPathEvents:
         missing = expected_event_types - actual_event_types
         extra = actual_event_types - expected_event_types
 
-        assert not missing, f"Missing event types: {missing}"
-        assert not extra, f"Unexpected event types: {extra}"
+        assert not missing, (
+            f"Required event types are missing from published_events.\n"
+            f"Missing: {missing}\n\n"
+            f"HOW TO FIX: Add the missing event types to contract.yaml published_events "
+            f"section. Each decision path requires its own event type declaration."
+        )
+        assert not extra, (
+            f"Unexpected event types found in published_events.\n"
+            f"Extra: {extra}\n"
+            f"Expected: {expected_event_types}\n\n"
+            f"HOW TO FIX: Remove unexpected event types from contract.yaml published_events "
+            f"or update ALL_PUBLISHED_EVENT_TYPES in this test if the new event is valid."
+        )
 
 
 # =============================================================================
@@ -304,13 +326,21 @@ class TestResultEvent:
         """
         event_type = RESULT_EVENT_TYPE
         assert event_type in event_types_map, (
-            f"{event_type} must be defined in published_events"
+            f"{event_type} must be defined in published_events.\n"
+            f"Found event types: {list(event_types_map.keys())}\n\n"
+            f"HOW TO FIX: Add {event_type} to contract.yaml published_events section:\n"
+            f"  - event_type: {event_type}\n"
+            f"    topic: {{env}}.{{namespace}}.onex.evt.node-registration-result.v1"
         )
 
         event = event_types_map[event_type]
         expected_topic = "{env}.{namespace}.onex.evt.node-registration-result.v1"
         assert event["topic"] == expected_topic, (
-            f"{event_type} topic should be '{expected_topic}', got '{event['topic']}'"
+            f"{event_type} topic mismatch.\n"
+            f"Expected: '{expected_topic}'\n"
+            f"Got: '{event['topic']}'\n\n"
+            f"HOW TO FIX: Update the topic in contract.yaml published_events to match "
+            f"the ONEX naming convention: {{env}}.{{namespace}}.onex.evt.<slug>.v1"
         )
 
     def test_result_event_follows_topic_convention(
@@ -324,8 +354,12 @@ class TestResultEvent:
         topic = event.get("topic", "")
 
         assert TOPIC_PATTERN_REGEX.match(topic), (
-            f"Result event topic '{topic}' does not match pattern "
-            f"'{{env}}.{{namespace}}.onex.evt.<slug>.v1'"
+            f"Result event topic does not match ONEX naming convention.\n"
+            f"Topic: '{topic}'\n"
+            f"Expected pattern: '{{env}}.{{namespace}}.onex.evt.<slug>.v1'\n\n"
+            f"HOW TO FIX: Update the topic in contract.yaml to follow the pattern:\n"
+            f"  {{env}}.{{namespace}}.onex.evt.<kebab-case-slug>.v1\n"
+            f"  Example: {{env}}.{{namespace}}.onex.evt.node-registration-result.v1"
         )
 
 
@@ -360,8 +394,12 @@ class TestEventStructure:
                 events_missing_fields.append(f"{event_id}: missing {missing_fields}")
 
         assert not events_missing_fields, (
-            "Events with missing required fields:\n"
+            "Published events have missing required fields.\n"
             + "\n".join(f"  - {e}" for e in events_missing_fields)
+            + "\n\n"
+            + "HOW TO FIX: Each event in contract.yaml published_events must include:\n"
+            + "  - topic: The Kafka topic pattern (e.g., {env}.{namespace}.onex.evt.<slug>.v1)\n"
+            + "  - event_type: The event type name (e.g., NodeRegistrationAccepted)"
         )
 
     def test_event_types_are_unique(self, published_events: list[dict]) -> None:
@@ -369,14 +407,24 @@ class TestEventStructure:
         event_types = [e["event_type"] for e in published_events if "event_type" in e]
         duplicates = [et for et in event_types if event_types.count(et) > 1]
 
-        assert not duplicates, f"Duplicate event types found: {list(set(duplicates))}"
+        assert not duplicates, (
+            f"Event types must be unique in published_events.\n"
+            f"Duplicate event types found: {list(set(duplicates))}\n\n"
+            f"HOW TO FIX: Check contract.yaml published_events section and ensure each "
+            f"event_type appears only once. Remove or rename duplicate entries."
+        )
 
     def test_topics_are_unique(self, published_events: list[dict]) -> None:
         """Test that all topics are unique (no duplicates)."""
         topics = [e["topic"] for e in published_events if "topic" in e]
         duplicates = [t for t in topics if topics.count(t) > 1]
 
-        assert not duplicates, f"Duplicate topics found: {list(set(duplicates))}"
+        assert not duplicates, (
+            f"Topics must be unique in published_events.\n"
+            f"Duplicate topics found: {list(set(duplicates))}\n\n"
+            f"HOW TO FIX: Check contract.yaml published_events section and ensure each "
+            f"topic appears only once. Each event type should publish to its own topic."
+        )
 
 
 # =============================================================================
@@ -518,8 +566,12 @@ class TestConsumedEventHandlers:
         proper event routing and subscription management.
         """
         assert "consumed_events" in contract_data, (
-            "Contract must define 'consumed_events' section. "
-            "This declares which events the orchestrator subscribes to."
+            "Contract must define 'consumed_events' section.\n"
+            "This declares which events the orchestrator subscribes to.\n\n"
+            "HOW TO FIX: Add a consumed_events section to contract.yaml:\n"
+            "  consumed_events:\n"
+            "    - event_type: <EventTypeName>\n"
+            "      topic: {env}.{namespace}.onex.evt.<slug>.v1"
         )
 
     def test_consumed_events_have_required_fields(self, contract_data: dict) -> None:
@@ -544,6 +596,10 @@ class TestConsumedEventHandlers:
                 events_missing_fields.append(f"{event_id}: missing {missing_fields}")
 
         assert not events_missing_fields, (
-            "Consumed events with missing required fields:\n"
+            "Consumed events have missing required fields.\n"
             + "\n".join(f"  - {e}" for e in events_missing_fields)
+            + "\n\n"
+            + "HOW TO FIX: Each event in contract.yaml consumed_events must include:\n"
+            + "  - topic: The Kafka topic pattern to subscribe to\n"
+            + "  - event_type: The event type name for deserialization"
         )
