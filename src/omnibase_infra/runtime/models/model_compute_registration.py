@@ -50,6 +50,7 @@ class ModelComputeRegistration(BaseModel):
         frozen=True,
         extra="forbid",
         arbitrary_types_allowed=True,  # Required for type[ProtocolPluginCompute]
+        from_attributes=True,  # pytest-xdist compatibility
     )
 
     plugin_id: str = Field(

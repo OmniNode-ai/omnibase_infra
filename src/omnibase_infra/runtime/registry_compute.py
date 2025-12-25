@@ -84,14 +84,14 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from omnibase_infra.errors import ComputeRegistryError, ProtocolConfigurationError
-
-# Module-level logger for metrics and registry operations
-logger = logging.getLogger(__name__)
 from omnibase_infra.runtime.models import ModelComputeRegistration
 from omnibase_infra.runtime.models.model_compute_key import ModelComputeKey
 
 if TYPE_CHECKING:
     from omnibase_infra.protocols import ProtocolPluginCompute, ProtocolRegistryMetrics
+
+# Module-level logger for metrics and registry operations
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================

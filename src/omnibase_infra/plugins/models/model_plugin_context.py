@@ -56,6 +56,7 @@ class ModelPluginContext(BaseModel):
         extra="allow",
         frozen=False,
         populate_by_name=True,
+        from_attributes=True,  # pytest-xdist compatibility
     )
 
     # Common context fields - all optional with defaults

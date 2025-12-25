@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from functools import total_ordering
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.utils.util_semver import validate_semver
 
@@ -67,6 +67,10 @@ class ModelSemVer(BaseModel):
         >>> v2 > v1
         True
     """
+
+    model_config = ConfigDict(
+        from_attributes=True,  # pytest-xdist compatibility
+    )
 
     major: int = Field(default=1, ge=0, description="Major version number")
     minor: int = Field(default=0, ge=0, description="Minor version number")

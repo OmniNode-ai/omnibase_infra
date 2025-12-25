@@ -173,6 +173,7 @@ class TestOnexArchitectureCompliance:
                 # Pure computation - deterministic
                 values = input_data.get("values", [])
                 # Cast values to list for type safety - values is always list[int] from input
+                # type: ignore[call-overload] - safe cast from dynamic get() return to list[int]
                 values_list: list[int] = list(values) if values else []  # type: ignore[call-overload]
                 return ModelPluginOutputData.model_validate(
                     {"sum": sum(values_list), "count": len(values_list)}
@@ -231,6 +232,7 @@ class TestOnexArchitectureCompliance:
                 # ACCEPTABLE: Deterministic randomness with seed from context
                 seed_val = context.get("random_seed", 42)
                 # Cast to int for random.seed - safe since we provide default 42
+                # type: ignore[call-overload] - safe cast from dynamic get() return to int
                 seed = int(seed_val) if seed_val is not None else 42  # type: ignore[call-overload]
                 random.seed(seed)
 
@@ -319,7 +321,7 @@ class TestOnexArchitectureCompliance:
                 # ARCHITECTURAL VIOLATION: Mutating input data
                 # Note: Using setattr since Pydantic models don't support
                 # dict-style indexed assignment by default.
-                # This is an intentional mutation for testing purposes.
+                # type: ignore[attr-defined] - intentional mutation for testing side effects
                 object.__setattr__(input_data, "modified", True)  # type: ignore[attr-defined]
                 return ModelPluginOutputData.model_validate({"result": "modified"})
 
@@ -352,10 +354,10 @@ class TestOnexArchitectureCompliance:
                 # ARCHITECTURAL VIOLATION: Mutating context
                 # Note: Using setattr since Pydantic models don't support
                 # dict-style indexed assignment by default.
-                # This is an intentional mutation for testing purposes.
                 current_count = context.get("execution_count", 0)
-                # Cast to int - safe since we provide default 0
+                # type: ignore[call-overload] - safe cast from dynamic get() return to int
                 count_val = int(current_count) if current_count else 0  # type: ignore[call-overload]
+                # type: ignore[attr-defined] - intentional mutation for testing side effects
                 object.__setattr__(context, "execution_count", count_val + 1)  # type: ignore[attr-defined]
                 return ModelPluginOutputData.model_validate({"result": "modified"})
 
@@ -382,7 +384,7 @@ class TestOnexArchitectureCompliance:
             ) -> ModelPluginOutputData:
                 # COMPUTE: Pure data transformation
                 values = input_data.get("values", [])
-                # Cast values to list for type safety
+                # type: ignore[call-overload] - safe cast from dynamic get() return to list[int]
                 values_list: list[int] = list(values) if values else []  # type: ignore[call-overload]
                 return ModelPluginOutputData.model_validate(
                     {
@@ -430,7 +432,7 @@ class TestOnexArchitectureCompliance:
             ) -> ModelPluginOutputData:
                 # ACCEPTABLE: Transform single input source
                 value = input_data.get("value", 0)
-                # Cast to int for multiplication
+                # type: ignore[call-overload] - safe cast from dynamic get() return to int
                 value_int = int(value) if value else 0  # type: ignore[call-overload]
                 return ModelPluginOutputData.model_validate(
                     {"processed": value_int * 2}
@@ -495,7 +497,7 @@ class TestArchitecturalBenefits:
                 self, input_data: ModelPluginInputData, context: ModelPluginContext
             ) -> ModelPluginOutputData:
                 values = input_data.get("values", [])
-                # Cast values to list for max operation
+                # type: ignore[call-overload] - safe cast from dynamic get() return to list[int]
                 values_list: list[int] = list(values) if values else []  # type: ignore[call-overload]
                 return ModelPluginOutputData.model_validate(
                     {"max": max(values_list) if values_list else None}
@@ -525,7 +527,7 @@ class TestArchitecturalBenefits:
                 self, input_data: ModelPluginInputData, context: ModelPluginContext
             ) -> ModelPluginOutputData:
                 values = input_data.get("values", [])
-                # Cast values to list for operations
+                # type: ignore[call-overload] - safe cast from dynamic get() return to list[int]
                 values_list: list[int] = list(values) if values else []  # type: ignore[call-overload]
                 max_val = max(values_list) if values_list else 1
                 normalized = [v / max_val for v in values_list]
@@ -536,7 +538,7 @@ class TestArchitecturalBenefits:
                 self, input_data: ModelPluginInputData, context: ModelPluginContext
             ) -> ModelPluginOutputData:
                 normalized = input_data.get("normalized", [])
-                # Cast normalized to list for operations
+                # type: ignore[call-overload] - safe cast from dynamic get() return to list[float]
                 normalized_list: list[float] = list(normalized) if normalized else []  # type: ignore[call-overload]
                 return ModelPluginOutputData.model_validate(
                     {"sum": sum(normalized_list), "count": len(normalized_list)}
@@ -572,7 +574,7 @@ class TestArchitecturalBenefits:
             ) -> ModelPluginOutputData:
                 # No state - safe to run in parallel
                 value = input_data.get("value", 0)
-                # Cast to int for exponentiation
+                # type: ignore[call-overload] - safe cast from dynamic get() return to int
                 value_int = int(value) if value else 0  # type: ignore[call-overload]
                 return ModelPluginOutputData.model_validate({"processed": value_int**2})
 

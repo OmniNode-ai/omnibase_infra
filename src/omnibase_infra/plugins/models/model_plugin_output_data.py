@@ -53,6 +53,7 @@ class ModelPluginOutputData(BaseModel):
         extra="allow",
         frozen=False,
         populate_by_name=True,
+        from_attributes=True,  # pytest-xdist compatibility
     )
 
     def get(self, key: str, default: object = None) -> object:

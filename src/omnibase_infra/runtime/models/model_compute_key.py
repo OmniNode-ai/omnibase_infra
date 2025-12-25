@@ -46,6 +46,7 @@ class ModelComputeKey(BaseModel):
     model_config = ConfigDict(
         frozen=True,  # Make hashable for dict keys
         str_strip_whitespace=True,
+        from_attributes=True,  # pytest-xdist compatibility
     )
 
     @field_validator("version")
