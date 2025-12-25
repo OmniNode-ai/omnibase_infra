@@ -89,7 +89,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
 
         Args:
             pool: asyncpg connection pool for database access.
-                  Pool should be created by the caller (e.g., from DbAdapter).
+                  Pool should be created by the caller (e.g., from DbHandler).
         """
         self._pool = pool
         self._init_circuit_breaker(

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Database Health Response Model.
 
-This module provides the Pydantic model for database adapter health check
+This module provides the Pydantic model for database handler health check
 responses.
 """
 
@@ -12,15 +12,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelDbHealthResponse(BaseModel):
-    """Database adapter health check response.
+    """Database handler health check response.
 
     Provides current health status and configuration details
-    for the database adapter.
+    for the database handler.
 
     Attributes:
-        healthy: Whether the adapter can successfully connect to database
-        initialized: Whether the adapter has been initialized
-        adapter_type: Type of adapter (e.g., "db")
+        healthy: Whether the handler can successfully connect to database
+        initialized: Whether the handler has been initialized
+        handler_type: Type of handler (e.g., "database")
         pool_size: Connection pool size
         timeout_seconds: Query timeout in seconds
 
@@ -28,7 +28,7 @@ class ModelDbHealthResponse(BaseModel):
         >>> health = ModelDbHealthResponse(
         ...     healthy=True,
         ...     initialized=True,
-        ...     adapter_type="db",
+        ...     handler_type="database",
         ...     pool_size=5,
         ...     timeout_seconds=30.0,
         ... )
@@ -44,13 +44,13 @@ class ModelDbHealthResponse(BaseModel):
     )
 
     healthy: bool = Field(
-        description="Whether the adapter can successfully connect to database",
+        description="Whether the handler can successfully connect to database",
     )
     initialized: bool = Field(
-        description="Whether the adapter has been initialized",
+        description="Whether the handler has been initialized",
     )
-    adapter_type: str = Field(
-        description="Type of adapter (e.g., 'db')",
+    handler_type: str = Field(
+        description="Type of handler (e.g., 'database')",
     )
     pool_size: int = Field(
         ge=1,

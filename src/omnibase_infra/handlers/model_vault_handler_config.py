@@ -18,8 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from omnibase_infra.handlers.model_vault_retry_config import ModelVaultRetryConfig
 
 
-class ModelVaultAdapterConfig(BaseModel):
-    """Configuration for HashiCorp Vault adapter.
+class ModelVaultHandlerConfig(BaseModel):
+    """Configuration for HashiCorp Vault handler.
 
     Security Policy:
         - The token field uses SecretStr to prevent accidental logging
@@ -39,7 +39,7 @@ class ModelVaultAdapterConfig(BaseModel):
 
     Example:
         >>> from pydantic import SecretStr
-        >>> config = ModelVaultAdapterConfig(
+        >>> config = ModelVaultHandlerConfig(
         ...     url="https://vault.example.com:8200",
         ...     token=SecretStr("s.1234567890abcdefghijklmnopqrstuv"),
         ...     namespace="engineering",
@@ -143,4 +143,4 @@ class ModelVaultAdapterConfig(BaseModel):
     )
 
 
-__all__: list[str] = ["ModelVaultAdapterConfig"]
+__all__: list[str] = ["ModelVaultHandlerConfig"]

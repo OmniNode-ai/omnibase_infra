@@ -83,7 +83,7 @@ runtime:
 - `retry_policy` - Reserved for Beta resilience
 - `rate_limit` - Reserved for Beta throttling
 - `handlers.type: "local"` - LocalHandler forbidden in infra contracts
-- `handlers.type: "vault"` - VaultAdapter deferred to Beta
+- `handlers.type: "vault"` - VaultHandler deferred to Beta
 - `handlers.type: "consul"` - ConsulHandler deferred to Beta
 
 ---

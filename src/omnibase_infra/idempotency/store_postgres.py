@@ -78,7 +78,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.idempotency.models import (
-    ModelHealthCheckResult,
+    ModelIdempotencyStoreHealthCheckResult,
     ModelIdempotencyStoreMetrics,
     ModelPostgresIdempotencyStoreConfig,
 )
@@ -852,20 +852,22 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 context=context,
             ) from e
 
-    async def health_check(self) -> ModelHealthCheckResult:
+    async def health_check(self) -> ModelIdempotencyStoreHealthCheckResult:
         """Check if the store is healthy and can accept operations.
 
         Performs read verification and table existence check to ensure
         the database is operational without writing data.
 
         Returns:
-            ModelHealthCheckResult with health status and diagnostics:
+            ModelIdempotencyStoreHealthCheckResult with health status and diagnostics:
             - healthy: bool - True if store is healthy
             - reason: str - "ok", "not_initialized", "table_not_found", or "check_failed"
             - error_type: str | None - Exception type if check failed
         """
         if not self._initialized or self._pool is None:
-            return ModelHealthCheckResult(healthy=False, reason="not_initialized")
+            return ModelIdempotencyStoreHealthCheckResult(
+                healthy=False, reason="not_initialized"
+            )
 
         try:
             async with self._pool.acquire() as conn:
@@ -884,13 +886,13 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 )
 
                 if table_exists is None:
-                    return ModelHealthCheckResult(
+                    return ModelIdempotencyStoreHealthCheckResult(
                         healthy=False, reason="table_not_found"
                     )
-                return ModelHealthCheckResult(healthy=True, reason="ok")
+                return ModelIdempotencyStoreHealthCheckResult(healthy=True, reason="ok")
 
         except Exception as e:
-            return ModelHealthCheckResult(
+            return ModelIdempotencyStoreHealthCheckResult(
                 healthy=False,
                 reason="check_failed",
                 error_type=type(e).__name__,

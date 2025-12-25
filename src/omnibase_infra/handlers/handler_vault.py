@@ -51,7 +51,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
     SecretResolutionError,
 )
-from omnibase_infra.handlers.model_vault_adapter_config import ModelVaultAdapterConfig
+from omnibase_infra.handlers.model_vault_handler_config import ModelVaultHandlerConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 logger = logging.getLogger(__name__)
@@ -72,8 +72,8 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
-class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
-    """HashiCorp Vault adapter using hvac client (MVP: KV v2 secrets engine).
+class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
+    """HashiCorp Vault handler using hvac client (MVP: KV v2 secrets engine).
 
     Security Policy - Token Handling:
         The Vault token contains sensitive credentials and is treated as a secret
@@ -118,14 +118,14 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
     """
 
     def __init__(self) -> None:
-        """Initialize VaultAdapter in uninitialized state.
+        """Initialize VaultHandler in uninitialized state.
 
         Note: Circuit breaker is initialized during initialize() call when
         configuration is available. The mixin's _init_circuit_breaker() method
         is called there with the actual config values.
         """
         self._client: hvac.Client | None = None
-        self._config: ModelVaultAdapterConfig | None = None
+        self._config: ModelVaultHandlerConfig | None = None
         self._initialized: bool = False
         self._token_expires_at: float = 0.0
         self._executor: ThreadPoolExecutor | None = None
@@ -154,7 +154,8 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
         Args:
             config: Configuration dict containing:
-                - url: Vault server URL (required)
+                - url: Vault server URL (required) - must be a valid URL format
+                  (e.g., "http://localhost:8200" or "https://vault.example.com:8200")
                 - token: Vault authentication token (required)
                 - namespace: Optional Vault namespace for Enterprise
                 - timeout_seconds: Optional timeout (default 30.0)
@@ -163,15 +164,67 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 - retry: Optional retry configuration dict
 
         Raises:
-            RuntimeHostError: If URL or token is missing, or client initialization fails.
-            InfraAuthenticationError: If token authentication fails.
-            InfraConnectionError: If connection to Vault server fails.
+            ProtocolConfigurationError: If configuration validation fails. This includes:
+                - Missing URL: URL is a required field (Pydantic validation)
+                - Empty URL: URL cannot be empty string (field_validator)
+                - Invalid URL format: Must start with http:// or https:// (field_validator)
+                - Missing token: Token is a required field (post-Pydantic defensive check)
+                - Other Pydantic validation failures (e.g., timeout out of range)
+
+                All URL-related configuration errors raise ProtocolConfigurationError because
+                they represent invalid configuration, not runtime connectivity issues.
+                Error message will contain Pydantic validation details.
+
+            RuntimeHostError: If client initialization fails for non-auth/non-connection
+                reasons (e.g., unexpected exception during hvac.Client creation).
+
+            InfraAuthenticationError: If token authentication fails (token rejected by Vault).
+                This occurs when the Vault server is reachable but rejects the provided token.
+
+            InfraConnectionError: If connection to Vault server fails (network/DNS issues).
+                This occurs when the Vault server is unreachable at the specified URL.
+                Use this error type when the URL format is valid but the server cannot be reached.
+
+        Error Type Decision Guide:
+            - URL missing/empty/malformed -> ProtocolConfigurationError (config validation)
+            - URL valid but server unreachable -> InfraConnectionError (runtime connectivity)
+            - URL valid, server reachable, auth fails -> InfraAuthenticationError (auth issue)
 
         Security:
             Token must be provided via environment variable, not hardcoded in config.
             Use SecretStr for token to prevent accidental logging.
+
+        Example Error Scenarios:
+            >>> # Missing URL - raises ProtocolConfigurationError
+            >>> await handler.initialize({"token": "s.xxx"})
+            ProtocolConfigurationError: Invalid Vault configuration: ... url ... required
+
+            >>> # Empty URL - raises ProtocolConfigurationError
+            >>> await handler.initialize({"url": "", "token": "s.xxx"})
+            ProtocolConfigurationError: Invalid Vault configuration: ... URL cannot be empty
+
+            >>> # Invalid URL format - raises ProtocolConfigurationError
+            >>> await handler.initialize({"url": "not-a-valid-url", "token": "s.xxx"})
+            ProtocolConfigurationError: Invalid Vault configuration: ... must start with http://
+
+            >>> # Valid URL but server unreachable - raises InfraConnectionError
+            >>> await handler.initialize({"url": "http://unreachable:8200", "token": "s.xxx"})
+            InfraConnectionError: Failed to connect to Vault: VaultError
+
+            >>> # Valid URL, server reachable, invalid token - raises InfraAuthenticationError
+            >>> await handler.initialize({"url": "http://localhost:8200", "token": "bad"})
+            InfraAuthenticationError: Vault authentication failed - check token validity
         """
         init_correlation_id = uuid4()
+
+        logger.info(
+            "Initializing %s",
+            self.__class__.__name__,
+            extra={
+                "handler": self.__class__.__name__,
+                "correlation_id": str(init_correlation_id),
+            },
+        )
 
         # Parse configuration using Pydantic model
         try:
@@ -182,12 +235,12 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 config["token"] = SecretStr(token_raw)
 
             # Use model_validate for type-safe dict parsing (Pydantic v2 pattern)
-            self._config = ModelVaultAdapterConfig.model_validate(config)
+            self._config = ModelVaultHandlerConfig.model_validate(config)
         except ValidationError as e:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=init_correlation_id,
                 namespace=None,  # Config not initialized yet
             )
@@ -199,7 +252,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=init_correlation_id,
                 namespace=None,  # Config not initialized yet
             )
@@ -208,16 +261,21 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 context=ctx,
             ) from e
 
-        # Validate required fields
+        # Defensive validation for required fields
+        # Note: These checks are defensive programming since Pydantic validation
+        # should catch missing/empty URL and missing token. However, we keep them
+        # to ensure consistent error handling if the Pydantic model changes.
+        # All configuration validation errors use ProtocolConfigurationError per
+        # ONEX error handling patterns (config issues != runtime connectivity issues).
         if not self._config.url:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=init_correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
-            raise RuntimeHostError(
+            raise ProtocolConfigurationError(
                 "Missing 'url' in config - Vault server URL required",
                 context=ctx,
             )
@@ -226,11 +284,11 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=init_correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
-            raise RuntimeHostError(
+            raise ProtocolConfigurationError(
                 "Missing 'token' in config - Vault authentication token required",
                 context=ctx,
             )
@@ -250,7 +308,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.VAULT,
                     operation="initialize",
-                    target_name="vault_adapter",
+                    target_name="vault_handler",
                     correlation_id=init_correlation_id,
                     namespace=self._config.namespace if self._config else None,
                 )
@@ -308,7 +366,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             self._max_workers = self._config.max_concurrent_operations
             self._executor = ThreadPoolExecutor(
                 max_workers=self._max_workers,
-                thread_name_prefix="vault_adapter_",
+                thread_name_prefix="vault_handler_",
             )
             # Calculate max queue size
             self._max_queue_size = (
@@ -327,14 +385,18 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
             self._initialized = True
             logger.info(
-                "VaultAdapter initialized",
+                "%s initialized successfully",
+                self.__class__.__name__,
                 extra={
+                    "handler": self.__class__.__name__,
                     "url": self._config.url,
                     "namespace": self._config.namespace,
                     "timeout_seconds": self._config.timeout_seconds,
                     "verify_ssl": self._config.verify_ssl,
-                    "max_concurrent_operations": self._config.max_concurrent_operations,
+                    "thread_pool_max_workers": self._max_workers,
+                    "thread_pool_max_queue_size": self._max_queue_size,
                     "circuit_breaker_enabled": self._config.circuit_breaker_enabled,
+                    "correlation_id": str(init_correlation_id),
                 },
             )
 
@@ -345,7 +407,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=init_correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
@@ -357,7 +419,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=init_correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
@@ -369,7 +431,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=init_correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
@@ -402,7 +464,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         self._initialized = False
         self._config = None
         self._circuit_breaker_initialized = False
-        logger.info("VaultAdapter shutdown complete")
+        logger.info("VaultHandler shutdown complete")
 
     async def execute(
         self, envelope: dict[str, JsonValue]
@@ -433,12 +495,12 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="execute",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
-                "VaultAdapter not initialized. Call initialize() first.",
+                "VaultHandler not initialized. Call initialize() first.",
                 context=ctx,
             )
 
@@ -447,7 +509,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="execute",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
@@ -460,7 +522,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation=operation,
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
@@ -475,7 +537,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation=operation,
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
@@ -512,7 +574,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         """
         if self._config is None or self._client is None:
             logger.debug(
-                "Token renewal check skipped - adapter not initialized",
+                "Token renewal check skipped - handler not initialized",
                 extra={
                     "config_initialized": self._config is not None,
                     "client_initialized": self._client is not None,
@@ -657,7 +719,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
-                        target_name="vault_adapter",
+                        target_name="vault_handler",
                         correlation_id=correlation_id,
                         namespace=self._config.namespace if self._config else None,
                     )
@@ -675,7 +737,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.VAULT,
                     operation=operation,
-                    target_name="vault_adapter",
+                    target_name="vault_handler",
                     correlation_id=correlation_id,
                     namespace=self._config.namespace if self._config else None,
                 )
@@ -689,7 +751,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.VAULT,
                     operation=operation,
-                    target_name="vault_adapter",
+                    target_name="vault_handler",
                     correlation_id=correlation_id,
                     namespace=self._config.namespace if self._config else None,
                 )
@@ -710,7 +772,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
-                        target_name="vault_adapter",
+                        target_name="vault_handler",
                         correlation_id=correlation_id,
                         namespace=self._config.namespace if self._config else None,
                     )
@@ -731,7 +793,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
-                        target_name="vault_adapter",
+                        target_name="vault_handler",
                         correlation_id=correlation_id,
                         namespace=self._config.namespace if self._config else None,
                     )
@@ -788,7 +850,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.read_secret",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
@@ -865,7 +927,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.write_secret",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
@@ -879,7 +941,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.write_secret",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
@@ -954,7 +1016,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.delete_secret",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
@@ -1019,7 +1081,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.list_secrets",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
@@ -1095,12 +1157,12 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.renew_token",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
-                "VaultAdapter not initialized",
+                "VaultHandler not initialized",
                 context=ctx,
             )
 
@@ -1183,7 +1245,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.renew_token",
-                target_name="vault_adapter",
+                target_name="vault_handler",
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
@@ -1307,7 +1369,17 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             def health_check_func() -> dict[str, JsonValue]:
                 if self._client is None:
                     raise RuntimeError("Client not initialized")
-                result: dict[str, JsonValue] = self._client.sys.read_health_status()
+                response = self._client.sys.read_health_status()
+                # hvac returns Response object for some status codes, dict for others
+                if hasattr(response, "json"):
+                    # Response may have empty body (200 OK with no content)
+                    if hasattr(response, "text") and response.text:
+                        result: dict[str, JsonValue] = response.json()
+                    else:
+                        # Empty response means healthy (200 OK)
+                        result = {"initialized": True, "sealed": False}
+                else:
+                    result = response
                 return result
 
             # Use thread pool executor with retry logic for consistency
@@ -1399,4 +1471,4 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         }
 
 
-__all__: list[str] = ["VaultAdapter"]
+__all__: list[str] = ["VaultHandler"]

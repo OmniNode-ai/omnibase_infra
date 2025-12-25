@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""HTTP REST Adapter - MVP implementation using httpx async client.
+"""HTTP REST Handler - MVP implementation using httpx async client.
 
 Supports GET and POST operations with 30-second fixed timeout.
 PUT, DELETE, PATCH deferred to Beta. Retry logic and rate limiting deferred to Beta.
@@ -71,8 +71,8 @@ def _categorize_size(size: int) -> str:
         return "very_large"
 
 
-class HttpRestAdapter(MixinEnvelopeExtraction):
-    """HTTP REST protocol adapter using httpx async client (MVP: GET, POST only).
+class HttpRestHandler(MixinEnvelopeExtraction):
+    """HTTP REST protocol handler using httpx async client (MVP: GET, POST only).
 
     Security Features:
         - Configurable request/response size limits to prevent DoS attacks
@@ -81,7 +81,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
     """
 
     def __init__(self) -> None:
-        """Initialize HttpRestAdapter in uninitialized state."""
+        """Initialize HttpRestHandler in uninitialized state."""
         self._client: httpx.AsyncClient | None = None
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._max_request_size: int = _DEFAULT_MAX_REQUEST_SIZE
@@ -119,6 +119,18 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             categories (small/medium/large/very_large) - exact sizes are not exposed
             in error messages to prevent attackers from probing limits.
         """
+        # Generate correlation_id for initialization tracing
+        init_correlation_id = uuid4()
+
+        logger.info(
+            "Initializing %s",
+            self.__class__.__name__,
+            extra={
+                "handler": self.__class__.__name__,
+                "correlation_id": str(init_correlation_id),
+            },
+        )
+
         try:
             self._timeout = _DEFAULT_TIMEOUT_SECONDS
 
@@ -155,34 +167,25 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             )
             self._initialized = True
             logger.info(
-                "HttpRestAdapter initialized",
+                "%s initialized successfully",
+                self.__class__.__name__,
                 extra={
+                    "handler": self.__class__.__name__,
                     "timeout_seconds": self._timeout,
-                    "max_request_size": self._max_request_size,
-                    "max_response_size": self._max_response_size,
+                    "max_request_size_bytes": self._max_request_size,
+                    "max_response_size_bytes": self._max_response_size,
+                    "correlation_id": str(init_correlation_id),
                 },
             )
         except Exception as e:
-            # Extract correlation_id from config if provided, otherwise generate new
-            raw_correlation_id = config.get("correlation_id")
-            if isinstance(raw_correlation_id, UUID):
-                error_correlation_id = raw_correlation_id
-            elif isinstance(raw_correlation_id, str):
-                try:
-                    error_correlation_id = UUID(raw_correlation_id)
-                except ValueError:
-                    error_correlation_id = uuid4()
-            else:
-                error_correlation_id = uuid4()
-
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="initialize",
-                target_name="http_rest_adapter",
-                correlation_id=error_correlation_id,
+                target_name="http_handler",
+                correlation_id=init_correlation_id,
             )
             raise ProtocolConfigurationError(
-                "Failed to initialize HTTP adapter", context=ctx
+                "Failed to initialize HTTP handler", context=ctx
             ) from e
 
     async def shutdown(self) -> None:
@@ -191,7 +194,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             await self._client.aclose()
             self._client = None
         self._initialized = False
-        logger.info("HttpRestAdapter shutdown complete")
+        logger.info("HttpRestHandler shutdown complete")
 
     async def execute(
         self, envelope: dict[str, JsonValue]
@@ -219,11 +222,11 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="execute",
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HttpRestAdapter not initialized. Call initialize() first.", context=ctx
+                "HttpRestHandler not initialized. Call initialize() first.", context=ctx
             )
 
         operation = envelope.get("operation")
@@ -231,7 +234,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="execute",
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -242,7 +245,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -255,7 +258,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -267,7 +270,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -380,7 +383,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="validate_request_size",
-                target_name="http_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise InfraUnavailableError(
@@ -562,7 +565,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HttpRestAdapter not initialized - call initialize() first", context=ctx
+                "HttpRestHandler not initialized - call initialize() first", context=ctx
             )
 
         ctx = ModelInfraErrorContext(
@@ -716,12 +719,12 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
         )
 
     async def health_check(self) -> dict[str, JsonValue]:
-        """Return adapter health status."""
+        """Return handler health status."""
         correlation_id = uuid4()
         return {
             "healthy": self._initialized and self._client is not None,
             "initialized": self._initialized,
-            "adapter_type": self.handler_type.value,
+            "handler_type": self.handler_type.value,
             "timeout_seconds": self._timeout,
             "max_request_size": self._max_request_size,
             "max_response_size": self._max_response_size,
@@ -729,9 +732,9 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
         }
 
     def describe(self) -> dict[str, JsonValue]:
-        """Return adapter metadata and capabilities."""
+        """Return handler metadata and capabilities."""
         return {
-            "adapter_type": self.handler_type.value,
+            "handler_type": self.handler_type.value,
             "supported_operations": sorted(_SUPPORTED_OPERATIONS),
             "timeout_seconds": self._timeout,
             "max_request_size": self._max_request_size,
@@ -741,4 +744,4 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
         }
 
 
-__all__: list[str] = ["HttpRestAdapter"]
+__all__: list[str] = ["HttpRestHandler"]

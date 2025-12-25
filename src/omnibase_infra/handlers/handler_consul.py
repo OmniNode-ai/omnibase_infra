@@ -157,7 +157,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     Error Context Design:
         Error contexts use static target_name="consul_handler" for consistency with
-        VaultAdapter and other infrastructure handlers. This provides predictable
+        VaultHandler and other infrastructure handlers. This provides predictable
         error categorization and log filtering across all Consul operations.
 
         For multi-DC deployments, datacenter differentiation is achieved via:
@@ -236,6 +236,15 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             Use SecretStr for token to prevent accidental logging.
         """
         init_correlation_id = uuid4()
+
+        logger.info(
+            "Initializing %s",
+            self.__class__.__name__,
+            extra={
+                "handler": self.__class__.__name__,
+                "correlation_id": str(init_correlation_id),
+            },
+        )
 
         # Parse configuration using Pydantic model
         try:
@@ -342,15 +351,19 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
             self._initialized = True
             logger.info(
-                "ConsulHandler initialized",
+                "%s initialized successfully",
+                self.__class__.__name__,
                 extra={
+                    "handler": self.__class__.__name__,
                     "host": self._config.host,
                     "port": self._config.port,
                     "scheme": self._config.scheme,
                     "datacenter": self._config.datacenter,
                     "timeout_seconds": self._config.timeout_seconds,
-                    "max_concurrent_operations": self._max_workers,
+                    "thread_pool_max_workers": self._max_workers,
+                    "thread_pool_max_queue_size": self._max_queue_size,
                     "circuit_breaker_enabled": self._circuit_breaker_initialized,
+                    "correlation_id": str(init_correlation_id),
                 },
             )
 
@@ -434,7 +447,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         """Build standardized ModelConsulHandlerResponse wrapped in ModelHandlerOutput.
 
         This helper method ensures consistent response formatting across all
-        Consul operations, matching the pattern used by DbAdapter.
+        Consul operations, matching the pattern used by DbHandler.
 
         Args:
             typed_payload: Strongly-typed payload from the discriminated union.
@@ -613,7 +626,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 # Rationale: Transient failures during retry shouldn't count toward threshold.
                 # Only persistent failures (after all retries exhausted) indicate true service
                 # degradation. This prevents circuit breaker from opening due to temporary
-                # network blips. Pattern consistent with VaultAdapter implementation.
+                # network blips. Pattern consistent with VaultHandler implementation.
                 if attempt == retry_config.max_attempts - 1:
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
@@ -676,7 +689,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 # Rationale: Transient failures during retry shouldn't count toward threshold.
                 # Only persistent failures (after all retries exhausted) indicate true service
                 # degradation. This prevents circuit breaker from opening due to temporary
-                # network blips. Pattern consistent with VaultAdapter implementation.
+                # network blips. Pattern consistent with VaultHandler implementation.
                 if attempt == retry_config.max_attempts - 1:
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
@@ -700,7 +713,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 # Rationale: Transient failures during retry shouldn't count toward threshold.
                 # Only persistent failures (after all retries exhausted) indicate true service
                 # degradation. This prevents circuit breaker from opening due to temporary
-                # network blips. Pattern consistent with VaultAdapter implementation.
+                # network blips. Pattern consistent with VaultHandler implementation.
                 if attempt == retry_config.max_attempts - 1:
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
