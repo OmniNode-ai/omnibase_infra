@@ -6,8 +6,9 @@ Operational runbooks and guides for deploying and managing omnibase_infra in pro
 
 | Document | Description |
 |----------|-------------|
+| [DLQ Replay Guide](DLQ_REPLAY_GUIDE.md) | Dead Letter Queue replay mechanism: manual procedures, automated design, safety considerations |
 | [Event Bus Operations](EVENT_BUS_OPERATIONS_RUNBOOK.md) | Deployment, configuration, monitoring, and troubleshooting for KafkaEventBus |
-| [Thread Pool Tuning](THREAD_POOL_TUNING_RUNBOOK.md) | Guide for tuning thread pool configurations in VaultHandler and other components |
+| [Thread Pool Tuning](THREAD_POOL_TUNING_RUNBOOK.md) | Guide for tuning thread pool configurations in VaultAdapter and other components |
 
 ## Purpose
 

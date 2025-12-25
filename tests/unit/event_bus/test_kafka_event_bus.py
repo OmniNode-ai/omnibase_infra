@@ -1493,6 +1493,479 @@ enable_auto_commit: false
         assert bus.config.enable_idempotence is False
 
 
+class TestKafkaEventBusDLQRouting:
+    """Test suite for Dead Letter Queue (DLQ) routing.
+
+    Verifies OMN-949 acceptance criteria: "No silent drops"
+    - Deserialization errors route to DLQ
+    - Handler failures with exhausted retries route to DLQ
+    - Handler failures with remaining retries do NOT route to DLQ
+    """
+
+    @pytest.fixture
+    def mock_producer(self) -> AsyncMock:
+        """Create mock Kafka producer with DLQ support."""
+        producer = AsyncMock()
+        producer.start = AsyncMock()
+        producer.stop = AsyncMock()
+        producer._closed = False
+
+        mock_record_metadata = MagicMock()
+        mock_record_metadata.partition = 0
+        mock_record_metadata.offset = 42
+
+        async def mock_send(*args, **kwargs):
+            future = asyncio.get_running_loop().create_future()
+            future.set_result(mock_record_metadata)
+            return future
+
+        producer.send = AsyncMock(side_effect=mock_send)
+        return producer
+
+    @pytest.fixture
+    def dlq_config(self) -> ModelKafkaEventBusConfig:
+        """Create config with DLQ enabled."""
+        return ModelKafkaEventBusConfig(
+            bootstrap_servers="localhost:9092",
+            environment="test",
+            group="test-group",
+            dead_letter_topic="dlq-events",
+        )
+
+    @pytest.mark.asyncio
+    async def test_deserialization_error_routes_to_dlq(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """Test that deserialization errors are routed to DLQ.
+
+        OMN-949: No silent drops - malformed messages must go to DLQ.
+        PR #90 feedback: Assert DLQ metrics are incremented.
+        """
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = KafkaEventBus(config=dlq_config)
+            await event_bus.start()
+
+            # Capture initial metrics
+            initial_metrics = event_bus.dlq_metrics
+            assert initial_metrics.total_publishes == 0
+            assert initial_metrics.successful_publishes == 0
+
+            # Simulate a raw Kafka message that will fail deserialization
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"malformed-data"
+            mock_raw_msg.offset = 100
+            mock_raw_msg.partition = 0
+
+            # Call the raw DLQ publish method directly
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            error = ValueError("Invalid message format")
+
+            await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="deserialization_error",
+            )
+
+            # Verify DLQ publish was called
+            assert mock_producer.send.called
+            call_args = mock_producer.send.call_args
+
+            # Verify the topic is the DLQ topic
+            assert call_args[0][0] == "dlq-events"
+
+            # Verify the value contains failure metadata
+            value = call_args[1]["value"]
+            payload = json.loads(value)
+            assert payload["original_topic"] == "source-topic"
+            assert payload["failure_type"] == "deserialization_error"
+            assert "Invalid message format" in payload["failure_reason"]
+            assert payload["error_type"] == "ValueError"
+
+            # Verify DLQ metrics were incremented (PR #90 feedback)
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.total_publishes == 1, (
+                "DLQ total_publishes should be incremented on publish"
+            )
+            assert final_metrics.successful_publishes == 1, (
+                "DLQ successful_publishes should be incremented on success"
+            )
+            assert final_metrics.failed_publishes == 0
+            assert final_metrics.get_topic_count("source-topic") == 1
+            assert final_metrics.get_error_type_count("ValueError") == 1
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_handler_failure_with_exhausted_retries_routes_to_dlq(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """Test that handler failures with exhausted retries are routed to DLQ.
+
+        OMN-949: When retry_count >= max_retries, message MUST go to DLQ.
+        PR #90 feedback: Assert DLQ metrics are incremented.
+        """
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = KafkaEventBus(config=dlq_config)
+            await event_bus.start()
+
+            # Capture initial metrics
+            initial_metrics = event_bus.dlq_metrics
+            assert initial_metrics.total_publishes == 0
+            assert initial_metrics.successful_publishes == 0
+
+            # Create a message with exhausted retries
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            headers = ModelEventHeaders(
+                source="test-source",
+                event_type="test-event",
+                correlation_id=correlation_id,
+                retry_count=3,  # Exhausted
+                max_retries=3,
+            )
+            failed_message = ModelEventMessage(
+                topic="source-topic",
+                key=b"test-key",
+                value=b"test-value",
+                headers=headers,
+            )
+            error = RuntimeError("Handler processing failed")
+
+            await event_bus._publish_to_dlq(
+                original_topic="source-topic",
+                failed_message=failed_message,
+                error=error,
+                correlation_id=correlation_id,
+            )
+
+            # Verify DLQ publish was called
+            assert mock_producer.send.called
+            call_args = mock_producer.send.call_args
+
+            # Verify the topic is the DLQ topic
+            assert call_args[0][0] == "dlq-events"
+
+            # Verify the value contains failure metadata
+            value = call_args[1]["value"]
+            payload = json.loads(value)
+            assert payload["original_topic"] == "source-topic"
+            assert payload["retry_count"] == 3
+            assert "Handler processing failed" in payload["failure_reason"]
+
+            # Verify DLQ metrics were incremented (PR #90 feedback)
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.total_publishes == 1, (
+                "DLQ total_publishes should be incremented on publish"
+            )
+            assert final_metrics.successful_publishes == 1, (
+                "DLQ successful_publishes should be incremented on success"
+            )
+            assert final_metrics.failed_publishes == 0
+            assert final_metrics.get_topic_count("source-topic") == 1
+            assert final_metrics.get_error_type_count("RuntimeError") == 1
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_handler_failure_without_exhausted_retries_skips_dlq(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """Test that handler failures with remaining retries do NOT route to DLQ.
+
+        Messages that can still be retried should not go to DLQ immediately.
+        """
+        with (
+            patch(
+                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaConsumer",
+            ) as mock_consumer_class,
+        ):
+            # Create async iterator for consumer
+            messages_received: list[ModelEventMessage] = []
+
+            mock_consumer = AsyncMock()
+            mock_consumer.start = AsyncMock()
+            mock_consumer.stop = AsyncMock()
+
+            # Create a mock message with remaining retries
+            mock_msg = MagicMock()
+            mock_msg.key = b"test-key"
+            mock_msg.value = b"test-value"
+            mock_msg.offset = 42
+            mock_msg.partition = 0
+            mock_msg.headers = [
+                ("source", b"test-source"),
+                ("event_type", b"test-event"),
+                ("retry_count", b"1"),  # Still has retries left
+                ("max_retries", b"3"),
+            ]
+
+            async def mock_consumer_iter() -> (
+                AsyncMock
+            ):  # Type hint doesn't matter for mock
+                yield mock_msg
+                # After first message, stop yielding
+                while True:
+                    await asyncio.sleep(10)  # Block forever
+
+            mock_consumer.__aiter__ = lambda self: mock_consumer_iter()
+            mock_consumer_class.return_value = mock_consumer
+
+            event_bus = KafkaEventBus(config=dlq_config)
+            await event_bus.start()
+
+            # Track handler call and DLQ publishes
+            handler_called = asyncio.Event()
+            dlq_publish_count_before = mock_producer.send.call_count
+
+            async def failing_handler(msg: ModelEventMessage) -> None:
+                messages_received.append(msg)
+                handler_called.set()
+                raise ValueError("Temporary failure")
+
+            await event_bus.subscribe("test-topic", "group1", failing_handler)
+
+            # Wait for handler to be called
+            await asyncio.wait_for(handler_called.wait(), timeout=2.0)
+
+            # Give time for potential DLQ publish
+            await asyncio.sleep(0.1)
+
+            # Verify handler was called
+            assert len(messages_received) == 1
+
+            # Verify NO DLQ publish was made (only the initial producer setup calls)
+            # Count only sends to DLQ topic
+            dlq_sends = [
+                call
+                for call in mock_producer.send.call_args_list[dlq_publish_count_before:]
+                if call[0][0] == "dlq-events"
+            ]
+            assert len(dlq_sends) == 0, "Should not publish to DLQ when retries remain"
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_dlq_not_configured_logs_only(self, mock_producer: AsyncMock) -> None:
+        """Test that when DLQ is not configured, errors are logged but not published.
+
+        This ensures graceful degradation when DLQ is not set up.
+        """
+        # Config without DLQ
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers="localhost:9092",
+            environment="test",
+            group="test-group",
+            dead_letter_topic=None,  # No DLQ configured
+        )
+
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = KafkaEventBus(config=config)
+            await event_bus.start()
+
+            # Create a failed message
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            headers = ModelEventHeaders(
+                source="test-source",
+                event_type="test-event",
+                correlation_id=correlation_id,
+                retry_count=3,
+                max_retries=3,
+            )
+            failed_message = ModelEventMessage(
+                topic="source-topic",
+                key=b"test-key",
+                value=b"test-value",
+                headers=headers,
+            )
+            error = RuntimeError("Handler failed")
+
+            send_count_before = mock_producer.send.call_count
+
+            # This should not raise and should not publish to DLQ
+            await event_bus._publish_to_dlq(
+                original_topic="source-topic",
+                failed_message=failed_message,
+                error=error,
+                correlation_id=correlation_id,
+            )
+
+            # Verify no additional send calls were made
+            assert mock_producer.send.call_count == send_count_before
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_dlq_publish_failure_does_not_crash_consumer(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """Test that DLQ publish failures do not crash the consumer.
+
+        Even if DLQ publishing fails, the consumer should continue operating.
+        PR #90 feedback: Assert DLQ failed_publishes metric is incremented.
+        """
+        # Make producer fail on DLQ publish
+        call_count = 0
+
+        async def mock_send(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # Fail when publishing to DLQ
+            if args[0] == "dlq-events":
+                raise RuntimeError("DLQ publish failed")
+            future = asyncio.get_running_loop().create_future()
+            mock_record_metadata = MagicMock()
+            mock_record_metadata.partition = 0
+            mock_record_metadata.offset = call_count
+            future.set_result(mock_record_metadata)
+            return future
+
+        mock_producer.send = AsyncMock(side_effect=mock_send)
+
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = KafkaEventBus(config=dlq_config)
+            await event_bus.start()
+
+            # Capture initial metrics
+            initial_metrics = event_bus.dlq_metrics
+            assert initial_metrics.total_publishes == 0
+            assert initial_metrics.failed_publishes == 0
+
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            headers = ModelEventHeaders(
+                source="test-source",
+                event_type="test-event",
+                correlation_id=correlation_id,
+                retry_count=3,
+                max_retries=3,
+            )
+            failed_message = ModelEventMessage(
+                topic="source-topic",
+                key=b"test-key",
+                value=b"test-value",
+                headers=headers,
+            )
+            error = RuntimeError("Handler failed")
+
+            # This should NOT raise even though DLQ publish fails
+            await event_bus._publish_to_dlq(
+                original_topic="source-topic",
+                failed_message=failed_message,
+                error=error,
+                correlation_id=correlation_id,
+            )
+
+            # Verify the bus is still healthy
+            health = await event_bus.health_check()
+            assert health["started"] is True
+
+            # Verify DLQ metrics track the failure (PR #90 feedback)
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.total_publishes == 1, (
+                "DLQ total_publishes should be incremented even on failure"
+            )
+            assert final_metrics.successful_publishes == 0, (
+                "DLQ successful_publishes should NOT be incremented on failure"
+            )
+            assert final_metrics.failed_publishes == 1, (
+                "DLQ failed_publishes should be incremented on failure"
+            )
+            # Error type is still tracked even when DLQ publish fails
+            assert final_metrics.get_error_type_count("RuntimeError") == 1
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_dlq_handles_decode_failures(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """Test that _publish_raw_to_dlq handles decode failures gracefully.
+
+        Even corrupted binary data should be safely published to DLQ.
+        PR #90 feedback: Assert DLQ metrics are incremented.
+        """
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = KafkaEventBus(config=dlq_config)
+            await event_bus.start()
+
+            # Capture initial metrics
+            initial_metrics = event_bus.dlq_metrics
+            assert initial_metrics.total_publishes == 0
+
+            # Simulate a raw Kafka message with invalid UTF-8
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"\xff\xfe\xfd"  # Invalid UTF-8
+            mock_raw_msg.value = b"\x80\x81\x82"  # Invalid UTF-8
+            mock_raw_msg.offset = 100
+            mock_raw_msg.partition = 0
+
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            error = ValueError("Decode error")
+
+            # This should NOT raise
+            await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="deserialization_error",
+            )
+
+            # Verify DLQ publish was attempted
+            assert mock_producer.send.called
+            call_args = mock_producer.send.call_args
+            assert call_args[0][0] == "dlq-events"
+
+            # The payload should contain replacement characters for invalid UTF-8
+            value = call_args[1]["value"]
+            payload = json.loads(value)
+            # Check that decode didn't crash and we have some representation
+            assert payload["original_message"]["key"] is not None
+            assert payload["original_message"]["value"] is not None
+
+            # Verify DLQ metrics were incremented (PR #90 feedback)
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.total_publishes == 1, (
+                "DLQ total_publishes should be incremented"
+            )
+            assert final_metrics.successful_publishes == 1, (
+                "DLQ successful_publishes should be incremented on success"
+            )
+            assert final_metrics.get_error_type_count("ValueError") == 1
+
+            await event_bus.close()
+
+
 class TestKafkaEventBusTopicValidation:
     """Test suite for topic name validation.
 

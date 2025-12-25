@@ -7,6 +7,12 @@ Reusable mixin classes providing:
 - Infrastructure error integration
 - Correlation ID propagation
 - Configurable behavior
+
+Note:
+    TypedDicts and model types used by mixins (e.g., CapabilitiesTypedDict,
+    ModelIntrospectionPerformanceMetrics) should be imported from their
+    canonical locations in omnibase_infra.models.discovery, not from this
+    module.
 """
 
 from omnibase_infra.mixins.mixin_async_circuit_breaker import (
@@ -25,10 +31,7 @@ from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
 
 __all__ = [
-    "CapabilitiesDict",
     "CircuitState",
-    "IntrospectionCacheDict",
-    "IntrospectionPerformanceMetrics",
     "MixinAsyncCircuitBreaker",
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
