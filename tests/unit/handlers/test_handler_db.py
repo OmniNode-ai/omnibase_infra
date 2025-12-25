@@ -1423,9 +1423,9 @@ class TestDbAdapterLogWarnings:
 
         # Filter for warnings from our handler module using helper
         handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
-        assert (
-            len(handler_warnings) == 0
-        ), f"Unexpected warnings: {[w.message for w in handler_warnings]}"
+        assert len(handler_warnings) == 0, (
+            f"Unexpected warnings: {[w.message for w in handler_warnings]}"
+        )
 
     @pytest.mark.asyncio
     async def test_health_check_logs_warning_on_failure(
@@ -1499,9 +1499,9 @@ class TestDbAdapterLogWarnings:
 
         # Should have no warnings
         handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
-        assert (
-            len(handler_warnings) == 0
-        ), f"Unexpected warnings: {[w.message for w in handler_warnings]}"
+        assert len(handler_warnings) == 0, (
+            f"Unexpected warnings: {[w.message for w in handler_warnings]}"
+        )
 
 
 __all__: list[str] = [
