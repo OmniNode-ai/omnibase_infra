@@ -424,6 +424,19 @@ pattern_exemptions:
       Model with multiple factory methods (none, single, multiple, from_legacy_output) and convenience properties (is_empty, has_topics, single_topic, has_single_topic). Provides comprehensive API for handling dispatcher outputs.
 
     ticket: OMN-1002
+  # ==========================================================================
+  # ModelRegistryResponse Factory Method Exemptions (PR #79)
+  # ==========================================================================
+  # from_backend_results is a classmethod factory that requires all parameters
+  # to construct a response from individual backend results. Each parameter is
+  # a distinct required context for computing the response status.
+  - file_pattern: 'model_registry_response\.py'
+    method_pattern: "Function 'from_backend_results'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Classmethod factory requires all parameters to construct response from backend results: node_id, correlation_id, consul_result, postgres_result, timestamp. These are distinct required inputs for computing status, processing_time, and error_summary.
+
+    ticket: PR-79
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

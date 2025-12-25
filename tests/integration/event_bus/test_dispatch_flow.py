@@ -342,13 +342,21 @@ class TestMessageCategoryRouting:
             event_topic,
             None,
             b"event-payload",
-            ModelEventHeaders(source="test", event_type="user.created", timestamp=datetime(2025, 1, 1, tzinfo=UTC)),
+            ModelEventHeaders(
+                source="test",
+                event_type="user.created",
+                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
+            ),
         )
         await event_bus.publish(
             command_topic,
             None,
             b"command-payload",
-            ModelEventHeaders(source="test", event_type="create.user", timestamp=datetime(2025, 1, 1, tzinfo=UTC)),
+            ModelEventHeaders(
+                source="test",
+                event_type="create.user",
+                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
+            ),
         )
 
         assert len(event_messages) == 1

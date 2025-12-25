@@ -398,7 +398,9 @@ class TestHandlerRuntimeTickMultipleTimeouts:
         assert isinstance(events[0], ModelNodeRegistrationAckTimedOut)
         # Second event is liveness expiry
         assert isinstance(events[1], ModelNodeLivenessExpired)
-        assert events[1].last_heartbeat_at is None  # Projection doesn't track heartbeats
+        assert (
+            events[1].last_heartbeat_at is None
+        )  # Projection doesn't track heartbeats
 
 
 class TestHandlerRuntimeTickNoTimeouts:

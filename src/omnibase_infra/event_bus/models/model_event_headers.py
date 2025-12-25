@@ -60,7 +60,9 @@ class ModelEventHeaders(BaseModel):
     correlation_id: UUID = Field(default_factory=uuid4)
     message_id: UUID = Field(default_factory=uuid4)
     # Timestamps - MUST be explicitly injected (no default_factory for testability)
-    timestamp: datetime = Field(..., description="Message creation timestamp (must be explicitly provided)")
+    timestamp: datetime = Field(
+        ..., description="Message creation timestamp (must be explicitly provided)"
+    )
     source: str
     event_type: str
     schema_version: str = Field(default="1.0.0")
