@@ -253,7 +253,7 @@ class TestWorkflowGraphIntegration:
         """Test that execution graph has all 8 required nodes.
 
         The registration orchestrator workflow requires these nodes in order:
-        1. receive_introspection - Receive introspection or tick event
+        1. receive_introspection - Receive introspection, tick, or ack events
         2. read_projection - Read current registration state from projection (OMN-930)
         3. evaluate_timeout - Evaluate timeout using injected time (OMN-973)
         4. compute_intents - Compute registration intents via reducer
@@ -438,11 +438,11 @@ class TestWorkflowGraphIntegration:
         # Expected properties for all 8 nodes
         # Format: node_id -> (node_type, depends_on)
         expected_node_properties = {
-            # Node 1: Entry point - receives introspection or tick event
+            # Node 1: Entry point - receives introspection, tick, or ack events
             "receive_introspection": {
                 "node_type": "effect",
                 "depends_on": [],
-                "description": "Receive introspection or tick event",
+                "description": "Receive introspection, tick, or ack events",
             },
             # Node 2: Read projection state (OMN-930)
             "read_projection": {
