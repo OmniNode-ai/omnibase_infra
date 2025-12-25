@@ -21,12 +21,16 @@ import logging
 from collections.abc import AsyncGenerator, Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID, uuid4
 
 import pytest
 
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+
+if TYPE_CHECKING:
+    from omnibase_core.nodes import ModelReducerOutput
+
 from omnibase_infra.mixins import MixinNodeIntrospection
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
@@ -245,7 +249,7 @@ class TrackedRegistrationReducer:
         self,
         state: ModelRegistrationState,
         event: ModelNodeIntrospectionEvent,
-    ):
+    ) -> ModelReducerOutput[ModelRegistrationState]:
         """Delegate to reducer and track the call.
 
         Args:
@@ -291,7 +295,7 @@ class TrackedNodeRegistryEffect:
         *,
         skip_consul: bool = False,
         skip_postgres: bool = False,
-    ):
+    ) -> ModelRegistryResponse:
         """Delegate to effect and track the call.
 
         Args:
@@ -956,139 +960,6 @@ def registry_effect_with_mocks(
 
 
 # =============================================================================
-# Log Capture Fixtures
-# =============================================================================
-
-
-@dataclass
-class LogCapture:
-    """Captured log records for verification.
-
-    Attributes:
-        records: List of captured LogRecord objects.
-    """
-
-    records: list[logging.LogRecord] = field(default_factory=list)
-
-    def get_messages(self, level: int | None = None) -> list[str]:
-        """Get log messages, optionally filtered by level.
-
-        Args:
-            level: Optional log level to filter by (e.g., logging.WARNING).
-
-        Returns:
-            List of log message strings.
-        """
-        if level is not None:
-            return [r.getMessage() for r in self.records if r.levelno >= level]
-        return [r.getMessage() for r in self.records]
-
-    def get_records_by_level(self, level: int) -> list[logging.LogRecord]:
-        """Get records at a specific level.
-
-        Args:
-            level: Log level to filter by.
-
-        Returns:
-            List of matching LogRecord objects.
-        """
-        return [r for r in self.records if r.levelno == level]
-
-    def has_message_containing(self, substring: str) -> bool:
-        """Check if any message contains a substring.
-
-        Args:
-            substring: Substring to search for.
-
-        Returns:
-            True if any message contains the substring.
-        """
-        return any(substring in msg for msg in self.get_messages())
-
-    def count_messages_containing(self, substring: str) -> int:
-        """Count messages containing a substring.
-
-        Args:
-            substring: Substring to search for.
-
-        Returns:
-            Count of messages containing the substring.
-        """
-        return sum(1 for msg in self.get_messages() if substring in msg)
-
-    def clear(self) -> None:
-        """Clear captured records."""
-        self.records.clear()
-
-
-class _LogCaptureHandler(logging.Handler):
-    """Custom handler that captures records to a LogCapture instance."""
-
-    def __init__(self, capture: LogCapture) -> None:
-        super().__init__()
-        self._capture = capture
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self._capture.records.append(record)
-
-
-@pytest.fixture
-def log_capture() -> Iterator[LogCapture]:
-    """Capture log records for verification.
-
-    Yields:
-        LogCapture instance with captured records.
-
-    Example:
-        >>> def test_logging(log_capture):
-        ...     logger = logging.getLogger("test")
-        ...     logger.warning("Test warning")
-        ...     assert log_capture.has_message_containing("warning")
-    """
-    capture = LogCapture()
-    handler = _LogCaptureHandler(capture)
-    handler.setLevel(logging.DEBUG)
-
-    # Add handler to root logger
-    root_logger = logging.getLogger()
-    original_level = root_logger.level
-    root_logger.setLevel(logging.DEBUG)
-    root_logger.addHandler(handler)
-
-    yield capture
-
-    # Remove handler after test
-    root_logger.removeHandler(handler)
-    root_logger.setLevel(original_level)
-
-
-@pytest.fixture
-def reducer_log_capture() -> Iterator[LogCapture]:
-    """Capture log records from the RegistrationReducer.
-
-    Yields:
-        LogCapture instance with reducer-specific records.
-    """
-    capture = LogCapture()
-    handler = _LogCaptureHandler(capture)
-    handler.setLevel(logging.DEBUG)
-
-    # Add handler to reducer's logger specifically
-    reducer_logger = logging.getLogger(
-        "omnibase_infra.nodes.reducers.registration_reducer"
-    )
-    original_level = reducer_logger.level
-    reducer_logger.setLevel(logging.DEBUG)
-    reducer_logger.addHandler(handler)
-
-    yield capture
-
-    # Cleanup
-    reducer_logger.removeHandler(handler)
-    reducer_logger.setLevel(original_level)
-
-
-# =============================================================================
 # Snapshot Normalization Helpers
 # =============================================================================
 
@@ -1512,10 +1383,6 @@ __all__ = [
     "test_node_factory",
     "test_node",
     "IntrospectableTestNode",
-    # Log capture fixtures
-    "LogCapture",
-    "log_capture",
-    "reducer_log_capture",
     # Snapshot fixtures
     "SnapshotNormalizer",
     "snapshot_normalizer",

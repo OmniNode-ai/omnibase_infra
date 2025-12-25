@@ -36,12 +36,16 @@ Related:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 import pytest
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
+
+if TYPE_CHECKING:
+    from omnibase_core.models.reducer.model_intent import ModelIntent
+
 from omnibase_infra.nodes.effects.models import ModelRegistryRequest
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 
@@ -60,7 +64,7 @@ from .conftest import (
 
 def _convert_intents_to_request(
     event: ModelNodeIntrospectionEvent,
-    intents: tuple,
+    intents: tuple[ModelIntent, ...],
 ) -> ModelRegistryRequest:
     """Convert reducer output intents to a registry request.
 

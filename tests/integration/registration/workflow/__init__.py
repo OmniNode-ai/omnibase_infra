@@ -40,8 +40,7 @@ Available Fixtures (from conftest.py):
         - registry_request_factory: Creates registry requests
 
     Observability:
-        - log_capture: LogCapture for capturing all logs
-        - reducer_log_capture: LogCapture for reducer-specific logs
+        - caplog: Use pytest's built-in caplog fixture for log capture
 
     Test Helpers:
         - snapshot_normalizer: SnapshotNormalizer for stable assertions
