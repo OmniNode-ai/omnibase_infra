@@ -21,9 +21,9 @@ from omnibase_infra.models.dispatch import (
 from omnibase_infra.models.health import ModelHealthCheckResult
 from omnibase_infra.models.logging import ModelLogContext
 
-# ModelSemVer and SEMVER_DEFAULT are now imported from omnibase_core.models.primitives.model_semver
-# The local model_semver.py is deprecated and will be removed in a future version.
-# Import directly from omnibase_core for new code:
+# ModelSemVer and SEMVER_DEFAULT must be imported from omnibase_core.models.primitives.model_semver
+# The local model_semver.py has been REMOVED and raises ImportError on import.
+# Import directly from omnibase_core:
 #   from omnibase_core.models.primitives.model_semver import ModelSemVer
 # To create SEMVER_DEFAULT:
 #   SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
@@ -77,9 +77,8 @@ __all__ = [
     "ModelNodeIntrospectionEvent",
     "ModelNodeMetadata",
     "ModelNodeRegistration",
-    # SemVer models - DEPRECATED: Use omnibase_core.models.primitives.model_semver instead
-    # "ModelSemVer",
-    # "SEMVER_DEFAULT",
+    # SemVer models - REMOVED: Use omnibase_core.models.primitives.model_semver instead
+    # (model_semver.py now raises ImportError on import)
     # Validation models
     "ModelCoverageMetrics",
     "ModelExecutionShapeRule",

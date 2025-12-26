@@ -82,7 +82,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import threading
-import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -92,7 +91,6 @@ from pydantic import ValidationError
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
 from omnibase_infra.runtime.models import ModelPolicyKey, ModelPolicyRegistration
-from omnibase_infra.utils.util_semver import normalize_version_cached
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -590,13 +588,17 @@ class PolicyRegistry:
 
     @staticmethod
     def _normalize_version(version: str) -> str:
-        """Normalize version string for consistent lookups.
+        """Normalize version string for consistent lookups using ModelSemVer.
 
-        Delegates to the centralized normalize_version_cached function from
-        util_semver, which is the SINGLE SOURCE OF TRUTH for version normalization.
+        Converts version strings to canonical x.y.z format using ModelSemVer.parse().
+        This is the local normalization method for PolicyRegistry.
 
-        Uses the cached version for performance when policy registrations are
-        repeated or lookups occur frequently.
+        Normalization rules:
+            1. Strip leading/trailing whitespace
+            2. Strip leading 'v' or 'V' prefix
+            3. Expand partial versions (1 -> 1.0.0, 1.0 -> 1.0.0)
+            4. Parse with ModelSemVer.parse() for validation
+            5. Preserve prerelease suffix if present
 
         Args:
             version: The version string to normalize
@@ -613,13 +615,46 @@ class PolicyRegistry:
             >>> PolicyRegistry._normalize_version("v2.1")
             '2.1.0'
         """
-        try:
-            return normalize_version_cached(version)
-        except ValueError as e:
+        if not version or not version.strip():
             raise ProtocolConfigurationError(
-                str(e),
+                "Version cannot be empty",
+                version=version,
+            )
+
+        # Strip whitespace
+        normalized = version.strip()
+
+        # Strip leading 'v' or 'V' prefix
+        if normalized.startswith(("v", "V")):
+            normalized = normalized[1:]
+
+        # Split on first hyphen to handle prerelease suffix
+        parts = normalized.split("-", 1)
+        version_part = parts[0]
+        prerelease = parts[1] if len(parts) > 1 else None
+
+        # Expand to three-part version (x.y.z) for ModelSemVer parsing
+        version_nums = version_part.split(".")
+        while len(version_nums) < 3:
+            version_nums.append("0")
+        expanded_version = ".".join(version_nums)
+
+        # Parse with ModelSemVer for validation
+        try:
+            semver = ModelSemVer.parse(expanded_version)
+        except Exception as e:
+            raise ProtocolConfigurationError(
+                f"Invalid version format: {e}",
                 version=version,
             ) from e
+
+        result: str = semver.to_string()
+
+        # Re-add prerelease if present
+        if prerelease:
+            result = f"{result}-{prerelease}"
+
+        return result
 
     def register(
         self,
@@ -750,32 +785,8 @@ class PolicyRegistry:
             ...     version="1.0.0",
             ... )
         """
-        # Check if version needs normalization and emit deprecation warning
-        # A normalized version has exactly 3 numeric parts (x.y.z)
-        if version:
-            stripped = version.strip()
-            # Check for 'v' prefix or partial versions (missing parts)
-            needs_normalization = False
-            if stripped.startswith(("v", "V")):
-                needs_normalization = True
-            else:
-                # Split off prerelease suffix if present
-                version_part = stripped.split("-", 1)[0]
-                parts = version_part.split(".")
-                if len(parts) < 3:
-                    needs_normalization = True
-
-            if needs_normalization:
-                normalized = self._normalize_version(version)
-                warnings.warn(
-                    f"Passing non-normalized version string '{version}' is deprecated. "
-                    f"Use normalized format '{normalized}' instead, or use "
-                    f"ModelPolicyRegistration which normalizes automatically. "
-                    f"Non-normalized versions will raise ValueError in v2.0.0.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
+        # Version normalization is handled by ModelPolicyRegistration validator
+        # which normalizes partial versions and v-prefixed versions automatically
         try:
             registration = ModelPolicyRegistration(
                 policy_id=policy_id,
@@ -1100,14 +1111,10 @@ class PolicyRegistry:
                 Implementation moved here to support configurable cache size.
                 See _parse_semver docstring for full documentation.
 
-                IMPORTANT: This wrapper uses the centralized normalize_version_cached
-                function from util_semver to normalize version strings BEFORE
+                IMPORTANT: This wrapper normalizes version strings BEFORE
                 passing to the LRU-cached parsing function. This ensures that
                 equivalent versions (e.g., "1.0" and "1.0.0", "v1.0.0" and "1.0.0")
                 share the same cache entry, improving cache hit rates.
-
-                Wraps ValueError from normalize_version_cached as
-                ProtocolConfigurationError for consistency with existing error handling.
                 """
                 # Validate not empty after trimming
                 cleaned = version.strip()
@@ -1127,15 +1134,8 @@ class PolicyRegistry:
                         version=version,
                     )
 
-                # Use centralized normalization from util_semver
-                # normalize_version_cached raises ValueError for invalid formats
-                try:
-                    normalized = normalize_version_cached(version)
-                except ValueError as e:
-                    raise ProtocolConfigurationError(
-                        str(e),
-                        version=version,
-                    ) from e
+                # Use PolicyRegistry._normalize_version for normalization
+                normalized = PolicyRegistry._normalize_version(version)
 
                 # Now call the cached function with the NORMALIZED version
                 # This ensures "1.0", "1.0.0", "v1.0.0" all use the same cache entry

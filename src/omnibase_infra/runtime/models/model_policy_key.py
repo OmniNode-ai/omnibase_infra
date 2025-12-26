@@ -8,10 +8,10 @@ Replaces primitive tuple[str, str, str] pattern.
 
 from __future__ import annotations
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumPolicyType
-from omnibase_infra.utils.util_semver import normalize_version_cached
 
 
 class ModelPolicyKey(BaseModel):
@@ -57,19 +57,18 @@ class ModelPolicyKey(BaseModel):
     @field_validator("version", mode="before")
     @classmethod
     def validate_and_normalize_version(cls, v: str) -> str:
-        """Normalize version string for consistent lookups.
+        """Normalize version string for consistent lookups using ModelSemVer.
 
-        Delegates to the centralized normalize_version_cached function from
-        util_semver, which is the SINGLE SOURCE OF TRUTH for version normalization.
+        Converts version strings to canonical x.y.z format. This ensures consistent
+        version handling across all ONEX components, preventing lookup mismatches
+        where "1.0.0" and "1.0" might be treated as different versions.
 
-        Uses the cached version for:
-        - Consistent behavior with PolicyRegistry._normalize_version()
-        - Reduced deprecation warnings (only emits once per unique version string)
-        - Better performance through caching
-
-        This ensures consistent version handling across all ONEX components,
-        preventing lookup mismatches where "1.0.0" and "1.0" might be treated
-        as different versions.
+        Normalization rules:
+            1. Strip leading/trailing whitespace
+            2. Strip leading 'v' or 'V' prefix
+            3. Expand partial versions (1 -> 1.0.0, 1.0 -> 1.0.0)
+            4. Parse with ModelSemVer.parse() for validation
+            5. Preserve prerelease suffix if present
 
         Args:
             v: The version string to normalize
@@ -86,7 +85,44 @@ class ModelPolicyKey(BaseModel):
             >>> ModelPolicyKey(policy_id="test", policy_type="orchestrator", version="v2.1")
             ModelPolicyKey(policy_id='test', policy_type='orchestrator', version='2.1.0')
         """
-        return normalize_version_cached(v)
+        if not v or not v.strip():
+            raise ValueError("Version cannot be empty")
+
+        # Strip whitespace
+        normalized = v.strip()
+
+        # Strip leading 'v' or 'V' prefix
+        if normalized.startswith(("v", "V")):
+            normalized = normalized[1:]
+
+        # Check for empty prerelease suffix (e.g., "1.0.0-")
+        if normalized.endswith("-"):
+            raise ValueError("Prerelease suffix cannot be empty after hyphen")
+
+        # Split on first hyphen to handle prerelease suffix
+        parts = normalized.split("-", 1)
+        version_part = parts[0]
+        prerelease = parts[1] if len(parts) > 1 else None
+
+        # Expand to three-part version (x.y.z) for ModelSemVer parsing
+        version_nums = version_part.split(".")
+        while len(version_nums) < 3:
+            version_nums.append("0")
+        expanded_version = ".".join(version_nums)
+
+        # Parse with ModelSemVer for validation
+        try:
+            semver = ModelSemVer.parse(expanded_version)
+        except Exception as e:
+            raise ValueError(f"Invalid version format: {e}") from e
+
+        result: str = semver.to_string()
+
+        # Re-add prerelease if present
+        if prerelease:
+            result = f"{result}-{prerelease}"
+
+        return result
 
     @field_validator("policy_type")
     @classmethod
