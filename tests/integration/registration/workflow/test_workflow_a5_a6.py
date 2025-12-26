@@ -182,6 +182,7 @@ SENSITIVE_FIELD_PATTERNS = {
     "master_key",
     "client_secret",
     "session_token",
+    "session_id",  # Session identifiers (e.g., PHP PHPSESSID, Flask session IDs)
     "jwt",
     "oauth_token",
     "ssh_key",
@@ -842,6 +843,8 @@ class TestA6Observability:
             ("private_key: -----BEGIN RSA", "private_key"),
             ("client_secret=xyz", "client_secret"),
             ("connection_string: postgresql://user:pass@host", "connection_string"),
+            # Session identifier patterns
+            ("session_id: abc123def456", "session_id"),
             # New patterns added for comprehensive coverage
             ("dsn: postgresql://user:pass@localhost:5432/db", "dsn"),
             (
@@ -881,6 +884,10 @@ class TestA6Observability:
             "api_key_length: 32",
             "secret: [redacted]",
             "password: ***",
+            # Safe contexts for session identifiers
+            "has_session_id: True",
+            "session_id_present: True",
+            "session_id: [redacted]",
             # Safe contexts for new patterns
             "has_dsn: True",
             "dsn_present: True",
