@@ -19,19 +19,22 @@ import pytest
 import yaml
 
 
+# Module-level fixtures for shared use across test classes
+@pytest.fixture
+def exemptions_yaml_path() -> Path:
+    """Return the path to the exemptions YAML file."""
+    return Path("src/omnibase_infra/validation/validation_exemptions.yaml")
+
+
+@pytest.fixture
+def exemptions_yaml(exemptions_yaml_path: Path) -> dict[str, Any]:
+    """Load the exemptions YAML file."""
+    with open(exemptions_yaml_path) as f:
+        return yaml.safe_load(f)
+
+
 class TestValidationExemptionsRegex:
     """Tests for validation_exemptions.yaml regex pattern validity."""
-
-    @pytest.fixture
-    def exemptions_yaml_path(self) -> Path:
-        """Return the path to the exemptions YAML file."""
-        return Path("src/omnibase_infra/validation/validation_exemptions.yaml")
-
-    @pytest.fixture
-    def exemptions_yaml(self, exemptions_yaml_path: Path) -> dict[str, Any]:
-        """Load the exemptions YAML file."""
-        with open(exemptions_yaml_path) as f:
-            return yaml.safe_load(f)
 
     def _extract_all_patterns(
         self, exemptions_yaml: dict[str, Any]
@@ -192,13 +195,6 @@ class TestValidationExemptionsRegex:
 
 class TestExemptionPatternsMatchFiles:
     """Optional tests to verify patterns can match expected files."""
-
-    @pytest.fixture
-    def exemptions_yaml(self) -> dict[str, Any]:
-        """Load the exemptions YAML file."""
-        path = Path("src/omnibase_infra/validation/validation_exemptions.yaml")
-        with open(path) as f:
-            return yaml.safe_load(f)
 
     @pytest.fixture
     def source_files(self) -> list[str]:

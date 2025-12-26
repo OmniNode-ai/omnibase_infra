@@ -11,7 +11,7 @@ Thread Safety:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -94,7 +94,7 @@ class ModelOrchestratorOutput(BaseModel):
     @field_validator("intent_results", mode="before")
     @classmethod
     def _coerce_intent_results_to_tuple(
-        cls, v: Any
+        cls, v: object
     ) -> tuple[ModelIntentExecutionResult, ...]:
         """Convert list/sequence to tuple for immutability."""
         if isinstance(v, tuple):

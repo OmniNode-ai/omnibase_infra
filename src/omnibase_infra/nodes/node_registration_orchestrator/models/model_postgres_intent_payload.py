@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -115,14 +115,28 @@ class ModelPostgresIntentPayload(BaseModel):
 
     @field_validator("endpoints", mode="before")
     @classmethod
-    def _coerce_endpoints_to_tuple(cls, v: Any) -> tuple[tuple[str, str], ...]:
-        """Convert dict/mapping to tuple of pairs for immutability."""
+    def _coerce_endpoints_to_tuple(cls, v: object) -> tuple[tuple[str, str], ...]:
+        """Convert dict/mapping to tuple of pairs for immutability.
+
+        Args:
+            v: The input value to coerce. Must be either a tuple of (key, value)
+                pairs or a Mapping (dict-like object).
+
+        Returns:
+            A tuple of (key, value) string pairs.
+
+        Raises:
+            ValueError: If the input is neither a tuple nor a Mapping type.
+                This ensures invalid input types are explicitly rejected rather
+                than silently converted to empty tuple.
+        """
         if isinstance(v, tuple):
             return v  # type: ignore[return-value]  # Runtime validated by Pydantic
         if isinstance(v, Mapping):
             return tuple((str(k), str(val)) for k, val in v.items())
-        # For unrecognized types, return empty tuple (Pydantic will validate)
-        return ()
+        raise ValueError(
+            f"endpoints must be a tuple or Mapping, got {type(v).__name__}"
+        )
 
     @property
     def endpoints_dict(self) -> MappingProxyType[str, str]:

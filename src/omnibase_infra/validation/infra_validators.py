@@ -25,16 +25,15 @@ Exemption System:
     4. Run tests to verify the exemption works
 """
 
+# Standard library imports
 import logging
 import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, TypedDict
 
+# Third-party imports
 import yaml
-
-# Module-level logger for validation operations
-logger = logging.getLogger(__name__)
 from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
 from omnibase_core.validation import (
     CircularImportValidationResult,
@@ -48,6 +47,9 @@ from omnibase_core.validation import (
     validate_union_usage,
     validate_union_usage_file,
 )
+
+# Module-level initialization (AFTER all imports)
+logger = logging.getLogger(__name__)
 
 # Type alias for cleaner return types in infrastructure validators
 # Most validation results return None as the data payload (validation only)
