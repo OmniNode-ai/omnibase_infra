@@ -120,6 +120,20 @@ Related:
 from __future__ import annotations
 
 import logging
+from typing import cast
+from uuid import UUID
+
+# ModelEventEnvelope is used at runtime in function parameter types, not just for type hints
+from omnibase_core.models.events.model_event_envelope import (
+    ModelEventEnvelope,
+)
+
+from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
+from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
+from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
+from omnibase_infra.models.validation.model_chain_violation import ModelChainViolation
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "ChainPropagationValidator",
@@ -135,21 +149,6 @@ __all__ = [
     "get_correlation_id",
     "get_causation_id",
 ]
-
-from typing import cast
-from uuid import UUID
-
-# ModelEventEnvelope is used at runtime in function parameter types, not just for type hints
-from omnibase_core.models.events.model_event_envelope import (
-    ModelEventEnvelope,
-)
-
-from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
-from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
-from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
-from omnibase_infra.models.validation.model_chain_violation import ModelChainViolation
-
-logger = logging.getLogger(__name__)
 
 # ==============================================================================
 # Causation ID Lookup Keys

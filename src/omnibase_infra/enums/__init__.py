@@ -36,7 +36,7 @@ from omnibase_infra.enums.enum_policy_type import EnumPolicyType
 from omnibase_infra.enums.enum_registration_state import EnumRegistrationState
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 
-__all__ = [
+__all__: list[str] = [
     "EnumChainViolationType",
     "EnumDispatchStatus",
     "EnumHandlerType",

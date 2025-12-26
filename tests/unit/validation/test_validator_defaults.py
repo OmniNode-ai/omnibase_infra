@@ -40,31 +40,32 @@ class TestInfraValidatorConstants:
 
         OMN-983: Strict validation mode enabled.
 
-        Current baseline (~617 unions as of 2025-12-25):
-        - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
-        - These are counted but NOT flagged as violations
-        - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
+        This threshold applies ONLY to non-optional unions (excluding `X | None` patterns).
+        Simple optional patterns are idiomatic Python and are NOT counted toward the threshold.
 
-        Threshold history:
-        - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
-        - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots
-        - 540 (2025-12-23): OMN-950 comprehensive reducer tests
-        - 544 (2025-12-23): OMN-954 effect idempotency and retry tests (PR #78)
-        - 580 (2025-12-23): OMN-888 + PR #57 + OMN-954 merge
-        - 585 (2025-12-25): OMN-811 ComputeRegistry + node registration orchestrator unions
-        - 586 (2025-12-25): OMN-932 durable timeouts + introspection config migration
-        - 588 (2025-12-25): OMN-881 Kafka integration test fixes + typing updates
-        - 589 (2025-12-25): OMN-881 PR review fixes - _EventBusType conditional alias
-        - 600 (2025-12-25): OMN-952 PR #79 merge with main (OMN-811 compute registry + models)
-        - 606 (2025-12-25): OMN-949 DLQ configuration merge (~17 unions from DLQ + topic validation)
-        - 610 (2025-12-25): OMN-952 declarative orchestrator refactor + container wiring
-        - 626 (2025-12-25): OMN-952 + OMN-949 + OMN-1006 merge (~6 unions from combined changes)
+        What IS counted (threshold applies to):
+        - Multi-type unions: `str | int`, `A | B | C`
+        - Complex patterns: unions with 3+ types
+        - Non-optional unions: any union without `None` as one of exactly 2 types
 
-        Threshold: 630 (buffer above ~626 baseline for codebase growth)
-        Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
+        What is NOT counted (excluded from threshold):
+        - Simple optionals: `X | None` where X is any single type
+        - These are idiomatic Python for nullable types, not complexity concerns
+
+        Threshold history (after exclusion logic):
+        - 120 (2025-12-25): Initial threshold after excluding ~470 `X | None` patterns
+          - ~568 total unions in codebase
+          - ~468 are simple `X | None` optionals (82%)
+          - ~100 non-optional unions remain
+          - Buffer of 20 above baseline for codebase growth
+        - 121 (2025-12-25): OMN-881 introspection feature (+1 non-optional union)
+        - 121 (2025-12-25): OMN-949 DLQ, OMN-816, OMN-811, OMN-1006 merges (all used X | None patterns, excluded)
+        - 121 (2025-12-26): OMN-1007 registry pattern + merge with main (X | None patterns excluded)
+
+        Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 630, (
-            "INFRA_MAX_UNIONS should be 630 (OMN-952 + OMN-949 + OMN-1006 merge)"
+        assert INFRA_MAX_UNIONS == 121, (
+            "INFRA_MAX_UNIONS should be 121 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
@@ -246,31 +247,38 @@ class TestValidateInfraUnionUsageDefaults:
             "Should default to strict mode via INFRA_UNIONS_STRICT (True) per OMN-983"
         )
 
-    @patch("omnibase_infra.validation.infra_validators.validate_union_usage")
-    def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
-        """Verify defaults are correctly passed to core validator."""
-        # Mock validation result with proper structure for filtered result creation
-        # (validate_infra_union_usage now filters exempted patterns like patterns does)
-        mock_result = MagicMock()
-        mock_result.is_valid = True
-        mock_result.errors = []
-        mock_result.warnings = []
-        mock_result.suggestions = []
-        mock_result.issues = []
-        mock_result.validated_value = None
-        mock_result.summary = ""
-        mock_result.details = ""
-        mock_result.metadata = None
-        mock_validate.return_value = mock_result
+    @patch("omnibase_infra.validation.infra_validators._count_non_optional_unions")
+    def test_default_parameters_passed_to_core(
+        self, mock_count_unions: MagicMock
+    ) -> None:
+        """Verify defaults are correctly passed through the validation chain.
+
+        The new implementation uses _count_non_optional_unions which calls
+        validate_union_usage_file per-file. This test verifies:
+        1. The default directory (INFRA_SRC_PATH) is passed to the counter
+        2. The result metadata reflects default max_unions (INFRA_MAX_UNIONS)
+        3. The result metadata reflects default strict mode (INFRA_UNIONS_STRICT)
+        """
+        from pathlib import Path
+
+        # Mock the union counter to return controlled values
+        # Returns: (non_optional_count, total_count, issues)
+        mock_count_unions.return_value = (0, 0, [])
 
         # Call with defaults
-        validate_infra_union_usage()
+        result = validate_infra_union_usage()
 
-        # Verify core validator called with correct defaults
-        mock_validate.assert_called_once_with(
-            INFRA_SRC_PATH,  # Default directory
-            max_unions=INFRA_MAX_UNIONS,  # Default max from constant
-            strict=INFRA_UNIONS_STRICT,  # Strict mode (True) per OMN-983
+        # Verify the counter was called with default directory
+        mock_count_unions.assert_called_once_with(Path(INFRA_SRC_PATH))
+
+        # Verify result metadata reflects default parameters
+        assert result.metadata is not None, "Result should have metadata"
+        # max_unions and strict_mode are typed attributes on ModelValidationMetadata
+        assert result.metadata.max_unions == INFRA_MAX_UNIONS, (
+            f"Should use INFRA_MAX_UNIONS ({INFRA_MAX_UNIONS}) as default"
+        )
+        assert result.metadata.strict_mode == INFRA_UNIONS_STRICT, (
+            f"Should use INFRA_UNIONS_STRICT ({INFRA_UNIONS_STRICT}) as default"
         )
 
 
@@ -504,48 +512,57 @@ class TestUnionCountRegressionGuard:
     These tests call the actual validator against the real codebase (not mocked)
     to ensure that new code additions don't exceed union count thresholds.
 
+    IMPORTANT: The validator EXCLUDES simple optional patterns (`X | None`) from
+    the count. Only non-optional unions count toward the threshold.
+
     If these tests fail, it indicates one of:
-    1. New code added unions without using proper typed patterns from omnibase_core
+    1. New code added complex unions without using proper typed patterns
     2. The INFRA_MAX_UNIONS threshold needs to be adjusted (with documented rationale)
 
     See OMN-983 for threshold documentation and migration goals.
     """
 
     def test_union_count_within_threshold(self) -> None:
-        """Verify union count stays within configured threshold.
+        """Verify NON-OPTIONAL union count stays within configured threshold.
 
-        This test acts as a regression guard - if union count exceeds
-        the threshold, it indicates new code added unions without
+        This test acts as a regression guard - if non-optional union count exceeds
+        the threshold, it indicates new code added complex unions without
         using proper typed patterns from omnibase_core.
 
-        Current baseline (~544 unions as of 2025-12-23):
-        - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
-        - These are counted but NOT flagged as violations
-        - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
+        Current baseline (~100 non-optional unions as of 2025-12-25):
+        - Total unions: ~568 (including optionals)
+        - Simple optionals (`X | None`): ~468 (82%) - EXCLUDED from threshold
+        - Non-optional unions: ~100 - THIS is what counts toward threshold
 
-        Threshold: INFRA_MAX_UNIONS (555) - buffer above baseline.
-        Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
+        Threshold: INFRA_MAX_UNIONS (120) - buffer above ~100 baseline.
+        Target: Keep below 150 - if this grows, consider typed patterns.
         """
         result = validate_infra_union_usage()
 
-        # Extract actual union count from metadata for clear error messaging
-        actual_count = (
+        # Extract actual counts from metadata for clear error messaging
+        total_count = (
             result.metadata.total_unions
             if result.metadata and hasattr(result.metadata, "total_unions")
             else "unknown"
         )
+        non_optional_count = (
+            result.metadata.model_extra.get("non_optional_unions", "unknown")
+            if result.metadata and hasattr(result.metadata, "model_extra")
+            else "unknown"
+        )
 
         assert result.is_valid, (
-            f"Union count {actual_count} exceeds threshold {INFRA_MAX_UNIONS}. "
-            f"New code may have added unions without using typed patterns. "
+            f"Non-optional union count {non_optional_count} exceeds threshold {INFRA_MAX_UNIONS}. "
+            f"(Total unions: {total_count}, but X | None patterns are excluded.) "
+            f"New code may have added complex unions without using typed patterns. "
             f"Errors: {result.errors[:5]}{'...' if len(result.errors) > 5 else ''}"
         )
 
     def test_union_validation_returns_metadata(self) -> None:
         """Verify union validation returns metadata with count information.
 
-        The validator should return metadata containing the total union count,
-        which is useful for monitoring and documentation purposes.
+        The validator should return metadata containing both total and non-optional
+        union counts, which are useful for monitoring and documentation purposes.
         """
         result = validate_infra_union_usage()
 
@@ -559,14 +576,36 @@ class TestUnionCountRegressionGuard:
             "Metadata should contain total_unions count for monitoring"
         )
 
-        # Verify the count is reasonable (positive integer, below threshold)
+        # Verify the total count is reasonable (positive integer)
         assert isinstance(result.metadata.total_unions, int), (
             "total_unions should be an integer"
         )
         assert result.metadata.total_unions >= 0, "total_unions should be non-negative"
-        assert result.metadata.total_unions <= INFRA_MAX_UNIONS, (
-            f"total_unions ({result.metadata.total_unions}) should be within "
+
+        # Verify non_optional_unions is in model_extra
+        assert hasattr(result.metadata, "model_extra"), (
+            "Metadata should have model_extra for custom fields"
+        )
+        non_optional = result.metadata.model_extra.get("non_optional_unions")
+        assert non_optional is not None, (
+            "Metadata should contain non_optional_unions count"
+        )
+        assert isinstance(non_optional, int), "non_optional_unions should be an integer"
+        assert non_optional >= 0, "non_optional_unions should be non-negative"
+
+        # Non-optional count should be within threshold
+        assert non_optional <= INFRA_MAX_UNIONS, (
+            f"non_optional_unions ({non_optional}) should be within "
             f"threshold ({INFRA_MAX_UNIONS})"
+        )
+
+        # Verify optional_unions_excluded is present and consistent
+        excluded = result.metadata.model_extra.get("optional_unions_excluded")
+        assert excluded is not None, (
+            "Metadata should contain optional_unions_excluded count"
+        )
+        assert excluded == result.metadata.total_unions - non_optional, (
+            "optional_unions_excluded should equal total_unions - non_optional_unions"
         )
 
 
@@ -580,6 +619,10 @@ class TestUnionValidatorEdgeCases:
     - Directories with Python files but zero unions
     - Directories with very few unions (below any threshold)
     - max_unions=0 with zero actual unions
+
+    IMPORTANT: The validator EXCLUDES simple optional patterns (`X | None`) from
+    the threshold count. Total unions include all patterns, but only non-optional
+    unions count toward the threshold.
     """
 
     def test_empty_directory_is_valid(self, tmp_path: Path) -> None:
@@ -640,29 +683,41 @@ class TestUnionValidatorEdgeCases:
         assert result.is_valid, "Zero unions should be valid even with max_unions=0"
         assert result.errors == [], "No violation when actual count equals max"
 
-    def test_single_union_below_threshold(self, tmp_path: Path) -> None:
-        """Verify single union counts correctly and passes validation.
+    def test_single_optional_union_excluded_from_threshold(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify single optional union (`X | None`) is excluded from threshold.
 
-        A file with just one union (e.g., `str | None`) should be valid
-        when threshold is above 1.
+        A file with just one optional union (e.g., `str | None`) should be valid
+        even with max_unions=0 because optionals are excluded from the count.
         """
         (tmp_path / "one_union.py").write_text(
             "def greet(name: str | None = None) -> str:\n"
             "    return f'Hello, {name or \"World\"}!'\n"
         )
 
-        result = validate_infra_union_usage(str(tmp_path), max_unions=10, strict=True)
+        result = validate_infra_union_usage(str(tmp_path), max_unions=0, strict=True)
 
-        assert result.is_valid, "Single union should be valid when below threshold"
-        assert result.errors == [], "Should have no errors for single union"
+        assert result.is_valid, (
+            "Single optional union should be valid (excluded from threshold)"
+        )
+        assert result.errors == [], "Should have no errors for single optional union"
         if result.metadata and hasattr(result.metadata, "total_unions"):
-            assert result.metadata.total_unions == 1, "Should report exactly one union"
+            assert result.metadata.total_unions == 1, (
+                "Should report exactly one total union"
+            )
+        # Non-optional should be 0 since it's an optional
+        if result.metadata and hasattr(result.metadata, "model_extra"):
+            non_optional = result.metadata.model_extra.get("non_optional_unions", 0)
+            assert non_optional == 0, (
+                "Non-optional unions should be 0 for X | None pattern"
+            )
 
-    def test_few_unions_all_valid_patterns(self, tmp_path: Path) -> None:
-        """Verify few unions using valid patterns pass validation.
+    def test_few_optionals_all_excluded_from_threshold(self, tmp_path: Path) -> None:
+        """Verify few unions using optional patterns are excluded from threshold.
 
         Using the ONEX-preferred `X | None` pattern should not cause violations,
-        even with strict mode enabled.
+        even with max_unions=0 because these patterns are excluded.
         """
         (tmp_path / "few_unions.py").write_text(
             "from pydantic import BaseModel\n\n"
@@ -672,13 +727,39 @@ class TestUnionValidatorEdgeCases:
             "    description: str | None = None\n"
         )
 
-        result = validate_infra_union_usage(str(tmp_path), max_unions=10, strict=True)
+        result = validate_infra_union_usage(str(tmp_path), max_unions=0, strict=True)
 
-        assert result.is_valid, "Few valid unions should pass validation"
-        assert result.errors == [], "Valid union patterns should not cause errors"
+        assert result.is_valid, "Few optional unions should pass validation (excluded)"
+        assert result.errors == [], "Valid optional patterns should not cause errors"
         if result.metadata and hasattr(result.metadata, "total_unions"):
-            # Should have 2 unions (value and description)
-            assert result.metadata.total_unions == 2, "Should count both unions"
+            # Should have 2 total unions (value and description)
+            assert result.metadata.total_unions == 2, (
+                "Should count both unions in total"
+            )
+        # But non-optional should be 0
+        if result.metadata and hasattr(result.metadata, "model_extra"):
+            non_optional = result.metadata.model_extra.get("non_optional_unions", 0)
+            assert non_optional == 0, (
+                "Non-optional unions should be 0 for X | None patterns"
+            )
+
+    def test_non_optional_union_counts_toward_threshold(self, tmp_path: Path) -> None:
+        """Verify non-optional unions count toward threshold.
+
+        A union like `str | int` is NOT an optional pattern and SHOULD
+        count toward the threshold.
+        """
+        (tmp_path / "complex_union.py").write_text(
+            "def process(value: str | int) -> str:\n    return str(value)\n"
+        )
+
+        result = validate_infra_union_usage(str(tmp_path), max_unions=0, strict=True)
+
+        # Should fail because str | int counts toward threshold
+        assert not result.is_valid, "Non-optional union should count toward threshold"
+        if result.metadata and hasattr(result.metadata, "model_extra"):
+            non_optional = result.metadata.model_extra.get("non_optional_unions", 0)
+            assert non_optional == 1, "Non-optional unions should be 1 for str | int"
 
     def test_no_division_by_zero_with_empty_codebase(self, tmp_path: Path) -> None:
         """Verify no division errors occur with empty or minimal codebases.
@@ -714,6 +795,12 @@ class TestUnionValidatorEdgeCases:
         assert result.metadata.total_unions == 0, (
             "total_unions should be 0 for code without unions"
         )
+        # non_optional_unions should also be 0
+        if hasattr(result.metadata, "model_extra"):
+            non_optional = result.metadata.model_extra.get("non_optional_unions", 0)
+            assert non_optional == 0, (
+                "non_optional_unions should be 0 for code without unions"
+            )
 
 
 class TestDefaultsConsistency:

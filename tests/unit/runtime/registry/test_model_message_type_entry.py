@@ -5,6 +5,7 @@
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.runtime.registry.model_domain_constraint import (
@@ -164,7 +165,7 @@ class TestModelMessageTypeEntry:
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
             registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             entry.message_type = "Modified"  # type: ignore[misc]
 
     def test_registered_at_required(self) -> None:
@@ -185,7 +186,7 @@ class TestModelMessageTypeEntryValidation:
 
     def test_message_type_required(self) -> None:
         """Test that message_type is required."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelMessageTypeEntry(
                 handler_ids=("handler",),
                 allowed_categories=frozenset([EnumMessageCategory.EVENT]),
@@ -195,7 +196,7 @@ class TestModelMessageTypeEntryValidation:
 
     def test_handler_ids_required(self) -> None:
         """Test that handler_ids is required."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelMessageTypeEntry(
                 message_type="UserCreated",
                 allowed_categories=frozenset([EnumMessageCategory.EVENT]),
@@ -205,7 +206,7 @@ class TestModelMessageTypeEntryValidation:
 
     def test_handler_ids_min_length(self) -> None:
         """Test that handler_ids requires at least one handler."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelMessageTypeEntry(
                 message_type="UserCreated",
                 handler_ids=(),  # Empty tuple
@@ -216,7 +217,7 @@ class TestModelMessageTypeEntryValidation:
 
     def test_allowed_categories_required(self) -> None:
         """Test that allowed_categories is required."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelMessageTypeEntry(
                 message_type="UserCreated",
                 handler_ids=("handler",),
@@ -226,7 +227,7 @@ class TestModelMessageTypeEntryValidation:
 
     def test_domain_constraint_required(self) -> None:
         """Test that domain_constraint is required."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelMessageTypeEntry(
                 message_type="UserCreated",
                 handler_ids=("handler",),
@@ -247,7 +248,7 @@ class TestModelMessageTypeEntryValidation:
         assert len(entry.message_type) == 200
 
         # Should fail with too long
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelMessageTypeEntry(
                 message_type="A" * 201,
                 handler_ids=("handler",),
@@ -262,8 +263,6 @@ class TestModelMessageTypeEntryValidation:
         A message type with no allowed categories is invalid because it can
         never be routed - there is no valid topic category where it could appear.
         """
-        from pydantic import ValidationError
-
         with pytest.raises(ValidationError) as exc_info:
             ModelMessageTypeEntry(
                 message_type="InvalidType",

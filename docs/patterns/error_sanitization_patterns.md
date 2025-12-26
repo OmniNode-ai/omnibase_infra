@@ -260,7 +260,6 @@ def connect_to_database(connection_string: str, correlation_id: UUID) -> Connect
 API requests and responses often contain sensitive data that must be redacted.
 
 ```python
-from typing import Any
 import re
 
 
@@ -279,7 +278,7 @@ SENSITIVE_FIELD_PATTERNS = [
 ]
 
 
-def sanitize_dict(data: dict[str, Any], depth: int = 0, max_depth: int = 10) -> dict[str, Any]:
+def sanitize_dict(data: dict[str, object], depth: int = 0, max_depth: int = 10) -> dict[str, object]:
     """Recursively sanitize dictionary by redacting sensitive fields.
 
     Args:
@@ -315,9 +314,9 @@ def sanitize_dict(data: dict[str, Any], depth: int = 0, max_depth: int = 10) -> 
 
 # Usage example
 async def call_external_api(
-    request_data: dict[str, Any],
+    request_data: dict[str, object],
     correlation_id: UUID,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Call external API with sanitized error reporting."""
     context = ModelInfraErrorContext(
         transport_type=EnumInfraTransportType.HTTP,
@@ -383,7 +382,7 @@ def sanitize_path(path: str | Path, base_paths: list[str] | None = None) -> str:
 
 
 # Usage example
-def load_config(config_path: Path, correlation_id: UUID) -> dict[str, Any]:
+def load_config(config_path: Path, correlation_id: UUID) -> dict[str, object]:
     """Load configuration with sanitized error reporting."""
     try:
         return yaml.safe_load(config_path.read_text())
@@ -438,7 +437,7 @@ def sanitize_exceptions(func: Callable[P, T]) -> Callable[P, T]:
 
 # Usage example
 @sanitize_exceptions
-async def process_user_data(user_id: str, correlation_id: UUID) -> dict[str, Any]:
+async def process_user_data(user_id: str, correlation_id: UUID) -> dict[str, object]:
     """Process user data with automatic error sanitization."""
     # If any exception escapes, it will be wrapped safely
     user = await fetch_user(user_id)
@@ -591,7 +590,6 @@ async def authenticate_service(
 ```python
 import logging
 import json
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -610,7 +608,7 @@ class SanitizedLogFormatter(logging.Formatter):
 def log_error_safely(
     error: Exception,
     context: ModelInfraErrorContext | None = None,
-    extra: dict[str, Any] | None = None,
+    extra: dict[str, object] | None = None,
 ) -> None:
     """Log error with automatic sanitization of sensitive data.
 

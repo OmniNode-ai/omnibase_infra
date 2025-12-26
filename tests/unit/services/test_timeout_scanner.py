@@ -39,6 +39,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import (
@@ -557,14 +558,14 @@ class TestModelTimeoutQueryResult:
             query_duration_ms=1.0,
         )
 
-        with pytest.raises(Exception):  # Pydantic validation error
+        with pytest.raises(ValidationError):
             result.query_duration_ms = 999.0  # type: ignore[misc]
 
     def test_result_model_rejects_negative_duration(self) -> None:
         """Test result model rejects negative duration."""
         now = datetime.now(UTC)
 
-        with pytest.raises(Exception):  # Pydantic validation error
+        with pytest.raises(ValidationError):
             ModelTimeoutQueryResult(
                 ack_timeouts=[],
                 liveness_expirations=[],

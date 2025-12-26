@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumPolicyType
+from omnibase_infra.runtime.util_version import normalize_version
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -82,6 +83,36 @@ class ModelPolicyRegistration(BaseModel):
         default=False,
         description="If True, allows async interface (must be explicit for async policies)",
     )
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def validate_and_normalize_version(cls, v: str) -> str:
+        """Normalize version string for consistent storage.
+
+        Delegates to the shared normalize_version utility which is the
+        SINGLE SOURCE OF TRUTH for version normalization in omnibase_infra.
+
+        Converts version strings to canonical x.y.z format. This ensures version
+        strings are consistent across the registry, preventing storage/lookup
+        mismatches.
+
+        Normalization rules:
+            1. Strip leading/trailing whitespace
+            2. Strip leading 'v' or 'V' prefix
+            3. Expand partial versions (1 -> 1.0.0, 1.0 -> 1.0.0)
+            4. Parse with ModelSemVer.parse() for validation
+            5. Preserve prerelease suffix if present
+
+        Args:
+            v: The version string to normalize
+
+        Returns:
+            Normalized version string in "x.y.z" or "x.y.z-prerelease" format
+
+        Raises:
+            ValueError: If the version string is invalid and cannot be parsed
+        """
+        return normalize_version(v)
 
     @field_validator("policy_type")
     @classmethod

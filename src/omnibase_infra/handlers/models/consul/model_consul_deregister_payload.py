@@ -9,10 +9,16 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from omnibase_infra.handlers.models.consul.model_payload_consul import (
+    ModelPayloadConsul,
+    RegistryPayloadConsul,
+)
 
 
-class ModelConsulDeregisterPayload(BaseModel):
+@RegistryPayloadConsul.register("deregister")
+class ModelConsulDeregisterPayload(ModelPayloadConsul):
     """Payload for consul.deregister result.
 
     Attributes:

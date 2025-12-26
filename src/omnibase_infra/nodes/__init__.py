@@ -26,7 +26,7 @@ from omnibase_infra.nodes.effects import (
 )
 from omnibase_infra.nodes.reducers import RegistrationReducer
 
-__all__ = [
+__all__: list[str] = [
     "ModelBackendResult",
     "ModelRegistryRequest",
     "ModelRegistryResponse",

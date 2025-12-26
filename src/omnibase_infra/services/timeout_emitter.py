@@ -29,11 +29,12 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -81,9 +82,10 @@ class ModelTimeoutEmissionResult(BaseModel):
         markers_updated: Number of projection markers successfully updated.
             Always equals ack_timeouts_emitted + liveness_expirations_emitted
             for successful operations.
-        errors: List of error messages for failed emissions. Each error
-            includes the node_id and reason for failure. Note: an error
-            may indicate the event was published but marker update failed.
+        errors: Tuple of error messages for failed emissions (immutable for
+            thread safety). Each error includes the node_id and reason for
+            failure. Note: an error may indicate the event was published but
+            marker update failed.
         processing_time_ms: Total processing time in milliseconds.
         tick_id: The RuntimeTick ID that triggered this processing.
         correlation_id: Correlation ID for distributed tracing.
@@ -115,10 +117,34 @@ class ModelTimeoutEmissionResult(BaseModel):
         ge=0,
         description="Number of projection markers successfully updated (equals sum of emitted counts)",
     )
-    errors: list[str] = Field(
-        default_factory=list,
-        description="Error messages for failed emissions",
+    errors: tuple[str, ...] = Field(
+        default=(),
+        description="Tuple of error messages for failed emissions (immutable for thread safety)",
     )
+
+    @field_validator("errors", mode="before")
+    @classmethod
+    def _coerce_errors_to_tuple(cls, v: object) -> tuple[str, ...]:
+        """Convert list/sequence to tuple for immutability.
+
+        Args:
+            v: The input value to coerce.
+
+        Returns:
+            A tuple of error strings.
+
+        Raises:
+            ValueError: If input is not a valid sequence type.
+        """
+        if isinstance(v, tuple):
+            return v  # type: ignore[return-value]
+        if isinstance(v, Sequence) and not isinstance(v, str | bytes):
+            return tuple(v)  # type: ignore[return-value]
+        raise ValueError(
+            f"errors must be a tuple or Sequence (excluding str/bytes), "
+            f"got {type(v).__name__}"
+        )
+
     processing_time_ms: float = Field(
         ...,
         ge=0.0,

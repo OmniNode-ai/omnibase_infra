@@ -28,6 +28,63 @@
 # ============================================================================
 # Schema version for future compatibility
 schema_version: "1.0.0"
+# ==============================================================================
+# Skip Directories Configuration
+# ==============================================================================
+# Directories to exclude from validation scans. Uses EXACT name matching
+# (case-sensitive) to prevent false positives from substring matching.
+#
+# Matching behavior:
+# - Only parent directories are checked (filenames are NOT checked)
+# - Matching is case-sensitive (Linux standard)
+# - Uses set membership for O(1) lookup performance
+# - A path is skipped if ANY parent directory matches exactly
+#
+# Examples of what IS skipped:
+# - /src/archive/foo.py (has "archive" directory)
+# - /src/__pycache__/bar.pyc (has "__pycache__" directory)
+# - /src/.venv/lib/baz.py (has ".venv" directory)
+#
+# Examples of what is NOT skipped (no false positives):
+# - /src/archived_feature/foo.py ("archived_feature" != "archived")
+# - /src/my_archive/bar.py ("my_archive" != "archive")
+# - /src/Archive/baz.py (case-sensitive: "Archive" != "archive")
+# - /src/archive.py (filename not checked, only directories)
+#
+# To add new skip directories:
+# 1. Add to the appropriate category below
+# 2. Document why this directory should be skipped
+# 3. Run tests to verify (tests/unit/validation/test_path_skipping.py)
+# ==============================================================================
+skip_directories:
+  # Historical/demo code - not subject to current validation rules
+  historical:
+    - archive # Historical code preserved for reference
+    - archived # Alternative naming for archived code
+    - examples # Demo code that may intentionally show anti-patterns
+  # Python bytecode and caches - generated files, not source code
+  caches:
+    - __pycache__ # Python bytecode cache
+    - .mypy_cache # mypy type checking cache
+    - .pytest_cache # pytest cache directory
+  # Virtual environments - third-party code, not project code
+  virtual_environments:
+    - .venv # Standard virtual environment directory
+    - venv # Alternative virtual environment directory
+  # Build outputs - generated during build, not source code
+  build_outputs:
+    - build # Python build output directory
+    - dist # Distribution packages output
+    - .eggs # setuptools eggs directory
+  # Version control - repository metadata, not project code
+  version_control:
+    - .git # Git repository metadata
+  # Testing infrastructure - testing tool directories
+  testing:
+    - .tox # Tox testing directory
+  # Node.js - JavaScript/Node dependencies (if any JS in repo)
+  nodejs:
+    - node_modules # Node.js package dependencies
 # Pattern validator exemptions
 # These handle method count, parameter count, naming, and style violations
 pattern_exemptions:
@@ -632,6 +689,18 @@ pattern_exemptions:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
       - docs/design/ADR_DISPATCHER_TYPE_SAFETY.md
     ticket: OMN-1002
+  # ==========================================================================
+  # Failed Component Model Exemptions (OMN-1007)
+  # ==========================================================================
+  # component_name in ModelFailedComponent is a simple string identifier for
+  # the component that failed during shutdown (e.g., "KafkaEventBus", "VaultAdapter").
+  # It is NOT an entity reference requiring UUID + display_name pattern.
+  - file_pattern: 'model_failed_component\.py'
+    violation_pattern: "Field 'component_name' might reference an entity"
+    reason: >
+      component_name is a simple string identifier for the failed component (e.g., "KafkaEventBus"). This is a shutdown tracking field, not an entity reference. The component is identified by its type name, not by a UUID.
+
+    ticket: OMN-1007
   # ==========================================================================
   # ModelRegistryResponse Factory Method Exemptions (PR #79)
   # ==========================================================================

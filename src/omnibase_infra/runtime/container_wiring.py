@@ -53,7 +53,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from omnibase_infra.models.model_semver import SEMVER_DEFAULT
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.registry_compute import RegistryCompute
@@ -68,6 +69,9 @@ if TYPE_CHECKING:
         HandlerRuntimeTick,
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
+
+# Default semantic version constant for service metadata registration
+SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 
 logger = logging.getLogger(__name__)
 

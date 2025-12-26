@@ -178,10 +178,6 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import KafkaError
 
 from omnibase_infra.enums import EnumInfraTransportType
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -198,6 +194,9 @@ from omnibase_infra.event_bus.models import (
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.utils import sanitize_error_message
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 
 # Type alias for DLQ callback functions
 DlqCallbackType = Callable[[ModelDlqEvent], Awaitable[None]]

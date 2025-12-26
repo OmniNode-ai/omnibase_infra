@@ -85,6 +85,8 @@ class ModelExecutionShapeViolationResult(BaseModel):
 
     model_config = ConfigDict(
         frozen=True,
+        extra="forbid",
+        strict=True,
         str_strip_whitespace=True,
         use_enum_values=False,  # Keep enum objects for type safety
     )

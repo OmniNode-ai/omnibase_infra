@@ -67,6 +67,24 @@ class ModelOptionalString(BaseModel):
     def __bool__(self) -> bool:
         """Boolean representation based on value presence.
 
+        Warning:
+            **Non-standard __bool__ behavior**: This model overrides ``__bool__`` to
+            return ``True`` only when a value is present. This differs from typical
+            Pydantic model behavior where ``bool(model)`` always returns ``True`` for
+            any valid model instance.
+
+            This design enables idiomatic presence checks::
+
+                if opt_string:
+                    # Value is present - use it
+                    process(opt_string.value)
+                else:
+                    # No value - use fallback
+                    use_default()
+
+            Use ``opt_string.has_value()`` for explicit, self-documenting code.
+            Use ``opt_string is not None`` if you need to check model existence.
+
         Returns:
             True if value is present, False otherwise.
         """

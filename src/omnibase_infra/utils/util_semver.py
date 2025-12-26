@@ -7,6 +7,19 @@ Provides reusable semver pattern and validators for ONEX models.
 This module provides two validation approaches:
     - validate_semver: Strict validation requiring full MAJOR.MINOR.PATCH format
     - validate_version_lenient: Lenient validation accepting partial versions (1, 1.0, 1.0.0)
+
+IMPORTANT: normalize_version() and normalize_version_cached() have been REMOVED.
+Use ModelSemVer directly for all version handling:
+
+    from omnibase_core.models.primitives.model_semver import ModelSemVer
+
+    # For structured creation:
+    version = ModelSemVer(major=1, minor=0, patch=0)
+    version_str = version.to_string()  # "1.0.0"
+
+    # For parsing external input:
+    version = ModelSemVer.parse("1.0.0")
+    version_str = version.to_string()
 """
 
 from __future__ import annotations
@@ -125,4 +138,82 @@ def validate_version_lenient(v: str) -> str:
     return v
 
 
-__all__ = ["SEMVER_PATTERN", "validate_semver", "validate_version_lenient"]
+def normalize_version(version: str, *, _emit_warning: bool = True) -> str:
+    """REMOVED: String version normalization is no longer supported.
+
+    This function has been removed. Use ModelSemVer directly for all version handling.
+
+    Migration:
+        # Instead of:
+        version_str = normalize_version("1.0.0")
+
+        # Use ModelSemVer directly:
+        from omnibase_core.models.primitives.model_semver import ModelSemVer
+        version = ModelSemVer(major=1, minor=0, patch=0)
+        version_str = version.to_string()  # "1.0.0"
+
+        # Or for parsing external input:
+        version = ModelSemVer.parse("1.0.0")
+        version_str = version.to_string()
+
+    Args:
+        version: Not used - will raise TypeError immediately.
+        _emit_warning: Not used - will raise TypeError immediately.
+
+    Raises:
+        TypeError: Always raised. String version input is not allowed.
+    """
+    raise TypeError(
+        "String version input is not allowed. "
+        "Use ModelSemVer(major=X, minor=Y, patch=Z) for structured version handling, "
+        "or ModelSemVer.parse() for external input."
+    )
+
+
+def normalize_version_cached(version: str) -> str:
+    """REMOVED: String version normalization is no longer supported.
+
+    This function has been removed. Use ModelSemVer directly for all version handling.
+
+    Migration:
+        # Instead of:
+        version_str = normalize_version_cached("1.0.0")
+
+        # Use ModelSemVer directly:
+        from omnibase_core.models.primitives.model_semver import ModelSemVer
+        version = ModelSemVer(major=1, minor=0, patch=0)
+        version_str = version.to_string()  # "1.0.0"
+
+        # Or for parsing external input:
+        version = ModelSemVer.parse("1.0.0")
+        version_str = version.to_string()
+
+    Args:
+        version: Not used - will raise TypeError immediately.
+
+    Raises:
+        TypeError: Always raised. String version input is not allowed.
+    """
+    raise TypeError(
+        "String version input is not allowed. "
+        "Use ModelSemVer(major=X, minor=Y, patch=Z) for structured version handling, "
+        "or ModelSemVer.parse() for external input."
+    )
+
+
+def clear_normalize_version_cache() -> None:
+    """REMOVED: Cache no longer exists since normalize_version_cached was removed.
+
+    This function is kept for API compatibility but does nothing.
+    """
+    # No-op since cache no longer exists
+
+
+__all__: list[str] = [
+    "SEMVER_PATTERN",
+    "validate_semver",
+    "validate_version_lenient",
+    "normalize_version",
+    "normalize_version_cached",
+    "clear_normalize_version_cache",
+]

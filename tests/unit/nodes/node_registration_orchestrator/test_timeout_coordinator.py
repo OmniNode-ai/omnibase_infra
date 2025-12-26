@@ -380,7 +380,7 @@ class TestTimeoutCoordinatorCoordinate:
 
         # Result should still be success but with errors captured
         assert result.success is True
-        assert result.errors == ["Error 1", "Error 2"]
+        assert result.errors == ("Error 1", "Error 2")
         assert result.has_errors is True
 
     async def test_coordinate_empty_results(
@@ -547,7 +547,7 @@ class TestModelTimeoutCoordinationResult:
         assert result.emission_time_ms == 0.0
         assert result.success is True
         assert result.error is None
-        assert result.errors == []
+        assert result.errors == ()
 
     def test_total_found_property(self) -> None:
         """Test total_found property calculation."""
