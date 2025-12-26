@@ -15,24 +15,37 @@ Test Doubles:
     - StubConsulClient: Implements ProtocolConsulClient
     - StubPostgresAdapter: Implements ProtocolPostgresAdapter
 
+Protocol Compliance:
+    Both test doubles are verified to implement their respective protocols
+    via @runtime_checkable isinstance() checks. See test_protocol_compliance.py
+    for comprehensive protocol verification tests.
+
+    Protocol contracts enforced:
+    - Method signatures must match protocol definitions exactly
+    - Return types must be ModelBackendResult
+    - Thread safety for concurrent async calls
+
 Design Principles:
     - No mocking: Use real implementations with controllable behavior
     - State tracking: Track registrations for verification
     - Async-native: Full async support for realistic testing
     - Configurable failures: Set up failure scenarios programmatically
+
+Related:
+    - protocol_consul_client.py: ProtocolConsulClient definition
+    - protocol_postgres_adapter.py: ProtocolPostgresAdapter definition
+    - test_protocol_compliance.py: Protocol compliance verification tests
 """
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 from uuid import UUID
 
-from omnibase_infra.nodes.effects.models import ModelBackendResult
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
-if TYPE_CHECKING:
-    from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_infra.nodes.effects.models import ModelBackendResult
 
 
 @dataclass
