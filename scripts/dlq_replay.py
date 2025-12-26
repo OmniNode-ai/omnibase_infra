@@ -9,14 +9,21 @@ Usage:
     python scripts/dlq_replay.py list --dlq-topic dlq-events
     python scripts/dlq_replay.py replay --dlq-topic dlq-events --dry-run
     python scripts/dlq_replay.py replay --dlq-topic dlq-events --filter-topic dev.orders
+    python scripts/dlq_replay.py replay --dlq-topic dlq-events --start-time 2025-01-01T00:00:00Z
+    python scripts/dlq_replay.py replay --dlq-topic dlq-events --enable-tracking
 
 Environment Variables:
     KAFKA_BOOTSTRAP_SERVERS: Kafka broker addresses (REQUIRED - no default)
+    POSTGRES_HOST: PostgreSQL host for tracking (required if --enable-tracking)
+    POSTGRES_PORT: PostgreSQL port (default: 5432)
+    POSTGRES_DATABASE: PostgreSQL database name (default: omninode_bridge)
+    POSTGRES_USER: PostgreSQL username (required if --enable-tracking)
+    POSTGRES_PASSWORD: PostgreSQL password (required if --enable-tracking)
 
 See Also:
-    docs/operations/DLQ_REPLAY_GUIDE.md - Complete replay documentation
+    docs/operations/DLQ_REPLAY_RUNBOOK.md - Complete replay documentation
     OMN-949 - DLQ configuration ticket
-    OMN-1032 - PostgreSQL tracking integration (planned)
+    OMN-1032 - PostgreSQL tracking integration (integrated)
 
 SPDX-License-Identifier: MIT
 Copyright (c) 2025 OmniNode Team
@@ -37,8 +44,14 @@ from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import KafkaConnectionError, KafkaError
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
+from omnibase_infra.dlq import (
+    DLQTrackingService,
+    EnumReplayStatus,
+    ModelDlqReplayRecord,
+    ModelDlqTrackingConfig,
+)
 from omnibase_infra.enums import EnumNonRetryableErrorCategory
 
 if TYPE_CHECKING:
@@ -133,18 +146,68 @@ def safe_truncate(text: str, max_chars: int, suffix: str = "...") -> str:
     return text[: max_chars - suffix_len] + suffix
 
 
+def generate_replay_correlation_id() -> UUID:
+    """Generate a new correlation ID for replay tracking.
+
+    This function provides a single point of correlation ID generation
+    for all replay outcomes (completed, failed, skipped), ensuring
+    consistency in tracking.
+
+    Returns:
+        UUID: A new unique correlation ID for the replay attempt.
+    """
+    return uuid4()
+
+
+def parse_datetime_with_timezone(dt_string: str) -> datetime:
+    """Parse an ISO 8601 datetime string ensuring timezone-awareness.
+
+    This function handles common datetime string formats and ensures the
+    resulting datetime object is always timezone-aware. It provides a
+    single source of truth for timezone-aware datetime parsing throughout
+    the DLQ replay module.
+
+    Timezone Handling Behavior:
+        1. 'Z' suffix is converted to '+00:00' for ISO 8601 compliance
+           (Python's fromisoformat doesn't recognize 'Z' directly)
+        2. If the parsed datetime is naive (no timezone info), UTC is assumed
+        3. If the datetime already has timezone info, it is preserved
+
+    Args:
+        dt_string: ISO 8601 datetime string (e.g., "2025-01-01T00:00:00Z",
+                   "2025-01-01T00:00:00+00:00", "2025-01-01T00:00:00")
+
+    Returns:
+        Timezone-aware datetime object
+
+    Raises:
+        ValueError: If the string cannot be parsed as a valid datetime
+
+    Example:
+        >>> parse_datetime_with_timezone("2025-01-01T00:00:00Z")
+        datetime.datetime(2025, 1, 1, 0, 0, tzinfo=datetime.timezone.utc)
+        >>> parse_datetime_with_timezone("2025-01-01T00:00:00")
+        datetime.datetime(2025, 1, 1, 0, 0, tzinfo=datetime.timezone.utc)
+        >>> parse_datetime_with_timezone("2025-01-01T00:00:00+05:30")
+        datetime.datetime(2025, 1, 1, 0, 0, tzinfo=datetime.timezone(datetime.timedelta(seconds=19800)))
+    """
+    # Handle 'Z' suffix for UTC timezone (ISO 8601 standard)
+    # Python's fromisoformat() doesn't recognize 'Z', only '+00:00'
+    normalized = dt_string.replace("Z", "+00:00")
+
+    # Parse the ISO 8601 datetime string
+    dt = datetime.fromisoformat(normalized)
+
+    # Ensure timezone-aware (assume UTC if not specified)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+
+    return dt
+
+
 # =============================================================================
 # Enums and Models
 # =============================================================================
-
-
-class EnumReplayStatus(str, Enum):
-    """Status of a replay operation."""
-
-    PENDING = "pending"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
 
 
 class EnumFilterType(str, Enum):
@@ -153,8 +216,7 @@ class EnumFilterType(str, Enum):
     ALL = "all"
     BY_TOPIC = "by_topic"
     BY_ERROR_TYPE = "by_error_type"
-    # TODO(OMN-949): Implement time-range filtering support
-    # BY_TIME_RANGE = "by_time_range"
+    BY_TIME_RANGE = "by_time_range"
     BY_CORRELATION_ID = "by_correlation_id"
 
 
@@ -267,6 +329,16 @@ class ModelReplayConfig(BaseModel):
     filter_correlation_ids: list[UUID] = Field(default_factory=list)
     add_replay_headers: bool = True
     limit: int | None = None
+    # Time-range filtering (OMN-1032)
+    filter_start_time: datetime | None = None
+    filter_end_time: datetime | None = None
+    # PostgreSQL tracking configuration (OMN-1032)
+    enable_tracking: bool = False
+    postgres_host: str | None = None
+    postgres_port: int = 5432
+    postgres_database: str = "omninode_bridge"
+    postgres_user: str | None = None
+    postgres_password: str | None = None
     # Kafka producer settings - extracted from hardcoded values for configurability
     max_request_size: int = Field(
         default=10485760,  # 10MB
@@ -286,6 +358,20 @@ class ModelReplayConfig(BaseModel):
                 f"rate_limit_per_second must be > 0, got {v}. "
                 "A zero or negative rate limit would cause division by zero."
             )
+        return v
+
+    @field_validator("filter_end_time", mode="after")
+    @classmethod
+    def validate_time_range(
+        cls, v: datetime | None, info: ValidationInfo
+    ) -> datetime | None:
+        """Validate that filter_end_time is after filter_start_time."""
+        if v is not None and info.data:
+            start_time = info.data.get("filter_start_time")
+            if start_time is not None and v < start_time:
+                raise ValueError(
+                    f"filter_end_time ({v}) must be after filter_start_time ({start_time})"
+                )
         return v
 
     @classmethod
@@ -312,7 +398,32 @@ class ModelReplayConfig(BaseModel):
         filter_topics: list[str] = []
         filter_error_types: list[str] = []
         filter_correlation_ids: list[UUID] = []
+        filter_start_time: datetime | None = None
+        filter_end_time: datetime | None = None
 
+        # Parse time filters first (can combine with other filters)
+        start_time_str = getattr(args, "start_time", None)
+        end_time_str = getattr(args, "end_time", None)
+
+        if start_time_str:
+            try:
+                filter_start_time = parse_datetime_with_timezone(start_time_str)
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid start_time format: {start_time_str}. "
+                    "Use ISO 8601 format (e.g., 2025-01-01T00:00:00Z)"
+                ) from e
+
+        if end_time_str:
+            try:
+                filter_end_time = parse_datetime_with_timezone(end_time_str)
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid end_time format: {end_time_str}. "
+                    "Use ISO 8601 format (e.g., 2025-01-01T23:59:59Z)"
+                ) from e
+
+        # Determine filter type based on provided filters
         if args.filter_topic:
             filter_type = EnumFilterType.BY_TOPIC
             filter_topics = [args.filter_topic]
@@ -327,6 +438,22 @@ class ModelReplayConfig(BaseModel):
                 raise ValueError(
                     f"Invalid correlation ID format: {args.filter_correlation_id}"
                 ) from e
+        elif filter_start_time or filter_end_time:
+            # Only set BY_TIME_RANGE if no other filter is specified
+            filter_type = EnumFilterType.BY_TIME_RANGE
+
+        # Parse PostgreSQL tracking configuration
+        enable_tracking = getattr(args, "enable_tracking", False)
+        postgres_host = os.environ.get("POSTGRES_HOST")
+        postgres_port_str = os.environ.get("POSTGRES_PORT", "5432")
+        postgres_database = os.environ.get("POSTGRES_DATABASE", "omninode_bridge")
+        postgres_user = os.environ.get("POSTGRES_USER")
+        postgres_password = os.environ.get("POSTGRES_PASSWORD")
+
+        try:
+            postgres_port = int(postgres_port_str)
+        except ValueError:
+            postgres_port = 5432
 
         return cls(
             bootstrap_servers=bootstrap_servers,
@@ -338,7 +465,31 @@ class ModelReplayConfig(BaseModel):
             filter_topics=filter_topics,
             filter_error_types=filter_error_types,
             filter_correlation_ids=filter_correlation_ids,
+            filter_start_time=filter_start_time,
+            filter_end_time=filter_end_time,
+            enable_tracking=enable_tracking,
+            postgres_host=postgres_host,
+            postgres_port=postgres_port,
+            postgres_database=postgres_database,
+            postgres_user=postgres_user,
+            postgres_password=postgres_password,
             limit=getattr(args, "limit", None),
+        )
+
+    def build_tracking_dsn(self) -> str | None:
+        """Build PostgreSQL DSN from config fields.
+
+        Returns:
+            DSN string if all required fields are present and tracking is enabled,
+            None otherwise.
+        """
+        if not self.enable_tracking:
+            return None
+        if not all([self.postgres_host, self.postgres_user, self.postgres_password]):
+            return None
+        return (
+            f"postgresql://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_database}"
         )
 
 
@@ -681,14 +832,61 @@ class DLQProducer:
 def should_replay(
     message: ModelDlqMessage, config: ModelReplayConfig
 ) -> tuple[bool, str]:
-    """Determine if a DLQ message should be replayed.
+    """Determine if a DLQ message should be replayed based on configured filters.
+
+    This function evaluates a DLQ message against multiple filter criteria to
+    determine replay eligibility. Filters are applied in a specific order with
+    short-circuit evaluation.
+
+    Filter Evaluation Order:
+        1. **Max replay count**: Rejects messages that have exceeded the maximum
+           retry attempts (fail-fast check).
+        2. **Non-retryable errors**: Rejects messages with error types that are
+           inherently non-retryable (e.g., schema validation errors).
+        3. **Time range filter**: Applied ORTHOGONALLY to other filters - messages
+           must fall within the configured time range regardless of filter_type.
+        4. **Type-specific filter**: Applied based on config.filter_type (topic,
+           error type, correlation ID, or no additional filter).
+
+    Orthogonal Time Range Filtering:
+        Time range filters (filter_start_time, filter_end_time) are applied
+        independently of the filter_type setting. This means:
+
+        - When filter_type=BY_TOPIC and time range is set:
+          Message must match the topic filter AND fall within the time range.
+
+        - When filter_type=BY_ERROR_TYPE and time range is set:
+          Message must match the error type filter AND fall within the time range.
+
+        - When filter_type=BY_TIME_RANGE (no other filter specified):
+          Only the time range constraint is applied.
+
+        This orthogonal design allows operators to combine time-based filtering
+        with any other filter criterion for precise replay targeting.
+
+    Example:
+        To replay only connection errors from the last 24 hours::
+
+            config = ModelReplayConfig(
+                filter_type=EnumFilterType.BY_ERROR_TYPE,
+                filter_error_types=["InfraConnectionError"],
+                filter_start_time=datetime.now(UTC) - timedelta(hours=24),
+                filter_end_time=datetime.now(UTC),
+            )
+            # A message is replayed only if:
+            # 1. retry_count < max_replay_count
+            # 2. error_type is not in NON_RETRYABLE_ERRORS
+            # 3. failure_timestamp is within the last 24 hours (time range)
+            # 4. error_type == "InfraConnectionError" (type-specific filter)
 
     Args:
-        message: DLQ message to evaluate
-        config: Replay configuration
+        message: DLQ message to evaluate for replay eligibility.
+        config: Replay configuration containing filter criteria.
 
     Returns:
-        Tuple of (should_replay, reason)
+        Tuple of (should_replay, reason) where:
+            - should_replay: True if message passes all filter criteria
+            - reason: Human-readable explanation of the decision
     """
     # Check max replay count
     if message.retry_count >= config.max_replay_count:
@@ -700,6 +898,26 @@ def should_replay(
     # Check non-retryable error types
     if message.error_type in NON_RETRYABLE_ERRORS:
         return (False, f"Non-retryable error type: {message.error_type}")
+
+    # Apply time-range filter (can apply regardless of filter_type)
+    if config.filter_start_time or config.filter_end_time:
+        try:
+            # Parse message timestamp with timezone normalization
+            failure_dt = parse_datetime_with_timezone(message.failure_timestamp)
+            if config.filter_start_time and failure_dt < config.filter_start_time:
+                return (False, f"Before start time: {config.filter_start_time}")
+            if config.filter_end_time and failure_dt > config.filter_end_time:
+                return (False, f"After end time: {config.filter_end_time}")
+        except ValueError as e:
+            # If timestamp can't be parsed, log a warning and don't filter by time
+            logger.warning(
+                "Failed to parse failure_timestamp, skipping time filter",
+                extra={
+                    "correlation_id": str(message.correlation_id),
+                    "failure_timestamp": message.failure_timestamp,
+                    "parse_error": str(e),
+                },
+            )
 
     # Apply filters
     if config.filter_type == EnumFilterType.BY_TOPIC:
@@ -713,6 +931,9 @@ def should_replay(
     elif config.filter_type == EnumFilterType.BY_CORRELATION_ID:
         if message.correlation_id not in config.filter_correlation_ids:
             return (False, f"Correlation ID not in filter: {message.correlation_id}")
+
+    # BY_TIME_RANGE is handled above (time filtering applies independently of filter_type)
+    # Time filters are orthogonal and can combine with topic/error/correlation filters
 
     return (True, "Eligible for replay")
 
@@ -731,18 +952,86 @@ class DLQReplayExecutor:
         self.consumer = DLQConsumer(config)
         self.producer = DLQProducer(config)
         self.results: list[ModelReplayResult] = []
+        self._tracking_service: DLQTrackingService | None = None
+
+    @property
+    def is_tracking_enabled(self) -> bool:
+        """Return True if tracking service is initialized and ready.
+
+        This property provides clearer semantics than checking
+        `self._tracking_service is not None` directly.
+
+        Returns:
+            True if tracking is available, False otherwise.
+        """
+        return (
+            self._tracking_service is not None
+            and self._tracking_service.is_tracking_enabled
+        )
 
     async def start(self) -> None:
-        """Start consumer and producer."""
+        """Start consumer, producer, and optionally tracking service."""
         await self.consumer.start()
         if not self.config.dry_run:
             await self.producer.start()
 
+        # Initialize tracking if enabled
+        dsn = self.config.build_tracking_dsn()
+        if dsn:
+            tracking_config = ModelDlqTrackingConfig(dsn=dsn)
+            self._tracking_service = DLQTrackingService(tracking_config)
+            try:
+                await self._tracking_service.initialize()
+                logger.info("DLQ tracking service initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize tracking service: {e}")
+                self._tracking_service = None
+
     async def stop(self) -> None:
-        """Stop consumer and producer."""
+        """Stop consumer, producer, and tracking service."""
         await self.consumer.stop()
         if not self.config.dry_run:
             await self.producer.stop()
+        if self.is_tracking_enabled:
+            await self._tracking_service.shutdown()
+            logger.info("DLQ tracking service stopped")
+
+    async def _record_tracking(
+        self,
+        message: ModelDlqMessage,
+        status: EnumReplayStatus,
+        replay_correlation_id: UUID,
+        error_message: str | None = None,
+    ) -> None:
+        """Record replay attempt to PostgreSQL if tracking is enabled.
+
+        Args:
+            message: The DLQ message being replayed.
+            status: The replay status (from local EnumReplayStatus).
+            replay_correlation_id: New correlation ID for replay tracking.
+            error_message: Error details if replay failed.
+        """
+        if not self.is_tracking_enabled:
+            return
+
+        try:
+            record = ModelDlqReplayRecord(
+                id=uuid4(),
+                original_message_id=message.correlation_id,
+                replay_correlation_id=replay_correlation_id,
+                original_topic=message.original_topic,
+                target_topic=message.original_topic,  # Same as original for replay
+                replay_status=status,
+                replay_timestamp=datetime.now(UTC),
+                success=status == EnumReplayStatus.COMPLETED,
+                error_message=error_message,
+                dlq_offset=message.dlq_offset,
+                dlq_partition=message.dlq_partition,
+                retry_count=message.retry_count,
+            )
+            await self._tracking_service.record_replay_attempt(record)
+        except Exception as e:
+            logger.warning(f"Failed to record tracking: {e}")
 
     async def execute(self) -> list[ModelReplayResult]:
         """Execute the replay operation.
@@ -760,13 +1049,18 @@ class DLQReplayExecutor:
             should, reason = should_replay(message, self.config)
 
             if not should:
+                skip_correlation_id = generate_replay_correlation_id()
                 result = ModelReplayResult(
                     correlation_id=message.correlation_id,
                     original_topic=message.original_topic,
                     status=EnumReplayStatus.SKIPPED,
                     message=reason,
+                    replay_correlation_id=skip_correlation_id,
                 )
                 self.results.append(result)
+                await self._record_tracking(
+                    message, EnumReplayStatus.SKIPPED, skip_correlation_id, reason
+                )
                 logger.info(
                     f"SKIP: {message.correlation_id} - {reason}",
                     extra={
@@ -776,7 +1070,7 @@ class DLQReplayExecutor:
                 )
                 continue
 
-            replay_correlation_id = uuid4()
+            replay_correlation_id = generate_replay_correlation_id()
 
             if self.config.dry_run:
                 result = ModelReplayResult(
@@ -803,6 +1097,9 @@ class DLQReplayExecutor:
                         message="Replayed successfully",
                         replay_correlation_id=replay_correlation_id,
                     )
+                    await self._record_tracking(
+                        message, EnumReplayStatus.COMPLETED, replay_correlation_id
+                    )
                     logger.info(
                         f"REPLAYED: {message.correlation_id} -> {message.original_topic}",
                         extra={
@@ -816,6 +1113,9 @@ class DLQReplayExecutor:
                         status=EnumReplayStatus.FAILED,
                         message=f"Replay failed: {e}",
                         replay_correlation_id=replay_correlation_id,
+                    )
+                    await self._record_tracking(
+                        message, EnumReplayStatus.FAILED, replay_correlation_id, str(e)
                     )
                     logger.exception(
                         f"FAILED: {message.correlation_id}",
@@ -900,6 +1200,11 @@ async def cmd_replay(args: argparse.Namespace) -> int:
         print(f"  Failed:        {failed}")
         if config.dry_run:
             print(f"  Pending (dry): {pending}")
+        if config.enable_tracking:
+            tracking_status = (
+                "enabled" if executor.is_tracking_enabled else "failed to initialize"
+            )
+            print(f"  Tracking:      {tracking_status}")
         print()
 
         return 0 if failed == 0 else 1
@@ -996,7 +1301,7 @@ Examples:
   # Show DLQ statistics
   python scripts/dlq_replay.py stats --dlq-topic dlq-events
 
-See docs/operations/DLQ_REPLAY_GUIDE.md for complete documentation.
+See docs/operations/DLQ_REPLAY_RUNBOOK.md for complete documentation.
         """,
     )
 
@@ -1016,6 +1321,11 @@ See docs/operations/DLQ_REPLAY_GUIDE.md for complete documentation.
         "--verbose",
         action="store_true",
         help="Enable verbose logging",
+    )
+    parser.add_argument(
+        "--enable-tracking",
+        action="store_true",
+        help="Enable PostgreSQL replay tracking (requires POSTGRES_* env vars)",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -1037,6 +1347,16 @@ See docs/operations/DLQ_REPLAY_GUIDE.md for complete documentation.
     list_parser.add_argument("--filter-topic", help="Filter by original topic")
     list_parser.add_argument("--filter-error-type", help="Filter by error type")
     list_parser.add_argument("--filter-correlation-id", help="Filter by correlation ID")
+    list_parser.add_argument(
+        "--start-time",
+        type=str,
+        help="Filter messages after this time (ISO 8601 format, e.g., 2025-01-01T00:00:00Z)",
+    )
+    list_parser.add_argument(
+        "--end-time",
+        type=str,
+        help="Filter messages before this time (ISO 8601 format, e.g., 2025-01-01T23:59:59Z)",
+    )
 
     # replay command
     replay_parser = subparsers.add_parser("replay", help="Replay DLQ messages")
@@ -1068,6 +1388,16 @@ See docs/operations/DLQ_REPLAY_GUIDE.md for complete documentation.
     )
     replay_parser.add_argument(
         "--filter-correlation-id", help="Only replay specific correlation ID"
+    )
+    replay_parser.add_argument(
+        "--start-time",
+        type=str,
+        help="Filter messages after this time (ISO 8601 format, e.g., 2025-01-01T00:00:00Z)",
+    )
+    replay_parser.add_argument(
+        "--end-time",
+        type=str,
+        help="Filter messages before this time (ISO 8601 format, e.g., 2025-01-01T23:59:59Z)",
     )
 
     # stats command
