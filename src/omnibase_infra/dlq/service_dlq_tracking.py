@@ -258,6 +258,9 @@ class DLQReplayTracker:
         finally:
             # Cleanup pool if initialization failed
             if not self._initialized and self._pool is not None:
+                logger.warning(
+                    "Cleaning up connection pool after initialization failure"
+                )
                 await self._pool.close()
                 self._pool = None
 

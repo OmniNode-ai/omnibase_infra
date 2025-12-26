@@ -816,13 +816,14 @@ def should_replay(
                 return (False, f"Before start time: {config.filter_start_time}")
             if config.filter_end_time and failure_dt > config.filter_end_time:
                 return (False, f"After end time: {config.filter_end_time}")
-        except ValueError:
+        except ValueError as e:
             # If timestamp can't be parsed, log a warning and don't filter by time
             logger.warning(
                 "Failed to parse failure_timestamp, skipping time filter",
                 extra={
                     "correlation_id": str(message.correlation_id),
                     "failure_timestamp": message.failure_timestamp,
+                    "parse_error": str(e),
                 },
             )
 
@@ -839,8 +840,8 @@ def should_replay(
         if message.correlation_id not in config.filter_correlation_ids:
             return (False, f"Correlation ID not in filter: {message.correlation_id}")
 
-    # BY_TIME_RANGE is handled above (time filtering applies to all messages)
-    # No additional filter needed here
+    # BY_TIME_RANGE is handled above (time filtering applies independently of filter_type)
+    # Time filters are orthogonal and can combine with topic/error/correlation filters
 
     return (True, "Eligible for replay")
 

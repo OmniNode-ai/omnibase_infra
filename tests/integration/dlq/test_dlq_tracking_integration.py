@@ -45,8 +45,7 @@ Related Ticket: OMN-1032 - Complete DLQ Replay PostgreSQL Tracking Integration
 
 from __future__ import annotations
 
-import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -378,7 +377,8 @@ class TestDLQTrackingServiceQuery:
         """
         message_id = uuid4()
 
-        # Record multiple attempts with slight timestamp offsets
+        # Record multiple attempts with explicit timestamp offsets for deterministic ordering
+        base_time = datetime.now(UTC)
         for i in range(3):
             record = ModelDlqReplayRecord(
                 id=uuid4(),
@@ -389,7 +389,7 @@ class TestDLQTrackingServiceQuery:
                 replay_status=(
                     EnumReplayStatus.FAILED if i < 2 else EnumReplayStatus.COMPLETED
                 ),
-                replay_timestamp=datetime.now(UTC),
+                replay_timestamp=base_time + timedelta(seconds=i),
                 success=i == 2,
                 error_message="Retry needed" if i < 2 else None,
                 dlq_offset=100 + i,
@@ -397,8 +397,6 @@ class TestDLQTrackingServiceQuery:
                 retry_count=i + 1,
             )
             await dlq_tracking_service.record_replay_attempt(record)
-            # Small delay to ensure timestamp ordering
-            time.sleep(0.01)
 
         history = await dlq_tracking_service.get_replay_history(message_id)
         assert len(history) == 3
