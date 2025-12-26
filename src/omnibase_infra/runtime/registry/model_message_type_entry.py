@@ -22,6 +22,7 @@ Related:
 
 from datetime import UTC, datetime
 
+from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -159,9 +160,9 @@ class ModelMessageTypeEntry(BaseModel):
         description="Timestamp when this entry was registered (UTC).",
     )
 
-    metadata: dict[str, str] | None = Field(
+    metadata: JsonValue = Field(
         default=None,
-        description="Optional additional metadata.",
+        description="Optional additional metadata. Accepts any JSON-serializable value.",
     )
 
     def supports_category(self, category: EnumMessageCategory) -> bool:

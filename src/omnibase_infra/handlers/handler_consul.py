@@ -43,6 +43,10 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
+from omnibase_infra.handlers.models import (
+    ModelOperationContext,
+    ModelRetryState,
+)
 from omnibase_infra.handlers.models.consul import (
     ConsulPayload,
     ModelConsulDeregisterPayload,
@@ -583,17 +587,30 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             async with self._circuit_breaker_lock:
                 await self._check_circuit_breaker(operation, correlation_id)
 
+        # Initialize retry state with config values
         retry_config = self._config.retry
-        last_exception: Exception | None = None
+        retry_state = ModelRetryState(
+            attempt=0,
+            max_attempts=retry_config.max_attempts,
+            delay_seconds=retry_config.initial_delay_seconds,
+            backoff_multiplier=retry_config.exponential_base,
+        )
 
-        for attempt in range(retry_config.max_attempts):
+        # Create operation context for tracking
+        op_context = ModelOperationContext.create(
+            operation_name=operation,
+            correlation_id=correlation_id,
+            timeout_seconds=self._config.timeout_seconds,
+        )
+
+        while retry_state.is_retriable():
             try:
                 # consul is synchronous, wrap in custom thread executor
                 loop = asyncio.get_running_loop()
 
                 result = await asyncio.wait_for(
                     loop.run_in_executor(self._executor, func),
-                    timeout=self._config.timeout_seconds,
+                    timeout=op_context.timeout_seconds,
                 )
 
                 # Record success for circuit breaker (async mixin pattern)
@@ -604,13 +621,17 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 return result
 
             except TimeoutError as e:
-                last_exception = e
+                error_msg = f"Timeout after {op_context.timeout_seconds}s"
+                retry_state = retry_state.next_attempt(
+                    error_message=error_msg,
+                    max_delay_seconds=retry_config.max_delay_seconds,
+                )
                 # NOTE: Circuit breaker failures are recorded only on final retry attempt.
                 # Rationale: Transient failures during retry shouldn't count toward threshold.
                 # Only persistent failures (after all retries exhausted) indicate true service
                 # degradation. This prevents circuit breaker from opening due to temporary
                 # network blips. Pattern consistent with VaultHandler implementation.
-                if attempt == retry_config.max_attempts - 1:
+                if not retry_state.is_retriable():
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
                             await self._record_circuit_failure(
@@ -623,9 +644,9 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                         correlation_id=correlation_id,
                     )
                     raise InfraTimeoutError(
-                        f"Consul operation timed out after {self._config.timeout_seconds}s",
+                        f"Consul operation timed out after {op_context.timeout_seconds}s",
                         context=ctx,
-                        timeout_seconds=self._config.timeout_seconds,
+                        timeout_seconds=op_context.timeout_seconds,
                     ) from e
 
             except consul.ACLPermissionDenied as e:
@@ -647,8 +668,12 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             except consul.Timeout as e:
                 # Handle consul.Timeout (subclass of ConsulException) specifically
                 # to raise InfraTimeoutError instead of InfraConnectionError
-                last_exception = e
-                if attempt == retry_config.max_attempts - 1:
+                error_msg = f"Consul timeout: {type(e).__name__}"
+                retry_state = retry_state.next_attempt(
+                    error_message=error_msg,
+                    max_delay_seconds=retry_config.max_delay_seconds,
+                )
+                if not retry_state.is_retriable():
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
                             await self._record_circuit_failure(
@@ -663,17 +688,21 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                     raise InfraTimeoutError(
                         f"Consul operation timed out: {e}",
                         context=ctx,
-                        timeout_seconds=self._config.timeout_seconds,
+                        timeout_seconds=op_context.timeout_seconds,
                     ) from e
 
             except consul.ConsulException as e:
-                last_exception = e
+                error_msg = f"Consul error: {type(e).__name__}"
+                retry_state = retry_state.next_attempt(
+                    error_message=error_msg,
+                    max_delay_seconds=retry_config.max_delay_seconds,
+                )
                 # NOTE: Circuit breaker failures are recorded only on final retry attempt.
                 # Rationale: Transient failures during retry shouldn't count toward threshold.
                 # Only persistent failures (after all retries exhausted) indicate true service
                 # degradation. This prevents circuit breaker from opening due to temporary
                 # network blips. Pattern consistent with VaultHandler implementation.
-                if attempt == retry_config.max_attempts - 1:
+                if not retry_state.is_retriable():
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
                             await self._record_circuit_failure(
@@ -691,13 +720,17 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                     ) from e
 
             except Exception as e:
-                last_exception = e
+                error_msg = f"Unexpected error: {type(e).__name__}"
+                retry_state = retry_state.next_attempt(
+                    error_message=error_msg,
+                    max_delay_seconds=retry_config.max_delay_seconds,
+                )
                 # NOTE: Circuit breaker failures are recorded only on final retry attempt.
                 # Rationale: Transient failures during retry shouldn't count toward threshold.
                 # Only persistent failures (after all retries exhausted) indicate true service
                 # degradation. This prevents circuit breaker from opening due to temporary
                 # network blips. Pattern consistent with VaultHandler implementation.
-                if attempt == retry_config.max_attempts - 1:
+                if not retry_state.is_retriable():
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
                             await self._record_circuit_failure(
@@ -714,29 +747,24 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                         context=ctx,
                     ) from e
 
-            # Calculate exponential backoff
-            backoff = min(
-                retry_config.initial_delay_seconds
-                * (retry_config.exponential_base**attempt),
-                retry_config.max_delay_seconds,
-            )
-
+            # Use delay from retry state (already calculated with backoff)
             logger.debug(
                 "Retrying Consul operation",
                 extra={
                     "operation": operation,
-                    "attempt": attempt + 1,
-                    "max_attempts": retry_config.max_attempts,
-                    "backoff_seconds": backoff,
+                    "attempt": retry_state.attempt,
+                    "max_attempts": retry_state.max_attempts,
+                    "backoff_seconds": retry_state.delay_seconds,
+                    "last_error": retry_state.last_error,
                     "correlation_id": str(correlation_id),
                 },
             )
 
-            await asyncio.sleep(backoff)
+            await asyncio.sleep(retry_state.delay_seconds)
 
         # Should never reach here, but satisfy type checker
-        if last_exception is not None:
-            raise last_exception
+        if retry_state.last_error is not None:
+            raise RuntimeError(f"Retry exhausted: {retry_state.last_error}")
         raise RuntimeError("Retry loop completed without result")
 
     async def _kv_get(

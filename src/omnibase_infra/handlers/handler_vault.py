@@ -52,6 +52,7 @@ from omnibase_infra.errors import (
     SecretResolutionError,
 )
 from omnibase_infra.handlers.model_vault_handler_config import ModelVaultHandlerConfig
+from omnibase_infra.handlers.models import ModelOperationContext, ModelRetryState
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 logger = logging.getLogger(__name__)
@@ -683,17 +684,31 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             async with self._circuit_breaker_lock:
                 await self._check_circuit_breaker(operation, correlation_id)
 
+        # Initialize retry state with config values
         retry_config = self._config.retry
-        last_exception: Exception | None = None
+        retry_state = ModelRetryState(
+            attempt=0,
+            max_attempts=retry_config.max_attempts,
+            delay_seconds=retry_config.initial_backoff_seconds,
+            backoff_multiplier=retry_config.exponential_base,
+        )
 
-        for attempt in range(retry_config.max_attempts):
+        # Create operation context for tracking
+        op_context = ModelOperationContext.create(
+            operation_name=operation,
+            correlation_id=correlation_id,
+            timeout_seconds=self._config.timeout_seconds,
+            metadata={"namespace": self._config.namespace or "default"},
+        )
+
+        while retry_state.is_retriable():
             try:
                 # hvac is synchronous, wrap in custom thread executor
                 loop = asyncio.get_running_loop()
 
                 result = await asyncio.wait_for(
                     loop.run_in_executor(self._executor, func),
-                    timeout=self._config.timeout_seconds,
+                    timeout=op_context.timeout_seconds,
                 )
 
                 # Record success for circuit breaker (async mixin pattern)
@@ -704,9 +719,13 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 return result
 
             except TimeoutError as e:
-                last_exception = e
+                error_msg = f"Timeout after {op_context.timeout_seconds}s"
+                retry_state = retry_state.next_attempt(
+                    error_message=error_msg,
+                    max_delay_seconds=retry_config.max_backoff_seconds,
+                )
                 # Only record circuit failure on final retry attempt
-                if attempt == retry_config.max_attempts - 1:
+                if not retry_state.is_retriable():
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
                             await self._record_circuit_failure(
@@ -720,9 +739,9 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                         namespace=self._config.namespace if self._config else None,
                     )
                     raise InfraTimeoutError(
-                        f"Vault operation timed out after {self._config.timeout_seconds}s",
+                        f"Vault operation timed out after {op_context.timeout_seconds}s",
                         context=ctx,
-                        timeout_seconds=self._config.timeout_seconds,
+                        timeout_seconds=op_context.timeout_seconds,
                     ) from e
 
             except hvac.exceptions.Forbidden as e:
@@ -757,9 +776,13 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 ) from e
 
             except hvac.exceptions.VaultDown as e:
-                last_exception = e
+                error_msg = f"Vault down: {type(e).__name__}"
+                retry_state = retry_state.next_attempt(
+                    error_message=error_msg,
+                    max_delay_seconds=retry_config.max_backoff_seconds,
+                )
                 # Only record circuit failure on final retry attempt
-                if attempt == retry_config.max_attempts - 1:
+                if not retry_state.is_retriable():
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
                             await self._record_circuit_failure(
@@ -778,9 +801,13 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                     ) from e
 
             except Exception as e:
-                last_exception = e
+                error_msg = f"Unexpected error: {type(e).__name__}"
+                retry_state = retry_state.next_attempt(
+                    error_message=error_msg,
+                    max_delay_seconds=retry_config.max_backoff_seconds,
+                )
                 # Only record circuit failure on final retry attempt
-                if attempt == retry_config.max_attempts - 1:
+                if not retry_state.is_retriable():
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
                             await self._record_circuit_failure(
@@ -798,29 +825,24 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                         context=ctx,
                     ) from e
 
-            # Calculate exponential backoff
-            backoff = min(
-                retry_config.initial_backoff_seconds
-                * (retry_config.exponential_base**attempt),
-                retry_config.max_backoff_seconds,
-            )
-
+            # Use delay from retry state (already calculated with backoff)
             logger.debug(
                 "Retrying Vault operation",
                 extra={
                     "operation": operation,
-                    "attempt": attempt + 1,
-                    "max_attempts": retry_config.max_attempts,
-                    "backoff_seconds": backoff,
+                    "attempt": retry_state.attempt,
+                    "max_attempts": retry_state.max_attempts,
+                    "backoff_seconds": retry_state.delay_seconds,
+                    "last_error": retry_state.last_error,
                     "correlation_id": str(correlation_id),
                 },
             )
 
-            await asyncio.sleep(backoff)
+            await asyncio.sleep(retry_state.delay_seconds)
 
         # Should never reach here, but satisfy type checker
-        if last_exception is not None:
-            raise last_exception
+        if retry_state.last_error is not None:
+            raise RuntimeError(f"Retry exhausted: {retry_state.last_error}")
         raise RuntimeError("Retry loop completed without result")
 
     async def _read_secret(

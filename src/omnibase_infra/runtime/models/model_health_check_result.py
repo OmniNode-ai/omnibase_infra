@@ -31,12 +31,8 @@ Example:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
+from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
 
 
 class ModelHealthCheckResult(BaseModel):
@@ -67,7 +63,7 @@ class ModelHealthCheckResult(BaseModel):
         ...,
         description="Whether the handler is healthy",
     )
-    details: dict[str, object] = Field(
+    details: dict[str, JsonValue] = Field(
         default_factory=dict,
         description="Detailed health check data from the handler",
     )
@@ -92,7 +88,7 @@ class ModelHealthCheckResult(BaseModel):
             >>> result.healthy
             True
         """
-        details: dict[str, object] = {"healthy": True}
+        details: dict[str, JsonValue] = {"healthy": True}
         if note:
             details["note"] = note
         return cls(handler_type=handler_type, healthy=True, details=details)

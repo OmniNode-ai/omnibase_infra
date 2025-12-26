@@ -1,0 +1,123 @@
+# Copyright 2025 OmniNode Team. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+"""Configuration model for circuit breaker initialization.
+
+This module provides the configuration model used to initialize the
+MixinAsyncCircuitBreaker mixin. Grouping parameters into a configuration
+model follows ONEX patterns for reducing function parameter count and
+union patterns.
+
+Circuit Breaker Overview:
+    The circuit breaker pattern prevents cascading failures in distributed systems
+    by temporarily blocking requests to a failing service. It operates in three states:
+    - CLOSED: Normal operation, requests allowed
+    - OPEN: Circuit tripped after threshold failures, requests blocked
+    - HALF_OPEN: Testing recovery after reset timeout, limited requests allowed
+
+See Also:
+    - MixinAsyncCircuitBreaker: The mixin that uses this configuration
+    - docs/patterns/circuit_breaker_implementation.md: Implementation details
+"""
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.enums import EnumInfraTransportType
+
+
+class ModelCircuitBreakerConfig(BaseModel):
+    """Configuration model for circuit breaker initialization.
+
+    This model groups all parameters required by ``_init_circuit_breaker()``
+    into a single configuration object, following ONEX conventions for functions
+    with more than 5 parameters and reducing union type patterns.
+
+    Attributes:
+        threshold: Maximum number of consecutive failures before opening the
+            circuit. Must be >= 1. Default: 5.
+        reset_timeout_seconds: Time in seconds before the circuit automatically
+            transitions from OPEN to HALF_OPEN for recovery testing.
+            Must be >= 0. Default: 60.0.
+        service_name: Identifier for the service being protected. Used in error
+            context and logging. Default: "unknown".
+        transport_type: Transport type for error context classification.
+            Determines which error code is used when the circuit opens.
+            Default: HTTP.
+
+    Example:
+        ```python
+        from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+        from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+        from omnibase_infra.enums import EnumInfraTransportType
+
+        class KafkaEventBus(MixinAsyncCircuitBreaker):
+            def __init__(self, environment: str):
+                config = ModelCircuitBreakerConfig(
+                    threshold=5,
+                    reset_timeout_seconds=60.0,
+                    service_name=f"kafka.{environment}",
+                    transport_type=EnumInfraTransportType.KAFKA,
+                )
+                self._init_circuit_breaker_from_config(config)
+
+        # With defaults
+        class HttpClient(MixinAsyncCircuitBreaker):
+            def __init__(self, service_name: str):
+                config = ModelCircuitBreakerConfig(service_name=service_name)
+                self._init_circuit_breaker_from_config(config)
+        ```
+
+    Configuration Guidelines:
+        - High-reliability services: Use lower threshold (3) and longer timeout (120s)
+        - Best-effort services: Use higher threshold (10) and shorter timeout (30s)
+        - Tune based on service SLAs and failure characteristics
+
+    See Also:
+        MixinAsyncCircuitBreaker: The mixin that uses this configuration.
+    """
+
+    threshold: int = Field(
+        default=5,
+        ge=1,
+        description="Maximum consecutive failures before opening the circuit",
+    )
+
+    reset_timeout_seconds: float = Field(
+        default=60.0,
+        ge=0.0,
+        description="Seconds before automatic transition from OPEN to HALF_OPEN",
+    )
+
+    service_name: str = Field(
+        default="unknown",
+        min_length=1,
+        description="Service identifier for error context and logging",
+    )
+
+    transport_type: EnumInfraTransportType = Field(
+        default=EnumInfraTransportType.HTTP,
+        description="Transport type for error context classification",
+    )
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "threshold": 5,
+                    "reset_timeout_seconds": 60.0,
+                    "service_name": "kafka.production",
+                    "transport_type": "kafka",
+                },
+                {
+                    "threshold": 3,
+                    "reset_timeout_seconds": 120.0,
+                    "service_name": "postgresql-primary",
+                    "transport_type": "db",
+                },
+            ]
+        },
+    )
+
+
+__all__ = ["ModelCircuitBreakerConfig"]
