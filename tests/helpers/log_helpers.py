@@ -19,6 +19,11 @@ Example usage:
 import logging
 from collections.abc import Sequence
 
+__all__ = [
+    "filter_handler_warnings",
+    "get_warning_messages",
+]
+
 
 def filter_handler_warnings(
     records: Sequence[logging.LogRecord],
