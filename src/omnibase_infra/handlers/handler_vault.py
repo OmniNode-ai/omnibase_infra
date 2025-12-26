@@ -67,7 +67,6 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
         "vault.delete_secret",
         "vault.list_secrets",
         "vault.renew_token",
-        "vault.health_check",
     }
 )
 
@@ -81,9 +80,8 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
         1. Token is stored as SecretStr in config (never logged or exposed)
         2. All error messages use generic descriptions without exposing token
-        3. Health check responses exclude token information
-        4. Token renewal is automatic when TTL falls below threshold
-        5. The describe() method returns capabilities without credentials
+        3. Token renewal is automatic when TTL falls below threshold
+        4. The describe() method returns capabilities without credentials
 
         See CLAUDE.md "Error Sanitization Guidelines" for the full security policy
         on what information is safe vs unsafe to include in errors and logs.
@@ -558,10 +556,8 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             return await self._delete_secret(payload, correlation_id, input_envelope_id)
         elif operation == "vault.list_secrets":
             return await self._list_secrets(payload, correlation_id, input_envelope_id)
-        elif operation == "vault.renew_token":
+        else:  # vault.renew_token
             return await self._renew_token_operation(correlation_id, input_envelope_id)
-        else:  # vault.health_check
-            return await self._health_check_operation(correlation_id, input_envelope_id)
 
     async def _check_token_renewal(self, correlation_id: UUID) -> None:
         """Check if token needs renewal and renew if necessary.
@@ -1284,174 +1280,6 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                     "renewable": auth_data.get("renewable", False),
                     "lease_duration": auth_data.get("lease_duration", 0),
                 },
-                "correlation_id": str(correlation_id),
-            },
-        )
-
-    async def health_check(
-        self, correlation_id: UUID | None = None
-    ) -> dict[str, JsonValue]:
-        """Return handler health status with operational metrics.
-
-        Uses thread pool executor and retry logic for consistency with other operations.
-        Includes circuit breaker protection and exponential backoff on transient failures.
-
-        This is the standalone health check method intended for direct invocation by
-        monitoring systems, health check endpoints, or diagnostic tools. When called
-        directly, a new correlation_id is generated for tracing purposes.
-
-        Envelope-Based vs Direct Invocation:
-            - Direct: Call health_check() for monitoring/diagnostics. If no correlation_id
-              is provided, a new one is generated internally for tracing.
-            - Envelope: Use execute() with operation="vault.health_check" for dispatch.
-              The envelope's correlation_id and envelope_id are preserved for causality.
-
-        Note:
-            This method does not accept envelope_id because it's designed for direct
-            invocation outside the envelope dispatch context. For envelope-based health
-            checks that preserve causality tracking, use _health_check_operation() via
-            the execute() method.
-
-        Args:
-            correlation_id: Optional correlation ID for tracing. When called via
-                envelope dispatch, this preserves the request's correlation_id.
-                When called directly (e.g., by monitoring), a new ID is generated.
-
-        Returns:
-            Health status dict with handler state information including:
-            - Basic health status (healthy, initialized, handler_type, timeout_seconds)
-            - Token TTL remaining (sanitized - no actual token value)
-            - Circuit breaker state and failure count
-            - Thread pool utilization metrics
-
-        Raises:
-            RuntimeHostError: If health check fails (errors are propagated, not swallowed)
-        """
-        healthy = False
-        if correlation_id is None:
-            correlation_id = uuid4()
-
-        # Calculate operational metrics (safe even if not initialized)
-        token_ttl_remaining: int | None = None
-        circuit_state: str | None = None
-        circuit_failure_count: int = 0
-        thread_pool_active: int = 0
-        thread_pool_max: int = 0
-
-        if self._initialized and self._config is not None:
-            # Token TTL remaining (sanitized - never expose actual token)
-            current_time = time.time()
-            ttl_remaining = self._token_expires_at - current_time
-            token_ttl_remaining = max(0, int(ttl_remaining))
-
-            # Circuit breaker state (thread-safe access via mixin)
-            if self._circuit_breaker_initialized:
-                async with self._circuit_breaker_lock:
-                    circuit_state = "open" if self._circuit_breaker_open else "closed"
-                    circuit_failure_count = self._circuit_breaker_failures
-
-            # Thread pool metrics
-            thread_pool_max = self._max_workers
-            if self._executor is not None:
-                # Access _threads with getattr for safety - ThreadPoolExecutor
-                # tracks active threads in _threads set but it's internal.
-                # This is acceptable for observability metrics; if the attribute
-                # is removed in future Python versions, we gracefully return 0.
-                threads_set = getattr(self._executor, "_threads", None)
-                if threads_set is not None:
-                    thread_pool_active = len(threads_set)
-                # Note: There's no public API for active thread count in
-                # ThreadPoolExecutor. The _threads attribute exists in all
-                # Python 3.x versions and is unlikely to change.
-
-        if self._initialized and self._client is not None:
-
-            def health_check_func() -> dict[str, JsonValue]:
-                if self._client is None:
-                    raise RuntimeError("Client not initialized")
-                response = self._client.sys.read_health_status()
-                # hvac returns Response object for some status codes, dict for others
-                if hasattr(response, "json"):
-                    # Response may have empty body (200 OK with no content)
-                    if hasattr(response, "text") and response.text:
-                        result: dict[str, JsonValue] = response.json()
-                    else:
-                        # Empty response means healthy (200 OK)
-                        result = {"initialized": True, "sealed": False}
-                else:
-                    result = response
-                return result
-
-            # Use thread pool executor with retry logic for consistency
-            # Errors are propagated (not caught) per PR #38 feedback
-            health_result = await self._execute_with_retry(
-                "vault.health_check",
-                health_check_func,
-                correlation_id,
-            )
-            # Type checking for healthy status extraction
-            initialized_val = health_result.get("initialized", False)
-            healthy = initialized_val if isinstance(initialized_val, bool) else False
-
-        return {
-            "healthy": healthy,
-            "initialized": self._initialized,
-            "handler_type": self.handler_type.value,
-            "timeout_seconds": self._config.timeout_seconds if self._config else 30.0,
-            # Operational metrics for visibility
-            "token_ttl_remaining_seconds": token_ttl_remaining,
-            "circuit_breaker_state": circuit_state,
-            "circuit_breaker_failure_count": circuit_failure_count,
-            "thread_pool_active_workers": thread_pool_active,
-            "thread_pool_max_workers": thread_pool_max,
-        }
-
-    async def _health_check_operation(
-        self,
-        correlation_id: UUID,
-        input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
-        """Execute health check operation from envelope.
-
-        This method wraps the core health_check() functionality in a ModelHandlerOutput
-        for envelope-based operation dispatch. It differs from health_check() in that:
-
-        1. It accepts pre-extracted IDs from the request envelope
-        2. It returns ModelHandlerOutput (suitable for envelope dispatch)
-        3. It preserves causality tracking via input_envelope_id
-
-        ID Semantics:
-            correlation_id: Groups related operations across distributed services.
-                Used for filtering logs, tracing request flows, and debugging.
-                Propagated from the request envelope or auto-generated if missing.
-
-            input_envelope_id: Links this response to the originating request envelope.
-                Enables request/response correlation in observability systems.
-                When called via execute(), extracted from the request envelope.
-                Auto-generated if not provided, ensuring all responses have valid
-                causality tracking IDs.
-
-        The standalone health_check() method generates its own correlation_id since
-        it may be called directly (not via envelope dispatch) for monitoring purposes.
-
-        Args:
-            correlation_id: Correlation ID for distributed tracing across services.
-            input_envelope_id: Envelope ID for causality tracking. Links this health
-                check response to the original request envelope, enabling end-to-end
-                request/response correlation in observability systems.
-
-        Returns:
-            ModelHandlerOutput with health check information
-        """
-        health_status = await self.health_check(correlation_id=correlation_id)
-
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_VAULT,
-            result={
-                "status": "success",
-                "payload": health_status,
                 "correlation_id": str(correlation_id),
             },
         )

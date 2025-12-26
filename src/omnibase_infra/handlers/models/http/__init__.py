@@ -9,7 +9,6 @@ Exports:
     EnumHttpOperationType: Discriminator enum for HTTP operation types
     ModelHttpGetPayload: Payload for http.get result
     ModelHttpPostPayload: Payload for http.post result
-    ModelHttpHealthCheckPayload: Payload for HTTP health check result
     HttpPayload: Discriminated union of all HTTP payload types
     ModelHttpHandlerPayload: Wrapper containing discriminated union payload
 """
@@ -24,9 +23,6 @@ from omnibase_infra.handlers.models.http.model_http_handler_payload import (
     HttpPayload,
     ModelHttpHandlerPayload,
 )
-from omnibase_infra.handlers.models.http.model_http_health_check_payload import (
-    ModelHttpHealthCheckPayload,
-)
 from omnibase_infra.handlers.models.http.model_http_post_payload import (
     ModelHttpPostPayload,
 )
@@ -35,7 +31,6 @@ __all__: list[str] = [
     "EnumHttpOperationType",
     "ModelHttpGetPayload",
     "ModelHttpPostPayload",
-    "ModelHttpHealthCheckPayload",
     "HttpPayload",
     "ModelHttpHandlerPayload",
 ]

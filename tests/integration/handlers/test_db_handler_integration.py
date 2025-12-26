@@ -24,13 +24,13 @@ Skip Conditions:
 Example CI/CD Output::
 
     $ pytest tests/integration/handlers/test_db_handler_integration.py -v
-    test_db_health_check SKIPPED (PostgreSQL not available - POSTGRES_PASSWORD not set)
+    test_db_describe SKIPPED (PostgreSQL not available - POSTGRES_PASSWORD not set)
     test_db_query_simple SKIPPED (PostgreSQL not available - POSTGRES_PASSWORD not set)
 
 Test Categories
 ===============
 
-- Connection Tests: Validate basic connectivity and health checks
+- Connection Tests: Validate basic connectivity and handler lifecycle
 - Query Tests: Verify SELECT operations with various inputs
 - Execute Tests: Verify INSERT/UPDATE/DELETE and DDL operations
 - Error Handling Tests: Validate proper error responses for invalid inputs
@@ -91,7 +91,6 @@ if TYPE_CHECKING:
 # Handler default configuration values
 # These match the defaults in DbHandler and are tested to ensure consistency
 DB_HANDLER_DEFAULT_POOL_SIZE = 5
-DB_HANDLER_DEFAULT_TIMEOUT_SECONDS = 30.0
 DB_HANDLER_VERSION = "0.1.0-mvp"
 
 # Module-level markers - skip all tests if PostgreSQL is not available
@@ -111,50 +110,6 @@ pytestmark = [
 
 class TestDbHandlerConnection:
     """Tests for DbHandler connection and lifecycle management."""
-
-    @pytest.mark.asyncio
-    async def test_db_health_check(self, db_config: dict[str, JsonValue]) -> None:
-        """Verify DbHandler can connect to remote PostgreSQL and report healthy.
-
-        This test validates that the handler can:
-        1. Initialize connection pool successfully
-        2. Execute health check query (SELECT 1)
-        3. Report healthy status with correct metadata
-        """
-        from omnibase_infra.handlers import DbHandler
-
-        handler = DbHandler()
-        await handler.initialize(db_config)
-
-        try:
-            health = await handler.health_check()
-
-            # Verify health response structure
-            assert health.healthy is True, "Handler should report healthy"
-            assert health.initialized is True, "Handler should be initialized"
-            assert health.handler_type == "database", (
-                "Handler type should be 'database'"
-            )
-            assert health.pool_size == DB_HANDLER_DEFAULT_POOL_SIZE, (
-                f"Default pool size should be {DB_HANDLER_DEFAULT_POOL_SIZE}"
-            )
-            assert health.timeout_seconds == DB_HANDLER_DEFAULT_TIMEOUT_SECONDS, (
-                f"Timeout should match default of {DB_HANDLER_DEFAULT_TIMEOUT_SECONDS}s"
-            )
-        finally:
-            await handler.shutdown()
-
-    @pytest.mark.asyncio
-    async def test_db_health_check_not_initialized(self) -> None:
-        """Verify health check returns unhealthy when not initialized."""
-        from omnibase_infra.handlers import DbHandler
-
-        handler = DbHandler()
-
-        health = await handler.health_check()
-
-        assert health.healthy is False, "Should be unhealthy when not initialized"
-        assert health.initialized is False, "Should not be initialized"
 
     @pytest.mark.asyncio
     async def test_db_describe(self, db_config: dict[str, JsonValue]) -> None:
@@ -178,23 +133,31 @@ class TestDbHandlerConnection:
 
     @pytest.mark.asyncio
     async def test_db_shutdown_cleans_up(self, db_config: dict[str, JsonValue]) -> None:
-        """Verify shutdown properly closes connection pool."""
+        """Verify shutdown properly closes connection pool.
+
+        After shutdown, the handler should reject execute() calls with
+        a RuntimeHostError indicating it is not initialized.
+        """
+        from omnibase_infra.errors import RuntimeHostError
         from omnibase_infra.handlers import DbHandler
 
         handler = DbHandler()
         await handler.initialize(db_config)
 
-        # Verify initialized
-        health = await handler.health_check()
-        assert health.healthy is True
+        # Verify initialized by executing a simple query
+        envelope = {
+            "operation": "db.query",
+            "payload": {"sql": "SELECT 1", "parameters": []},
+        }
+        result = await handler.execute(envelope)
+        assert result.result.status == "success"
 
         # Shutdown
         await handler.shutdown()
 
-        # Verify cleaned up
-        health = await handler.health_check()
-        assert health.healthy is False
-        assert health.initialized is False
+        # Verify cleaned up - execute should fail after shutdown
+        with pytest.raises(RuntimeHostError, match="not initialized"):
+            await handler.execute(envelope)
 
 
 # =============================================================================
