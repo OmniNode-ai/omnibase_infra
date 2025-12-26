@@ -347,6 +347,9 @@ class ModelReplayConfig(BaseModel):
                 filter_start_time = datetime.fromisoformat(
                     start_time_str.replace("Z", "+00:00")
                 )
+                # Ensure timezone-aware (assume UTC if not specified)
+                if filter_start_time.tzinfo is None:
+                    filter_start_time = filter_start_time.replace(tzinfo=UTC)
             except ValueError as e:
                 raise ValueError(
                     f"Invalid start_time format: {start_time_str}. "
@@ -359,6 +362,9 @@ class ModelReplayConfig(BaseModel):
                 filter_end_time = datetime.fromisoformat(
                     end_time_str.replace("Z", "+00:00")
                 )
+                # Ensure timezone-aware (assume UTC if not specified)
+                if filter_end_time.tzinfo is None:
+                    filter_end_time = filter_end_time.replace(tzinfo=UTC)
             except ValueError as e:
                 raise ValueError(
                     f"Invalid end_time format: {end_time_str}. "

@@ -224,41 +224,30 @@ class DLQReplayTracker:
                 },
             )
         except asyncpg.InvalidPasswordError as e:
-            # Clean up pool if it was created before table setup failed
-            if self._pool is not None:
-                await self._pool.close()
-                self._pool = None
             raise InfraConnectionError(
                 "Database authentication failed - check credentials",
                 context=context,
             ) from e
         except asyncpg.InvalidCatalogNameError as e:
-            # Clean up pool if it was created before table setup failed
-            if self._pool is not None:
-                await self._pool.close()
-                self._pool = None
             raise InfraConnectionError(
                 "Database not found - check database name",
                 context=context,
             ) from e
         except OSError as e:
-            # Clean up pool if it was created before table setup failed
-            if self._pool is not None:
-                await self._pool.close()
-                self._pool = None
             raise InfraConnectionError(
                 "Failed to connect to database - check host and port",
                 context=context,
             ) from e
         except Exception as e:
-            # Clean up pool if it was created before table setup failed
-            if self._pool is not None:
-                await self._pool.close()
-                self._pool = None
             raise RuntimeHostError(
                 f"Failed to initialize DLQ tracking service: {type(e).__name__}",
                 context=context,
             ) from e
+        finally:
+            # Cleanup pool if initialization failed
+            if not self._initialized and self._pool is not None:
+                await self._pool.close()
+                self._pool = None
 
     async def _ensure_table_exists(self) -> None:
         """Create the DLQ replay history table if it doesn't exist.

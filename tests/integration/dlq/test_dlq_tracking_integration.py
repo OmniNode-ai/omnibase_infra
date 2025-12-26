@@ -101,10 +101,10 @@ class TestDLQTrackingServiceInitialization:
         async with dlq_tracking_service._pool.acquire() as conn:
             result = await conn.fetchval(
                 "SELECT 1 FROM information_schema.tables WHERE table_name = $1",
-                dlq_tracking_config.table_name,
+                dlq_tracking_config.storage_table,
             )
             assert result == 1, (
-                f"Table {dlq_tracking_config.table_name} should exist after init"
+                f"Table {dlq_tracking_config.storage_table} should exist after init"
             )
 
     @pytest.mark.asyncio
@@ -128,7 +128,7 @@ class TestDLQTrackingServiceInitialization:
                 SELECT 1 FROM pg_indexes
                 WHERE indexname = $1
                 """,
-                f"idx_{dlq_tracking_config.table_name}_message_id",
+                f"idx_{dlq_tracking_config.storage_table}_message_id",
             )
             assert message_id_index == 1, "Index on original_message_id should exist"
 
@@ -138,7 +138,7 @@ class TestDLQTrackingServiceInitialization:
                 SELECT 1 FROM pg_indexes
                 WHERE indexname = $1
                 """,
-                f"idx_{dlq_tracking_config.table_name}_timestamp",
+                f"idx_{dlq_tracking_config.storage_table}_timestamp",
             )
             assert timestamp_index == 1, "Index on replay_timestamp should exist"
 
