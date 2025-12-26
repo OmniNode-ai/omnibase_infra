@@ -17,8 +17,23 @@ Design Pattern:
     The registry resolves types dynamically during Pydantic validation,
     enabling new intent types to be added without modifying existing code.
 
+IMPORTANT - Union Sync Requirement (OMN-1007):
+    When adding a new intent type, you MUST update BOTH:
+
+    1. Register with @IntentRegistry.register("kind") decorator (this file)
+    2. Add the model to ModelRegistrationIntent union in model_registration_intent.py
+
+    The IntentRegistry enables dynamic type resolution for ModelReducerExecutionResult,
+    while ModelRegistrationIntent is a static discriminated union used for Pydantic
+    field type hints in protocols (e.g., ProtocolEffect.execute_intent).
+
+    Use validate_union_registry_sync() from model_registration_intent.py in tests
+    to verify the two systems stay in sync.
+
 Related:
+    - model_registration_intent.py: ModelRegistrationIntent discriminated union
     - ProtocolRegistrationIntent: Protocol for duck-typed function signatures
+    - validate_union_registry_sync(): Test helper for sync validation
     - OMN-1007: Union reduction refactoring
 """
 

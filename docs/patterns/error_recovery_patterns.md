@@ -24,7 +24,7 @@ This document describes resilience patterns for handling infrastructure failures
 ### Implementation
 
 ```python
-from typing import TypeVar, Callable, Any
+from typing import TypeVar, Callable
 from uuid import UUID
 import asyncio
 from omnibase_infra.errors import InfraConnectionError

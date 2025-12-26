@@ -47,6 +47,10 @@ from omnibase_infra.nodes.node_registration_orchestrator.models import (
     ModelReducerState,
     ModelRegistryIntent,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_registration_intent import (
+    get_union_intent_types,
+    validate_union_registry_sync,
+)
 
 # ============================================================================
 # Test Fixtures
@@ -1142,3 +1146,127 @@ class TestIntentEdgeCases:
 
         assert len(result.intents) == 100
         assert result.intent_count == 100
+
+
+# ============================================================================
+# Tests for Union and Registry Sync Validation (OMN-1007)
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestUnionRegistrySync:
+    """Tests for union and registry synchronization.
+
+    These tests verify that the ModelRegistrationIntent discriminated union
+    and the IntentRegistry stay in sync. This is critical because:
+
+    1. ModelRegistrationIntent (static union) is used for Pydantic field validation
+    2. IntentRegistry (dynamic) is used for runtime type resolution
+
+    If they drift, validation and deserialization may behave inconsistently.
+
+    Related:
+        - OMN-1007: Union reduction refactoring
+        - model_registration_intent.py: validate_union_registry_sync()
+    """
+
+    def test_validate_union_registry_sync_passes(self) -> None:
+        """Union and registry should be in sync by default.
+
+        This is the critical test that catches sync issues. If this fails,
+        someone added a new intent type to one location but not the other.
+        """
+        is_valid, errors = validate_union_registry_sync()
+
+        if not is_valid:
+            # Provide helpful error message for debugging
+            error_msg = "Union and registry are out of sync:\n" + "\n".join(
+                f"  - {e}" for e in errors
+            )
+            pytest.fail(error_msg)
+
+    def test_get_union_intent_types_returns_all_types(self) -> None:
+        """get_union_intent_types returns all types in the union."""
+        types = get_union_intent_types()
+
+        assert isinstance(types, tuple)
+        assert len(types) >= 2  # At least consul and postgres
+        assert ModelConsulRegistrationIntent in types
+        assert ModelPostgresUpsertIntent in types
+
+    def test_union_types_match_registry_count(self) -> None:
+        """Number of union types matches number of registered types."""
+        union_types = get_union_intent_types()
+        registry_types = IntentRegistry.get_all_types()
+
+        assert len(union_types) == len(registry_types), (
+            f"Union has {len(union_types)} types but registry has "
+            f"{len(registry_types)} types. They must match."
+        )
+
+    def test_all_union_types_are_registered(self) -> None:
+        """All types in the union are registered in IntentRegistry."""
+        union_types = get_union_intent_types()
+
+        for union_type in union_types:
+            # Get the kind from the class default
+            kind_default = getattr(union_type, "model_fields", {}).get("kind")
+            assert kind_default is not None, (
+                f"{union_type.__name__} has no 'kind' field"
+            )
+
+            kind_value = kind_default.default
+            assert IntentRegistry.is_registered(kind_value), (
+                f"{union_type.__name__} with kind='{kind_value}' is not "
+                f"registered in IntentRegistry"
+            )
+
+    def test_all_registered_types_are_in_union(self) -> None:
+        """All types in IntentRegistry are included in the union."""
+        union_types = set(get_union_intent_types())
+        registry_types = IntentRegistry.get_all_types()
+
+        for kind, registered_type in registry_types.items():
+            assert registered_type in union_types, (
+                f"Registered type {registered_type.__name__} (kind='{kind}') "
+                f"is missing from ModelRegistrationIntent union. "
+                f"Add it to model_registration_intent.py"
+            )
+
+    def test_registry_types_match_union_types_exactly(self) -> None:
+        """Registry and union contain exactly the same type instances."""
+        union_types = set(get_union_intent_types())
+        registry_types = set(IntentRegistry.get_all_types().values())
+
+        assert union_types == registry_types, (
+            f"Union types {union_types} do not match registry types {registry_types}"
+        )
+
+    def test_sync_validation_detects_missing_from_union(self) -> None:
+        """Sync validation detects when a type is registered but not in union.
+
+        This test temporarily registers a new type and verifies the
+        validation function catches the inconsistency.
+        """
+        # Save original registry state
+        original_types = IntentRegistry.get_all_types()
+
+        try:
+            # Register a fake type that won't be in the union
+            @IntentRegistry.register("fake_test_kind")
+            class FakeIntent(ModelRegistryIntent):
+                kind: Literal["fake_test_kind"] = "fake_test_kind"
+
+            # Now validation should fail
+            is_valid, errors = validate_union_registry_sync()
+
+            assert is_valid is False, "Should detect missing union type"
+            assert len(errors) >= 1
+            assert any("fake_test_kind" in e for e in errors)
+            assert any("missing from" in e.lower() for e in errors)
+
+        finally:
+            # Restore original registry state
+            IntentRegistry.clear()
+            for kind, cls in original_types.items():
+                IntentRegistry._types[kind] = cls

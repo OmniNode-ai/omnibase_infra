@@ -73,29 +73,46 @@ class ModelConsulIntentPayload(BaseModel):
         """Convert list/sequence to tuple for immutability.
 
         This validator ensures explicit handling of all input types rather than
-        silent fallback, which could mask invalid input.
+        silent fallback, which could mask invalid input. In strict mode, all
+        items must already be strings - no silent type coercion.
 
         Args:
-            v: The input value to coerce. Must be a tuple, list, set, or frozenset.
+            v: The input value to coerce. Must be a tuple, list, set, or frozenset
+                containing only string elements.
 
         Returns:
             A tuple of string tags.
 
         Raises:
-            ValueError: If the input is not a recognized sequence type.
-                This ensures invalid input types are explicitly rejected rather
-                than silently coerced to unexpected values.
+            ValueError: If the input is not a recognized sequence type or if
+                any element is not a string. This ensures invalid input types
+                are explicitly rejected rather than silently coerced.
 
         Edge Cases:
             - ``None``: Raises ValueError (explicit rejection)
             - Empty sequence ``[]``, ``()``: Returns empty tuple
             - Invalid types (int, str, dict): Raises ValueError
-            - Valid sequences: Converts to tuple of strings
+            - Non-string elements: Raises ValueError (strict mode)
+            - Valid sequences of strings: Converts to tuple
         """
         if isinstance(v, tuple):
+            # Validate tuple contents in strict mode
+            for i, item in enumerate(v):
+                if not isinstance(item, str):
+                    raise ValueError(
+                        f"tags[{i}] must be a string, got {type(item).__name__}"
+                    )
             return v  # type: ignore[return-value]  # Runtime validated by Pydantic
         if isinstance(v, list | set | frozenset):
-            return tuple(str(item) for item in v)
+            # Validate and convert to tuple - strict mode requires string elements
+            result: list[str] = []
+            for i, item in enumerate(v):
+                if not isinstance(item, str):
+                    raise ValueError(
+                        f"tags[{i}] must be a string, got {type(item).__name__}"
+                    )
+                result.append(item)
+            return tuple(result)
         raise ValueError(
             f"tags must be a tuple, list, set, or frozenset, got {type(v).__name__}"
         )
@@ -106,31 +123,60 @@ class ModelConsulIntentPayload(BaseModel):
         """Convert dict/mapping to tuple of pairs for immutability.
 
         This validator ensures explicit handling of all input types rather than
-        silent fallback to empty tuple, which could mask invalid input.
+        silent fallback to empty tuple, which could mask invalid input. In strict
+        mode, all keys and values must already be strings - no silent type coercion.
 
         Args:
             v: The input value to coerce. Must be either a tuple of (key, value)
-                pairs or a Mapping (dict-like object).
+                pairs or a Mapping (dict-like object) with string keys and values.
 
         Returns:
             A tuple of (key, value) string pairs.
 
         Raises:
-            ValueError: If the input is neither a tuple nor a Mapping type.
-                This ensures invalid input types are explicitly rejected rather
-                than silently converted to empty tuple.
+            ValueError: If the input is neither a tuple nor a Mapping type, or if
+                any key/value is not a string. This ensures invalid input types
+                are explicitly rejected rather than silently coerced.
 
         Edge Cases:
             - ``None``: Raises ValueError (explicit rejection)
             - Empty Mapping ``{}``: Returns empty tuple
             - Empty tuple ``()``: Passed through (same as default)
             - Invalid types (list, int, str): Raises ValueError
-            - Non-empty Mapping: Converts to tuple of (key, value) pairs
+            - Non-string keys/values: Raises ValueError (strict mode)
+            - Non-empty Mapping with strings: Converts to tuple of (key, value) pairs
         """
         if isinstance(v, tuple):
+            # Validate tuple contents in strict mode
+            for i, item in enumerate(v):
+                if not isinstance(item, tuple) or len(item) != 2:
+                    raise ValueError(
+                        f"meta[{i}] must be a (key, value) tuple, got {type(item).__name__}"
+                    )
+                key, val = item
+                if not isinstance(key, str):
+                    raise ValueError(
+                        f"meta[{i}][0] (key) must be a string, got {type(key).__name__}"
+                    )
+                if not isinstance(val, str):
+                    raise ValueError(
+                        f"meta[{i}][1] (value) must be a string, got {type(val).__name__}"
+                    )
             return v  # type: ignore[return-value]  # Runtime validated by Pydantic
         if isinstance(v, Mapping):
-            return tuple((str(k), str(val)) for k, val in v.items())
+            # Validate and convert to tuple - strict mode requires string keys/values
+            result: list[tuple[str, str]] = []
+            for key, val in v.items():
+                if not isinstance(key, str):
+                    raise ValueError(
+                        f"meta key must be a string, got {type(key).__name__}"
+                    )
+                if not isinstance(val, str):
+                    raise ValueError(
+                        f"meta[{key!r}] value must be a string, got {type(val).__name__}"
+                    )
+                result.append((key, val))
+            return tuple(result)
         raise ValueError(f"meta must be a tuple or Mapping, got {type(v).__name__}")
 
     @property

@@ -136,19 +136,20 @@ class ModelPostgresIntentPayload(BaseModel):
         """Convert dict/mapping to tuple of pairs for immutability.
 
         This validator ensures explicit handling of all input types rather than
-        silent fallback to empty tuple, which could mask invalid input.
+        silent fallback to empty tuple, which could mask invalid input. In strict
+        mode, all keys and values must already be strings - no silent type coercion.
 
         Args:
             v: The input value to coerce. Must be either a tuple of (key, value)
-                pairs or a Mapping (dict-like object).
+                pairs or a Mapping (dict-like object) with string keys and values.
 
         Returns:
             A tuple of (key, value) string pairs.
 
         Raises:
-            ValueError: If the input is neither a tuple nor a Mapping type.
-                This ensures invalid input types are explicitly rejected rather
-                than silently converted to empty tuple.
+            ValueError: If the input is neither a tuple nor a Mapping type, or if
+                any key/value is not a string. This ensures invalid input types
+                are explicitly rejected rather than silently coerced.
 
         Warns:
             UserWarning: When an empty Mapping is coerced to empty tuple.
@@ -160,7 +161,8 @@ class ModelPostgresIntentPayload(BaseModel):
             - Empty Mapping ``{}``: Logs warning, returns empty tuple
             - Empty tuple ``()``: Passed through (same as default)
             - Invalid types (list, int, str): Raises ValueError
-            - Non-empty Mapping: Converts to tuple of (key, value) pairs
+            - Non-string keys/values: Raises ValueError (strict mode)
+            - Non-empty Mapping with strings: Converts to tuple of (key, value) pairs
 
         Example:
             >>> # Valid inputs
@@ -171,8 +173,27 @@ class ModelPostgresIntentPayload(BaseModel):
             >>> # Invalid inputs raise ValueError
             >>> _coerce_endpoints_to_tuple(None)  # Raises ValueError
             >>> _coerce_endpoints_to_tuple([])    # Raises ValueError (list not Mapping)
+            >>> _coerce_endpoints_to_tuple({1: "/health"})  # Raises ValueError (non-string key)
         """
         if isinstance(v, tuple):
+            # Validate tuple contents in strict mode
+            for i, item in enumerate(v):
+                if not isinstance(item, tuple) or len(item) != 2:
+                    raise ValueError(
+                        f"endpoints[{i}] must be a (key, value) tuple, "
+                        f"got {type(item).__name__}"
+                    )
+                key, val = item
+                if not isinstance(key, str):
+                    raise ValueError(
+                        f"endpoints[{i}][0] (key) must be a string, "
+                        f"got {type(key).__name__}"
+                    )
+                if not isinstance(val, str):
+                    raise ValueError(
+                        f"endpoints[{i}][1] (value) must be a string, "
+                        f"got {type(val).__name__}"
+                    )
             return v  # type: ignore[return-value]  # Runtime validated by Pydantic
         if isinstance(v, Mapping):
             if len(v) == 0:
@@ -185,7 +206,21 @@ class ModelPostgresIntentPayload(BaseModel):
                 )
                 warnings.warn(msg, UserWarning, stacklevel=2)
                 logger.warning(msg)
-            return tuple((str(k), str(val)) for k, val in v.items())
+                return ()
+            # Validate and convert to tuple - strict mode requires string keys/values
+            result: list[tuple[str, str]] = []
+            for key, val in v.items():
+                if not isinstance(key, str):
+                    raise ValueError(
+                        f"endpoints key must be a string, got {type(key).__name__}"
+                    )
+                if not isinstance(val, str):
+                    raise ValueError(
+                        f"endpoints[{key!r}] value must be a string, "
+                        f"got {type(val).__name__}"
+                    )
+                result.append((key, val))
+            return tuple(result)
         raise ValueError(
             f"endpoints must be a tuple or Mapping, got {type(v).__name__}"
         )

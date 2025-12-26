@@ -362,34 +362,47 @@ class TestEndpointsValidatorEdgeCases:
         assert endpoints_view["api"] == "/api"
         assert len(endpoints_view) == 2
 
-    def test_non_string_keys_coerced_to_string(
+    def test_non_string_keys_raises_validation_error(
         self, base_payload_kwargs: dict[str, Any]
     ) -> None:
-        """Verify non-string dict keys are coerced to strings."""
-        # Dict with int keys - should be coerced to strings
-        # Note: This tests the str(k) behavior in the validator
-        payload = ModelPostgresIntentPayload(
-            **base_payload_kwargs,
-            endpoints={1: "/one", 2: "/two"},  # type: ignore[dict-item]
-        )
+        """Verify non-string dict keys raise ValidationError in strict mode.
 
-        # Keys should be string-coerced
-        assert ("1", "/one") in payload.endpoints
-        assert ("2", "/two") in payload.endpoints
+        Per PR #92 review: validators now use strict mode that rejects non-string
+        keys instead of silently coercing them to strings. This ensures explicit
+        type handling rather than masking potential data issues.
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            ModelPostgresIntentPayload(
+                **base_payload_kwargs,
+                endpoints={1: "/one", 2: "/two"},  # type: ignore[dict-item]
+            )
 
-    def test_non_string_values_coerced_to_string(
+        # Verify error indicates the type problem
+        error_str = str(exc_info.value)
+        assert "endpoints" in error_str
+        assert "key must be a string" in error_str
+        assert "int" in error_str
+
+    def test_non_string_values_raises_validation_error(
         self, base_payload_kwargs: dict[str, Any]
     ) -> None:
-        """Verify non-string dict values are coerced to strings."""
-        # Dict with int values - should be coerced to strings
-        payload = ModelPostgresIntentPayload(
-            **base_payload_kwargs,
-            endpoints={"port": 8080, "timeout": 30},  # type: ignore[dict-item]
-        )
+        """Verify non-string dict values raise ValidationError in strict mode.
 
-        # Values should be string-coerced
-        assert ("port", "8080") in payload.endpoints
-        assert ("timeout", "30") in payload.endpoints
+        Per PR #92 review: validators now use strict mode that rejects non-string
+        values instead of silently coercing them to strings. This ensures explicit
+        type handling rather than masking potential data issues.
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            ModelPostgresIntentPayload(
+                **base_payload_kwargs,
+                endpoints={"port": 8080, "timeout": 30},  # type: ignore[dict-item]
+            )
+
+        # Verify error indicates the type problem
+        error_str = str(exc_info.value)
+        assert "endpoints" in error_str
+        assert "value must be a string" in error_str
+        assert "int" in error_str
 
     # ------------------------------------------------------------------------
     # Tuple passthrough tests

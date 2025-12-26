@@ -45,6 +45,8 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_st
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_registration_intent import (
     IntentPayload,
     ModelRegistrationIntent,
+    get_union_intent_types,
+    validate_union_registry_sync,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_intent import (
     IntentRegistry,
@@ -68,4 +70,6 @@ __all__ = [
     "ModelReducerState",
     "ModelRegistrationIntent",
     "ModelRegistryIntent",
+    "get_union_intent_types",
+    "validate_union_registry_sync",
 ]

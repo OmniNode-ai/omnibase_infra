@@ -34,6 +34,9 @@ from typing import Literal, TypedDict
 
 # Third-party imports
 import yaml
+from omnibase_core.models.common.model_validation_metadata import (
+    ModelValidationMetadata,
+)
 from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
 from omnibase_core.validation import (
     CircularImportValidationResult,
@@ -1056,11 +1059,19 @@ def validate_infra_union_usage(
         ModelValidationResult with validation status and any errors.
         The metadata includes both total_unions (all unions) and non_optional_unions
         (excluding `X | None` patterns) for transparency.
-    """
-    from omnibase_core.models.common.model_validation_metadata import (
-        ModelValidationMetadata,
-    )
 
+    Metadata Extension Fields:
+        ModelValidationMetadata uses `extra="allow"` to support domain-specific fields.
+        The following extension fields are used by this validator and are properly typed:
+
+        - non_optional_unions (int): Count of unions excluding `X | None` patterns.
+          This is what the threshold check applies to.
+        - optional_unions_excluded (int): Count of simple `X | None` optionals that were
+          excluded from the threshold check for transparency.
+
+        These fields are additional to the base ModelValidationMetadata fields like
+        total_unions and max_unions which are formally defined on the model.
+    """
     # Convert to Path if string
     dir_path = Path(directory) if isinstance(directory, str) else directory
 
@@ -1084,21 +1095,24 @@ def validate_infra_union_usage(
     files_processed = len([f for f in python_files if not should_skip_path(f)])
 
     # Create result with enhanced metadata showing both counts
+    # Note: ModelValidationMetadata uses extra="allow", so extension fields
+    # (non_optional_unions, optional_unions_excluded) are accepted as int values.
+    # See docstring "Metadata Extension Fields" section for field documentation.
     return ModelValidationResult(
         is_valid=is_valid,
         errors=filtered_issues,
         metadata=ModelValidationMetadata(
+            # Standard ModelValidationMetadata fields (formally defined)
             validation_type="union_usage",
             files_processed=files_processed,
             violations_found=len(filtered_issues),
-            # Total unions (all patterns including X | None)
-            total_unions=total_count,
-            # Non-optional unions (excluding X | None) - this is what threshold checks
-            non_optional_unions=non_optional_count,
-            # How many simple optionals were excluded
-            optional_unions_excluded=total_count - non_optional_count,
-            max_unions=max_unions,
-            strict_mode=strict,
+            total_unions=total_count,  # Base field: all unions including X | None
+            max_unions=max_unions,  # Base field: configured threshold
+            strict_mode=strict,  # Base field: whether strict mode enabled
+            # Extension fields (via extra="allow", typed as int)
+            # These provide transparency into the exclusion logic:
+            non_optional_unions=non_optional_count,  # What threshold actually checks
+            optional_unions_excluded=total_count - non_optional_count,  # X | None count
         ),
     )
 
