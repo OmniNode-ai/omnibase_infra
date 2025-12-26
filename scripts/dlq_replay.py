@@ -159,6 +159,52 @@ def generate_replay_correlation_id() -> UUID:
     return uuid4()
 
 
+def parse_datetime_with_timezone(dt_string: str) -> datetime:
+    """Parse an ISO 8601 datetime string ensuring timezone-awareness.
+
+    This function handles common datetime string formats and ensures the
+    resulting datetime object is always timezone-aware. It provides a
+    single source of truth for timezone-aware datetime parsing throughout
+    the DLQ replay module.
+
+    Timezone Handling Behavior:
+        1. 'Z' suffix is converted to '+00:00' for ISO 8601 compliance
+           (Python's fromisoformat doesn't recognize 'Z' directly)
+        2. If the parsed datetime is naive (no timezone info), UTC is assumed
+        3. If the datetime already has timezone info, it is preserved
+
+    Args:
+        dt_string: ISO 8601 datetime string (e.g., "2025-01-01T00:00:00Z",
+                   "2025-01-01T00:00:00+00:00", "2025-01-01T00:00:00")
+
+    Returns:
+        Timezone-aware datetime object
+
+    Raises:
+        ValueError: If the string cannot be parsed as a valid datetime
+
+    Example:
+        >>> parse_datetime_with_timezone("2025-01-01T00:00:00Z")
+        datetime.datetime(2025, 1, 1, 0, 0, tzinfo=datetime.timezone.utc)
+        >>> parse_datetime_with_timezone("2025-01-01T00:00:00")
+        datetime.datetime(2025, 1, 1, 0, 0, tzinfo=datetime.timezone.utc)
+        >>> parse_datetime_with_timezone("2025-01-01T00:00:00+05:30")
+        datetime.datetime(2025, 1, 1, 0, 0, tzinfo=datetime.timezone(datetime.timedelta(seconds=19800)))
+    """
+    # Handle 'Z' suffix for UTC timezone (ISO 8601 standard)
+    # Python's fromisoformat() doesn't recognize 'Z', only '+00:00'
+    normalized = dt_string.replace("Z", "+00:00")
+
+    # Parse the ISO 8601 datetime string
+    dt = datetime.fromisoformat(normalized)
+
+    # Ensure timezone-aware (assume UTC if not specified)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+
+    return dt
+
+
 # =============================================================================
 # Enums and Models
 # =============================================================================
@@ -361,13 +407,7 @@ class ModelReplayConfig(BaseModel):
 
         if start_time_str:
             try:
-                # Handle 'Z' suffix for UTC timezone
-                filter_start_time = datetime.fromisoformat(
-                    start_time_str.replace("Z", "+00:00")
-                )
-                # Ensure timezone-aware (assume UTC if not specified)
-                if filter_start_time.tzinfo is None:
-                    filter_start_time = filter_start_time.replace(tzinfo=UTC)
+                filter_start_time = parse_datetime_with_timezone(start_time_str)
             except ValueError as e:
                 raise ValueError(
                     f"Invalid start_time format: {start_time_str}. "
@@ -376,13 +416,7 @@ class ModelReplayConfig(BaseModel):
 
         if end_time_str:
             try:
-                # Handle 'Z' suffix for UTC timezone
-                filter_end_time = datetime.fromisoformat(
-                    end_time_str.replace("Z", "+00:00")
-                )
-                # Ensure timezone-aware (assume UTC if not specified)
-                if filter_end_time.tzinfo is None:
-                    filter_end_time = filter_end_time.replace(tzinfo=UTC)
+                filter_end_time = parse_datetime_with_timezone(end_time_str)
             except ValueError as e:
                 raise ValueError(
                     f"Invalid end_time format: {end_time_str}. "
@@ -868,10 +902,8 @@ def should_replay(
     # Apply time-range filter (can apply regardless of filter_type)
     if config.filter_start_time or config.filter_end_time:
         try:
-            # Parse message timestamp, handling 'Z' suffix for UTC
-            failure_dt = datetime.fromisoformat(
-                message.failure_timestamp.replace("Z", "+00:00")
-            )
+            # Parse message timestamp with timezone normalization
+            failure_dt = parse_datetime_with_timezone(message.failure_timestamp)
             if config.filter_start_time and failure_dt < config.filter_start_time:
                 return (False, f"Before start time: {config.filter_start_time}")
             if config.filter_end_time and failure_dt > config.filter_end_time:
@@ -922,6 +954,21 @@ class DLQReplayExecutor:
         self.results: list[ModelReplayResult] = []
         self._tracking_service: DLQTrackingService | None = None
 
+    @property
+    def is_tracking_enabled(self) -> bool:
+        """Return True if tracking service is initialized and ready.
+
+        This property provides clearer semantics than checking
+        `self._tracking_service is not None` directly.
+
+        Returns:
+            True if tracking is available, False otherwise.
+        """
+        return (
+            self._tracking_service is not None
+            and self._tracking_service.is_tracking_enabled
+        )
+
     async def start(self) -> None:
         """Start consumer, producer, and optionally tracking service."""
         await self.consumer.start()
@@ -945,7 +992,7 @@ class DLQReplayExecutor:
         await self.consumer.stop()
         if not self.config.dry_run:
             await self.producer.stop()
-        if self._tracking_service is not None:
+        if self.is_tracking_enabled:
             await self._tracking_service.shutdown()
             logger.info("DLQ tracking service stopped")
 
@@ -964,7 +1011,7 @@ class DLQReplayExecutor:
             replay_correlation_id: New correlation ID for replay tracking.
             error_message: Error details if replay failed.
         """
-        if self._tracking_service is None:
+        if not self.is_tracking_enabled:
             return
 
         try:
@@ -1155,7 +1202,7 @@ async def cmd_replay(args: argparse.Namespace) -> int:
             print(f"  Pending (dry): {pending}")
         if config.enable_tracking:
             tracking_status = (
-                "enabled" if executor._tracking_service else "failed to initialize"
+                "enabled" if executor.is_tracking_enabled else "failed to initialize"
             )
             print(f"  Tracking:      {tracking_status}")
         print()
