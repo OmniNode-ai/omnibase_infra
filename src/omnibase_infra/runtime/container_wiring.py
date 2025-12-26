@@ -53,10 +53,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from omnibase_infra.models.model_semver import SEMVER_DEFAULT
+from omnibase_core.models.primitives import ModelSemVer
+
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.registry_compute import RegistryCompute
+
+# Default semantic version for infrastructure components
+SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 
 if TYPE_CHECKING:
     import asyncpg
