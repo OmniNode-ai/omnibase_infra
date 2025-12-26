@@ -92,6 +92,7 @@ from pydantic import ValidationError
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
 from omnibase_infra.runtime.models import ModelPolicyKey, ModelPolicyRegistration
+from omnibase_infra.utils.util_semver import normalize_version_cached
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -591,14 +592,11 @@ class PolicyRegistry:
     def _normalize_version(version: str) -> str:
         """Normalize version string for consistent lookups.
 
-        This method uses the same normalization logic as ModelPolicyKey.normalize_version
-        to ensure version strings are comparable during registry lookups.
+        Delegates to the centralized normalize_version_cached function from
+        util_semver, which is the SINGLE SOURCE OF TRUTH for version normalization.
 
-        Normalization rules:
-            1. Strip leading/trailing whitespace
-            2. Strip leading 'v' or 'V' prefix (e.g., "v1.0.0" -> "1.0.0")
-            3. Ensure three-part version (e.g., "1" -> "1.0.0", "1.2" -> "1.2.0")
-            4. Preserve prerelease suffixes (e.g., "1.0-beta" -> "1.0.0-beta")
+        Uses the cached version for performance when policy registrations are
+        repeated or lookups occur frequently.
 
         Args:
             version: The version string to normalize
@@ -606,44 +604,22 @@ class PolicyRegistry:
         Returns:
             Normalized version string in "x.y.z" or "x.y.z-prerelease" format
 
+        Raises:
+            ProtocolConfigurationError: If the version format is invalid
+
         Example:
             >>> PolicyRegistry._normalize_version("1.0")
             '1.0.0'
             >>> PolicyRegistry._normalize_version("v2.1")
             '2.1.0'
         """
-        # Strip whitespace
-        normalized = version.strip()
-
-        # Don't normalize empty - let caller handle
-        if not normalized:
-            return version
-
-        # Strip leading 'v' or 'V' prefix
-        if normalized.startswith(("v", "V")):
-            normalized = normalized[1:]
-
-        # Split on first hyphen to handle prerelease suffix
-        parts = normalized.split("-", 1)
-        version_part = parts[0]
-        prerelease = parts[1] if len(parts) > 1 else ""
-
-        # Ensure three-part version (x.y.z)
-        # Only expand partial versions, don't truncate versions with >3 parts
-        version_nums = version_part.split(".")
-        if len(version_nums) <= 3:
-            while len(version_nums) < 3:
-                version_nums.append("0")
-            normalized = ".".join(version_nums)
-        else:
-            # Pass through as-is
-            normalized = version_part
-
-        # Re-add prerelease if present (even if empty)
-        if len(parts) > 1:
-            normalized = f"{normalized}-{prerelease}"
-
-        return normalized
+        try:
+            return normalize_version_cached(version)
+        except ValueError as e:
+            raise ProtocolConfigurationError(
+                str(e),
+                version=version,
+            ) from e
 
     def register(
         self,
@@ -1124,61 +1100,42 @@ class PolicyRegistry:
                 Implementation moved here to support configurable cache size.
                 See _parse_semver docstring for full documentation.
 
-                IMPORTANT: This wrapper normalizes version strings BEFORE
-                passing to the LRU-cached function. This ensures that equivalent
-                versions (e.g., "1.0" and "1.0.0", "v1.0.0" and "1.0.0") share
-                the same cache entry, improving cache hit rates.
+                IMPORTANT: This wrapper uses the centralized normalize_version_cached
+                function from util_semver to normalize version strings BEFORE
+                passing to the LRU-cached parsing function. This ensures that
+                equivalent versions (e.g., "1.0" and "1.0.0", "v1.0.0" and "1.0.0")
+                share the same cache entry, improving cache hit rates.
 
-                Uses ModelSemVer.parse() from omnibase_core for actual parsing,
-                with preprocessing to handle:
-                - Whitespace trimming (core requires clean input)
-                - Leading 'v' or 'V' prefix removal
-                - Partial versions: "1" -> "1.0.0", "1.2" -> "1.2.0"
-                - Empty prerelease suffix: "1.0.0-" is invalid
-
-                Wraps ModelOnexError as ProtocolConfigurationError for
-                consistency with existing error handling.
+                Wraps ValueError from normalize_version_cached as
+                ProtocolConfigurationError for consistency with existing error handling.
                 """
-                # Preprocess: trim whitespace
-                cleaned = version.strip()
-
                 # Validate not empty after trimming
+                cleaned = version.strip()
                 if not cleaned:
                     raise ProtocolConfigurationError(
                         "Version string cannot be empty or whitespace-only",
                         version=version,
                     )
 
-                # Strip leading 'v' or 'V' prefix for normalization
-                if cleaned.startswith(("v", "V")):
-                    cleaned = cleaned[1:]
-
                 # Handle empty prerelease suffix (e.g., "1.0.0-")
-                if cleaned.endswith("-"):
+                # This check is done before normalization to provide a clear error
+                if cleaned.endswith("-") or (
+                    cleaned.startswith(("v", "V")) and cleaned[1:].endswith("-")
+                ):
                     raise ProtocolConfigurationError(
                         "Prerelease suffix cannot be empty after hyphen",
                         version=version,
                     )
 
-                # Normalize partial versions to x.y.z format
-                # Core ModelSemVer requires full format
-                parts = cleaned.split("-", 1)  # Split on first hyphen for prerelease
-                version_part = parts[0]
-                prerelease = parts[1] if len(parts) > 1 else ""
-
-                version_nums = version_part.split(".")
-                if len(version_nums) == 1:
-                    # "1" -> "1.0.0"
-                    normalized = f"{version_nums[0]}.0.0"
-                elif len(version_nums) == 2:
-                    # "1.2" -> "1.2.0"
-                    normalized = f"{version_nums[0]}.{version_nums[1]}.0"
-                else:
-                    normalized = version_part
-
-                # Re-add prerelease if present
-                if prerelease:
-                    normalized = f"{normalized}-{prerelease}"
+                # Use centralized normalization from util_semver
+                # normalize_version_cached raises ValueError for invalid formats
+                try:
+                    normalized = normalize_version_cached(version)
+                except ValueError as e:
+                    raise ProtocolConfigurationError(
+                        str(e),
+                        version=version,
+                    ) from e
 
                 # Now call the cached function with the NORMALIZED version
                 # This ensures "1.0", "1.0.0", "v1.0.0" all use the same cache entry

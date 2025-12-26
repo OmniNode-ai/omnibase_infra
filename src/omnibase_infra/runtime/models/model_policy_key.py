@@ -8,11 +8,10 @@ Replaces primitive tuple[str, str, str] pattern.
 
 from __future__ import annotations
 
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumPolicyType
-from omnibase_infra.utils.util_semver import validate_version_lenient
+from omnibase_infra.utils.util_semver import normalize_version
 
 
 class ModelPolicyKey(BaseModel):
@@ -57,30 +56,21 @@ class ModelPolicyKey(BaseModel):
 
     @field_validator("version", mode="before")
     @classmethod
-    def normalize_version(cls, v: str) -> str:
-        """Normalize version string for consistent lookups using ModelSemVer.
+    def validate_and_normalize_version(cls, v: str) -> str:
+        """Normalize version string for consistent lookups.
 
-        This validator ensures that equivalent version strings are normalized
-        to a canonical form, preventing lookup mismatches where "1.0.0" and
-        "1.0" might be treated as different versions.
+        Delegates to the centralized normalize_version function from util_semver,
+        which is the SINGLE SOURCE OF TRUTH for version normalization.
 
-        Uses ModelSemVer for proper semantic version validation and normalization,
-        avoiding duplicated string manipulation logic.
-
-        Normalization rules:
-            1. Strip leading/trailing whitespace
-            2. Strip leading 'v' or 'V' prefix (e.g., "v1.0.0" -> "1.0.0")
-            3. Validate format with validate_version_lenient (accepts 1, 1.0, 1.0.0)
-            4. Expand to three-part version (e.g., "1" -> "1.0.0", "1.2" -> "1.2.0")
-            5. Parse with ModelSemVer.parse() for final validation
-            6. Return normalized string via ModelSemVer.to_string()
+        This ensures consistent version handling across all ONEX components,
+        preventing lookup mismatches where "1.0.0" and "1.0" might be treated
+        as different versions.
 
         Args:
             v: The version string to normalize
 
         Returns:
-            Normalized version string in "x.y.z" or "x.y.z-prerelease" format,
-            or the original value if empty (let downstream validation handle it)
+            Normalized version string in "x.y.z" or "x.y.z-prerelease" format
 
         Raises:
             ValueError: If the version string is invalid and cannot be parsed
@@ -91,48 +81,7 @@ class ModelPolicyKey(BaseModel):
             >>> ModelPolicyKey(policy_id="test", policy_type="orchestrator", version="v2.1")
             ModelPolicyKey(policy_id='test', policy_type='orchestrator', version='2.1.0')
         """
-        # Don't normalize empty/whitespace-only - let downstream validation handle it
-        if not v or not v.strip():
-            return v
-
-        # Strip whitespace
-        normalized = v.strip()
-
-        # Strip leading 'v' or 'V' prefix
-        if normalized.startswith(("v", "V")):
-            normalized = normalized[1:]
-
-        # Validate format with lenient parsing (accepts 1, 1.0, 1.0.0)
-        # This will raise ValueError for invalid formats
-        validate_version_lenient(normalized)
-
-        # Split on first hyphen to handle prerelease suffix
-        parts = normalized.split("-", 1)
-        version_part = parts[0]
-        prerelease = parts[1] if len(parts) > 1 else None
-
-        # Expand to three-part version (x.y.z) for ModelSemVer parsing
-        version_nums = version_part.split(".")
-        while len(version_nums) < 3:
-            version_nums.append("0")
-        expanded_version = ".".join(version_nums)
-
-        # Parse base version with ModelSemVer for validation
-        # Uses parse() from omnibase_core ModelSemVer (replaces from_string())
-        # Note: core ModelSemVer strips prerelease from to_string(), so we
-        # must preserve and re-add the prerelease suffix manually
-        try:
-            semver = ModelSemVer.parse(expanded_version)
-        except Exception as e:
-            # Convert ModelOnexError to ValueError for Pydantic field validation
-            raise ValueError(str(e)) from e
-        normalized = semver.to_string()
-
-        # Re-add prerelease if present (core ModelSemVer strips it from to_string)
-        if prerelease:
-            normalized = f"{normalized}-{prerelease}"
-
-        return normalized
+        return normalize_version(v)
 
     @field_validator("policy_type")
     @classmethod

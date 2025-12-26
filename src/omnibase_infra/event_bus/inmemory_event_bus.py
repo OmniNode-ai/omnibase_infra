@@ -51,16 +51,15 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
 from omnibase_infra.errors import (
     InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
 )
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 
 logger = logging.getLogger(__name__)
 

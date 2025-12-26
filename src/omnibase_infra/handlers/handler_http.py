@@ -18,9 +18,6 @@ from omnibase_core.enums.enum_handler_type import EnumHandlerType
 from omnibase_core.models.dispatch import ModelHandlerOutput
 
 from omnibase_infra.enums import EnumInfraTransportType
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -30,6 +27,9 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.mixins import MixinEnvelopeExtraction
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 
 logger = logging.getLogger(__name__)
 

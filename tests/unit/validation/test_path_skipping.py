@@ -10,6 +10,7 @@ The key requirements are:
 1. Exact directory component matching (not substring matching)
 2. Only check parent directories (not filenames)
 3. Case-sensitive matching
+4. Configurable via YAML (with hardcoded fallback)
 """
 
 from pathlib import Path
@@ -19,7 +20,9 @@ import pytest
 from omnibase_infra.validation.infra_validators import (
     SKIP_DIRECTORY_NAMES,
     _is_skip_directory,
+    _load_skip_directories_from_yaml,
     _should_skip_path,
+    get_skip_directories,
 )
 
 
@@ -265,3 +268,81 @@ class TestPathSkippingIntegration:
         ]
         for path in source_files:
             assert _should_skip_path(path) is False, f"Should NOT skip: {path}"
+
+
+class TestGetSkipDirectories:
+    """Tests for the get_skip_directories function."""
+
+    def test_get_skip_directories_returns_frozenset(self) -> None:
+        """Verify get_skip_directories returns a frozenset."""
+        result = get_skip_directories()
+        assert isinstance(result, frozenset)
+
+    def test_get_skip_directories_contains_expected_values(self) -> None:
+        """Verify get_skip_directories includes expected directory names."""
+        result = get_skip_directories()
+        # These are the minimum expected directories from both YAML and fallback
+        expected_minimum = {
+            "archive",
+            "archived",
+            "examples",
+            "__pycache__",
+            ".venv",
+            "venv",
+            ".git",
+        }
+        assert expected_minimum.issubset(result)
+
+    def test_get_skip_directories_matches_constant(self) -> None:
+        """Verify YAML config matches hardcoded constant (no drift)."""
+        # The YAML configuration should produce the same set as the constant
+        # This test catches configuration drift
+        result = get_skip_directories()
+        assert result == SKIP_DIRECTORY_NAMES, (
+            f"YAML config and SKIP_DIRECTORY_NAMES constant have drifted. "
+            f"Missing from YAML: {SKIP_DIRECTORY_NAMES - result}. "
+            f"Extra in YAML: {result - SKIP_DIRECTORY_NAMES}."
+        )
+
+
+class TestLoadSkipDirectoriesFromYaml:
+    """Tests for the _load_skip_directories_from_yaml function."""
+
+    def test_yaml_loader_returns_frozenset_or_none(self) -> None:
+        """Verify YAML loader returns frozenset or None."""
+        # Clear the cache to ensure fresh load
+        _load_skip_directories_from_yaml.cache_clear()
+        result = _load_skip_directories_from_yaml()
+        assert result is None or isinstance(result, frozenset)
+
+    def test_yaml_loader_is_cached(self) -> None:
+        """Verify YAML loader caches results for performance."""
+        # Clear cache and load twice
+        _load_skip_directories_from_yaml.cache_clear()
+        result1 = _load_skip_directories_from_yaml()
+        result2 = _load_skip_directories_from_yaml()
+        # Both calls should return the same object (cached)
+        if result1 is not None:
+            assert result1 is result2
+
+
+class TestPathSkippingConfigurationIntegrity:
+    """Tests to ensure configuration consistency."""
+
+    def test_no_empty_directory_names(self) -> None:
+        """Verify no empty strings in skip directories."""
+        result = get_skip_directories()
+        assert "" not in result, "Empty string found in skip directories"
+        assert all(d.strip() == d for d in result), "Whitespace-padded entries found"
+
+    def test_all_directories_are_strings(self) -> None:
+        """Verify all skip directory entries are strings."""
+        result = get_skip_directories()
+        assert all(isinstance(d, str) for d in result)
+
+    def test_no_path_separators_in_directory_names(self) -> None:
+        """Verify skip directories are single components (no path separators)."""
+        result = get_skip_directories()
+        for d in result:
+            assert "/" not in d, f"Path separator found in '{d}'"
+            assert "\\" not in d, f"Backslash found in '{d}'"

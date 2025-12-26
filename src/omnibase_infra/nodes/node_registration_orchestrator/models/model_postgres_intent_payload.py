@@ -22,16 +22,32 @@ Thread Safety:
 
     For dict-like access to endpoints, use the ``endpoints_dict`` property
     which returns a MappingProxyType (read-only view).
+
+Edge Case Behavior:
+    The ``endpoints`` field validator explicitly handles the following cases:
+    - ``None``: Raises ValueError (invalid input, not silently ignored)
+    - Empty Mapping ``{}``: Logs warning and converts to empty tuple
+    - Invalid types (int, str, list, etc.): Raises ValueError
+    - Tuple: Passed through as-is
+    - Non-empty Mapping: Converted to tuple of (key, value) pairs
+
+    Empty Mapping coercion is logged as a warning to help detect cases where
+    endpoints were expected but not populated. If this is intentional, the
+    warning can be safely ignored.
 """
 
 from __future__ import annotations
 
+import logging
+import warnings
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
@@ -118,6 +134,9 @@ class ModelPostgresIntentPayload(BaseModel):
     def _coerce_endpoints_to_tuple(cls, v: object) -> tuple[tuple[str, str], ...]:
         """Convert dict/mapping to tuple of pairs for immutability.
 
+        This validator ensures explicit handling of all input types rather than
+        silent fallback to empty tuple, which could mask invalid input.
+
         Args:
             v: The input value to coerce. Must be either a tuple of (key, value)
                 pairs or a Mapping (dict-like object).
@@ -129,10 +148,42 @@ class ModelPostgresIntentPayload(BaseModel):
             ValueError: If the input is neither a tuple nor a Mapping type.
                 This ensures invalid input types are explicitly rejected rather
                 than silently converted to empty tuple.
+
+        Warns:
+            UserWarning: When an empty Mapping is coerced to empty tuple.
+                This warning helps detect cases where endpoints were expected
+                but not populated. If intentional, the warning can be ignored.
+
+        Edge Cases:
+            - ``None``: Raises ValueError (explicit rejection)
+            - Empty Mapping ``{}``: Logs warning, returns empty tuple
+            - Empty tuple ``()``: Passed through (same as default)
+            - Invalid types (list, int, str): Raises ValueError
+            - Non-empty Mapping: Converts to tuple of (key, value) pairs
+
+        Example:
+            >>> # Valid inputs
+            >>> _coerce_endpoints_to_tuple({"health": "/health"})
+            (('health', '/health'),)
+            >>> _coerce_endpoints_to_tuple(())
+            ()
+            >>> # Invalid inputs raise ValueError
+            >>> _coerce_endpoints_to_tuple(None)  # Raises ValueError
+            >>> _coerce_endpoints_to_tuple([])    # Raises ValueError (list not Mapping)
         """
         if isinstance(v, tuple):
             return v  # type: ignore[return-value]  # Runtime validated by Pydantic
         if isinstance(v, Mapping):
+            if len(v) == 0:
+                # Log warning for empty Mapping to help detect potentially missing data.
+                # This is different from the default empty tuple - it's an explicit
+                # empty Mapping input that gets coerced.
+                msg = (
+                    "Empty Mapping provided for endpoints, coercing to empty tuple. "
+                    "If this is intentional, consider using default=() instead."
+                )
+                warnings.warn(msg, UserWarning, stacklevel=2)
+                logger.warning(msg)
             return tuple((str(k), str(val)) for k, val in v.items())
         raise ValueError(
             f"endpoints must be a tuple or Mapping, got {type(v).__name__}"

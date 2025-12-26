@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
 from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
     EnumVaultOperationType,
 )
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 
 
 class ModelVaultSecretPayload(BaseModel):

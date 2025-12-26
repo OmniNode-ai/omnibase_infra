@@ -624,7 +624,9 @@ class TestMixinNodeIntrospectionCaching:
         # node_id is a UUID passed via config
         assert isinstance(data.node_id, UUID)
         assert data.node_id == TEST_NODE_UUID_1
-        assert data.node_type == EnumNodeKind.EFFECT
+        # node_type is serialized as the enum value (lowercase string "effect")
+        # Use .value for explicit string comparison, consistent with integration tests
+        assert data.node_type == EnumNodeKind.EFFECT.value
         assert isinstance(data.capabilities, dict)
         assert isinstance(data.endpoints, dict)
         assert data.version == "1.0.0"

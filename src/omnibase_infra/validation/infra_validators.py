@@ -717,6 +717,81 @@ def validate_infra_contract_deep(
 _contract_validator = ProtocolContractValidator()
 
 
+# ==============================================================================
+# Skip Directory Configuration
+# ==============================================================================
+#
+# Skip directories are loaded from validation_exemptions.yaml for configurability.
+# If the YAML file is missing or doesn't contain skip_directories, we fall back
+# to a hardcoded default set.
+#
+# This follows the same pattern as exemption loading to keep all validation
+# configuration in one place.
+
+
+@lru_cache(maxsize=1)
+def _load_skip_directories_from_yaml() -> frozenset[str] | None:
+    """
+    Load skip directory configuration from YAML.
+
+    Returns:
+        frozenset of directory names to skip, or None if not configured in YAML.
+        Returns None (not empty set) to distinguish "not configured" from
+        "explicitly empty".
+    """
+    if not EXEMPTIONS_YAML_PATH.exists():
+        return None
+
+    try:
+        with EXEMPTIONS_YAML_PATH.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
+        if not isinstance(data, dict):
+            return None
+
+        skip_dirs = data.get("skip_directories")
+        if skip_dirs is None:
+            return None
+
+        # Handle both list and dict formats
+        if isinstance(skip_dirs, list):
+            # Simple list format: ["archive", "examples", ...]
+            return frozenset(str(d) for d in skip_dirs if d)
+        elif isinstance(skip_dirs, dict):
+            # Dict format with categories: {historical: [...], caches: [...]}
+            all_dirs: set[str] = set()
+            for category_dirs in skip_dirs.values():
+                if isinstance(category_dirs, list):
+                    all_dirs.update(str(d) for d in category_dirs if d)
+            return frozenset(all_dirs) if all_dirs else None
+
+        return None
+
+    except (yaml.YAMLError, OSError) as e:
+        logger.warning(
+            "Failed to load skip directories from %s: %s. Using defaults.",
+            EXEMPTIONS_YAML_PATH,
+            e,
+        )
+        return None
+
+
+def get_skip_directories() -> frozenset[str]:
+    """
+    Get the set of directory names to skip during validation.
+
+    Returns skip directories from YAML configuration if available,
+    otherwise falls back to the hardcoded SKIP_DIRECTORY_NAMES default.
+
+    Returns:
+        frozenset of directory names that should be excluded from validation.
+    """
+    yaml_dirs = _load_skip_directories_from_yaml()
+    if yaml_dirs is not None:
+        return yaml_dirs
+    return SKIP_DIRECTORY_NAMES
+
+
 def _is_simple_optional(pattern: ModelUnionPattern) -> bool:
     """
     Determine if a union pattern is a simple optional (`X | None`).
@@ -812,6 +887,10 @@ def _is_skip_directory(component: str) -> bool:
     Uses exact string matching (case-sensitive) via set membership for O(1) lookup.
     This prevents false positives from substring matching.
 
+    Skip directories are loaded from validation_exemptions.yaml if configured,
+    otherwise falls back to the hardcoded SKIP_DIRECTORY_NAMES default.
+    See get_skip_directories() for the configuration loading logic.
+
     Args:
         component: A single path component (directory or file name).
 
@@ -841,7 +920,7 @@ def _is_skip_directory(component: str) -> bool:
         >>> _is_skip_directory(".git_backup")
         False
     """
-    return component in SKIP_DIRECTORY_NAMES
+    return component in get_skip_directories()
 
 
 def _should_skip_path(path: Path) -> bool:
@@ -1154,6 +1233,9 @@ __all__ = [
     "get_pattern_exemptions",
     "get_union_exemptions",
     "get_architecture_exemptions",
+    # Path skip configuration
+    "get_skip_directories",
+    "_load_skip_directories_from_yaml",
     # Path utilities
     "_is_skip_directory",
     "_should_skip_path",

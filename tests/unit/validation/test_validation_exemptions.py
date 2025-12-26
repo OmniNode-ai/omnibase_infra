@@ -18,12 +18,46 @@ from typing import Any
 import pytest
 import yaml
 
+# -----------------------------------------------------------------------------
+# Module-level constants for path resolution and configuration
+# -----------------------------------------------------------------------------
 
+# Compute project root from test file location for robust path resolution
+_THIS_FILE = Path(__file__).resolve()
+_PROJECT_ROOT = _THIS_FILE.parent.parent.parent.parent  # tests/unit/validation -> root
+
+# Relative paths from project root
+_EXEMPTIONS_YAML_REL_PATH = "src/omnibase_infra/validation/validation_exemptions.yaml"
+_SOURCE_DIR_REL_PATH = "src/omnibase_infra"
+
+# Exemption sections that should be present in the YAML file
+EXEMPTION_SECTIONS = (
+    "pattern_exemptions",
+    "architecture_exemptions",
+    "union_exemptions",
+)
+
+# Pattern field names to extract from exemptions
+PATTERN_FIELDS = (
+    "file_pattern",
+    "class_pattern",
+    "method_pattern",
+    "violation_pattern",
+)
+
+# Required fields for each exemption entry
+REQUIRED_EXEMPTION_FIELDS = frozenset({"file_pattern", "violation_pattern", "reason"})
+
+
+# -----------------------------------------------------------------------------
 # Module-level fixtures for shared use across test classes
+# -----------------------------------------------------------------------------
+
+
 @pytest.fixture
 def exemptions_yaml_path() -> Path:
-    """Return the path to the exemptions YAML file."""
-    return Path("src/omnibase_infra/validation/validation_exemptions.yaml")
+    """Return the absolute path to the exemptions YAML file."""
+    return _PROJECT_ROOT / _EXEMPTIONS_YAML_REL_PATH
 
 
 @pytest.fixture
@@ -31,6 +65,13 @@ def exemptions_yaml(exemptions_yaml_path: Path) -> dict[str, Any]:
     """Load the exemptions YAML file."""
     with open(exemptions_yaml_path) as f:
         return yaml.safe_load(f)
+
+
+@pytest.fixture
+def source_files() -> list[str]:
+    """Get list of all Python source files in the codebase."""
+    src_path = _PROJECT_ROOT / _SOURCE_DIR_REL_PATH
+    return [str(f.relative_to(_PROJECT_ROOT)) for f in src_path.rglob("*.py")]
 
 
 class TestValidationExemptionsRegex:
@@ -45,32 +86,12 @@ class TestValidationExemptionsRegex:
             List of tuples: (section_name, pattern_field, pattern_value)
         """
         patterns: list[tuple[str, str, str]] = []
-        pattern_fields = [
-            "file_pattern",
-            "class_pattern",
-            "method_pattern",
-            "violation_pattern",
-        ]
 
-        # Extract from pattern_exemptions
-        for exemption in exemptions_yaml.get("pattern_exemptions", []):
-            for field in pattern_fields:
-                if field in exemption:
-                    patterns.append(("pattern_exemptions", field, exemption[field]))
-
-        # Extract from architecture_exemptions
-        for exemption in exemptions_yaml.get("architecture_exemptions", []):
-            for field in pattern_fields:
-                if field in exemption:
-                    patterns.append(
-                        ("architecture_exemptions", field, exemption[field])
-                    )
-
-        # Extract from union_exemptions
-        for exemption in exemptions_yaml.get("union_exemptions", []):
-            for field in pattern_fields:
-                if field in exemption:
-                    patterns.append(("union_exemptions", field, exemption[field]))
+        for section in EXEMPTION_SECTIONS:
+            for exemption in exemptions_yaml.get(section, []):
+                for field in PATTERN_FIELDS:
+                    if field in exemption:
+                        patterns.append((section, field, exemption[field]))
 
         return patterns
 
@@ -124,53 +145,23 @@ class TestValidationExemptionsRegex:
                 + "\n".join(error_messages)
             )
 
-    def test_pattern_exemptions_section_exists(
-        self, exemptions_yaml: dict[str, Any]
+    @pytest.mark.parametrize("section", EXEMPTION_SECTIONS)
+    def test_exemption_section_exists_and_is_list(
+        self, exemptions_yaml: dict[str, Any], section: str
     ) -> None:
-        """Verify pattern_exemptions section exists and is a list."""
-        assert "pattern_exemptions" in exemptions_yaml, (
-            "pattern_exemptions section is required"
-        )
-        assert isinstance(exemptions_yaml["pattern_exemptions"], list), (
-            "pattern_exemptions must be a list"
-        )
-
-    def test_architecture_exemptions_section_exists(
-        self, exemptions_yaml: dict[str, Any]
-    ) -> None:
-        """Verify architecture_exemptions section exists and is a list."""
-        assert "architecture_exemptions" in exemptions_yaml, (
-            "architecture_exemptions section is required"
-        )
-        assert isinstance(exemptions_yaml["architecture_exemptions"], list), (
-            "architecture_exemptions must be a list"
-        )
-
-    def test_union_exemptions_section_exists(
-        self, exemptions_yaml: dict[str, Any]
-    ) -> None:
-        """Verify union_exemptions section exists and is a list."""
-        assert "union_exemptions" in exemptions_yaml, (
-            "union_exemptions section is required"
-        )
-        assert isinstance(exemptions_yaml["union_exemptions"], list), (
-            "union_exemptions must be a list"
-        )
+        """Verify each exemption section exists and is a list."""
+        assert section in exemptions_yaml, f"{section} section is required"
+        assert isinstance(exemptions_yaml[section], list), f"{section} must be a list"
 
     def test_all_exemptions_have_required_fields(
         self, exemptions_yaml: dict[str, Any]
     ) -> None:
         """Verify all exemptions have required fields: file_pattern, violation_pattern, reason."""
-        required_fields = {"file_pattern", "violation_pattern", "reason"}
         missing_fields_errors: list[str] = []
 
-        for section in [
-            "pattern_exemptions",
-            "architecture_exemptions",
-            "union_exemptions",
-        ]:
+        for section in EXEMPTION_SECTIONS:
             for idx, exemption in enumerate(exemptions_yaml.get(section, [])):
-                missing = required_fields - set(exemption.keys())
+                missing = REQUIRED_EXEMPTION_FIELDS - set(exemption.keys())
                 if missing:
                     missing_fields_errors.append(
                         f"  [{section}][{idx}]: Missing fields: {missing}"
@@ -196,12 +187,6 @@ class TestValidationExemptionsRegex:
 class TestExemptionPatternsMatchFiles:
     """Optional tests to verify patterns can match expected files."""
 
-    @pytest.fixture
-    def source_files(self) -> list[str]:
-        """Get list of all Python source files in the codebase."""
-        src_path = Path("src/omnibase_infra")
-        return [str(f) for f in src_path.rglob("*.py")]
-
     def test_file_patterns_match_at_least_one_file(
         self, exemptions_yaml: dict[str, Any], source_files: list[str]
     ) -> None:
@@ -211,11 +196,7 @@ class TestExemptionPatternsMatchFiles:
         """
         orphaned_patterns: list[tuple[str, str]] = []
 
-        for section in [
-            "pattern_exemptions",
-            "architecture_exemptions",
-            "union_exemptions",
-        ]:
+        for section in EXEMPTION_SECTIONS:
             for exemption in exemptions_yaml.get(section, []):
                 file_pattern = exemption.get("file_pattern")
                 if file_pattern:
@@ -244,6 +225,7 @@ class TestExemptionPatternsMatchFiles:
             "src/omnibase_infra/validation/execution_shape_validator.py",
         ]
         for file_path in key_files:
-            assert Path(file_path).exists(), (
+            full_path = _PROJECT_ROOT / file_path
+            assert full_path.exists(), (
                 f"Expected file {file_path} to exist (has exemptions defined)"
             )

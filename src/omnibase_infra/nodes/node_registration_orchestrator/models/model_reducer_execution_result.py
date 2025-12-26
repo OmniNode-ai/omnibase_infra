@@ -44,28 +44,17 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_state import (
-    ModelReducerState,
-)
-
-if TYPE_CHECKING:
-    from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_registration_intent import (
-        ModelConsulRegistrationIntent,
-    )
-    from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_upsert_intent import (
-        ModelPostgresUpsertIntent,
-    )
-
-# Import the concrete types for runtime validation
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_registration_intent import (
     ModelConsulRegistrationIntent,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_upsert_intent import (
     ModelPostgresUpsertIntent,
+)
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_state import (
+    ModelReducerState,
 )
 
 RegistrationIntentUnion = ModelConsulRegistrationIntent | ModelPostgresUpsertIntent

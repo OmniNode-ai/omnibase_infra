@@ -886,11 +886,10 @@ class TestCacheEdgeCases:
             "1.0.0-beta",
         ]
 
+        # All versions in distinct_versions are valid semver and should parse successfully
+        # Do not swallow exceptions - if parsing fails, the test should fail
         for v in distinct_versions:
-            try:
-                PolicyRegistry._parse_semver(v)
-            except Exception:
-                pass  # Some formats may be invalid
+            PolicyRegistry._parse_semver(v)
 
         info = PolicyRegistry._get_semver_cache_info()
 

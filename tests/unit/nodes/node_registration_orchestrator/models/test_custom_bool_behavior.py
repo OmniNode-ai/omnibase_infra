@@ -589,3 +589,190 @@ class TestBoolBehaviorDocumentation:
 
         # Explicit and recommended approach:
         assert not empty_result.has_intents  # Most readable
+
+
+# ============================================================================
+# Tests for ModelReducerExecutionResult Immutability (frozen=True)
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestModelReducerExecutionResultImmutability:
+    """Tests for frozen model immutability in ModelReducerExecutionResult.
+
+    ModelReducerExecutionResult is a frozen Pydantic model (frozen=True),
+    which ensures thread safety and prevents accidental state mutation.
+    Attempting to mutate any field should raise a ValidationError.
+
+    The model uses tuple[RegistrationIntentUnion, ...] for the intents field
+    instead of list to maintain full immutability - tuples are immutable
+    containers, while lists would allow mutation even with frozen=True.
+
+    Related:
+        - CLAUDE.md: Section on "Frozen Model with Tuple Fields"
+        - PR #92 review feedback: CRITICAL - frozen model immutability verification
+        - Pydantic docs: https://docs.pydantic.dev/latest/concepts/config/#frozen
+
+    .. versionadded:: 0.7.0
+        Created as part of PR #92 review to verify frozen model behavior.
+    """
+
+    def test_mutation_of_state_field_raises_validation_error(
+        self,
+        initial_state: ModelReducerState,
+        sample_consul_intent: ModelConsulRegistrationIntent,
+    ) -> None:
+        """Verify that attempting to mutate the state field raises ValidationError.
+
+        Frozen Pydantic models prevent field assignment after construction.
+        This ensures thread safety and immutable state semantics.
+        """
+        from pydantic import ValidationError
+
+        result = ModelReducerExecutionResult(
+            state=initial_state,
+            intents=(sample_consul_intent,),
+        )
+
+        # Attempting to assign a new state should raise ValidationError
+        new_state = ModelReducerState(pending_registrations=99)
+        with pytest.raises(ValidationError) as exc_info:
+            result.state = new_state  # type: ignore[misc]
+
+        # Verify the error is about frozen instance
+        assert (
+            "frozen" in str(exc_info.value).lower()
+            or "immutable" in str(exc_info.value).lower()
+        )
+
+    def test_mutation_of_intents_field_raises_validation_error(
+        self,
+        initial_state: ModelReducerState,
+        sample_consul_intent: ModelConsulRegistrationIntent,
+        sample_postgres_intent: ModelPostgresUpsertIntent,
+    ) -> None:
+        """Verify that attempting to mutate the intents field raises ValidationError.
+
+        The intents field is a tuple (immutable container) and the model is frozen.
+        Attempting to replace the entire field should raise ValidationError.
+        """
+        from pydantic import ValidationError
+
+        result = ModelReducerExecutionResult(
+            state=initial_state,
+            intents=(sample_consul_intent,),
+        )
+
+        # Attempting to assign new intents should raise ValidationError
+        new_intents = (sample_postgres_intent,)
+        with pytest.raises(ValidationError) as exc_info:
+            result.intents = new_intents  # type: ignore[misc]
+
+        # Verify the error is about frozen instance
+        assert (
+            "frozen" in str(exc_info.value).lower()
+            or "immutable" in str(exc_info.value).lower()
+        )
+
+    def test_intents_field_is_tuple_not_list(
+        self,
+        initial_state: ModelReducerState,
+        sample_consul_intent: ModelConsulRegistrationIntent,
+    ) -> None:
+        """Verify that the intents field is a tuple, not a list.
+
+        Using tuple instead of list ensures full immutability:
+        - Frozen model prevents field reassignment
+        - Tuple prevents in-place mutation of the container contents
+
+        This is critical for thread safety - concurrent access is safe
+        because the data structure cannot be modified.
+        """
+        result = ModelReducerExecutionResult(
+            state=initial_state,
+            intents=(sample_consul_intent,),
+        )
+
+        # Verify the field is a tuple, not a list
+        assert isinstance(result.intents, tuple)
+        assert not isinstance(result.intents, list)
+
+    def test_with_intents_factory_converts_list_to_tuple(
+        self,
+        initial_state: ModelReducerState,
+        sample_consul_intent: ModelConsulRegistrationIntent,
+        sample_postgres_intent: ModelPostgresUpsertIntent,
+    ) -> None:
+        """Verify that with_intents() factory converts list input to tuple.
+
+        The factory method accepts Sequence (including list) for convenience,
+        but always stores as tuple for immutability.
+        """
+        # Pass a list to the factory
+        result = ModelReducerExecutionResult.with_intents(
+            state=initial_state,
+            intents=[sample_consul_intent, sample_postgres_intent],  # List input
+        )
+
+        # Result should have tuple, not list
+        assert isinstance(result.intents, tuple)
+        assert len(result.intents) == 2
+
+    def test_empty_factory_returns_empty_tuple(self) -> None:
+        """Verify that empty() factory returns an empty tuple for intents."""
+        result = ModelReducerExecutionResult.empty()
+
+        assert result.intents == ()
+        assert isinstance(result.intents, tuple)
+        assert len(result.intents) == 0
+
+    def test_no_change_factory_returns_empty_tuple(
+        self,
+        initial_state: ModelReducerState,
+    ) -> None:
+        """Verify that no_change() factory returns an empty tuple for intents."""
+        result = ModelReducerExecutionResult.no_change(initial_state)
+
+        assert result.intents == ()
+        assert isinstance(result.intents, tuple)
+
+    def test_frozen_model_is_hashable(
+        self,
+        initial_state: ModelReducerState,
+    ) -> None:
+        """Verify that frozen model instances are hashable.
+
+        Frozen Pydantic models should be hashable, which enables:
+        - Use as dictionary keys
+        - Use in sets
+        - Memoization and caching
+
+        Note: This requires all nested types to also be hashable.
+        ModelReducerState is also frozen, and tuples are hashable.
+        """
+        result1 = ModelReducerExecutionResult(state=initial_state, intents=())
+        result2 = ModelReducerExecutionResult(state=initial_state, intents=())
+
+        # Should be hashable - if not, this will raise TypeError
+        hash1 = hash(result1)
+        hash2 = hash(result2)
+
+        # Same content should produce same hash
+        assert hash1 == hash2
+
+        # Should be usable in a set
+        result_set = {result1, result2}
+        assert len(result_set) == 1  # Duplicates removed
+
+    def test_model_config_has_frozen_true(self) -> None:
+        """Verify that the model config explicitly sets frozen=True.
+
+        This is a documentation test that ensures the model configuration
+        is correct and won't be accidentally changed.
+        """
+        config = ModelReducerExecutionResult.model_config
+
+        assert config.get("frozen") is True, (
+            "ModelReducerExecutionResult must have frozen=True in model_config "
+            "to ensure immutability and thread safety"
+        )

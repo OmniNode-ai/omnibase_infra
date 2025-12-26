@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
 from omnibase_infra.handlers.models.http.enum_http_operation_type import (
     EnumHttpOperationType,
 )
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 
 
 class ModelHttpPostPayload(BaseModel):

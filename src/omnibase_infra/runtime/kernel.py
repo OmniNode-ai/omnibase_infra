@@ -49,9 +49,6 @@ from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
 import yaml
 from omnibase_core.container import ModelONEXContainer
 from pydantic import ValidationError
@@ -69,6 +66,9 @@ from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.validation import validate_runtime_config
 from omnibase_infra.utils.correlation import generate_correlation_id
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 
 logger = logging.getLogger(__name__)
 
