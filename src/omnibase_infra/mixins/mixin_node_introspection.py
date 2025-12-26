@@ -114,6 +114,7 @@ Security Considerations:
 
 Usage:
     ```python
+    from omnibase_core.enums import EnumNodeKind
     from omnibase_infra.mixins import MixinNodeIntrospection
     from omnibase_infra.models.discovery import ModelIntrospectionConfig
 
@@ -121,7 +122,7 @@ Usage:
         def __init__(self, node_config, event_bus=None):
             config = ModelIntrospectionConfig(
                 node_id=node_config.node_id,
-                node_type="EFFECT",
+                node_type=EnumNodeKind.EFFECT,
                 event_bus=event_bus,
             )
             self.initialize_introspection(config)
@@ -171,6 +172,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
+
+from omnibase_core.enums import EnumNodeKind
 
 from omnibase_infra.models.discovery import (
     ModelIntrospectionConfig,
@@ -352,13 +355,14 @@ class MixinNodeIntrospection:
     Example:
         ```python
         from uuid import UUID
+        from omnibase_core.enums import EnumNodeKind
         from omnibase_infra.models.discovery import ModelIntrospectionConfig
 
         class PostgresAdapter(MixinNodeIntrospection):
             def __init__(self, node_id: UUID, adapter_config):
                 config = ModelIntrospectionConfig(
                     node_id=node_id,
-                    node_type="EFFECT",
+                    node_type=EnumNodeKind.EFFECT,
                     event_bus=adapter_config.event_bus,
                 )
                 self.initialize_introspection(config)
@@ -397,14 +401,14 @@ class MixinNodeIntrospection:
 
     # Configuration attributes
     _introspection_node_id: UUID | None
-    _introspection_node_type: str | None
+    _introspection_node_type: EnumNodeKind | None
     _introspection_event_bus: ProtocolEventBus | None
     _introspection_version: str
     _introspection_start_time: float | None
 
     # Capability discovery configuration
-    _introspection_operation_keywords: set[str]
-    _introspection_exclude_prefixes: set[str]
+    _introspection_operation_keywords: frozenset[str]
+    _introspection_exclude_prefixes: frozenset[str]
 
     # Registry listener callback error tracking (instance-level)
     # Used for rate-limiting error logging to prevent log spam during
@@ -418,28 +422,34 @@ class MixinNodeIntrospection:
     _introspection_last_metrics: IntrospectionPerformanceMetrics | None
 
     # Default operation keywords for capability discovery
-    DEFAULT_OPERATION_KEYWORDS: ClassVar[set[str]] = {
-        "execute",
-        "handle",
-        "process",
-        "run",
-        "invoke",
-        "call",
-    }
+    DEFAULT_OPERATION_KEYWORDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "execute",
+            "handle",
+            "process",
+            "run",
+            "invoke",
+            "call",
+        }
+    )
 
     # Default prefixes to exclude from capability discovery
-    DEFAULT_EXCLUDE_PREFIXES: ClassVar[set[str]] = {
-        "_",
-        "get_",
-        "set_",
-        "initialize",
-        "start_",
-        "stop_",
-    }
+    DEFAULT_EXCLUDE_PREFIXES: ClassVar[frozenset[str]] = frozenset(
+        {
+            "_",
+            "get_",
+            "set_",
+            "initialize",
+            "start_",
+            "stop_",
+        }
+    )
 
     # Node-type-specific operation keyword suggestions
-    NODE_TYPE_OPERATION_KEYWORDS: ClassVar[dict[str, set[str]]] = {
-        "EFFECT": {
+    # Uses EnumNodeKind as keys to ensure type safety when accessing with node_type.
+    # Example: keywords = NODE_TYPE_OPERATION_KEYWORDS.get(node_type, set())
+    NODE_TYPE_OPERATION_KEYWORDS: ClassVar[dict[EnumNodeKind, set[str]]] = {
+        EnumNodeKind.EFFECT: {
             "execute",
             "handle",
             "process",
@@ -451,7 +461,7 @@ class MixinNodeIntrospection:
             "query",
             "connect",
         },
-        "COMPUTE": {
+        EnumNodeKind.COMPUTE: {
             "execute",
             "handle",
             "process",
@@ -462,7 +472,7 @@ class MixinNodeIntrospection:
             "convert",
             "parse",
         },
-        "REDUCER": {
+        EnumNodeKind.REDUCER: {
             "execute",
             "handle",
             "process",
@@ -473,7 +483,7 @@ class MixinNodeIntrospection:
             "combine",
             "accumulate",
         },
-        "ORCHESTRATOR": {
+        EnumNodeKind.ORCHESTRATOR: {
             "execute",
             "handle",
             "process",
@@ -500,18 +510,20 @@ class MixinNodeIntrospection:
                 See ModelIntrospectionConfig for available options.
 
         Raises:
-            ValueError: If config.node_id or config.node_type is empty
-                (validated by Pydantic min_length=1)
+            ValueError: If config.node_id is not a valid UUID or config.node_type
+                is not a valid EnumNodeKind member.
+            TypeError: If node_type is neither EnumNodeKind nor str.
 
         Example:
             ```python
+            from omnibase_core.enums import EnumNodeKind
             from omnibase_infra.models.discovery import ModelIntrospectionConfig
 
             class MyNode(MixinNodeIntrospection):
                 def __init__(self, node_config):
                     config = ModelIntrospectionConfig(
                         node_id=node_config.node_id,
-                        node_type="EFFECT",
+                        node_type=EnumNodeKind.EFFECT,
                         event_bus=node_config.event_bus,
                         version="1.2.0",
                     )
@@ -522,9 +534,9 @@ class MixinNodeIntrospection:
                 def __init__(self, node_config):
                     config = ModelIntrospectionConfig(
                         node_id=node_config.node_id,
-                        node_type="EFFECT",
+                        node_type=EnumNodeKind.EFFECT,
                         event_bus=node_config.event_bus,
-                        operation_keywords={"fetch", "upload", "download"},
+                        operation_keywords=frozenset({"fetch", "upload", "download"}),
                     )
                     self.initialize_introspection(config)
             ```
@@ -532,25 +544,38 @@ class MixinNodeIntrospection:
         See Also:
             ModelIntrospectionConfig: Configuration model with all available options.
         """
-        # Note: Pydantic validates node_id is a valid UUID and node_type has min_length=1
+        # Note: Pydantic validates node_id is a valid UUID and node_type is EnumNodeKind
 
         # Configuration - extract from config model
         self._introspection_node_id = config.node_id
-        self._introspection_node_type = config.node_type
+
+        # Defensive type handling for node_type: accept both EnumNodeKind and string.
+        # While ModelIntrospectionConfig's validator ensures EnumNodeKind, this defensive
+        # check handles edge cases like mocked configs or direct attribute access patterns.
+        if isinstance(config.node_type, EnumNodeKind):
+            self._introspection_node_type = config.node_type
+        elif isinstance(config.node_type, str):
+            # Coerce string to EnumNodeKind (handles both "effect" and "EFFECT")
+            self._introspection_node_type = EnumNodeKind(config.node_type.lower())
+        else:
+            # Should never happen with proper ModelIntrospectionConfig, but handle gracefully
+            raise TypeError(
+                f"node_type must be EnumNodeKind or str, got {type(config.node_type).__name__}"
+            )
         self._introspection_event_bus = config.event_bus
         self._introspection_version = config.version
         self._introspection_cache_ttl = config.cache_ttl
 
-        # Capability discovery configuration - use copies to avoid mutation
+        # Capability discovery configuration - frozensets are immutable, no copy needed
         self._introspection_operation_keywords = (
             config.operation_keywords
             if config.operation_keywords is not None
-            else self.DEFAULT_OPERATION_KEYWORDS.copy()
+            else self.DEFAULT_OPERATION_KEYWORDS
         )
         self._introspection_exclude_prefixes = (
             config.exclude_prefixes
             if config.exclude_prefixes is not None
-            else self.DEFAULT_EXCLUDE_PREFIXES.copy()
+            else self.DEFAULT_EXCLUDE_PREFIXES
         )
 
         # Topic configuration - extract from config model
@@ -1137,15 +1162,20 @@ class MixinNodeIntrospection:
 
         node_type = self._introspection_node_type
         if node_type is None:
+            # Design Note: EnumNodeKind.EFFECT is the intended sentinel/default value
+            # when node_type is uninitialized. EFFECT is chosen because:
+            # 1. It's the most common node type in the ONEX ecosystem
+            # 2. Effect nodes have the broadest capability expectations
+            # 3. Fallback to EFFECT is safer than ORCHESTRATOR (avoids privilege escalation)
             logger.warning(
-                "Node type not initialized, using 'unknown' - "
+                "Node type not initialized, using EFFECT as fallback - "
                 "ensure initialize_introspection() was called correctly",
                 extra={
                     "node_id": str(node_id_uuid),
                     "operation": "get_introspection_data",
                 },
             )
-            node_type = "unknown"
+            node_type = EnumNodeKind.EFFECT
 
         # Extract operations list with proper type narrowing
         operations_value = capabilities.get("operations", [])
@@ -1362,12 +1392,14 @@ class MixinNodeIntrospection:
 
             node_type = self._introspection_node_type
             if node_type is None:
+                # Design Note: EnumNodeKind.EFFECT is the intended sentinel/default value.
+                # See get_introspection_data() for detailed rationale.
                 logger.warning(
-                    "Node type not initialized, using 'unknown' in heartbeat - "
+                    "Node type not initialized, using EFFECT in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
                     extra={"node_id": str(node_id), "operation": "_publish_heartbeat"},
                 )
-                node_type = "unknown"
+                node_type = EnumNodeKind.EFFECT
 
             # Create heartbeat event
             heartbeat = ModelNodeHeartbeatEvent(

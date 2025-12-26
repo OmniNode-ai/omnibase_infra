@@ -57,6 +57,7 @@ Test Isolation
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
 import pytest
@@ -110,7 +111,7 @@ def unique_secret_path() -> str:
 async def cleanup_secret(
     vault_handler: VaultHandler,
     unique_secret_path: str,
-):
+) -> AsyncGenerator[str, None]:
     """Cleanup fixture to delete test secrets after test completion.
 
     Yields the unique_secret_path and ensures cleanup after test,

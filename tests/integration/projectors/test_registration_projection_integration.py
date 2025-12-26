@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection import (
@@ -61,7 +62,7 @@ def make_projection(
     *,
     entity_id: UUID | None = None,
     state: EnumRegistrationState = EnumRegistrationState.PENDING_REGISTRATION,
-    node_type: str = "effect",
+    node_type: EnumNodeKind = EnumNodeKind.EFFECT,
     node_version: str = "1.0.0",
     event_id: UUID | None = None,
     offset: int = 0,
@@ -73,7 +74,7 @@ def make_projection(
     Args:
         entity_id: Node UUID (generated if not provided)
         state: FSM state (default: PENDING_REGISTRATION)
-        node_type: ONEX node type (default: "effect")
+        node_type: ONEX node type (default: EnumNodeKind.EFFECT)
         node_version: Semantic version (default: "1.0.0")
         event_id: Last applied event ID (generated if not provided)
         offset: Kafka offset (default: 0)
