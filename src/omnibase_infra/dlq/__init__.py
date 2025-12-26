@@ -7,8 +7,13 @@ processing in distributed systems. It enables persistent tracking
 of replay attempts through PostgreSQL.
 
 Components:
+    - Constants: Shared validation patterns (constants_dlq.py)
     - Models: Pydantic models for DLQ tracking configuration and records
     - Tracker: PostgreSQL-based tracker for replay history persistence
+
+Constants:
+    - PATTERN_TABLE_NAME: Regex pattern string for PostgreSQL table name validation
+    - REGEX_TABLE_NAME: Pre-compiled regex for runtime validation
 
 Models:
     - ModelDlqTrackingConfig: Configuration for PostgreSQL-based tracking
@@ -66,6 +71,7 @@ Related:
     - OMN-949 - DLQ configuration ticket
 """
 
+from omnibase_infra.dlq.constants_dlq import PATTERN_TABLE_NAME, REGEX_TABLE_NAME
 from omnibase_infra.dlq.models import (
     EnumReplayStatus,
     ModelDlqReplayRecord,
@@ -80,6 +86,9 @@ from omnibase_infra.dlq.service_dlq_tracking import (
 DLQTrackingService = DLQReplayTracker
 
 __all__: list[str] = [
+    # Constants
+    "PATTERN_TABLE_NAME",  # Regex pattern string for table name validation
+    "REGEX_TABLE_NAME",  # Pre-compiled regex for runtime validation
     # Models
     "EnumReplayStatus",
     "ModelDlqReplayRecord",

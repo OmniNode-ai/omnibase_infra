@@ -798,14 +798,61 @@ class DLQProducer:
 def should_replay(
     message: ModelDlqMessage, config: ModelReplayConfig
 ) -> tuple[bool, str]:
-    """Determine if a DLQ message should be replayed.
+    """Determine if a DLQ message should be replayed based on configured filters.
+
+    This function evaluates a DLQ message against multiple filter criteria to
+    determine replay eligibility. Filters are applied in a specific order with
+    short-circuit evaluation.
+
+    Filter Evaluation Order:
+        1. **Max replay count**: Rejects messages that have exceeded the maximum
+           retry attempts (fail-fast check).
+        2. **Non-retryable errors**: Rejects messages with error types that are
+           inherently non-retryable (e.g., schema validation errors).
+        3. **Time range filter**: Applied ORTHOGONALLY to other filters - messages
+           must fall within the configured time range regardless of filter_type.
+        4. **Type-specific filter**: Applied based on config.filter_type (topic,
+           error type, correlation ID, or no additional filter).
+
+    Orthogonal Time Range Filtering:
+        Time range filters (filter_start_time, filter_end_time) are applied
+        independently of the filter_type setting. This means:
+
+        - When filter_type=BY_TOPIC and time range is set:
+          Message must match the topic filter AND fall within the time range.
+
+        - When filter_type=BY_ERROR_TYPE and time range is set:
+          Message must match the error type filter AND fall within the time range.
+
+        - When filter_type=BY_TIME_RANGE (no other filter specified):
+          Only the time range constraint is applied.
+
+        This orthogonal design allows operators to combine time-based filtering
+        with any other filter criterion for precise replay targeting.
+
+    Example:
+        To replay only connection errors from the last 24 hours::
+
+            config = ModelReplayConfig(
+                filter_type=EnumFilterType.BY_ERROR_TYPE,
+                filter_error_types=["InfraConnectionError"],
+                filter_start_time=datetime.now(UTC) - timedelta(hours=24),
+                filter_end_time=datetime.now(UTC),
+            )
+            # A message is replayed only if:
+            # 1. retry_count < max_replay_count
+            # 2. error_type is not in NON_RETRYABLE_ERRORS
+            # 3. failure_timestamp is within the last 24 hours (time range)
+            # 4. error_type == "InfraConnectionError" (type-specific filter)
 
     Args:
-        message: DLQ message to evaluate
-        config: Replay configuration
+        message: DLQ message to evaluate for replay eligibility.
+        config: Replay configuration containing filter criteria.
 
     Returns:
-        Tuple of (should_replay, reason)
+        Tuple of (should_replay, reason) where:
+            - should_replay: True if message passes all filter criteria
+            - reason: Human-readable explanation of the decision
     """
     # Check max replay count
     if message.retry_count >= config.max_replay_count:

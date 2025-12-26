@@ -2,8 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 # ruff: noqa: S608
 # S608 disabled: All SQL f-strings use storage_table which is validated via:
-# 1. Pydantic regex pattern ^[a-zA-Z_][a-zA-Z0-9_]*$ in ModelDlqTrackingConfig
+# 1. Pydantic regex pattern (PATTERN_TABLE_NAME) in ModelDlqTrackingConfig
 # 2. Runtime validation in _validate_storage_table() (defense-in-depth)
+# Both use the shared PATTERN_TABLE_NAME constant from constants_dlq.py.
 # This defense-in-depth approach ensures only valid PostgreSQL identifiers are used,
 # preventing SQL injection even if config validation is somehow bypassed.
 """DLQ Replay Tracking Service.
@@ -46,11 +47,11 @@ Related:
 from __future__ import annotations
 
 import logging
-import re
 from uuid import UUID, uuid4
 
 import asyncpg
 
+from omnibase_infra.dlq.constants_dlq import PATTERN_TABLE_NAME, REGEX_TABLE_NAME
 from omnibase_infra.dlq.models import (
     EnumReplayStatus,
     ModelDlqReplayRecord,
@@ -67,10 +68,6 @@ from omnibase_infra.errors import (
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 
 logger = logging.getLogger(__name__)
-
-# Regex pattern for valid PostgreSQL table names (defense-in-depth validation)
-# Must start with letter or underscore, followed by letters, digits, or underscores
-_TABLE_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 class DLQReplayTracker(MixinAsyncCircuitBreaker):
@@ -191,14 +188,18 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
         complementing the Pydantic field validation in the config model.
         Together they form a defense-in-depth approach to prevent SQL injection.
 
+        Both validations use the shared PATTERN_TABLE_NAME constant from
+        constants_dlq.py to ensure consistency. See that module for details
+        on why both validation layers are intentional and required.
+
         Args:
             storage_table: The storage table name to validate.
 
         Raises:
             ProtocolConfigurationError: If storage_table doesn't match the
-                expected pattern ^[a-zA-Z_][a-zA-Z0-9_]*$
+                expected pattern (PATTERN_TABLE_NAME constant).
         """
-        if not _TABLE_NAME_PATTERN.match(storage_table):
+        if not REGEX_TABLE_NAME.match(storage_table):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="validate_storage_table",
@@ -207,7 +208,7 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
             )
             raise ProtocolConfigurationError(
                 f"Invalid storage table: {storage_table}. "
-                "Must match pattern ^[a-zA-Z_][a-zA-Z0-9_]*$ "
+                f"Must match pattern {PATTERN_TABLE_NAME} "
                 "(letters, digits, underscores only, must start with letter or underscore)",
                 context=context,
                 parameter="storage_table",
@@ -381,7 +382,7 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
                 context=context,
             )
 
-        # Check circuit breaker before execution
+        # Circuit breaker check (caller-held lock pattern per ONEX circuit breaker pattern)
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("record_replay_attempt", correlation_id)
 
@@ -420,12 +421,12 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
                     },
                 )
 
-            # Record success for circuit breaker
+            # Circuit breaker success (caller-held lock pattern per ONEX circuit breaker pattern)
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
         except asyncpg.QueryCanceledError as e:
-            # Record failure for circuit breaker
+            # Circuit breaker failure (caller-held lock pattern per ONEX circuit breaker pattern)
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
                     "record_replay_attempt", correlation_id
@@ -436,7 +437,7 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
                 timeout_seconds=self._config.command_timeout,
             ) from e
         except asyncpg.PostgresConnectionError as e:
-            # Record failure for circuit breaker
+            # Circuit breaker failure (caller-held lock pattern per ONEX circuit breaker pattern)
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
                     "record_replay_attempt", correlation_id
@@ -446,7 +447,7 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
                 context=context,
             ) from e
         except asyncpg.PostgresError as e:
-            # Record failure for circuit breaker
+            # Circuit breaker failure (caller-held lock pattern per ONEX circuit breaker pattern)
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
                     "record_replay_attempt", correlation_id
@@ -493,7 +494,7 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
                 context=context,
             )
 
-        # Check circuit breaker before execution
+        # Circuit breaker check (caller-held lock pattern per ONEX circuit breaker pattern)
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("get_replay_history", correlation_id)
 
@@ -530,14 +531,14 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
                         )
                     )
 
-            # Record success for circuit breaker
+            # Circuit breaker success (caller-held lock pattern per ONEX circuit breaker pattern)
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
             return records
 
         except asyncpg.QueryCanceledError as e:
-            # Record failure for circuit breaker
+            # Circuit breaker failure (caller-held lock pattern per ONEX circuit breaker pattern)
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("get_replay_history", correlation_id)
             raise InfraTimeoutError(
@@ -546,7 +547,7 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
                 timeout_seconds=self._config.command_timeout,
             ) from e
         except asyncpg.PostgresConnectionError as e:
-            # Record failure for circuit breaker
+            # Circuit breaker failure (caller-held lock pattern per ONEX circuit breaker pattern)
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("get_replay_history", correlation_id)
             raise InfraConnectionError(
@@ -554,7 +555,7 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
                 context=context,
             ) from e
         except asyncpg.PostgresError as e:
-            # Record failure for circuit breaker
+            # Circuit breaker failure (caller-held lock pattern per ONEX circuit breaker pattern)
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("get_replay_history", correlation_id)
             raise RuntimeHostError(

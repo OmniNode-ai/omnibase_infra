@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
+from omnibase_infra.dlq.constants_dlq import PATTERN_TABLE_NAME
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
@@ -124,12 +125,14 @@ class ModelDlqTrackingConfig(BaseModel):
 
         return dsn
 
+    # Defense-in-depth: Table name validation is applied at both config and runtime level.
+    # See constants_dlq.py for details on why both validations are intentional.
     storage_table: str = Field(
         default="dlq_replay_history",
         description="PostgreSQL table for storing DLQ replay history records",
         min_length=1,
         max_length=63,  # PostgreSQL identifier limit
-        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+        pattern=PATTERN_TABLE_NAME,
     )
     pool_min_size: int = Field(
         default=1,
