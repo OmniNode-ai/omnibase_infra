@@ -109,6 +109,7 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
 
     Example:
         >>> from uuid import uuid4
+        >>> from datetime import datetime, timezone
         >>> config = ModelDlqTrackingConfig(
         ...     dsn="postgresql://user:pass@localhost:5432/mydb",
         ...     storage_table="dlq_replay_history",
@@ -279,9 +280,7 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
         finally:
             # Cleanup pool if initialization failed
             if not self._initialized and self._pool is not None:
-                logger.warning(
-                    "Cleaning up connection pool after initialization failure"
-                )
+                logger.debug("Cleaning up connection pool after initialization failure")
                 await self._pool.close()
                 self._pool = None
 
