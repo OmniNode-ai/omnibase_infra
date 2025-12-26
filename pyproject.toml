@@ -243,6 +243,7 @@ markers = [
     "consul: Tests requiring real Consul instance (CONSUL_HTTP_ADDR)",
     "postgres: Tests requiring real PostgreSQL instance (POSTGRES_DSN)",
     "kafka: Tests requiring real Kafka instance (KAFKA_BOOTSTRAP_SERVERS)",
+    "e2e: End-to-end tests requiring full infrastructure (Kafka + Consul + PostgreSQL)",
 ]
 addopts = [
     "--strict-markers",
