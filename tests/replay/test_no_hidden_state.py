@@ -28,22 +28,20 @@ Related Tickets:
 
 from __future__ import annotations
 
+import concurrent.futures
 import copy
 import inspect
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING
-from uuid import UUID
 
 import pytest
 
-from omnibase_infra.models.registration import (
-    ModelNodeCapabilities,
-    ModelNodeIntrospectionEvent,
-    ModelNodeMetadata,
-)
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
-from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
+from omnibase_infra.testing import is_ci_environment
+from tests.helpers import (
+    DeterministicClock,
+    DeterministicIdGenerator,
+    create_introspection_event,
+)
 
 __all__ = [
     "TestReducerPurityInspection",
@@ -73,25 +71,6 @@ def clock() -> DeterministicClock:
 def reducer() -> RegistrationReducer:
     """Create a fresh RegistrationReducer instance."""
     return RegistrationReducer()
-
-
-def create_introspection_event(
-    node_id: UUID,
-    correlation_id: UUID,
-    timestamp: datetime,
-    node_type: str = "effect",
-) -> ModelNodeIntrospectionEvent:
-    """Factory for creating introspection events."""
-    return ModelNodeIntrospectionEvent(
-        node_id=node_id,
-        node_type=node_type,
-        node_version="1.0.0",
-        correlation_id=correlation_id,
-        timestamp=timestamp,
-        endpoints={"health": "http://localhost:8080/health"},
-        capabilities=ModelNodeCapabilities(postgres=True, read=True),
-        metadata=ModelNodeMetadata(environment="test"),
-    )
 
 
 # =============================================================================
@@ -254,7 +233,8 @@ class TestNoSideEffects:
 
         # Verify input state was NOT mutated
         assert original_state.status == state_before.status, (
-            f"Input state.status was mutated: {state_before.status} -> {original_state.status}"
+            f"Input state.status was mutated: "
+            f"{state_before.status} -> {original_state.status}"
         )
         assert original_state.node_id == state_before.node_id, (
             "Input state.node_id was mutated"
@@ -329,10 +309,10 @@ class TestNoSideEffects:
             timestamp=clock.now(),
         )
 
-        # Run multiple reductions
+        # Run multiple reductions (output deliberately unused - testing side effects)
         state = ModelRegistrationState()
         for _ in range(5):
-            output = reducer.reduce(state, event)
+            _ = reducer.reduce(state, event)  # Exercise reducer, ignore output
             state = ModelRegistrationState()  # Reset for next iteration
 
         # Capture reducer state after
@@ -514,10 +494,6 @@ class TestStateIsolation:
 
         Multiple threads should be able to call reduce() without interference.
         """
-        import concurrent.futures
-
-        from omnibase_infra.testing import is_ci_environment
-
         # Shared inputs (immutable)
         fixed_node_id = id_generator.next_uuid()
         fixed_correlation_id = id_generator.next_uuid()

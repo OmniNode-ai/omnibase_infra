@@ -78,7 +78,8 @@ class ChainedMessage:
 
     Attributes:
         message_id: Unique identifier for this message.
-        correlation_id: Shared workflow correlation ID (same for all messages in workflow).
+        correlation_id: Shared workflow correlation ID
+            (same for all messages in workflow).
         causation_id: Parent message ID (None for root message).
         payload: Message payload data.
         position: Position in the chain (0 = root).
@@ -148,7 +149,9 @@ class ChainBuilder:
         >>> # Build a valid chain
         >>> valid_chain = builder.build_valid_chain(length=5)
         >>> # Build a chain with broken correlation at position 3
-        >>> broken_chain = builder.build_chain_with_correlation_break(length=5, break_at=3)
+        >>> broken_chain = builder.build_chain_with_correlation_break(
+        ...     length=5, break_at=3
+        ... )
     """
 
     def __init__(
@@ -179,12 +182,20 @@ class ChainBuilder:
         - The root message (position 0) has no causation_id
 
         Args:
-            length: Number of messages in chain.
+            length: Number of messages in chain. Must be positive (length > 0).
             correlation_id: Optional correlation ID (generates if None).
 
         Returns:
             List of ChainedMessage forming a valid chain.
+
+        Raises:
+            ValueError: If length is not positive.
         """
+        if length <= 0:
+            raise ValueError(
+                f"Chain length must be positive, got {length}. "
+                "A chain requires at least one message."
+            )
         correlation_id = correlation_id or uuid4()
         chain: list[ChainedMessage] = []
 
@@ -212,13 +223,32 @@ class ChainBuilder:
         by chain validation.
 
         Args:
-            length: Number of messages in chain.
+            length: Number of messages in chain. Must be positive (length > 0).
             break_at: Position where correlation breaks (messages at this
                 position and later will have a different correlation_id).
+                Must satisfy: 0 <= break_at < length.
 
         Returns:
             List of ChainedMessage with broken correlation at break_at.
+
+        Raises:
+            ValueError: If length is not positive, or break_at is out of range.
         """
+        if length <= 0:
+            raise ValueError(
+                f"Chain length must be positive, got {length}. "
+                "A chain requires at least one message."
+            )
+        if break_at < 0:
+            raise ValueError(
+                f"break_at must be non-negative, got {break_at}. "
+                "Cannot break at a negative position."
+            )
+        if break_at >= length:
+            raise ValueError(
+                f"break_at ({break_at}) must be less than length ({length}). "
+                "Cannot break beyond the chain length."
+            )
         correlation_id = uuid4()
         broken_correlation_id = uuid4()
         chain: list[ChainedMessage] = []
@@ -252,13 +282,33 @@ class ChainBuilder:
         simulating a causation break that should be detected by validation.
 
         Args:
-            length: Number of messages in chain.
+            length: Number of messages in chain. Must be positive (length > 0).
             break_at: Position where causation breaks (this message will
                 have a random causation_id instead of parent's message_id).
+                Must satisfy: 0 < break_at < length (cannot break at root
+                since it has no causation_id).
 
         Returns:
             List of ChainedMessage with broken causation at break_at.
+
+        Raises:
+            ValueError: If length is not positive, or break_at is out of range.
         """
+        if length <= 0:
+            raise ValueError(
+                f"Chain length must be positive, got {length}. "
+                "A chain requires at least one message."
+            )
+        if break_at <= 0:
+            raise ValueError(
+                f"break_at must be positive (> 0), got {break_at}. "
+                "Cannot break causation at root (position 0) since it has no causation_id."
+            )
+        if break_at >= length:
+            raise ValueError(
+                f"break_at ({break_at}) must be less than length ({length}). "
+                "Cannot break beyond the chain length."
+            )
         correlation_id = uuid4()
         chain: list[ChainedMessage] = []
 
@@ -292,12 +342,20 @@ class ChainBuilder:
         Useful for fuzz testing chain validation.
 
         Args:
-            length: Number of messages in chain.
+            length: Number of messages in chain. Must be positive (length > 0).
 
         Returns:
             Tuple of (chain, list of break positions) where break positions
             indicates which messages have broken correlation or causation.
+
+        Raises:
+            ValueError: If length is not positive.
         """
+        if length <= 0:
+            raise ValueError(
+                f"Chain length must be positive, got {length}. "
+                "A chain requires at least one message."
+            )
         correlation_id = uuid4()
         chain: list[ChainedMessage] = []
         break_positions: list[int] = []

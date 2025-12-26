@@ -32,10 +32,11 @@ Related Tickets:
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_infra.errors import InfraConnectionError
 from tests.chaos.conftest import (
     ChaosConfig,
     ChaosEffectExecutor,
@@ -71,8 +72,9 @@ class TestHandlerFailureAtVariousPoints:
         intent_id = uuid4()
         correlation_id = uuid4()
 
-        # Act & Assert
-        with pytest.raises(ValueError, match="Chaos injection"):
+        # Act & Assert - InfraConnectionError is used for chaos injection failures
+        # (correlation_id is in error context, not message string per ONEX guidelines)
+        with pytest.raises(InfraConnectionError, match="Chaos injection"):
             await chaos_effect_executor.execute_with_chaos(
                 intent_id=intent_id,
                 operation="test_operation",
@@ -109,8 +111,8 @@ class TestHandlerFailureAtVariousPoints:
         intent_id = uuid4()
         correlation_id = uuid4()
 
-        # Act & Assert
-        with pytest.raises(ValueError, match="Chaos injection"):
+        # Act & Assert - InfraConnectionError is used for chaos injection failures
+        with pytest.raises(InfraConnectionError, match="Chaos injection"):
             await executor.execute_with_chaos(
                 intent_id=intent_id,
                 operation="test_operation",
@@ -146,8 +148,8 @@ class TestHandlerFailureAtVariousPoints:
         intent_id = uuid4()
         correlation_id = uuid4()
 
-        # Act & Assert
-        with pytest.raises(ValueError, match="Chaos injection"):
+        # Act & Assert - InfraConnectionError is used for chaos injection failures
+        with pytest.raises(InfraConnectionError, match="Chaos injection"):
             await executor.execute_with_chaos(
                 intent_id=intent_id,
                 operation="test_operation",
@@ -195,26 +197,35 @@ class TestHandlerFailurePropagation:
     """Test that handler failures are properly propagated."""
 
     @pytest.mark.asyncio
-    async def test_failure_propagates_with_correlation_id(
+    async def test_failure_propagates_with_correlation_id_in_context(
         self,
         deterministic_failure_injector: FailureInjector,
     ) -> None:
-        """Test that failure messages include correlation ID.
+        """Test that failure errors include correlation ID in context.
 
-        Failure messages should include the correlation ID for tracing
-        purposes in distributed systems.
+        Per ONEX error sanitization guidelines, correlation_id should be
+        passed via ModelInfraErrorContext, NOT in the error message string.
+        This enables tracing while avoiding sensitive data leakage.
         """
         # Arrange
         correlation_id = uuid4()
 
-        # Act & Assert
-        with pytest.raises(ValueError) as exc_info:
+        # Act & Assert - InfraConnectionError includes context with correlation_id
+        with pytest.raises(InfraConnectionError) as exc_info:
             await deterministic_failure_injector.maybe_inject_failure(
                 operation="test_op",
                 correlation_id=correlation_id,
             )
 
-        assert str(correlation_id) in str(exc_info.value)
+        # Verify correlation_id is in error model (proper ONEX pattern)
+        # The correlation_id is stored in error.model.correlation_id
+        # (or error.correlation_id)
+        error = exc_info.value
+        assert error.model.correlation_id == correlation_id
+
+        # Verify correlation_id is NOT exposed in message string (sanitization)
+        # The error message should not contain the raw UUID string
+        assert str(correlation_id) not in error.message
 
     @pytest.mark.asyncio
     async def test_failure_does_not_mask_original_error(
@@ -307,7 +318,9 @@ class TestHandlerFailureRecovery:
         # Arrange - injector that fails once, then succeeds
         call_count = 0
 
-        async def conditional_failure(operation: str, correlation_id=None) -> None:
+        async def conditional_failure(
+            operation: str, correlation_id: UUID | None = None
+        ) -> None:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -423,7 +436,7 @@ class TestHandlerFailureRandom:
                     operation=f"test_operation_{i}",
                     fail_point="mid",
                 )
-            except ValueError:
+            except InfraConnectionError:
                 failure_count += 1
 
         # Assert - failure rate should be roughly 30% (with tolerance)
@@ -448,7 +461,7 @@ class TestHandlerFailureRandom:
                 await deterministic_failure_injector.maybe_inject_failure(
                     operation=f"test_{i}",
                 )
-            except ValueError:
+            except InfraConnectionError:
                 pass
 
         # Assert
@@ -464,7 +477,7 @@ class TestHandlerFailureRandom:
         for _ in range(3):
             try:
                 await deterministic_failure_injector.maybe_inject_failure("test")
-            except ValueError:
+            except InfraConnectionError:
                 pass
 
         assert deterministic_failure_injector.failure_count == 3

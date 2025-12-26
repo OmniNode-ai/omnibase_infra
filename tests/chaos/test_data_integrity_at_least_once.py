@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -46,6 +46,8 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_infra.idempotency import InMemoryIdempotencyStore
+
+from .conftest import ChaosConfig
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -57,38 +59,26 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class ChaosConfig:
-    """Configuration for chaos injection in tests.
-
-    Attributes:
-        failure_rate: Probability of failure (0.0 to 1.0).
-        max_retries: Maximum retry attempts before giving up.
-        retry_delay_ms: Delay between retries in milliseconds.
-        failure_types: List of exception types to randomly raise.
-    """
-
-    failure_rate: float = 0.3
-    max_retries: int = 5
-    retry_delay_ms: float = 10.0
-    failure_types: list[type[Exception]] = field(
-        default_factory=lambda: [
-            ConnectionError,
-            TimeoutError,
-            RuntimeError,
-        ]
-    )
-
-
-@dataclass
 class EventRecord:
     """Record of an event for tracking processing.
+
+    This dataclass tracks event lifecycle through processing attempts.
+
+    State Transitions:
+        - Initial: processed=False, attempt_count=0
+        - During processing: attempt_count increments per attempt
+        - After success: processed=True (only after backend execution AND idempotency marking)
+        - After failure: processed=False (event can be retried later)
 
     Attributes:
         event_id: Unique identifier for the event.
         correlation_id: Correlation ID for tracing.
         payload: Event payload data.
-        processed: Whether the event has been processed.
-        attempt_count: Number of processing attempts.
+        processed: Whether the event has been successfully processed.
+            Only set to True after both backend execution and idempotency
+            marking complete successfully. Remains False on any failure.
+        attempt_count: Number of processing attempts made. Incremented
+            at the start of each attempt, regardless of outcome.
     """
 
     event_id: UUID
@@ -204,14 +194,39 @@ class ResilientEventProcessor:
         but only MARKED as processed AFTER successful execution.
         This ensures retries work correctly after failures.
 
+        Exception Handling:
+            The following exceptions are considered transient and trigger retries:
+            - ConnectionError: Network connectivity issues
+            - TimeoutError: Operation timeouts
+            - RuntimeError: Transient runtime failures (from chaos injection)
+
+            All other exceptions bubble up immediately without retry.
+            On retry exhaustion, the last caught exception is re-raised
+            with its original traceback preserved.
+
+        State Transitions on Success:
+            1. event.attempt_count incremented
+            2. Backend executor called
+            3. Idempotency store marked
+            4. event.processed = True
+            5. Event ID added to processed_events set
+
+        State Transitions on Failure:
+            1. event.attempt_count incremented (per attempt)
+            2. event.processed remains False
+            3. Event NOT added to processed_events set
+            4. Exception re-raised after retries exhausted
+
         Args:
             event: Event to process.
 
         Returns:
-            True if event was processed successfully.
+            True if event was processed successfully (includes already-processed case).
 
         Raises:
-            Exception: If all retry attempts are exhausted.
+            ConnectionError: If connection fails after all retries exhausted.
+            TimeoutError: If operation times out after all retries exhausted.
+            RuntimeError: If runtime error occurs after all retries exhausted.
         """
         max_retries = self.chaos_injector.config.max_retries
         retry_delay = self.chaos_injector.config.retry_delay_ms / 1000.0
@@ -263,13 +278,29 @@ class ResilientEventProcessor:
     ) -> tuple[int, int]:
         """Process a batch of events with retry logic.
 
-        Processes all events, tracking successes and failures.
+        Processes all events sequentially, tracking successes and failures.
+        Each event is processed independently - a failure in one event
+        does not affect processing of subsequent events.
+
+        Exception Handling:
+            Exceptions from individual events are caught and counted as failures.
+            The exception is NOT propagated - this allows batch processing to
+            continue even when some events fail after retry exhaustion.
+
+            To identify which events failed, check event.processed after batch
+            completion. Failed events will have processed=False.
+
+        Note:
+            This is intentional batch semantics for testing. Production code
+            may want different behavior (e.g., collect exceptions, fail-fast).
 
         Args:
             events: List of events to process.
 
         Returns:
             Tuple of (success_count, failure_count).
+            success_count: Events that returned True from process_event.
+            failure_count: Events that raised exceptions after retry exhaustion.
         """
         success_count = 0
         failure_count = 0
@@ -278,7 +309,9 @@ class ResilientEventProcessor:
             try:
                 if await self.process_event(event):
                     success_count += 1
-            except Exception:
+            except (ConnectionError, TimeoutError, RuntimeError):
+                # Transient failures after retry exhaustion - count as failure
+                # Event remains unprocessed (event.processed=False) for later retry
                 failure_count += 1
 
         return success_count, failure_count

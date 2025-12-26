@@ -38,6 +38,7 @@ Related Tickets:
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -55,6 +56,7 @@ from tests.chaos.conftest import (
     ChaosConfig,
     ChaosEffectExecutor,
     FailureInjector,
+    MockEventBusWithPartition,
     NetworkPartitionSimulator,
 )
 
@@ -97,7 +99,7 @@ class ServiceSimulator:
             True if operation succeeded.
 
         Raises:
-            ValueError: If failure injection triggers.
+            InfraConnectionError: If failure injection triggers.
             InfraTimeoutError: If timeout injection triggers.
         """
         async with self._lock:
@@ -169,7 +171,7 @@ class MultiServiceExecutor:
             async with self._lock:
                 self.completed_operations.append(f"{service_name}:{operation}")
             return result
-        except Exception as e:
+        except Exception:
             async with self._lock:
                 self.failed_operations.append(f"{service_name}:{operation}")
             raise
@@ -538,6 +540,28 @@ class TestCascadingFailures:
         circuit_open = False
 
         class CircuitBreakerSimulator:
+            """Simplified circuit breaker simulator for testing cascade prevention.
+
+            This inline class provides a minimal circuit breaker implementation
+            to verify that retry logic correctly respects circuit breaker state
+            and prevents infinite failure cascades.
+
+            Attributes:
+                failure_count: Number of consecutive failures recorded.
+                threshold: Number of failures required to open the circuit.
+                is_open: Whether the circuit is currently open (blocking requests).
+
+            Behavior:
+                - Tracks consecutive failures via failure_count
+                - Opens circuit (is_open=True) when failure_count >= threshold
+                - Once open, raises InfraUnavailableError for all subsequent calls
+                - Always raises ValueError before opening to simulate operation failures
+
+            Usage:
+                breaker = CircuitBreakerSimulator(threshold=3)
+                # First 3 calls raise ValueError, 4th+ raise InfraUnavailableError
+            """
+
             def __init__(self, threshold: int):
                 self.failure_count = 0
                 self.threshold = threshold
@@ -825,11 +849,13 @@ class TestMixedFailureModes:
 
         # Categorize results
         timeouts = [r for r in results if isinstance(r, InfraTimeoutError)]
-        value_errors = [r for r in results if isinstance(r, ValueError)]
+        connection_errors = [r for r in results if isinstance(r, InfraConnectionError)]
         successes = [r for r in results if r is True]
 
         assert len(timeouts) == 1, "Database should timeout"
-        assert len(value_errors) == 1, "Cache should fail with ValueError"
+        assert len(connection_errors) == 1, (
+            "Cache should fail with InfraConnectionError"
+        )
         assert len(successes) == 1, "External API should succeed"
 
     @pytest.mark.asyncio
@@ -861,8 +887,6 @@ class TestMixedFailureModes:
         )
 
         # Act
-        import time
-
         start_time = time.monotonic()
 
         results = await asyncio.gather(
@@ -901,9 +925,6 @@ class TestMixedFailureModes:
         - After healing, operations should succeed
         - No data corruption should occur
         """
-        # Import MockEventBusWithPartition
-        from tests.chaos.conftest import MockEventBusWithPartition
-
         # Arrange
         event_bus = MockEventBusWithPartition(network_partition_simulator)
         await event_bus.start()
@@ -1105,8 +1126,6 @@ class TestCircuitBreakerUnderConcurrentLoad:
                     if self.is_open:
                         # Check for half-open transition
                         if self.open_time is not None:
-                            import time
-
                             if time.monotonic() - self.open_time > self.reset_timeout:
                                 # Try half-open - allow one request
                                 self.is_open = False
@@ -1130,8 +1149,6 @@ class TestCircuitBreakerUnderConcurrentLoad:
                     if should_fail:
                         self.failure_count += 1
                         if self.failure_count >= self.threshold:
-                            import time
-
                             self.is_open = True
                             self.open_time = time.monotonic()
                         raise ValueError(f"Simulated failure in {operation}")
@@ -1159,8 +1176,10 @@ class TestCircuitBreakerUnderConcurrentLoad:
         # Circuit should be open
         assert breaker.is_open, "Circuit should be open after threshold failures"
 
-        # Some should be blocked by circuit
-        blocked = [r for r in results if isinstance(r, InfraUnavailableError)]
+        # Categorize results
+        blocked_by_circuit = [
+            r for r in results if isinstance(r, InfraUnavailableError)
+        ]
         value_errors = [r for r in results if isinstance(r, ValueError)]
 
         # At least threshold operations should have executed before circuit opened
@@ -1168,8 +1187,9 @@ class TestCircuitBreakerUnderConcurrentLoad:
             f"Expected at least {threshold} ValueErrors, got {len(value_errors)}"
         )
 
-        # Remaining should be blocked
-        assert breaker.blocked_count >= 0, "Some operations may have been blocked"
+        # Remaining should be blocked (circuit breaker rejected them)
+        assert len(blocked_by_circuit) >= 0, "Some operations may have been blocked"
+        assert breaker.blocked_count >= 0, "Blocked count should be tracked"
         assert breaker.executed_count + breaker.blocked_count == num_concurrent
 
     @pytest.mark.asyncio
@@ -1408,8 +1428,6 @@ class TestDLQConcurrentWrites:
                 error: str,
             ) -> bool:
                 """Write a failed message to DLQ."""
-                import time
-
                 async with self._lock:
                     self.write_count += 1
 
@@ -1542,9 +1560,8 @@ class TestDLQConcurrentWrites:
         - Timestamps should be monotonically increasing
         - No interleaving corruption should occur
         """
-        # Arrange
-        import time
 
+        # Arrange
         @dataclass
         class OrderedDLQMessage:
             """DLQ message with ordering metadata."""
@@ -1678,8 +1695,8 @@ class TestRecoveryRaceConditions:
                             self.successful_ops += 1
                         return True
 
-                    except ValueError:
-                        # Handle retry
+                    except InfraConnectionError:
+                        # Handle retry - InfraConnectionError from maybe_inject_failure
                         async with self._lock:
                             op.retry_count += 1
                             self.total_retries += 1
@@ -1926,7 +1943,7 @@ class TestRecoveryRaceConditions:
 
         # Assert
         alloc_results = results[0]
-        cleaned_count = results[2]
+        _cleaned_count = results[2]  # Capture for potential debugging
 
         # Cleanup should have completed
         assert manager.cleanup_completed, "Cleanup should complete"
@@ -1938,6 +1955,508 @@ class TestRecoveryRaceConditions:
                 or not manager.resources[r.id].is_allocated
             ), f"Resource {r.id} should be cleaned or deallocated"
 
-        # Some allocations should have failed during cleanup
+        # Allocation results may include failures if cleanup started during allocation.
+        # Due to timing non-determinism, the failure count can range from 0 to 5.
         failed_allocs = [r for r in alloc_results if isinstance(r, Exception)]
-        assert len(failed_allocs) >= 0  # May be 0 if timing is different
+        successful_allocs = [r for r in alloc_results if not isinstance(r, Exception)]
+        assert len(failed_allocs) + len(successful_allocs) == 5, (
+            f"All allocation attempts should be accounted for: "
+            f"{len(failed_allocs)} failed + {len(successful_allocs)} succeeded != 5"
+        )
+
+
+# =============================================================================
+# Simultaneous Multiple Failure Modes (OMN-955 PR #95 Review)
+# =============================================================================
+
+
+@pytest.mark.chaos
+class TestSimultaneousMultipleFailureModes:
+    """Test scenarios with multiple failure modes occurring simultaneously.
+
+    These tests validate system behavior when failures, timeouts, and latency
+    all occur concurrently. This is the most challenging chaos scenario as
+    it combines multiple stress factors.
+
+    Key validations:
+    - System handles interleaved failure types correctly
+    - Counters remain accurate under multi-mode chaos
+    - No operations are lost or double-counted
+    - Recovery is possible after simultaneous multi-mode failures
+    """
+
+    @pytest.mark.asyncio
+    async def test_simultaneous_failure_timeout_latency_injection(
+        self,
+        chaos_idempotency_store: InMemoryIdempotencyStore,
+        mock_backend_client: MagicMock,
+    ) -> None:
+        """Test concurrent operations with all chaos modes active.
+
+        When failures, timeouts, and latency are all injected:
+        - Each operation experiences one of the failure modes
+        - Results correctly categorize each failure type
+        - Total operations match expected count
+        - No operations are lost
+        """
+        # Arrange - configure all chaos modes simultaneously
+        injector = FailureInjector(
+            config=ChaosConfig(
+                failure_rate=0.25,  # 25% failures
+                timeout_rate=0.25,  # 25% timeouts
+                latency_min_ms=5,  # 5-20ms latency on all operations
+                latency_max_ms=20,
+            )
+        )
+
+        executor = ChaosEffectExecutor(
+            idempotency_store=chaos_idempotency_store,
+            failure_injector=injector,
+            backend_client=mock_backend_client,
+        )
+
+        num_concurrent = 40
+
+        # Act - execute many concurrent operations with multi-mode chaos
+        results = await asyncio.gather(
+            *[
+                executor.execute_with_chaos(
+                    intent_id=uuid4(),
+                    operation=f"multi_chaos_op_{i}",
+                    fail_point="mid",  # Apply chaos at mid-point
+                )
+                for i in range(num_concurrent)
+            ],
+            return_exceptions=True,
+        )
+
+        # Assert - all operations accounted for
+        assert len(results) == num_concurrent
+
+        # Categorize results - FailureInjector raises InfraConnectionError for
+        # failures and InfraTimeoutError for timeouts
+        successes = [r for r in results if r is True]
+        all_exceptions = [r for r in results if isinstance(r, Exception)]
+        connection_errors = [r for r in results if isinstance(r, InfraConnectionError)]
+        timeout_errors = [r for r in results if isinstance(r, InfraTimeoutError)]
+
+        # All operations should be either success or exception
+        total_categorized = len(successes) + len(all_exceptions)
+        assert total_categorized == num_concurrent, (
+            f"Expected {num_concurrent} categorized, got {total_categorized}. "
+            f"Successes: {len(successes)}, Exceptions: {len(all_exceptions)}"
+        )
+
+        # Counter consistency - executor tracks successes and failures
+        assert executor.execution_count == len(successes), (
+            f"Execution count mismatch: {executor.execution_count} != {len(successes)}"
+        )
+        assert executor.failed_count == len(all_exceptions), (
+            f"Failed count mismatch: {executor.failed_count} != {len(all_exceptions)}"
+        )
+
+        # With combined 50% failure rate (25% + 25%), expect roughly half to fail
+        # Allow variance - at least some of each outcome
+        assert len(successes) > 0, "Expected at least some successes"
+        assert len(all_exceptions) > 0, "Expected at least some failures"
+
+        # Verify exception types are as expected
+        # (InfraConnectionError or InfraTimeoutError)
+        expected_exception_count = len(connection_errors) + len(timeout_errors)
+        assert expected_exception_count == len(all_exceptions), (
+            f"Unexpected exception types found. "
+            f"Expected {len(all_exceptions)} to be "
+            f"InfraConnectionError or InfraTimeoutError, "
+            f"got {expected_exception_count} "
+            f"(ConnectionErrors: {len(connection_errors)}, "
+            f"Timeouts: {len(timeout_errors)})"
+        )
+
+    @pytest.mark.asyncio
+    async def test_mixed_chaos_profiles_concurrent_execution(
+        self,
+        multi_service_executor: MultiServiceExecutor,
+    ) -> None:
+        """Test concurrent operations with different chaos profiles per service.
+
+        When different services have different chaos configurations:
+        - Each service fails according to its own profile
+        - Results correctly reflect service-specific behavior
+        - Cross-service operations complete without interference
+        """
+        # Arrange - each service gets a different chaos profile
+        # Database: high failure rate
+        multi_service_executor.services["database"].failure_injector = FailureInjector(
+            config=ChaosConfig(failure_rate=0.8)
+        )
+        # Cache: high timeout rate
+        multi_service_executor.services["cache"].failure_injector = FailureInjector(
+            config=ChaosConfig(timeout_rate=0.8)
+        )
+        # External API: high latency but low failure rate
+        multi_service_executor.services[
+            "external_api"
+        ].failure_injector = FailureInjector(
+            config=ChaosConfig(
+                failure_rate=0.1,
+                latency_min_ms=10,
+                latency_max_ms=30,
+            )
+        )
+
+        num_iterations = 20
+
+        # Act - execute operations on all services
+        operations = []
+        for i in range(num_iterations):
+            operations.extend(
+                [
+                    ("database", f"db_op_{i}"),
+                    ("cache", f"cache_op_{i}"),
+                    ("external_api", f"api_op_{i}"),
+                ]
+            )
+
+        results = await multi_service_executor.execute_all_concurrent(
+            operations=operations,
+            correlation_id=uuid4(),
+        )
+
+        # Assert
+        assert len(results) == num_iterations * 3
+
+        # Database should have mostly failures (80% rate)
+        db_service = multi_service_executor.services["database"]
+        assert db_service.failure_count >= num_iterations * 0.5, (
+            f"Expected high failure count for database, got {db_service.failure_count}"
+        )
+
+        # Cache should have mostly timeouts (80% rate, via failure_count as timeout
+        # triggers ValueError in FailureInjector)
+        cache_service = multi_service_executor.services["cache"]
+        # Note: timeouts also increment failure_count in ServiceSimulator
+        assert cache_service.call_count == num_iterations
+
+        # External API should have mostly successes (10% failure rate)
+        api_service = multi_service_executor.services["external_api"]
+        assert api_service.success_count >= num_iterations * 0.5, (
+            f"Expected high success count for API, got {api_service.success_count}"
+        )
+
+        # All operations accounted for
+        total_tracked = len(multi_service_executor.completed_operations) + len(
+            multi_service_executor.failed_operations
+        )
+        assert total_tracked == num_iterations * 3
+
+    @pytest.mark.asyncio
+    async def test_counter_consistency_after_concurrent_multi_mode_chaos(
+        self,
+        chaos_idempotency_store: InMemoryIdempotencyStore,
+        mock_backend_client: MagicMock,
+    ) -> None:
+        """Test that counters remain accurate after intense multi-mode chaos.
+
+        After running many concurrent operations with all chaos modes:
+        - execution_count + failed_count == total unique operations
+        - No operations are lost or double-counted
+        - Backend call count matches execution count
+        """
+        # Arrange - aggressive chaos configuration
+        injector = FailureInjector(
+            config=ChaosConfig(
+                failure_rate=0.3,
+                timeout_rate=0.2,
+                latency_min_ms=1,
+                latency_max_ms=10,
+            )
+        )
+
+        executor = ChaosEffectExecutor(
+            idempotency_store=chaos_idempotency_store,
+            failure_injector=injector,
+            backend_client=mock_backend_client,
+        )
+
+        num_concurrent = 100
+
+        # Act
+        results = await asyncio.gather(
+            *[
+                executor.execute_with_chaos(
+                    intent_id=uuid4(),  # Unique intent for each
+                    operation=f"counter_test_op_{i}",
+                    fail_point="mid",
+                )
+                for i in range(num_concurrent)
+            ],
+            return_exceptions=True,
+        )
+
+        # Assert
+        assert len(results) == num_concurrent
+
+        successes = [r for r in results if r is True]
+        failures = [r for r in results if isinstance(r, Exception)]
+
+        # Counter consistency checks
+        assert executor.execution_count == len(successes), (
+            f"Execution count {executor.execution_count} != successes {len(successes)}"
+        )
+        assert executor.failed_count == len(failures), (
+            f"Failed count {executor.failed_count} != failures {len(failures)}"
+        )
+        assert executor.execution_count + executor.failed_count == num_concurrent, (
+            f"Total {executor.execution_count + executor.failed_count} "
+            f"!= {num_concurrent}"
+        )
+
+        # Backend should only be called for successful operations
+        assert mock_backend_client.execute.call_count == len(successes), (
+            f"Backend calls {mock_backend_client.execute.call_count} != "
+            f"successes {len(successes)}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_recovery_after_simultaneous_multi_mode_failures(
+        self,
+        chaos_idempotency_store: InMemoryIdempotencyStore,
+        mock_backend_client: MagicMock,
+    ) -> None:
+        """Test system recovery after experiencing all failure modes.
+
+        After intense chaos:
+        - System should be able to process new operations successfully
+        - No lingering state corruption
+        - Fresh operations should succeed at expected rate
+        """
+        # Arrange - intense chaos followed by stable period
+        injector = FailureInjector(
+            config=ChaosConfig(
+                failure_rate=0.5,
+                timeout_rate=0.3,
+                latency_min_ms=5,
+                latency_max_ms=15,
+            )
+        )
+
+        executor = ChaosEffectExecutor(
+            idempotency_store=chaos_idempotency_store,
+            failure_injector=injector,
+            backend_client=mock_backend_client,
+        )
+
+        # Phase 1: Execute under chaos
+        chaos_results = await asyncio.gather(
+            *[
+                executor.execute_with_chaos(
+                    intent_id=uuid4(),
+                    operation=f"chaos_phase_op_{i}",
+                    fail_point="mid",
+                )
+                for i in range(30)
+            ],
+            return_exceptions=True,
+        )
+
+        chaos_successes = len([r for r in chaos_results if r is True])
+        chaos_failures = len([r for r in chaos_results if isinstance(r, Exception)])
+
+        # Record state after chaos
+        post_chaos_exec_count = executor.execution_count
+        post_chaos_fail_count = executor.failed_count
+
+        # Phase 2: Disable chaos and verify recovery
+        injector.config.failure_rate = 0.0
+        injector.config.timeout_rate = 0.0
+        injector.config.latency_min_ms = 0
+        injector.config.latency_max_ms = 0
+
+        recovery_results = await asyncio.gather(
+            *[
+                executor.execute_with_chaos(
+                    intent_id=uuid4(),
+                    operation=f"recovery_phase_op_{i}",
+                    fail_point="mid",
+                )
+                for i in range(20)
+            ],
+            return_exceptions=True,
+        )
+
+        # Assert
+        # Chaos phase had mixed results
+        assert chaos_successes + chaos_failures == 30
+        assert chaos_failures > 0, "Chaos phase should have some failures"
+
+        # Recovery phase should succeed completely
+        recovery_successes = [r for r in recovery_results if r is True]
+        recovery_failures = [r for r in recovery_results if isinstance(r, Exception)]
+
+        assert len(recovery_successes) == 20, (
+            f"Expected all 20 recovery ops to succeed, got {len(recovery_successes)}"
+        )
+        assert len(recovery_failures) == 0, (
+            f"Expected no recovery failures, got {len(recovery_failures)}"
+        )
+
+        # Counters should reflect both phases
+        assert executor.execution_count == post_chaos_exec_count + 20
+        assert executor.failed_count == post_chaos_fail_count
+
+    @pytest.mark.asyncio
+    async def test_interleaved_success_failure_timeout_sequence(
+        self,
+        chaos_idempotency_store: InMemoryIdempotencyStore,
+        mock_backend_client: MagicMock,
+    ) -> None:
+        """Test deterministic interleaved failure patterns.
+
+        With a predictable sequence of success/failure/timeout:
+        - Results should match expected pattern
+        - Counter accuracy should be perfect
+        - No operations lost or misclassified
+        """
+        # Arrange - use controlled failure sequence instead of random
+        call_sequence: list[str] = []
+        call_count = 0
+
+        async def sequenced_backend(operation: str, intent_id: UUID) -> None:
+            nonlocal call_count
+            call_count += 1
+            sequence_pos = call_count % 4
+
+            if sequence_pos == 1:
+                # Success
+                call_sequence.append("success")
+            elif sequence_pos == 2:
+                # Failure (ValueError)
+                call_sequence.append("failure")
+                raise ValueError(f"Sequenced failure at position {call_count}")
+            elif sequence_pos == 3:
+                # Timeout
+                call_sequence.append("timeout")
+                raise InfraTimeoutError(
+                    f"Sequenced timeout at position {call_count}",
+                    context=ModelInfraErrorContext(operation=operation),
+                )
+            else:  # sequence_pos == 0
+                # Success
+                call_sequence.append("success")
+
+        mock_backend_client.execute = AsyncMock(side_effect=sequenced_backend)
+
+        # Use a no-chaos injector since we control failures via backend
+        no_chaos_injector = FailureInjector(config=ChaosConfig())
+
+        executor = ChaosEffectExecutor(
+            idempotency_store=chaos_idempotency_store,
+            failure_injector=no_chaos_injector,
+            backend_client=mock_backend_client,
+        )
+
+        num_ops = 16  # Divisible by 4 for clean sequence
+
+        # Act - execute sequentially to maintain predictable order
+        results: list[bool | Exception] = []
+        for i in range(num_ops):
+            try:
+                result = await executor.execute_with_chaos(
+                    intent_id=uuid4(),
+                    operation=f"sequenced_op_{i}",
+                )
+                results.append(result)
+            except Exception as e:
+                results.append(e)
+
+        # Assert
+        assert len(results) == num_ops
+
+        # Categorize results
+        successes = [r for r in results if r is True]
+        value_errors = [r for r in results if isinstance(r, ValueError)]
+        timeout_errors = [r for r in results if isinstance(r, InfraTimeoutError)]
+
+        # With pattern [success, failure, timeout, success], expect:
+        # 16 ops -> 8 successes, 4 failures, 4 timeouts
+        expected_successes = 8
+        expected_failures = 4
+        expected_timeouts = 4
+
+        assert len(successes) == expected_successes, (
+            f"Expected {expected_successes} successes, got {len(successes)}"
+        )
+        assert len(value_errors) == expected_failures, (
+            f"Expected {expected_failures} failures, got {len(value_errors)}"
+        )
+        assert len(timeout_errors) == expected_timeouts, (
+            f"Expected {expected_timeouts} timeouts, got {len(timeout_errors)}"
+        )
+
+        # Counter accuracy
+        assert executor.execution_count == expected_successes
+        assert executor.failed_count == expected_failures + expected_timeouts
+
+    @pytest.mark.asyncio
+    async def test_high_concurrency_multi_mode_stress(
+        self,
+        chaos_idempotency_store: InMemoryIdempotencyStore,
+        mock_backend_client: MagicMock,
+    ) -> None:
+        """Stress test with very high concurrency and all chaos modes.
+
+        Under extreme concurrent load with all chaos active:
+        - No deadlocks or hangs (completes within timeout)
+        - All operations are accounted for
+        - State remains consistent
+        """
+        # Arrange - moderate chaos rates but high concurrency
+        injector = FailureInjector(
+            config=ChaosConfig(
+                failure_rate=0.2,
+                timeout_rate=0.1,
+                latency_min_ms=1,
+                latency_max_ms=5,
+            )
+        )
+
+        executor = ChaosEffectExecutor(
+            idempotency_store=chaos_idempotency_store,
+            failure_injector=injector,
+            backend_client=mock_backend_client,
+        )
+
+        num_concurrent = 200  # High concurrency
+
+        # Act - should complete within timeout (no deadlock)
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(
+                    *[
+                        executor.execute_with_chaos(
+                            intent_id=uuid4(),
+                            operation=f"stress_op_{i}",
+                            fail_point="mid",
+                        )
+                        for i in range(num_concurrent)
+                    ],
+                    return_exceptions=True,
+                ),
+                timeout=30.0,  # 30 second timeout for high concurrency
+            )
+        except TimeoutError:
+            pytest.fail(
+                "High concurrency multi-mode chaos test timed out - possible deadlock"
+            )
+
+        # Assert
+        assert len(results) == num_concurrent
+
+        successes = [r for r in results if r is True]
+        failures = [r for r in results if isinstance(r, Exception)]
+
+        # All operations accounted for
+        assert len(successes) + len(failures) == num_concurrent
+
+        # Counter consistency
+        assert executor.execution_count + executor.failed_count == num_concurrent

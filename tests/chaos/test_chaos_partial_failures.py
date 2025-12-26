@@ -754,12 +754,11 @@ class TestPartialFailureWithIdempotency:
         # Assert
         assert result.completed is False
 
-        # Verify correlation ID was recorded with idempotency records
+        # Verify effect results have valid IDs (correlation_id is propagated
+        # through the workflow but requires additional infrastructure to verify)
         for effect_result in result.effect_results:
-            domain = f"workflow.{workflow_id}.{effect_result.effect_name}"
-            # Check that records exist (we can't directly verify correlation_id
-            # without additional infrastructure, but we verify the workflow ran)
             assert effect_result.effect_id is not None
+            assert effect_result.effect_name is not None
 
     @pytest.mark.asyncio
     async def test_failed_effect_count_tracking(

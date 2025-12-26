@@ -15,7 +15,9 @@ Example usage:
     >>> from tests.helpers.replay_utils import compare_outputs, EventFactory
     >>>
     >>> # Compare two reducer outputs
-    >>> are_equal, differences = compare_outputs(output1, output2)
+    >>> result = compare_outputs(output1, output2)
+    >>> if not result.are_equal:
+    ...     print(f"Differences: {result.differences}")
     >>>
     >>> # Create deterministic events
     >>> factory = EventFactory()
@@ -28,9 +30,11 @@ Related Tickets:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypedDict
+from uuid import UUID, uuid4
 
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
@@ -41,8 +45,6 @@ from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from omnibase_core.nodes import ModelReducerOutput
 
 
@@ -54,6 +56,62 @@ NodeType = Literal["effect", "compute", "reducer", "orchestrator"]
 
 
 # =============================================================================
+# Output Comparison Result Model
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class ModelOutputComparison:
+    """Structured result from comparing two reducer outputs.
+
+    Provides a clear, typed representation of comparison results
+    instead of a bare tuple. Supports backwards-compatible tuple
+    unpacking via __iter__.
+
+    Attributes:
+        are_equal: True if outputs are identical, False otherwise.
+        differences: Tuple of human-readable difference descriptions.
+            Empty when are_equal is True.
+        output1_status: Status from the first output's result.
+        output2_status: Status from the second output's result.
+        output1_intent_count: Number of intents in first output.
+        output2_intent_count: Number of intents in second output.
+
+    Example:
+        >>> result = compare_outputs(output1, output2)
+        >>> if not result.are_equal:
+        ...     for diff in result.differences:
+        ...         print(f"Difference: {diff}")
+        >>> # Backwards-compatible tuple unpacking:
+        >>> are_equal, differences = compare_outputs(output1, output2)
+    """
+
+    are_equal: bool
+    differences: tuple[str, ...]
+    output1_status: str
+    output2_status: str
+    output1_intent_count: int
+    output2_intent_count: int
+
+    def __bool__(self) -> bool:
+        """Allow direct boolean evaluation of comparison result."""
+        return self.are_equal
+
+    def __iter__(self) -> Iterator[bool | tuple[str, ...]]:
+        """Support backwards-compatible tuple unpacking.
+
+        Yields:
+            are_equal: Boolean indicating if outputs are identical.
+            differences: Tuple of difference descriptions.
+
+        Example:
+            >>> are_equal, differences = compare_outputs(output1, output2)
+        """
+        yield self.are_equal
+        yield self.differences
+
+
+# =============================================================================
 # Output Comparison Helpers
 # =============================================================================
 
@@ -61,7 +119,7 @@ NodeType = Literal["effect", "compute", "reducer", "orchestrator"]
 def compare_outputs(
     output1: ModelReducerOutput,
     output2: ModelReducerOutput,
-) -> tuple[bool, list[str]]:
+) -> ModelOutputComparison:
     """Compare two reducer outputs for equality.
 
     Performs a deep comparison of reducer outputs to verify determinism.
@@ -72,14 +130,16 @@ def compare_outputs(
         output2: Second output to compare.
 
     Returns:
-        Tuple of (are_equal, list of differences). If are_equal is True,
-        the differences list will be empty.
+        ModelOutputComparison with structured comparison results.
+        The result can be used as a boolean (True if equal).
 
     Example:
         >>> output1 = reducer.reduce(state, event)
         >>> output2 = reducer.reduce(state, event)
-        >>> are_equal, differences = compare_outputs(output1, output2)
-        >>> assert are_equal, f"Outputs differ: {differences}"
+        >>> result = compare_outputs(output1, output2)
+        >>> assert result, f"Outputs differ: {result.differences}"
+        >>> # Or with destructuring for backwards compatibility:
+        >>> assert result.are_equal, f"Outputs differ: {result.differences}"
     """
     differences: list[str] = []
 
@@ -103,7 +163,8 @@ def compare_outputs(
     if output1.result.postgres_confirmed != output2.result.postgres_confirmed:
         differences.append(
             f"Postgres confirmed mismatch: "
-            f"{output1.result.postgres_confirmed} != {output2.result.postgres_confirmed}"
+            f"{output1.result.postgres_confirmed} != "
+            f"{output2.result.postgres_confirmed}"
         )
 
     # Compare intents
@@ -129,7 +190,14 @@ def compare_outputs(
             ):
                 differences.append(f"Intent {i} correlation_id mismatch")
 
-    return len(differences) == 0, differences
+    return ModelOutputComparison(
+        are_equal=len(differences) == 0,
+        differences=tuple(differences),
+        output1_status=output1.result.status,
+        output2_status=output2.result.status,
+        output1_intent_count=len(output1.intents),
+        output2_intent_count=len(output2.intents),
+    )
 
 
 # =============================================================================
@@ -211,6 +279,40 @@ def detect_timestamp_order_violations(
 # =============================================================================
 
 
+# =============================================================================
+# TypedDicts for Serialization
+# =============================================================================
+
+
+class EventSequenceEntryDict(TypedDict):
+    """TypedDict for serialized EventSequenceEntry.
+
+    Provides strong typing for the dictionary representation of an
+    EventSequenceEntry, used in to_dict/from_dict serialization.
+    """
+
+    event: dict[str, object]
+    expected_status: str
+    expected_intent_count: int
+    sequence_number: int
+
+
+class EventSequenceLogDict(TypedDict):
+    """TypedDict for serialized EventSequenceLog.
+
+    Provides strong typing for the dictionary representation of an
+    EventSequenceLog, used in to_dict/from_dict serialization.
+    """
+
+    initial_state: dict[str, object]
+    entries: list[EventSequenceEntryDict]
+
+
+# =============================================================================
+# Event Sequence Entry
+# =============================================================================
+
+
 @dataclass(frozen=True)
 class EventSequenceEntry:
     """A single entry in an event sequence log.
@@ -277,45 +379,54 @@ class EventSequenceLog:
         )
         self.entries.append(entry)
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> EventSequenceLogDict:
         """Serialize the log to a dictionary for storage/transport.
 
         Returns:
-            Dictionary representation of the event sequence log.
+            Typed dictionary representation of the event sequence log.
         """
-        return {
-            "initial_state": self.initial_state.model_dump(mode="json"),
-            "entries": [
-                {
-                    "event": entry.event.model_dump(mode="json"),
-                    "expected_status": entry.expected_status,
-                    "expected_intent_count": entry.expected_intent_count,
-                    "sequence_number": entry.sequence_number,
-                }
-                for entry in self.entries
-            ],
-        }
+        entries: list[EventSequenceEntryDict] = [
+            EventSequenceEntryDict(
+                event=entry.event.model_dump(mode="json"),
+                expected_status=entry.expected_status,
+                expected_intent_count=entry.expected_intent_count,
+                sequence_number=entry.sequence_number,
+            )
+            for entry in self.entries
+        ]
+        return EventSequenceLogDict(
+            initial_state=self.initial_state.model_dump(mode="json"),
+            entries=entries,
+        )
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> EventSequenceLog:
+    def from_dict(cls, data: EventSequenceLogDict) -> EventSequenceLog:
         """Deserialize a log from a dictionary.
 
+        Preserves explicit sequence_number values from the serialized data
+        rather than auto-assigning them, ensuring faithful reconstruction
+        of the original log.
+
         Args:
-            data: Dictionary representation of the event sequence log.
+            data: Typed dictionary representation of the event sequence log.
 
         Returns:
-            Reconstructed EventSequenceLog instance.
+            Reconstructed EventSequenceLog instance with preserved sequence numbers.
         """
         initial_state = ModelRegistrationState.model_validate(data["initial_state"])
         log = cls(initial_state=initial_state)
 
         for entry_data in data["entries"]:
             event = ModelNodeIntrospectionEvent.model_validate(entry_data["event"])
-            log.append(
+            # Directly create entry to preserve explicit sequence_number from serialized data
+            # instead of using append() which auto-assigns sequence numbers
+            entry = EventSequenceEntry(
                 event=event,
                 expected_status=entry_data["expected_status"],
                 expected_intent_count=entry_data["expected_intent_count"],
+                sequence_number=entry_data["sequence_number"],
             )
+            log.entries.append(entry)
 
         return log
 
@@ -353,7 +464,10 @@ def detect_sequence_number_violations(
                         if i > 0
                         else entry.event.timestamp
                     ),
-                    violation_type=f"sequence_mismatch (expected {expected_seq}, got {entry.sequence_number})",
+                    violation_type=(
+                        f"sequence_mismatch (expected {expected_seq}, "
+                        f"got {entry.sequence_number})"
+                    ),
                 )
             )
 
@@ -471,36 +585,54 @@ class EventFactory:
 
 
 def create_introspection_event(
-    node_id: UUID,
-    correlation_id: UUID,
-    timestamp: datetime,
-    node_type: str = "effect",
+    node_id: UUID | None = None,
+    correlation_id: UUID | None = None,
+    timestamp: datetime | None = None,
+    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
     node_version: str = "1.0.0",
     endpoints: dict[str, str] | None = None,
 ) -> ModelNodeIntrospectionEvent:
-    """Create an introspection event with controlled parameters.
+    """Create an introspection event with flexible parameters.
 
-    Provide a convenience function for creating events with explicit parameters.
-    For deterministic testing, use EventFactory instead.
+    Unified factory function supporting both deterministic replay testing
+    (explicit IDs/timestamps) and convenience unit testing (auto-generated values).
+
+    For deterministic testing, pass explicit node_id, correlation_id, and timestamp.
+    For convenience testing, omit parameters to use auto-generated values.
+    For full deterministic control, use EventFactory instead.
 
     Args:
-        node_id: UUID of the node being registered.
-        correlation_id: Correlation ID for the event (used as event_id).
-        timestamp: Event timestamp.
+        node_id: UUID of the node being registered (generates if not provided).
+        correlation_id: Correlation ID for the event (generates if not provided).
+        timestamp: Event timestamp (generates if not provided).
         node_type: Node type (effect, compute, reducer, orchestrator).
         node_version: Semantic version of the node.
         endpoints: Optional endpoints dictionary.
 
     Returns:
         Configured ModelNodeIntrospectionEvent instance.
+
+    Examples:
+        # Deterministic testing (replay scenarios)
+        >>> event = create_introspection_event(
+        ...     node_id=uuid4(),
+        ...     correlation_id=uuid4(),
+        ...     timestamp=datetime.now(UTC),
+        ... )
+
+        # Convenience testing (unit tests)
+        >>> event = create_introspection_event()  # All defaults
+        >>> event = create_introspection_event(node_type="reducer")
     """
     return ModelNodeIntrospectionEvent(
-        node_id=node_id,
+        node_id=node_id if node_id is not None else uuid4(),
         node_type=node_type,
         node_version=node_version,
-        correlation_id=correlation_id,
-        timestamp=timestamp,
-        endpoints=endpoints or {"health": "http://localhost:8080/health"},
+        correlation_id=correlation_id if correlation_id is not None else uuid4(),
+        timestamp=timestamp if timestamp is not None else datetime.now(UTC),
+        endpoints=endpoints
+        if endpoints is not None
+        else {"health": "http://localhost:8080/health"},
         capabilities=ModelNodeCapabilities(postgres=True, read=True),
         metadata=ModelNodeMetadata(environment="test"),
     )
@@ -513,12 +645,17 @@ def create_introspection_event(
 __all__ = [
     # Type definitions
     "NodeType",
+    # Output comparison result model
+    "ModelOutputComparison",
     # Output comparison
     "compare_outputs",
     # Ordering violation detection
     "OrderingViolation",
     "detect_timestamp_order_violations",
     "detect_sequence_number_violations",
+    # Serialization TypedDicts
+    "EventSequenceEntryDict",
+    "EventSequenceLogDict",
     # Event sequence models
     "EventSequenceEntry",
     "EventSequenceLog",

@@ -31,8 +31,10 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
+import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -55,12 +57,20 @@ from omnibase_infra.idempotency import InMemoryIdempotencyStore
 class ChaosConfig:
     """Configuration for chaos injection.
 
+    This is the unified chaos configuration used by all chaos testing utilities.
+    It supports both infrastructure-level chaos (latency, partitions) and
+    application-level chaos (failure types, retry behavior).
+
     Attributes:
         failure_rate: Probability of failure (0.0-1.0).
         timeout_rate: Probability of timeout (0.0-1.0).
         latency_min_ms: Minimum latency injection in milliseconds.
         latency_max_ms: Maximum latency injection in milliseconds.
         partition_duration_ms: Duration of simulated partition in milliseconds.
+        enabled: Whether chaos injection is enabled.
+        max_retries: Maximum retry attempts before giving up.
+        retry_delay_ms: Delay between retries in milliseconds.
+        failure_types: List of exception types to randomly raise.
     """
 
     failure_rate: float = 0.0
@@ -69,6 +79,15 @@ class ChaosConfig:
     latency_max_ms: int = 0
     partition_duration_ms: int = 0
     enabled: bool = True
+    max_retries: int = 5
+    retry_delay_ms: float = 10.0
+    failure_types: list[type[Exception]] = field(
+        default_factory=lambda: [
+            ConnectionError,
+            TimeoutError,
+            RuntimeError,
+        ]
+    )
 
     def __post_init__(self) -> None:
         """Validate configuration bounds after initialization.
@@ -94,12 +113,17 @@ class ChaosConfig:
             raise ValueError(f"latency_max_ms must be >= 0, got {self.latency_max_ms}")
         if self.latency_min_ms > self.latency_max_ms:
             raise ValueError(
-                f"latency_min_ms ({self.latency_min_ms}) must be <= latency_max_ms ({self.latency_max_ms})"
+                f"latency_min_ms ({self.latency_min_ms}) must be <= "
+                f"latency_max_ms ({self.latency_max_ms})"
             )
         if self.partition_duration_ms < 0:
             raise ValueError(
                 f"partition_duration_ms must be >= 0, got {self.partition_duration_ms}"
             )
+        if self.max_retries < 0:
+            raise ValueError(f"max_retries must be >= 0, got {self.max_retries}")
+        if self.retry_delay_ms < 0:
+            raise ValueError(f"retry_delay_ms must be >= 0, got {self.retry_delay_ms}")
 
 
 # =============================================================================
@@ -138,11 +162,15 @@ CHAOS_PROFILES: dict[str, ChaosConfig] = {
 def get_chaos_profile(name: str) -> ChaosConfig:
     """Get a predefined chaos profile by name.
 
+    Returns a fresh copy of the profile configuration, ensuring test isolation.
+    Modifications to the returned config do not affect other tests or the
+    original profile definition.
+
     Args:
         name: Profile name (see CHAOS_PROFILES keys).
 
     Returns:
-        ChaosConfig for the requested profile.
+        ChaosConfig: A fresh copy of the requested profile configuration.
 
     Raises:
         KeyError: If profile name not found.
@@ -156,8 +184,12 @@ def get_chaos_profile(name: str) -> ChaosConfig:
         - network_instability: 1000ms partition duration
         - degraded_network: 50-200ms latency + 10% failures
         - chaos_monkey: 30% failures + 10% timeouts + 10-100ms latency
+
+    Example:
+        >>> profile = get_chaos_profile("stable")
+        >>> profile.failure_rate = 0.5  # Safe: does not affect other tests
     """
-    return CHAOS_PROFILES[name]
+    return replace(CHAOS_PROFILES[name])
 
 
 @dataclass
@@ -182,7 +214,15 @@ class FailureInjector:
 
         Args:
             rate: Probability of failure (0.0-1.0).
+
+        Warns:
+            UserWarning: If rate is outside [0.0, 1.0] and will be clamped.
         """
+        if rate < 0.0 or rate > 1.0:
+            warnings.warn(
+                f"failure_rate {rate} clamped to [0.0, 1.0]",
+                stacklevel=2,
+            )
         self.config.failure_rate = max(0.0, min(1.0, rate))
 
     def set_timeout_rate(self, rate: float) -> None:
@@ -190,7 +230,15 @@ class FailureInjector:
 
         Args:
             rate: Probability of timeout (0.0-1.0).
+
+        Warns:
+            UserWarning: If rate is outside [0.0, 1.0] and will be clamped.
         """
+        if rate < 0.0 or rate > 1.0:
+            warnings.warn(
+                f"timeout_rate {rate} clamped to [0.0, 1.0]",
+                stacklevel=2,
+            )
         self.config.timeout_rate = max(0.0, min(1.0, rate))
 
     def set_latency_range(self, min_ms: int, max_ms: int) -> None:
@@ -232,16 +280,23 @@ class FailureInjector:
 
         Args:
             operation: Name of the operation being executed.
-            correlation_id: Optional correlation ID for tracing.
+            correlation_id: Optional correlation ID for tracing
+                (passed via error context).
 
         Raises:
-            ValueError: If failure injection triggers.
+            InfraConnectionError: If failure injection triggers. Uses ONEX error
+                context pattern - correlation_id is passed via ModelInfraErrorContext,
+                NOT in the message string (per error sanitization guidelines).
         """
         if self.should_fail():
             self.failure_count += 1
-            raise ValueError(
-                f"Chaos injection: simulated failure in '{operation}' "
-                f"(correlation_id={correlation_id})"
+            context = ModelInfraErrorContext(
+                operation=operation,
+                correlation_id=correlation_id,
+            )
+            raise InfraConnectionError(
+                f"Chaos injection: simulated failure in '{operation}'",
+                context=context,
             )
 
     async def maybe_inject_timeout(
@@ -324,7 +379,7 @@ class NetworkPartitionSimulator:
     def start_partition(self) -> None:
         """Start a network partition simulation."""
         self.is_partitioned = True
-        self.partition_start_time = asyncio.get_event_loop().time()
+        self.partition_start_time = time.monotonic()
 
     def end_partition(self) -> None:
         """End the network partition simulation."""
@@ -476,18 +531,64 @@ class ChaosEffectExecutor:
     ) -> bool:
         """Execute an operation with chaos injection.
 
+        Idempotency and Counter Accounting:
+            This method uses intent_id for idempotency detection. Counter behavior
+            depends on whether the intent_id has been seen before:
+
+            **New intent_id (first execution)**:
+                - Backend operation executes
+                - On success: ``execution_count`` incremented, ``failed_count`` unchanged
+                - On failure: ``failed_count`` incremented, ``execution_count`` unchanged
+                - Exception: Post-chaos failure (see below)
+
+            **Duplicate intent_id (idempotent skip)**:
+                - Backend operation is SKIPPED entirely
+                - NO counters are updated (neither execution_count nor failed_count)
+                - Method returns True immediately
+                - This is intentional: counters track actual execution attempts,
+                  not idempotent re-requests
+
+            **Post-failure chaos (edge case)**:
+                If ``fail_point="post"`` triggers after the backend succeeds,
+                BOTH counters may be incremented for the same operation:
+                - ``execution_count`` was already incremented (backend succeeded)
+                - ``failed_count`` is then incremented when post-chaos raises
+
+                This is by design - it models real scenarios where a successful
+                operation is followed by a transport failure (e.g., success recorded
+                but acknowledgment lost). Tests should account for this behavior:
+
+                >>> # If 3 operations succeed but 1 has post-chaos failure:
+                >>> # execution_count could be 3, failed_count could be 1
+                >>> # Total counter sum may exceed unique operation count
+
+        Counter Invariants:
+            - ``execution_count``: Number of times backend.execute() completed successfully
+            - ``failed_count``: Number of exceptions raised (from any phase)
+            - For non-post-chaos scenarios: ``execution_count + failed_count == unique_intent_count``
+            - For post-chaos scenarios: ``execution_count + failed_count >= unique_intent_count``
+
         Args:
-            intent_id: Unique identifier for this intent.
-            operation: Name of the operation.
-            domain: Idempotency domain.
-            correlation_id: Optional correlation ID.
-            fail_point: Specific point to inject failure ("pre", "mid", "post").
+            intent_id: Unique identifier for this intent. Used as the idempotency
+                key within the specified domain. Duplicate intent_ids within the
+                same domain skip execution entirely (no counter updates).
+            operation: Name of the operation. Used in chaos injection logging
+                and error context (e.g., "fetch_user", "create_order").
+            domain: Idempotency domain. Different domains have independent
+                idempotency namespaces. Default is "chaos".
+            correlation_id: Optional correlation ID for distributed tracing.
+                Passed to chaos injection errors via ModelInfraErrorContext.
+            fail_point: Specific point to inject failure:
+                - "pre": Before idempotency check (may waste intent_id)
+                - "mid": After idempotency check, before backend execution
+                - "post": After successful backend execution (see edge case above)
+                - None: Only random chaos from failure_injector config
 
         Returns:
             True if operation succeeded (or was idempotent duplicate).
 
         Raises:
-            ValueError: If chaos injection triggers failure.
+            InfraConnectionError: If chaos injection triggers connection failure.
             InfraTimeoutError: If chaos injection triggers timeout.
         """
         # --- PHASE 1: Pre-execution chaos injection (NO LOCK HELD) ---
@@ -609,7 +710,9 @@ class MockEventBusWithPartition:
         """
         self.partition_simulator = partition_simulator
         self.published_messages: list[dict[str, object]] = []
-        self.subscribers: dict[str, list[Callable]] = {}
+        self.subscribers: dict[
+            str, list[Callable[[dict[str, object]], Awaitable[None]]]
+        ] = {}
         self.started = False
         self.connection_attempts = 0
         self._lock = asyncio.Lock()
@@ -675,17 +778,17 @@ class MockEventBusWithPartition:
         self,
         topic: str,
         group: str,
-        handler: Callable,
-    ) -> Callable:
+        handler: Callable[[dict[str, object]], Awaitable[None]],
+    ) -> Callable[[], Coroutine[object, object, None]]:
         """Subscribe to a topic.
 
         Args:
             topic: Topic to subscribe to.
             group: Consumer group.
-            handler: Handler callback.
+            handler: Async handler callback that receives message dict.
 
         Returns:
-            Unsubscribe function.
+            Async unsubscribe function.
         """
         if topic not in self.subscribers:
             self.subscribers[topic] = []
@@ -939,38 +1042,70 @@ def classify_results_by_type(
     *,
     success_type: type = bool,
 ) -> dict[str, list]:
-    """Classify mixed results by their type.
+    """Classify mixed results into successes, failures, and other categories.
 
     Useful for analyzing results from asyncio.gather(return_exceptions=True).
+    All results are guaranteed to be classified into exactly one primary category.
+
+    Important - Default bool Behavior:
+        With the default ``success_type=bool``, BOTH True AND False are
+        classified as successes (since both are instances of bool). This is
+        intentional - in many chaos tests, successfully completing an operation
+        (regardless of its boolean result) is what matters. If you need only
+        True values, see the filtering example below.
+
+    Classification Rules:
+        - Exceptions -> 'failures' (also added to exception-type-specific key)
+        - Instances of success_type -> 'successes'
+        - Everything else -> 'other'
 
     Args:
         results: Mixed list of results and exceptions.
-        success_type: Type to consider as success (default: bool for True values).
+        success_type: Type to consider as success. Results matching this type
+            via isinstance() are classified as successes. Default is bool,
+            meaning both True and False values are considered successes
+            (since isinstance(False, bool) is True).
 
     Returns:
-        Dict with keys: 'successes', 'failures', and exception class names.
+        Dict with keys:
+            - 'successes': Results matching success_type
+            - 'failures': All exceptions
+            - 'other': Results that are neither exceptions nor success_type
+            - Exception class names (e.g., 'ValueError'): Exceptions by type
 
-    Example:
-        >>> results = [True, ValueError("a"), True, InfraTimeoutError("b")]
+    Example - Basic usage (both True and False are successes):
+        >>> results = [True, False, ValueError("a"), "string", InfraTimeoutError("b")]
         >>> classified = classify_results_by_type(results)
-        >>> classified['successes']  # [True, True]
+        >>> classified['successes']  # [True, False] - BOTH included!
+        >>> classified['failures']  # [ValueError("a"), InfraTimeoutError("b")]
+        >>> classified['other']  # ["string"]
         >>> classified['ValueError']  # [ValueError("a")]
         >>> classified['InfraTimeoutError']  # [InfraTimeoutError("b")]
+
+    Example - Filtering for True-only values:
+        >>> # If you need only True values (not False), filter the successes:
+        >>> true_only = [r for r in classified['successes'] if r is True]
+        >>> false_only = [r for r in classified['successes'] if r is False]
+
+    Example - Custom success type:
+        >>> # For operations returning strings on success:
+        >>> classified = classify_results_by_type(results, success_type=str)
+        >>> classified['successes']  # Only string results
     """
-    classified: dict[str, list] = {"successes": [], "failures": []}
+    classified: dict[str, list] = {"successes": [], "failures": [], "other": []}
 
     for result in results:
         if isinstance(result, Exception):
             classified["failures"].append(result)
-            # Also categorize by exception type
+            # Also categorize by exception type for detailed analysis
             exc_type_name = type(result).__name__
             if exc_type_name not in classified:
                 classified[exc_type_name] = []
             classified[exc_type_name].append(result)
-        elif (success_type is bool and result is True) or isinstance(
-            result, success_type
-        ):
+        elif isinstance(result, success_type):
             classified["successes"].append(result)
+        else:
+            classified["other"].append(result)
 
     return classified
 
@@ -1034,8 +1169,8 @@ def assert_failure_rate_within_tolerance(
     # Validate inputs
     if total_attempts <= 0:
         raise AssertionError(
-            f"{context_prefix}Cannot validate failure rate with {total_attempts} attempts "
-            "(need at least 1)"
+            f"{context_prefix}Cannot validate failure rate with "
+            f"{total_attempts} attempts (need at least 1)"
         )
 
     if actual_failures < 0:
@@ -1045,12 +1180,14 @@ def assert_failure_rate_within_tolerance(
 
     if actual_failures > total_attempts:
         raise AssertionError(
-            f"{context_prefix}Invalid actual_failures={actual_failures} > total_attempts={total_attempts}"
+            f"{context_prefix}Invalid actual_failures={actual_failures} > "
+            f"total_attempts={total_attempts}"
         )
 
     if not 0.0 <= expected_rate <= 1.0:
         raise AssertionError(
-            f"{context_prefix}Invalid expected_rate={expected_rate} (must be in [0.0, 1.0])"
+            f"{context_prefix}Invalid expected_rate={expected_rate} "
+            "(must be in [0.0, 1.0])"
         )
 
     if tolerance <= 0:
@@ -1101,7 +1238,8 @@ def assert_failure_rate_within_tolerance(
         )
 
     assert min_failures <= actual_failures <= max_failures, (
-        f"{context_prefix}Failure rate {actual_rate:.1%} ({actual_failures}/{total_attempts}) "
+        f"{context_prefix}Failure rate {actual_rate:.1%} "
+        f"({actual_failures}/{total_attempts}) "
         f"outside expected range [{min_failures}, {max_failures}] "
         f"(target: {expected_rate:.0%} +/- {tolerance:.0%}).{sample_warning}"
     )

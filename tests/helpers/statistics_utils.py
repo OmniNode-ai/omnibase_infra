@@ -165,7 +165,8 @@ class PerformanceStats:
             f"  Mean: {self.mean:.4f}s | Median: {self.median:.4f}s\n"
             f"  StdDev: {self.std_dev:.4f}s | CV: {self.coefficient_of_variation:.2%}\n"
             f"  Min: {self.min_val:.4f}s | Max: {self.max_val:.4f}s\n"
-            f"  P50: {self.p50:.4f}s | P90: {self.p90:.4f}s | P95: {self.p95:.4f}s | P99: {self.p99:.4f}s"
+            f"  P50: {self.p50:.4f}s | P90: {self.p90:.4f}s | "
+            f"P95: {self.p95:.4f}s | P99: {self.p99:.4f}s"
         )
 
 
@@ -371,7 +372,8 @@ def calculate_binomial_confidence_interval(
     approximation, especially for extreme proportions or small samples.
 
     Args:
-        successes: Number of successes (or failures, depending on what you're measuring).
+        successes: Number of successes (or failures, depending on
+            what you're measuring).
         trials: Total number of trials.
         confidence_level: Confidence level (0.0 to 1.0, default 0.95).
 

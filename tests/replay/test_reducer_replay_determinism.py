@@ -34,6 +34,8 @@ Related:
 
 from __future__ import annotations
 
+import copy
+import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -116,7 +118,6 @@ class TestSingleEventDeterminism:
         Validates that the reducer is consistently deterministic,
         not just in isolated cases.
         """
-        state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
             node_type="compute",
@@ -427,8 +428,6 @@ class TestReplayAfterSerialization:
 
         Validates that JSON round-trip doesn't affect reducer output.
         """
-        import json
-
         events = event_factory.create_event_sequence(count=3)
 
         # Process original events
@@ -477,8 +476,6 @@ class TestStateImmutabilityInReplay:
 
         The reducer must return new state objects, not mutate inputs.
         """
-        import copy
-
         events = event_factory.create_event_sequence(count=3)
 
         for event in events:

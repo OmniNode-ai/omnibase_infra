@@ -51,6 +51,7 @@ from omnibase_infra.models.registration import (
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 from tests.helpers.replay_utils import (
+    EventSequenceEntry,
     OrderingViolation,
     detect_sequence_number_violations,
     detect_timestamp_order_violations,
@@ -289,8 +290,6 @@ class TestSequenceNumberViolations:
 
         Verifies that gaps in sequence numbers are detected.
         """
-        from tests.replay.conftest import EventSequenceEntry
-
         events = event_factory.create_event_sequence(count=5)
 
         # Manually create entries with a gap in sequence numbers

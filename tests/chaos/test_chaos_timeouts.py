@@ -38,6 +38,7 @@ Related Tickets:
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -660,14 +661,12 @@ class TestTimeoutWithIdempotency:
         intent_id = uuid4()
 
         # Act - time the execution
-        import time
-
-        start = time.time()
+        start = time.perf_counter()
         result = await executor.execute_with_chaos(
             intent_id=intent_id,
             operation="test_op",
         )
-        elapsed_ms = (time.time() - start) * 1000
+        elapsed_ms = (time.perf_counter() - start) * 1000
 
         # Assert - should have added some latency
         assert result is True

@@ -37,6 +37,7 @@ Related:
 
 from __future__ import annotations
 
+import random
 import time
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -136,23 +137,30 @@ def generate_events_with_duplicates(
 
     Returns:
         List of events where `duplicate_rate` fraction are duplicates.
+        Duplicates are copies of unique events (same correlation_id).
+
+    Example:
+        total_count=1000, duplicate_rate=0.5 yields:
+        - 500 unique events
+        - 500 duplicates (cycling through the unique events)
     """
-    unique_count = int(total_count * (1 - duplicate_rate))
+    # Calculate unique count, ensuring at least 1 unique event to avoid division by zero
+    unique_count = max(1, int(total_count * (1 - duplicate_rate)))
+    duplicate_count = total_count - unique_count
+
+    # Generate unique events first
     unique_events = generate_events(unique_count, id_generator, clock)
 
-    # Create duplicates by repeating unique events
-    events: list[ModelNodeIntrospectionEvent] = []
-    duplicate_idx = 0
-    unique_idx = 0
+    # Start with all unique events
+    events: list[ModelNodeIntrospectionEvent] = list(unique_events)
 
-    for i in range(total_count):
-        if unique_idx < len(unique_events):
-            events.append(unique_events[unique_idx])
-            unique_idx += 1
-        else:
-            # Cycle through unique events for duplicates
-            events.append(unique_events[duplicate_idx % len(unique_events)])
-            duplicate_idx += 1
+    # Add duplicates by cycling through unique events
+    for i in range(duplicate_count):
+        # Create a copy of the event - same correlation_id but different object
+        # This ensures duplicates are separate instances for proper testing
+        original = unique_events[i % len(unique_events)]
+        duplicate = original.model_copy()
+        events.append(duplicate)
 
     return events
 
@@ -414,8 +422,6 @@ class TestChaosReplayPerformance:
         message_ids = [uuid4() for _ in range(event_count)]
         correlation_id = uuid4()
 
-        import random
-
         random.seed(42)  # Deterministic failures
 
         start_time = time.perf_counter()
@@ -429,33 +435,47 @@ class TestChaosReplayPerformance:
             succeeded = False
 
             for attempt in range(max_retries):
-                # Check idempotency first
-                is_new = await store.check_and_record(
+                # Check idempotency first (read-only check)
+                already_processed = await store.is_processed(
                     message_id=message_id,
                     domain="chaos_replay_test",
-                    correlation_id=correlation_id,
                 )
 
-                if not is_new:
-                    # Already processed - skip
+                if already_processed:
+                    # Already processed successfully - skip
                     succeeded = True
                     break
 
-                # Simulate potential failure
+                # Simulate potential failure BEFORE recording
+                # In real systems, failure before record = no record,
+                # so retries will see the message as unprocessed
                 if random.random() < failure_rate:
                     failure_count += 1
                     if attempt < max_retries - 1:
                         retry_count += 1
-                        # Clear the record to allow retry
-                        # (In real systems, failure before record = no record)
-                        # For this test, we simulate transient failures
+                        # No record was made, so retry will work
                         continue
-                else:
-                    success_count += 1
-                    succeeded = True
-                    break
+                    # Final attempt - fall through to record success
+                    # (simulating eventual success after retries exhausted)
+
+                # Success - record the idempotency key
+                await store.mark_processed(
+                    message_id=message_id,
+                    domain="chaos_replay_test",
+                    correlation_id=correlation_id,
+                )
+                success_count += 1
+                succeeded = True
+                break
 
             if not succeeded:
+                # All retries failed - record anyway for idempotency tracking
+                # (prevents reprocessing on next replay attempt)
+                await store.mark_processed(
+                    message_id=message_id,
+                    domain="chaos_replay_test",
+                    correlation_id=correlation_id,
+                )
                 success_count += 1  # Final attempt counted as success for metric
 
         elapsed = time.perf_counter() - start_time
@@ -476,7 +496,8 @@ class TestChaosReplayPerformance:
             f"({events_per_second:.0f} events/s)"
         )
         print(
-            f"  Successes: {success_count}, Failures: {failure_count}, Retries: {retry_count}"
+            f"  Successes: {success_count}, Failures: {failure_count}, "
+            f"Retries: {retry_count}"
         )
 
     async def test_recovery_replay_after_simulated_crash(
@@ -779,7 +800,8 @@ class TestReplayThroughput:
 
         median_throughput = batch_size / stats.median
         print(
-            f"\n[Performance] Sustained throughput ({num_batches - warmup_batches} batches of {batch_size}, "
+            f"\n[Performance] Sustained throughput "
+            f"({num_batches - warmup_batches} batches of {batch_size}, "
             f"{warmup_batches} warmup):"
         )
         print(f"{stats.format_report('Batch timing')}")

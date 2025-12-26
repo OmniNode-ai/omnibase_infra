@@ -27,8 +27,6 @@ Related Tickets:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 import pytest
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -41,11 +39,14 @@ from omnibase_infra.models.projection.model_registration_snapshot import (
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,
-    ModelNodeMetadata,
 )
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
-from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
+from tests.helpers import (
+    DeterministicClock,
+    DeterministicIdGenerator,
+    create_introspection_event,
+)
 
 __all__ = [
     "TestSnapshotPlusTail",
@@ -118,26 +119,6 @@ def sample_snapshot(
     )
 
 
-def create_introspection_event(
-    node_id,
-    correlation_id,
-    timestamp: datetime,
-    node_type: str = "effect",
-    node_version: str = "1.0.0",
-) -> ModelNodeIntrospectionEvent:
-    """Factory for creating introspection events."""
-    return ModelNodeIntrospectionEvent(
-        node_id=node_id,
-        node_type=node_type,
-        node_version=node_version,
-        correlation_id=correlation_id,
-        timestamp=timestamp,
-        endpoints={"health": "http://localhost:8080/health"},
-        capabilities=ModelNodeCapabilities(postgres=True, read=True),
-        metadata=ModelNodeMetadata(environment="test"),
-    )
-
-
 # =============================================================================
 # Test: Snapshot Plus Tail Reconstruction
 # =============================================================================
@@ -195,9 +176,14 @@ class TestSnapshotPlusTail:
             2. Create snapshot from projection
             3. Create tail events (sequence > 100)
             4. Apply tail events to snapshot-derived state
-            5. Verify final state reflects all events
+            5. Verify final state reflects both snapshot AND tail events
+
+        ONEX Principle:
+            snapshot_state + reduce(tail_events) = full_state
+            The snapshot provides the starting state; tail events are applied on top.
         """
         # Create snapshot from projection at sequence 100
+        # The projection has current_state=ACTIVE, meaning registration is complete
         snapshot = ModelRegistrationSnapshot.from_projection(
             sample_projection,
             snapshot_version=1,
@@ -205,7 +191,23 @@ class TestSnapshotPlusTail:
             node_name="TestNode",
         )
 
+        # Verify snapshot captured the ACTIVE state
+        assert snapshot.current_state == EnumRegistrationState.ACTIVE
+        assert snapshot.entity_id == sample_projection.entity_id
+
+        # Convert snapshot to reducer-compatible state
+        # EnumRegistrationState.ACTIVE (projection) -> status="complete" (reducer)
+        # This represents a fully registered node with both backends confirmed
+        snapshot_derived_state = ModelRegistrationState(
+            status="complete",
+            node_id=snapshot.entity_id,
+            consul_confirmed=True,
+            postgres_confirmed=True,
+            last_processed_event_id=sample_projection.last_applied_event_id,
+        )
+
         # Create tail events (simulating events after snapshot)
+        # In a real scenario, these would be re-registration or update events
         clock.advance(60)
         tail_event = create_introspection_event(
             node_id=sample_projection.entity_id,
@@ -214,23 +216,22 @@ class TestSnapshotPlusTail:
             node_version="1.1.0",  # Updated version in tail
         )
 
-        # Convert snapshot state to reducer state for tail processing
-        # The snapshot represents ACTIVE state, so we simulate continuing
-        # from a "pending" state to apply the new event
+        # Apply tail event to snapshot-derived state
+        # Note: Introspection events on a "complete" state trigger a new registration
+        # cycle (the reducer transitions to "pending" for the new event)
         reducer = RegistrationReducer()
-        reducer_state = ModelRegistrationState(
-            status="idle",  # Reset to apply tail event
-            node_id=None,
-        )
-
-        # Apply tail event
-        output = reducer.reduce(reducer_state, tail_event)
+        output = reducer.reduce(snapshot_derived_state, tail_event)
         final_state = output.result
 
-        # Final state should reflect tail event
-        assert final_state.status == "pending"
+        # Final state reflects:
+        # 1. Node identity preserved from snapshot (same entity_id)
+        # 2. Tail event processed (new event_id tracked)
+        # 3. State transitioned per reducer logic
         assert final_state.node_id == sample_projection.entity_id
         assert final_state.last_processed_event_id == tail_event.correlation_id
+
+        # The reducer starts a new registration cycle for introspection on complete state
+        assert final_state.status == "pending"
 
     def test_full_replay_vs_snapshot_plus_tail_consistency(
         self,
@@ -272,9 +273,8 @@ class TestSnapshotPlusTail:
             output = reducer_partial.reduce(partial_state, event)
             partial_state = output.result
 
-        # Create snapshot from partial state
-        snapshot_state = partial_state
-        snapshot_last_event_id = snapshot_state.last_processed_event_id
+        # partial_state now represents the snapshot state at snapshot_point;
+        # last_processed_event_id determines the tail cutoff
 
         # Apply tail events (events after snapshot)
         tail_events = all_events[snapshot_point:]

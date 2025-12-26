@@ -47,9 +47,14 @@ from omnibase_infra.models.registration import (
 )
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from tests.helpers.replay_utils import (
+    EventSequenceEntryDict,
+    EventSequenceLog,
+    EventSequenceLogDict,
+)
 
 if TYPE_CHECKING:
-    from tests.replay.conftest import EventFactory, EventSequenceLog
+    from tests.replay.conftest import EventFactory
 
 
 # =============================================================================
@@ -241,8 +246,6 @@ class TestEventSequenceSerialization:
         - Events are properly reconstructed
         - Initial state is preserved
         """
-        from tests.replay.conftest import EventSequenceLog
-
         # Create and serialize a sequence
         events = event_factory.create_event_sequence(count=2)
         state = ModelRegistrationState()
@@ -288,8 +291,6 @@ class TestEventSequenceSerialization:
         - JSON can be parsed back to dictionary
         - Deserialization produces equivalent log
         """
-        from tests.replay.conftest import EventSequenceLog
-
         # Create sequence
         events = event_factory.create_event_sequence(count=2)
         state = ModelRegistrationState()
@@ -309,6 +310,63 @@ class TestEventSequenceSerialization:
         restored_log = EventSequenceLog.from_dict(parsed_data)
 
         assert len(restored_log) == len(event_sequence_log)
+
+    def test_deserialize_preserves_explicit_sequence_numbers(
+        self,
+        event_factory: EventFactory,
+    ) -> None:
+        """Test that deserialization preserves explicit sequence numbers.
+
+        Verifies that:
+        - Non-consecutive sequence numbers are preserved
+        - from_dict does not auto-assign sequence numbers
+        - Explicit values in serialized data take precedence
+
+        This ensures replay fidelity when loading captured sequences.
+        """
+        # Create events for testing
+        events = event_factory.create_event_sequence(count=3)
+
+        # Create serialized data with explicit non-consecutive sequence numbers
+        entries: list[EventSequenceEntryDict] = [
+            EventSequenceEntryDict(
+                event=events[0].model_dump(mode="json"),
+                expected_status="pending",
+                expected_intent_count=2,
+                sequence_number=10,  # Explicit non-consecutive
+            ),
+            EventSequenceEntryDict(
+                event=events[1].model_dump(mode="json"),
+                expected_status="active",
+                expected_intent_count=1,
+                sequence_number=20,  # Explicit non-consecutive
+            ),
+            EventSequenceEntryDict(
+                event=events[2].model_dump(mode="json"),
+                expected_status="complete",
+                expected_intent_count=0,
+                sequence_number=30,  # Explicit non-consecutive
+            ),
+        ]
+
+        data = EventSequenceLogDict(
+            initial_state={"status": "idle", "node_id": None},
+            entries=entries,
+        )
+
+        # Deserialize
+        restored_log = EventSequenceLog.from_dict(data)
+
+        # Verify explicit sequence numbers are preserved (not auto-assigned 1, 2, 3)
+        assert len(restored_log) == 3
+        assert restored_log.entries[0].sequence_number == 10
+        assert restored_log.entries[1].sequence_number == 20
+        assert restored_log.entries[2].sequence_number == 30
+
+        # Also verify other fields are preserved
+        assert restored_log.entries[0].expected_status == "pending"
+        assert restored_log.entries[1].expected_status == "active"
+        assert restored_log.entries[2].expected_status == "complete"
 
 
 @pytest.mark.unit
@@ -359,8 +417,6 @@ class TestEventLogFixtures:
         - Workflow can be captured
         - Capture produces consistent results
         """
-        from tests.replay.conftest import EventSequenceLog
-
         log = EventSequenceLog()
 
         for event in complete_registration_sequence:

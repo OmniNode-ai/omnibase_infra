@@ -38,6 +38,7 @@ Related Tickets:
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -471,9 +472,7 @@ class TestPartitionHealing:
         start_time = network_partition_simulator.partition_start_time
 
         # Verify time is reasonable (recent)
-        import asyncio
-
-        current_time = asyncio.get_event_loop().time()
+        current_time = time.monotonic()
         assert current_time - start_time < 1.0  # Within 1 second
 
         # End partition

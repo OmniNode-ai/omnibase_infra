@@ -28,7 +28,12 @@ The critical insight is to **minimize lock scope** - only protect the specific s
 
 ```python
 import asyncio
+from collections.abc import Awaitable, Callable
 from uuid import UUID
+
+# Type alias for async backend operations that return bool
+BackendOperation = Callable[[], Awaitable[bool]]
+
 
 class OperationTracker:
     """Tracks operations with atomic counter updates.
@@ -50,7 +55,7 @@ class OperationTracker:
     async def execute_tracked_operation(
         self,
         operation_id: UUID,
-        backend_operation: ...,
+        backend_operation: BackendOperation,
     ) -> bool:
         """Execute operation with atomic counter tracking.
 
@@ -88,7 +93,6 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
 
 # Type alias for async callbacks with no parameters
 # Callbacks that perform I/O or state transitions typically have this signature
@@ -115,7 +119,7 @@ class StateManager:
     """
 
     is_active: bool = False
-    state_data: dict[str, Any] = field(default_factory=dict)
+    state_data: dict[str, object] = field(default_factory=dict)
     transition_callbacks: list[AsyncCallback] = field(default_factory=list)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -156,11 +160,13 @@ async def notify_subscribers() -> None:
     await asyncio.sleep(0.01)  # Simulate I/O
 
 
-# Usage
-manager = StateManager()
-manager.register_transition_callback(log_activation)
-manager.register_transition_callback(notify_subscribers)
-await manager.transition_to_active()
+# Usage (run in async context)
+async def example_state_transition() -> None:
+    """Example usage of StateManager with callbacks."""
+    manager = StateManager()
+    manager.register_transition_callback(log_activation)
+    manager.register_transition_callback(notify_subscribers)
+    await manager.transition_to_active()
 ```
 
 ## Counter Accuracy Pattern
@@ -171,30 +177,34 @@ Counters are **eventually accurate** - they correctly reflect totals after all c
 
 ```python
 # INCORRECT: Asserting during active execution
-task = asyncio.create_task(executor.execute(...))
-assert executor.execution_count == 0  # Race condition! May be 0 or 1
-await task
+async def incorrect_pattern(executor: EffectExecutor) -> None:
+    """Demonstrates race condition when asserting during execution."""
+    task = asyncio.create_task(executor.execute(...))
+    assert executor.execution_count == 0  # Race condition! May be 0 or 1
+    await task
 ```
 
 ### The Solution
 
 ```python
 # CORRECT: Wait for all operations before asserting
-results = await asyncio.gather(
-    executor.execute(uuid4(), "op1"),
-    executor.execute(uuid4(), "op2"),
-    executor.execute(uuid4(), "op3"),
-    return_exceptions=True,
-)
-# Now counters are stable and accurate
-assert executor.execution_count + executor.failed_count == 3
+async def correct_pattern(executor: EffectExecutor) -> None:
+    """Demonstrates proper counter verification after gather."""
+    results = await asyncio.gather(
+        executor.execute(uuid4(), "op1"),
+        executor.execute(uuid4(), "op2"),
+        executor.execute(uuid4(), "op3"),
+        return_exceptions=True,
+    )
+    # Now counters are stable and accurate
+    assert executor.execution_count + executor.failed_count == 3
 ```
 
 ### Test Utility
 
 ```python
 import asyncio
-from collections.abc import Awaitable, Coroutine
+from collections.abc import Coroutine
 from typing import TypeVar
 
 # TypeVar for generic result type
@@ -352,22 +362,26 @@ async def update_metrics(recovered_at: float) -> None:
     print(f"Recovery completed at {recovered_at}")
 
 
-# Usage
-manager = RecoveryManager()
-manager.register_recovery_callback(log_recovery)
-manager.register_recovery_with_context(update_metrics)
-await manager.simulate_recovery_with_callbacks(duration_ms=50)
+# Usage (run in async context)
+async def example_recovery() -> None:
+    """Example usage of RecoveryManager with callbacks."""
+    manager = RecoveryManager()
+    manager.register_recovery_callback(log_recovery)
+    manager.register_recovery_with_context(update_metrics)
+    await manager.simulate_recovery_with_callbacks(duration_ms=50)
 ```
 
 ### Anti-Pattern: Lock Held During Callbacks
 
 ```python
 # WRONG - Holds lock during potentially slow callbacks
-async with self._lock:
-    self.is_recovering = False
-    for callback in self.recovery_callbacks:
-        await callback()  # If this acquires _lock -> DEADLOCK
-                          # If this is slow -> all waiters blocked
+async def wrong_callback_execution(self) -> None:
+    """Anti-pattern: holding lock during callback execution."""
+    async with self._lock:
+        self.is_recovering = False
+        for callback in self.recovery_callbacks:
+            await callback()  # If this acquires _lock -> DEADLOCK
+                              # If this is slow -> all waiters blocked
 ```
 
 ## Callback Type Patterns Reference
@@ -528,9 +542,8 @@ class ConnectionManager:
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class EventType(str, Enum):
@@ -546,7 +559,7 @@ class EventPayload(BaseModel):
     """Base event payload."""
     event_type: EventType
     timestamp: float
-    data: dict[str, Any] = {}
+    data: dict[str, object] = Field(default_factory=dict)
 
 
 # Callback that receives typed event payload

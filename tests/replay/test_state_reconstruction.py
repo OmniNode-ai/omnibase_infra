@@ -30,19 +30,16 @@ Related Tickets:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from uuid import UUID, uuid4
-
 import pytest
 
-from omnibase_infra.models.registration import (
-    ModelNodeCapabilities,
-    ModelNodeIntrospectionEvent,
-    ModelNodeMetadata,
-)
+from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
-from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
+from tests.helpers import (
+    DeterministicClock,
+    DeterministicIdGenerator,
+    create_introspection_event,
+)
 
 __all__ = [
     "TestEventLogReconstruction",
@@ -96,39 +93,6 @@ def clock() -> DeterministicClock:
         DeterministicClock starting at 2024-01-01 UTC.
     """
     return DeterministicClock()
-
-
-def create_introspection_event(
-    node_id: UUID,
-    correlation_id: UUID,
-    timestamp: datetime,
-    node_type: str = "effect",
-    node_version: str = "1.0.0",
-    endpoints: dict[str, str] | None = None,
-) -> ModelNodeIntrospectionEvent:
-    """Factory for creating introspection events with controlled parameters.
-
-    Args:
-        node_id: UUID of the node being registered.
-        correlation_id: Correlation ID for the event (used as event_id).
-        timestamp: Event timestamp.
-        node_type: Node type (effect, compute, reducer, orchestrator).
-        node_version: Semantic version of the node.
-        endpoints: Optional endpoints dictionary.
-
-    Returns:
-        Configured ModelNodeIntrospectionEvent instance.
-    """
-    return ModelNodeIntrospectionEvent(
-        node_id=node_id,
-        node_type=node_type,
-        node_version=node_version,
-        correlation_id=correlation_id,
-        timestamp=timestamp,
-        endpoints=endpoints or {"health": "http://localhost:8080/health"},
-        capabilities=ModelNodeCapabilities(postgres=True, read=True),
-        metadata=ModelNodeMetadata(environment="test"),
-    )
 
 
 # =============================================================================
