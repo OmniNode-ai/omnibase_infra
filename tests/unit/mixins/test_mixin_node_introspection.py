@@ -41,6 +41,7 @@ import time
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import BaseModel
 
 # Test UUIDs - use deterministic values for reproducible tests
@@ -257,7 +258,7 @@ class TestMixinNodeIntrospectionInit:
         node.initialize_introspection(config)
 
         assert node._introspection_node_id == TEST_NODE_UUID_1
-        assert node._introspection_node_type == "EFFECT"
+        assert node._introspection_node_type == EnumNodeKind.EFFECT
         assert node._introspection_event_bus is None
         assert node._introspection_version == "1.0.0"
         assert node._introspection_start_time is not None
@@ -623,7 +624,7 @@ class TestMixinNodeIntrospectionCaching:
         # node_id is a UUID passed via config
         assert isinstance(data.node_id, UUID)
         assert data.node_id == TEST_NODE_UUID_1
-        assert data.node_type == "EFFECT"
+        assert data.node_type == EnumNodeKind.EFFECT
         assert isinstance(data.capabilities, dict)
         assert isinstance(data.endpoints, dict)
         assert data.version == "1.0.0"
@@ -1770,13 +1771,14 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         assert "execute_task" not in operations
 
     async def test_node_type_specific_keywords_constant_exists(self) -> None:
-        """Test that NODE_TYPE_OPERATION_KEYWORDS constant exists."""
+        """Test that NODE_TYPE_OPERATION_KEYWORDS constant exists with EnumNodeKind keys."""
         assert hasattr(MixinNodeIntrospection, "NODE_TYPE_OPERATION_KEYWORDS")
         keywords_map = MixinNodeIntrospection.NODE_TYPE_OPERATION_KEYWORDS
-        assert "EFFECT" in keywords_map
-        assert "COMPUTE" in keywords_map
-        assert "REDUCER" in keywords_map
-        assert "ORCHESTRATOR" in keywords_map
+        # Keys should be EnumNodeKind members for type safety
+        assert EnumNodeKind.EFFECT in keywords_map
+        assert EnumNodeKind.COMPUTE in keywords_map
+        assert EnumNodeKind.REDUCER in keywords_map
+        assert EnumNodeKind.ORCHESTRATOR in keywords_map
         for keywords in keywords_map.values():
             assert isinstance(keywords, set)
 
@@ -1833,7 +1835,12 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         assert "execute_task" not in ops2
 
     async def test_default_keywords_not_mutated(self) -> None:
-        """Test that DEFAULT_OPERATION_KEYWORDS is not mutated by instances."""
+        """Test that DEFAULT_OPERATION_KEYWORDS is not mutated by instances.
+
+        With frozenset, the keywords are immutable by design, so we verify:
+        1. Instance keywords are separate from class defaults
+        2. Neither can be mutated (frozenset is immutable)
+        """
         original_defaults = MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS.copy()
         node = MockNode()
         config = ModelIntrospectionConfig(
@@ -1842,9 +1849,13 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
             event_bus=None,
         )
         node.initialize_introspection(config)
-        node._introspection_operation_keywords.add("custom_keyword")
+
+        # Verify instance keywords are a frozenset (immutable by design)
+        assert isinstance(node._introspection_operation_keywords, frozenset)
+
+        # Verify class defaults remain unchanged and are also immutable
         assert original_defaults == MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
-        assert "custom_keyword" not in MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
+        assert isinstance(MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS, frozenset)
 
 
 @pytest.mark.unit

@@ -19,7 +19,7 @@ and are designed to be deterministic.
 from __future__ import annotations
 
 import asyncio
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -55,7 +55,7 @@ class MockServiceWithCircuitBreaker(MixinAsyncCircuitBreaker):
     async def perform_operation(
         self,
         should_fail: bool = False,
-        correlation_id=None,
+        correlation_id: UUID | None = None,
     ) -> str:
         """Perform an operation through the circuit breaker."""
         # Check circuit breaker

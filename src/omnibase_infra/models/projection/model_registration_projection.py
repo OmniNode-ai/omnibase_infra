@@ -22,9 +22,11 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 from uuid import UUID
 
+from omnibase_core.enums import (
+    EnumNodeKind,
+)
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -77,16 +79,24 @@ class ModelRegistrationProjection(BaseModel):
     Example:
         >>> from datetime import datetime, UTC
         >>> from uuid import uuid4
+        >>> from omnibase_core.enums import EnumNodeKind
         >>> now = datetime.now(UTC)
         >>> projection = ModelRegistrationProjection(
         ...     entity_id=uuid4(),
         ...     current_state=EnumRegistrationState.ACTIVE,
-        ...     node_type="effect",
+        ...     node_type=EnumNodeKind.EFFECT,
         ...     last_applied_event_id=uuid4(),
         ...     last_applied_offset=12345,
         ...     registered_at=now,
         ...     updated_at=now,
         ... )
+
+    Note:
+        When serialized to JSON via ``model_dump(mode="json")``, the ``node_type``
+        field is serialized as its string value (e.g., ``"effect"``), not the
+        enum member name. This is Pydantic's default enum serialization behavior.
+        When deserializing, both ``EnumNodeKind.EFFECT`` and ``"effect"`` are
+        accepted due to Pydantic's automatic coercion.
     """
 
     model_config = ConfigDict(
@@ -114,7 +124,7 @@ class ModelRegistrationProjection(BaseModel):
     )
 
     # Node Information (snapshot at registration time)
-    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = Field(
+    node_type: EnumNodeKind = Field(
         ...,
         description="ONEX node type",
     )

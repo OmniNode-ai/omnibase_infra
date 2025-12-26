@@ -329,7 +329,7 @@ def configured_container(
 ) -> MagicMock:
     """Create container with mock dependencies configured."""
 
-    def resolve_mock(protocol):
+    def resolve_mock(protocol: type) -> object:
         """Resolve mock dependencies using protocol type matching."""
         if protocol is ProtocolReducer:
             return mock_reducer

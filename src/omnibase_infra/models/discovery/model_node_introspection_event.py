@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import TypedDict
 from uuid import UUID
 
+from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
@@ -126,7 +127,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
     """
 
     node_id: UUID = Field(..., description="Unique node identifier")
-    node_type: str = Field(..., description="Node type classification")
+    node_type: EnumNodeKind = Field(..., description="Node type classification")
 
     # Capabilities discovered via reflection
     # Uses CapabilitiesTypedDict for type safety while maintaining Pydantic compatibility
