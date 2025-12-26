@@ -1075,7 +1075,6 @@ class MixinNodeIntrospection:
 
         # Collect metrics values in local variables (model is frozen)
         get_capabilities_ms = 0.0
-        discover_capabilities_ms = 0.0
         get_endpoints_ms = 0.0
         get_current_state_ms = 0.0
         method_count = 0
@@ -1108,6 +1107,12 @@ class MixinNodeIntrospection:
             return cached_event
 
         # Build fresh introspection data with timing for each component
+        # First, measure the class method signature discovery time separately.
+        # This is cached at the class level, so subsequent calls are instant.
+        discover_start = time.perf_counter()
+        self._get_class_method_signatures()  # Force cache population if not already done
+        discover_capabilities_ms = (time.perf_counter() - discover_start) * 1000
+
         cap_start = time.perf_counter()
         capabilities = await self.get_capabilities()
         get_capabilities_ms = (time.perf_counter() - cap_start) * 1000

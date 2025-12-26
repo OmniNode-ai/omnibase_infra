@@ -22,8 +22,8 @@ Deduplication (per C2 Durable Timeout Handling):
     liveness_timeout_emitted_at) to prevent duplicate timeout events.
     The projection reader filters out already-emitted timeouts.
 
-Thread Safety:
-    This handler is stateless and thread-safe for concurrent calls
+Coroutine Safety:
+    This handler is stateless and coroutine-safe for concurrent calls
     with different tick instances.
 
 Related Tickets:
@@ -85,11 +85,13 @@ class HandlerRuntimeTick:
         >>> from datetime import datetime, timezone
         >>> from uuid import uuid4
         >>> from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
+        >>> # Use explicit timestamps (time injection pattern) - not datetime.now()
+        >>> tick_time = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
         >>> runtime_tick = ModelRuntimeTick(
-        ...     now=datetime.now(timezone.utc),
+        ...     now=tick_time,
         ...     tick_id=uuid4(),
         ...     sequence_number=1,
-        ...     scheduled_at=datetime.now(timezone.utc),
+        ...     scheduled_at=tick_time,
         ...     correlation_id=uuid4(),
         ...     scheduler_id="runtime-001",
         ...     tick_interval_ms=1000,
@@ -97,7 +99,7 @@ class HandlerRuntimeTick:
         >>> handler = HandlerRuntimeTick(projection_reader)
         >>> events = await handler.handle(
         ...     tick=runtime_tick,
-        ...     now=runtime_tick.now,
+        ...     now=tick_time,
         ...     correlation_id=runtime_tick.correlation_id,
         ... )
         >>> # events may contain timeout events

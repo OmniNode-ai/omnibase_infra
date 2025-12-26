@@ -51,13 +51,15 @@ class ModelNodeLivenessExpired(BaseModel):
     Example:
         >>> from datetime import datetime, UTC, timedelta
         >>> from uuid import uuid4
+        >>> # Use explicit timestamps (time injection pattern) - not datetime.now()
+        >>> now = datetime(2025, 1, 15, 12, 10, 0, tzinfo=UTC)
         >>> event = ModelNodeLivenessExpired(
         ...     entity_id=uuid4(),
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     causation_id=uuid4(),
-        ...     emitted_at=datetime.now(UTC),
-        ...     last_heartbeat_at=datetime.now(UTC) - timedelta(minutes=10),
+        ...     emitted_at=now,
+        ...     last_heartbeat_at=now - timedelta(minutes=10),
         ... )
     """
 

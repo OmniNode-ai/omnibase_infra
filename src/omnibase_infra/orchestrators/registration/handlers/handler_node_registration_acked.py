@@ -21,8 +21,8 @@ Processing Logic:
     If no projection exists:
         - Ack for unknown node, no-op (log warning)
 
-Thread Safety:
-    This handler is stateless and thread-safe for concurrent calls
+Coroutine Safety:
+    This handler is stateless and coroutine-safe for concurrent calls
     with different command instances.
 
 Related Tickets:
@@ -91,10 +91,14 @@ class HandlerNodeRegistrationAcked:
         _liveness_interval_seconds: Interval for liveness deadline.
 
     Example:
+        >>> from datetime import datetime, UTC
+        >>> from uuid import uuid4
+        >>> # Use explicit timestamps (time injection pattern) - not datetime.now()
+        >>> now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
         >>> handler = HandlerNodeRegistrationAcked(projection_reader)
         >>> events = await handler.handle(
         ...     command=ack_command,
-        ...     now=datetime.now(UTC),
+        ...     now=now,
         ...     correlation_id=uuid4(),
         ... )
         >>> # events may contain [AckReceived, BecameActive]

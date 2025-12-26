@@ -20,8 +20,8 @@ Decision Logic:
     - State is ACK_RECEIVED (already acknowledged)
     - State is ACTIVE (already active - heartbeat should be used)
 
-Thread Safety:
-    This handler is stateless and thread-safe for concurrent calls
+Coroutine Safety:
+    This handler is stateless and coroutine-safe for concurrent calls
     with different event instances.
 
 Related Tickets:
@@ -98,10 +98,14 @@ class HandlerNodeIntrospected:
         _projection_reader: Reader for registration projection state.
 
     Example:
+        >>> from datetime import datetime, UTC
+        >>> from uuid import uuid4
+        >>> # Use explicit timestamps (time injection pattern) - not datetime.now()
+        >>> now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
         >>> handler = HandlerNodeIntrospected(projection_reader)
         >>> events = await handler.handle(
         ...     event=introspection_event,
-        ...     now=datetime.now(UTC),
+        ...     now=now,
         ...     correlation_id=uuid4(),
         ... )
         >>> if events:

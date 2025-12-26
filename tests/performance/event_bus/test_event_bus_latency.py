@@ -286,7 +286,7 @@ class TestEndToEndLatency:
         locks = [asyncio.Lock() for _ in range(5)]
         publish_times: dict[int, float] = {}
 
-        async def make_handler(
+        def make_handler(
             idx: int,
             locks_ref: list[asyncio.Lock],
             publish_times_ref: dict[int, float],
@@ -305,7 +305,7 @@ class TestEndToEndLatency:
             return handler
 
         for sub_idx in range(5):
-            handler = await make_handler(
+            handler = make_handler(
                 sub_idx, locks, publish_times, latencies_by_subscriber
             )
             await event_bus.subscribe(topic, f"multi-e2e-{sub_idx}", handler)

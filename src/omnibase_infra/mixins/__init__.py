@@ -21,9 +21,6 @@ from omnibase_infra.mixins.mixin_async_circuit_breaker import (
 )
 from omnibase_infra.mixins.mixin_envelope_extraction import MixinEnvelopeExtraction
 from omnibase_infra.mixins.mixin_node_introspection import (
-    CapabilitiesDict,
-    IntrospectionCacheDict,
-    IntrospectionPerformanceMetrics,
     MixinNodeIntrospection,
     PerformanceMetricsCacheDict,
 )

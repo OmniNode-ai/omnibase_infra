@@ -51,13 +51,15 @@ class ModelNodeRegistrationAckTimedOut(BaseModel):
     Example:
         >>> from datetime import datetime, UTC, timedelta
         >>> from uuid import uuid4
+        >>> # Use explicit timestamps (time injection pattern) - not datetime.now()
+        >>> now = datetime(2025, 1, 15, 12, 5, 0, tzinfo=UTC)
         >>> event = ModelNodeRegistrationAckTimedOut(
         ...     entity_id=uuid4(),
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     causation_id=uuid4(),
-        ...     emitted_at=datetime.now(UTC),
-        ...     deadline_at=datetime.now(UTC) - timedelta(minutes=5),
+        ...     emitted_at=now,
+        ...     deadline_at=now - timedelta(minutes=5),
         ... )
     """
 

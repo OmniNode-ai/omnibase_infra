@@ -2,6 +2,27 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Registration Orchestrator - Declarative workflow coordinator.
 
+DUAL IMPLEMENTATION NOTE:
+    This codebase contains TWO NodeRegistrationOrchestrator classes with distinct purposes:
+
+    1. THIS MODULE (nodes/node_registration_orchestrator/node.py):
+       - DECLARATIVE orchestrator driven by contract.yaml
+       - Zero custom routing logic - all behavior from workflow_definition
+       - Lightweight shell that delegates to TimeoutCoordinator and HeartbeatHandler
+       - Used for ONEX-compliant runtime execution via RuntimeHostProcess
+       - Pattern: "Contract-driven, handlers wired externally"
+
+    2. orchestrators/registration/node_registration_orchestrator.py:
+       - IMPERATIVE orchestrator with explicit handler routing
+       - Contains isinstance() checks for ModelNodeIntrospectionEvent, ModelRuntimeTick, etc.
+       - Wires handlers internally (HandlerNodeIntrospected, HandlerRuntimeTick, etc.)
+       - Used for direct programmatic orchestration and testing
+       - Pattern: "Code-driven, handlers wired internally"
+
+    Both extend NodeOrchestrator from omnibase_core but serve different use cases.
+    The declarative version (this file) is the target architecture for ONEX compliance.
+    The imperative version provides backward compatibility and explicit control for tests.
+
 This orchestrator uses the declarative pattern where workflow behavior
 is 100% driven by contract.yaml, not Python code.
 
@@ -78,8 +99,8 @@ Design Decisions:
     - Declarative Execution: Workflow steps defined in execution_graph
     - Retry at Base Class: NodeOrchestrator owns retry policy
 
-Thread Safety:
-    This orchestrator is NOT thread-safe. Each instance should handle one
+Coroutine Safety:
+    This orchestrator is NOT coroutine-safe. Each instance should handle one
     workflow at a time. For concurrent workflows, create multiple instances.
 
 Implemented Features:

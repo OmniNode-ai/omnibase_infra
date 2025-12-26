@@ -152,7 +152,7 @@ class InMemoryEventBus:
         # Topic -> offset counter for message ordering
         self._topic_offsets: dict[str, int] = defaultdict(int)
 
-        # Lock for thread safety
+        # Lock for coroutine safety
         self._lock = asyncio.Lock()
 
         # Started flag

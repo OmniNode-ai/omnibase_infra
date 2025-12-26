@@ -14,8 +14,8 @@ The pattern is:
 
 This ensures restart-safe, exactly-once timeout event emission.
 
-Thread Safety:
-    This emitter is stateless and delegates thread safety to underlying
+Coroutine Safety:
+    This emitter is stateless and delegates coroutine safety to underlying
     components (event_bus, projector). Multiple coroutines may call
     process_timeouts concurrently as long as underlying components
     support concurrent access.

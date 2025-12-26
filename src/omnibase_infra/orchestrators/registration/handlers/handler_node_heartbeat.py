@@ -115,9 +115,9 @@ class HandlerNodeHeartbeat:
         - Only ACTIVE nodes should receive heartbeats; other states log warnings
         - Database errors are re-raised as InfraConnectionError/InfraTimeoutError
 
-    Thread Safety:
-        This handler is stateless and thread-safe. The projection reader and
-        projector are assumed to be thread-safe (they use connection pools).
+    Coroutine Safety:
+        This handler is stateless and coroutine-safe. The projection reader and
+        projector are assumed to be coroutine-safe (they use connection pools).
 
     Example:
         >>> from omnibase_infra.projectors import (

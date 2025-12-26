@@ -1,6 +1,33 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # ONEX Node Contract - Registration Orchestrator Node
+#
+# =============================================================================
+# SUBCONTRACT ARCHITECTURE NOTE (PR #79 Nitpick)
+# =============================================================================
+# As this contract grows in complexity, consider extracting sections into
+# subcontracts. ONEX supports 6 subcontract types from ModelContract:
+#
+#   1. fsm_subcontract        - FSM state machine definitions
+#   2. event_subcontract      - Event type definitions and routing
+#   3. aggregation_subcontract - Aggregation/projection rules
+#   4. state_subcontract      - State management configuration
+#   5. routing_subcontract    - Message routing rules
+#   6. caching_subcontract    - Caching strategy definitions
+#
+# Current candidates for extraction:
+#   - handler_routing section (246 lines) -> routing_subcontract
+#   - consumed_events/published_events    -> event_subcontract
+#   - coordination_rules                  -> state_subcontract
+#
+# Extraction pattern:
+#   1. Create subcontracts/ directory
+#   2. Move section to routing_subcontract.yaml
+#   3. Reference: routing_subcontract: !include subcontracts/routing.yaml
+#
+# This keeps the main contract readable while enabling modular evolution.
+# =============================================================================
+#
 contract_version:
   major: 1
   minor: 0
@@ -215,7 +242,7 @@ consumed_events:
   # Note: direct_handler=true indicates this event bypasses the workflow and is
   # handled by a dedicated handler (HandlerNodeHeartbeat) via handle_heartbeat().
   - topic: "{env}.{namespace}.onex.evt.node-heartbeat.v1"
-    event_type: "ModelNodeHeartbeatEvent"
+    event_type: "NodeHeartbeatEvent"
     description: "Periodic heartbeat from active nodes for liveness tracking"
     direct_handler: true
 # Handler Routing Configuration

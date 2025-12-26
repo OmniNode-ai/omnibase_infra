@@ -463,7 +463,10 @@ class TestInvalidSchemaRejection:
         from omnibase_infra.event_bus.models import ModelEventHeaders
 
         with pytest.raises(ValidationError) as exc_info:
-            ModelEventHeaders(event_type="test.event")
+            ModelEventHeaders(
+                event_type="test.event",
+                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
+            )
         assert "source" in str(exc_info.value).lower()
 
     def test_headers_missing_event_type_rejected(self) -> None:
@@ -471,7 +474,10 @@ class TestInvalidSchemaRejection:
         from omnibase_infra.event_bus.models import ModelEventHeaders
 
         with pytest.raises(ValidationError) as exc_info:
-            ModelEventHeaders(source="test-service")
+            ModelEventHeaders(
+                source="test-service",
+                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
+            )
         assert "event_type" in str(exc_info.value).lower()
 
     def test_headers_invalid_priority_rejected(self) -> None:

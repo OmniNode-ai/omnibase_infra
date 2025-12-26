@@ -17,9 +17,9 @@ Design Decisions:
     - Uses tick_id as causation_id for emitted events
     - Delegates to TimeoutEmitter for actual emission logic
 
-Thread Safety:
-    This coordinator is stateless and thread-safe for concurrent calls.
-    Each call coordinates independently, delegating thread safety to
+Coroutine Safety:
+    This coordinator is stateless and coroutine-safe for concurrent calls.
+    Each call coordinates independently, delegating coroutine safety to
     the underlying services (TimeoutScanner, TimeoutEmitter).
 
 Related Tickets:

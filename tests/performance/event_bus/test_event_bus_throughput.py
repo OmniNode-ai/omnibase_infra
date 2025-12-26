@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 
 import pytest
 
@@ -505,15 +506,17 @@ class TestPublishWithSubscribers:
         counters: list[int] = [0] * 5
         locks = [asyncio.Lock() for _ in range(5)]
 
-        async def make_handler(index: int) -> None:
+        def make_handler(
+            index: int,
+        ) -> Callable[[ModelEventMessage], Awaitable[None]]:
             async def handler(msg: ModelEventMessage) -> None:
                 async with locks[index]:
                     counters[index] += 1
 
-            await event_bus.subscribe(topic, f"group-{index}", handler)
+            return handler
 
         for i in range(5):
-            await make_handler(i)
+            await event_bus.subscribe(topic, f"group-{i}", make_handler(i))
 
         start = time.perf_counter()
         for i in range(500):

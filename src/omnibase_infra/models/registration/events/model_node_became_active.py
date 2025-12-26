@@ -56,7 +56,7 @@ class ModelNodeBecameActive(BaseModel):
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     causation_id=uuid4(),
-        ...     emitted_at=datetime.now(UTC),
+        ...     emitted_at=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
         ...     capabilities=ModelNodeCapabilities(postgres=True, read=True),
         ... )
     """

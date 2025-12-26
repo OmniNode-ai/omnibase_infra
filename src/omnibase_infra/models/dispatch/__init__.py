@@ -61,6 +61,7 @@ Usage:
     ...     dispatcher_name="User Event Dispatcher",
     ...     node_kind=EnumNodeKind.REDUCER,
     ...     supported_categories=[EnumMessageCategory.EVENT],
+    ...     registered_at=datetime.now(UTC),
     ... )
     >>>
     >>> # Create a route

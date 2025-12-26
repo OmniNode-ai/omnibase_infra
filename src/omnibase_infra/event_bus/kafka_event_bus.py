@@ -397,7 +397,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             str, list[tuple[str, str, Callable[[ModelEventMessage], Awaitable[None]]]]
         ] = defaultdict(list)
 
-        # Lock for thread safety (protects all shared state)
+        # Lock for coroutine safety (protects all shared state)
         self._lock = asyncio.Lock()
 
         # State flags

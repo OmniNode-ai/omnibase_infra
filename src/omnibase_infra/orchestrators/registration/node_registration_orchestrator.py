@@ -1,6 +1,28 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registration Orchestrator Node.
+"""Registration Orchestrator Node - Imperative handler router.
+
+DUAL IMPLEMENTATION NOTE:
+    This codebase contains TWO NodeRegistrationOrchestrator classes with distinct purposes:
+
+    1. nodes/node_registration_orchestrator/node.py:
+       - DECLARATIVE orchestrator driven by contract.yaml
+       - Zero custom routing logic - all behavior from workflow_definition
+       - Lightweight shell that delegates to TimeoutCoordinator and HeartbeatHandler
+       - Used for ONEX-compliant runtime execution via RuntimeHostProcess
+       - Pattern: "Contract-driven, handlers wired externally"
+
+    2. THIS MODULE (orchestrators/registration/node_registration_orchestrator.py):
+       - IMPERATIVE orchestrator with explicit handler routing
+       - Contains isinstance() checks for ModelNodeIntrospectionEvent, ModelRuntimeTick, etc.
+       - Wires handlers internally (HandlerNodeIntrospected, HandlerRuntimeTick, etc.)
+       - Used for direct programmatic orchestration and testing
+       - Pattern: "Code-driven, handlers wired internally"
+
+    Both extend NodeOrchestrator from omnibase_core but serve different use cases.
+    The declarative version is the target architecture for ONEX compliance.
+    The imperative version (this file) provides backward compatibility and explicit
+    control for tests and scenarios requiring direct handler access.
 
 This module provides the NodeRegistrationOrchestrator, the FIRST orchestrator
 node in omnibase_infra. The orchestrator processes registration workflow events
