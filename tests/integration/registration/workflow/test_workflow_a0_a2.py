@@ -27,6 +27,7 @@ Related:
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -757,9 +758,139 @@ class TestWorkflowIntegration:
         )
 
 
+# =============================================================================
+# Performance Baseline Tests
+# =============================================================================
+
+
+class TestPerformanceBaseline:
+    """Performance baseline tests for registration workflow.
+
+    These tests verify that core registration operations maintain acceptable
+    performance characteristics. They serve as regression tests to detect
+    performance degradation in the reducer and related components.
+
+    Performance Targets:
+        - Reducer operations: 100 reduce calls in <0.5s
+        - State creation: Minimal overhead per operation
+        - Intent generation: Efficient intent emission
+
+    Note:
+        These tests use time.perf_counter() for high-precision timing.
+        Thresholds are set conservatively to avoid flaky tests while
+        still catching significant performance regressions.
+    """
+
+    def test_performance_reducer_operations_under_threshold(
+        self,
+        registration_reducer: RegistrationReducer,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
+    ) -> None:
+        """Verify reducer operations complete within performance threshold.
+
+        This test ensures the registration reducer maintains acceptable
+        performance by running multiple operations and verifying total
+        execution time.
+
+        Performance Target: 100 reduce operations in <0.5s
+
+        Test Methodology:
+            1. Create 100 unique introspection events
+            2. Run reduce() for each event with fresh state
+            3. Measure total wall-clock time
+            4. Assert time is under threshold
+
+        Rationale:
+            - 100 operations provides statistical significance
+            - 0.5s threshold is conservative (5ms per operation)
+            - Fresh state per operation tests worst-case scenario
+            - Uses perf_counter for sub-millisecond precision
+        """
+        num_operations = 100
+        threshold_seconds = 0.5
+
+        start = time.perf_counter()
+
+        for _ in range(num_operations):
+            state = ModelRegistrationState()
+            event = introspection_event_factory()
+            registration_reducer.reduce(state, event)
+
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < threshold_seconds, (
+            f"Reducer performance regression: {num_operations} operations took "
+            f"{elapsed:.3f}s (threshold: {threshold_seconds}s, "
+            f"avg: {elapsed / num_operations * 1000:.2f}ms/op)"
+        )
+
+    def test_performance_state_creation_overhead(
+        self,
+        registration_reducer: RegistrationReducer,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
+    ) -> None:
+        """Verify state creation has minimal overhead.
+
+        This test ensures that creating ModelRegistrationState instances
+        does not introduce significant overhead that could impact
+        high-throughput registration scenarios.
+
+        Performance Target: 1000 state creations in <0.1s
+        """
+        num_operations = 1000
+        threshold_seconds = 0.1
+
+        start = time.perf_counter()
+
+        for _ in range(num_operations):
+            _ = ModelRegistrationState()
+
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < threshold_seconds, (
+            f"State creation performance regression: {num_operations} creations took "
+            f"{elapsed:.3f}s (threshold: {threshold_seconds}s, "
+            f"avg: {elapsed / num_operations * 1000:.3f}ms/op)"
+        )
+
+    def test_performance_intent_generation_efficiency(
+        self,
+        registration_reducer: RegistrationReducer,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
+    ) -> None:
+        """Verify intent generation is efficient.
+
+        This test ensures that the reducer's intent generation (emitting
+        Consul and PostgreSQL intents) maintains acceptable performance.
+
+        Performance Target: 50 reduce operations with intent verification in <0.3s
+        """
+        num_operations = 50
+        threshold_seconds = 0.3
+
+        start = time.perf_counter()
+
+        for _ in range(num_operations):
+            state = ModelRegistrationState()
+            event = introspection_event_factory()
+            output = registration_reducer.reduce(state, event)
+
+            # Verify intents were generated (ensures we're testing real work)
+            assert len(output.intents) == EXPECTED_INTENT_COUNT
+
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < threshold_seconds, (
+            f"Intent generation performance regression: {num_operations} operations took "
+            f"{elapsed:.3f}s (threshold: {threshold_seconds}s, "
+            f"avg: {elapsed / num_operations * 1000:.2f}ms/op)"
+        )
+
+
 __all__ = [
     "TestA0PurityGate",
     "TestA1IntrospectionPublish",
     "TestA2TwoWayIntrospectionLoop",
+    "TestPerformanceBaseline",
     "TestWorkflowIntegration",
 ]

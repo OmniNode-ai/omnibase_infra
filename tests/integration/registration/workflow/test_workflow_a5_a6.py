@@ -188,6 +188,11 @@ SENSITIVE_FIELD_PATTERNS = {
     "ssl_cert",
     "conn_string",
     "connection_string",
+    "dsn",  # Database connection strings (Sentry, PostgreSQL DSN format)
+    "webhook_url",  # Webhook URLs may contain embedded secrets/tokens
+    "signing_key",  # JWT/API signing keys
+    "encryption",  # Generic encryption-related fields (e.g., encryption_secret)
+    "certificate",  # SSL/TLS certificates
 }
 
 # Value patterns that indicate secrets
@@ -837,6 +842,15 @@ class TestA6Observability:
             ("private_key: -----BEGIN RSA", "private_key"),
             ("client_secret=xyz", "client_secret"),
             ("connection_string: postgresql://user:pass@host", "connection_string"),
+            # New patterns added for comprehensive coverage
+            ("dsn: postgresql://user:pass@localhost:5432/db", "dsn"),
+            (
+                "webhook_url: https://hooks.slack.com/services/T00/B00/xxx",
+                "webhook_url",
+            ),
+            ("signing_key: hs256_secret_key_abc123", "signing_key"),
+            ("encryption: aes256_key_xyz789", "encryption"),
+            ("certificate: -----BEGIN CERTIFICATE-----", "certificate"),
         ]
 
         for log_text, expected_pattern in field_test_cases:
@@ -867,6 +881,18 @@ class TestA6Observability:
             "api_key_length: 32",
             "secret: [redacted]",
             "password: ***",
+            # Safe contexts for new patterns
+            "has_dsn: True",
+            "dsn_present: True",
+            "dsn: [redacted]",
+            "has_webhook_url: True",
+            "webhook_url: [redacted]",
+            "has_signing_key: True",
+            "signing_key: ***",
+            "has_encryption: True",
+            "encryption: [redacted]",
+            "has_certificate: True",
+            "certificate_present: True",
         ]
 
         for log_text in safe_test_cases:

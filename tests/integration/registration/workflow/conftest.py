@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import UUID, uuid4
 
 import pytest
@@ -30,6 +30,11 @@ from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 
 if TYPE_CHECKING:
     from omnibase_core.nodes import ModelReducerOutput
+
+    from omnibase_infra.models.registration.model_node_capabilities import (
+        ModelNodeCapabilities,
+    )
+    from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
 
 from omnibase_infra.mixins import MixinNodeIntrospection
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
@@ -55,6 +60,133 @@ from tests.integration.registration.effect.test_doubles import (
     StubConsulClient,
     StubPostgresAdapter,
 )
+
+# =============================================================================
+# Protocol Types for Factory Fixtures
+# =============================================================================
+
+
+class ProtocolIntrospectionEventFactory(Protocol):
+    """Protocol for introspection event factory function.
+
+    Provides type information for IDE autocomplete when using the
+    introspection_event_factory fixture.
+    """
+
+    def __call__(
+        self,
+        node_type: EnumNodeKind = ...,
+        node_version: str = ...,
+        correlation_id: UUID | None = ...,
+        node_id: UUID | None = ...,
+    ) -> ModelNodeIntrospectionEvent:
+        """Create an introspection event.
+
+        Args:
+            node_type: ONEX node type (EnumNodeKind).
+            node_version: Semantic version string.
+            correlation_id: Optional correlation ID.
+            node_id: Optional node ID.
+
+        Returns:
+            ModelNodeIntrospectionEvent instance.
+        """
+        ...
+
+
+class ProtocolTestNodeFactory(Protocol):
+    """Protocol for test node factory function.
+
+    Provides type information for IDE autocomplete when using the
+    test_node_factory fixture.
+    """
+
+    def __call__(
+        self,
+        node_id: UUID | None = ...,
+        node_type: EnumNodeKind = ...,
+        version: str = ...,
+    ) -> IntrospectableTestNode:
+        """Create an introspectable test node.
+
+        Args:
+            node_id: Optional node ID.
+            node_type: ONEX node type (EnumNodeKind).
+            version: Node version string.
+
+        Returns:
+            IntrospectableTestNode instance.
+        """
+        ...
+
+
+class ProtocolDeterministicIntrospectionEventFactory(Protocol):
+    """Protocol for deterministic introspection event factory function.
+
+    Provides type information for IDE autocomplete when using the
+    deterministic_introspection_event_factory fixture.
+    """
+
+    def __call__(
+        self,
+        node_type: EnumNodeKind = ...,
+        node_version: str = ...,
+        endpoints: dict[str, str] | None = ...,
+        capabilities: ModelNodeCapabilities | None = ...,
+        metadata: ModelNodeMetadata | None = ...,
+        node_id: UUID | None = ...,
+        correlation_id: UUID | None = ...,
+    ) -> ModelNodeIntrospectionEvent:
+        """Create an introspection event with deterministic values.
+
+        Args:
+            node_type: ONEX node type (EnumNodeKind).
+            node_version: Semantic version string.
+            endpoints: Optional endpoint URLs.
+            capabilities: Optional node capabilities.
+            metadata: Optional node metadata.
+            node_id: Optional specific node ID.
+            correlation_id: Optional specific correlation ID.
+
+        Returns:
+            ModelNodeIntrospectionEvent with deterministic values.
+        """
+        ...
+
+
+class ProtocolRegistryRequestFactory(Protocol):
+    """Protocol for registry request factory function.
+
+    Provides type information for IDE autocomplete when using the
+    registry_request_factory fixture.
+    """
+
+    def __call__(
+        self,
+        node_type: EnumNodeKind = ...,
+        node_version: str = ...,
+        endpoints: dict[str, str] | None = ...,
+        tags: list[str] | None = ...,
+        metadata: dict[str, str] | None = ...,
+        node_id: UUID | None = ...,
+        correlation_id: UUID | None = ...,
+    ) -> ModelRegistryRequest:
+        """Create a registry request with deterministic values.
+
+        Args:
+            node_type: ONEX node type (EnumNodeKind).
+            node_version: Semantic version string.
+            endpoints: Optional endpoint URLs.
+            tags: Optional service tags.
+            metadata: Optional additional metadata.
+            node_id: Optional specific node ID.
+            correlation_id: Optional specific correlation ID.
+
+        Returns:
+            ModelRegistryRequest with deterministic values.
+        """
+        ...
+
 
 # =============================================================================
 # Introspectable Test Node for MixinNodeIntrospection Testing
@@ -459,11 +591,11 @@ def sample_introspection_event() -> ModelNodeIntrospectionEvent:
 
 
 @pytest.fixture
-def introspection_event_factory() -> Callable[..., ModelNodeIntrospectionEvent]:
+def introspection_event_factory() -> ProtocolIntrospectionEventFactory:
     """Factory for creating unique introspection events.
 
     Returns:
-        Callable that creates unique ModelNodeIntrospectionEvent instances.
+        Factory callable that creates unique ModelNodeIntrospectionEvent instances.
     """
 
     def _create_event(
@@ -499,14 +631,14 @@ async def event_bus() -> AsyncGenerator[InMemoryEventBus, None]:
 @pytest.fixture
 def test_node_factory(
     event_bus: InMemoryEventBus,
-) -> Callable[..., IntrospectableTestNode]:
+) -> ProtocolTestNodeFactory:
     """Factory for creating IntrospectableTestNode instances.
 
     Args:
         event_bus: Event bus for publishing introspection events.
 
     Returns:
-        Callable that creates IntrospectableTestNode instances.
+        Factory callable that creates IntrospectableTestNode instances.
     """
 
     def _create_node(
@@ -1147,7 +1279,7 @@ def failure_injector(
 def deterministic_introspection_event_factory(
     uuid_generator: DeterministicUUIDGenerator,
     deterministic_clock: DeterministicClock,
-) -> Callable[..., ModelNodeIntrospectionEvent]:
+) -> ProtocolDeterministicIntrospectionEventFactory:
     """Factory for creating introspection events with deterministic values.
 
     Returns a callable that generates ModelNodeIntrospectionEvent instances
@@ -1158,7 +1290,7 @@ def deterministic_introspection_event_factory(
         deterministic_clock: Deterministic clock.
 
     Returns:
-        Callable that creates introspection events.
+        Factory callable that creates introspection events with deterministic values.
     """
     from omnibase_infra.models.registration.model_node_capabilities import (
         ModelNodeCapabilities,
@@ -1206,7 +1338,7 @@ def deterministic_introspection_event_factory(
 def registry_request_factory(
     uuid_generator: DeterministicUUIDGenerator,
     deterministic_clock: DeterministicClock,
-) -> Callable[..., ModelRegistryRequest]:
+) -> ProtocolRegistryRequestFactory:
     """Factory for creating registry requests with deterministic values.
 
     Returns a callable that generates ModelRegistryRequest instances
@@ -1217,7 +1349,7 @@ def registry_request_factory(
         deterministic_clock: Deterministic clock.
 
     Returns:
-        Callable that creates registry requests.
+        Factory callable that creates registry requests with deterministic values.
     """
 
     def _create_request(
@@ -1263,6 +1395,11 @@ def registry_request_factory(
 # =============================================================================
 
 __all__ = [
+    # Protocol types for factory fixtures
+    "ProtocolIntrospectionEventFactory",
+    "ProtocolTestNodeFactory",
+    "ProtocolDeterministicIntrospectionEventFactory",
+    "ProtocolRegistryRequestFactory",
     # Clock fixtures
     "DeterministicClock",
     "deterministic_clock",
