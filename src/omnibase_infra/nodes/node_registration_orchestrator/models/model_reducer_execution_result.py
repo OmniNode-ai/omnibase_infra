@@ -15,6 +15,20 @@ Design Pattern:
     the same result is passed between components. The intents field uses an
     immutable tuple rather than a mutable list to maintain full immutability.
 
+Intent Typing:
+    The intents field accepts any model implementing ProtocolRegistrationIntent
+    from protocols.py. This protocol-based approach:
+    - Eliminates duplicate union definitions across modules
+    - Allows future intent types to be added by implementing the protocol
+    - Follows ONEX duck typing principles
+
+    Current implementations:
+    - ModelConsulRegistrationIntent: Consul service registration
+    - ModelPostgresUpsertIntent: PostgreSQL upsert operations
+
+    For type hints in external code, use ProtocolRegistrationIntent from
+    omnibase_infra.nodes.node_registration_orchestrator.protocols.
+
 Thread Safety:
     ModelReducerExecutionResult is immutable (frozen=True) after creation,
     making it thread-safe for concurrent read access. All fields use immutable
@@ -44,6 +58,7 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -57,25 +72,14 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_st
     ModelReducerState,
 )
 
-RegistrationIntentUnion = ModelConsulRegistrationIntent | ModelPostgresUpsertIntent
-"""Type alias for registration intent union without discriminator annotation.
+if TYPE_CHECKING:
+    from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
+        ProtocolRegistrationIntent,
+    )
 
-This alias represents the same union as ``ModelRegistrationIntent`` in
-``model_registration_intent.py``, but without the ``Annotated[..., Field(discriminator=...)]``
-wrapper. We define it here rather than importing ``ModelRegistrationIntent`` to avoid
-circular imports between these modules.
-
-Use this alias for:
-    - Type hints in method signatures and field definitions
-    - Cases where Pydantic's discriminated union behavior is not needed
-
-Use ``ModelRegistrationIntent`` from ``model_registration_intent.py`` when:
-    - Pydantic needs to discriminate between intent types based on the ``kind`` field
-    - Deserializing JSON where the discriminator determines the concrete type
-
-.. versionadded:: 0.7.0
-    Created as part of OMN-1007 tuple-to-model conversion work.
-"""
+# Internal union type for Pydantic validation.
+# External code should use ProtocolRegistrationIntent from protocols.py for type hints.
+_IntentUnion = ModelConsulRegistrationIntent | ModelPostgresUpsertIntent
 
 
 class ModelReducerExecutionResult(BaseModel):
@@ -86,6 +90,7 @@ class ModelReducerExecutionResult(BaseModel):
     - Self-documenting field names (state, intents)
     - Factory methods for common patterns (empty, no_change, with_intents)
     - Full immutability for thread safety (frozen model with tuple intents)
+    - Protocol-based intent typing for extensibility (ProtocolRegistrationIntent)
 
     Attributes:
         state: The updated reducer state after processing an event.
@@ -152,9 +157,12 @@ class ModelReducerExecutionResult(BaseModel):
         ...,
         description="The updated reducer state after processing the event.",
     )
-    intents: tuple[RegistrationIntentUnion, ...] = Field(
+    intents: tuple[_IntentUnion, ...] = Field(
         default=(),
-        description="Tuple of registration intents to be executed by the effect node.",
+        description=(
+            "Tuple of registration intents to be executed by the effect node. "
+            "All intents implement ProtocolRegistrationIntent from protocols.py."
+        ),
     )
 
     @property
@@ -243,14 +251,15 @@ class ModelReducerExecutionResult(BaseModel):
     def with_intents(
         cls,
         state: ModelReducerState,
-        intents: Sequence[RegistrationIntentUnion],
+        intents: Sequence[ProtocolRegistrationIntent],
     ) -> ModelReducerExecutionResult:
         """Create a result with state and intents.
 
         Args:
             state: The updated reducer state.
-            intents: Sequence of registration intents to execute. Will be
-                converted to an immutable tuple.
+            intents: Sequence of registration intents to execute. Each intent
+                must implement ProtocolRegistrationIntent (e.g., ModelConsulRegistrationIntent,
+                ModelPostgresUpsertIntent). Will be converted to an immutable tuple.
 
         Returns:
             ModelReducerExecutionResult with the provided state and intents.
@@ -266,7 +275,8 @@ class ModelReducerExecutionResult(BaseModel):
 
         .. versionadded:: 0.7.0
         """
-        return cls(state=state, intents=tuple(intents))
+        # Cast to _IntentUnion for Pydantic validation while accepting any ProtocolRegistrationIntent
+        return cls(state=state, intents=tuple(intents))  # type: ignore[arg-type]
 
     def __bool__(self) -> bool:
         """Allow using result in boolean context to check for pending work.
@@ -326,4 +336,4 @@ class ModelReducerExecutionResult(BaseModel):
         )
 
 
-__all__ = ["ModelReducerExecutionResult", "RegistrationIntentUnion"]
+__all__ = ["ModelReducerExecutionResult"]

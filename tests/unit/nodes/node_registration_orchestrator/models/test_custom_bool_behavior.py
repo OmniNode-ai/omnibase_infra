@@ -604,7 +604,7 @@ class TestModelReducerExecutionResultImmutability:
     which ensures thread safety and prevents accidental state mutation.
     Attempting to mutate any field should raise a ValidationError.
 
-    The model uses tuple[RegistrationIntentUnion, ...] for the intents field
+    The model uses tuple[ProtocolRegistrationIntent, ...] for the intents field
     instead of list to maintain full immutability - tuples are immutable
     containers, while lists would allow mutation even with frozen=True.
 

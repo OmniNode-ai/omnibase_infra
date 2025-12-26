@@ -78,6 +78,86 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_registrati
     ModelRegistrationIntent,
 )
 
+
+@runtime_checkable
+class ProtocolRegistrationIntent(Protocol):
+    """Protocol for registration intent models.
+
+    This protocol defines the structural interface that all registration intent
+    models must implement. Using a protocol instead of a union type:
+    - Eliminates duplicate union definitions across modules
+    - Allows future intent types to be added by simply implementing the protocol
+    - Follows ONEX duck typing principles
+    - Enables structural typing for type narrowing without import dependencies
+
+    Thread Safety:
+        Intent models implementing this protocol MUST be immutable (frozen=True
+        in Pydantic ConfigDict) to ensure safe concurrent access.
+
+    Implementers:
+        - ModelConsulRegistrationIntent: Consul service registration intents
+        - ModelPostgresUpsertIntent: PostgreSQL upsert intents
+        (future intent types are automatically supported via structural typing)
+
+    Example:
+        >>> def process_intent(intent: ProtocolRegistrationIntent) -> None:
+        ...     # Access common properties through the protocol
+        ...     print(f"Processing {intent.kind} intent for node {intent.node_id}")
+        ...     print(f"Operation: {intent.operation}")
+        ...     print(f"Correlation ID: {intent.correlation_id}")
+
+    Related:
+        - ModelRegistrationIntent: Annotated discriminated union for Pydantic parsing
+        - ProtocolEffect.execute_intent(): Uses this protocol for intent parameters
+
+    .. versionadded:: 0.7.0
+        Created as part of OMN-1007 to replace duplicated union type definitions.
+    """
+
+    @property
+    def kind(self) -> str:
+        """The intent kind identifier (e.g., 'consul', 'postgres').
+
+        This field is used as a discriminator for intent routing and type
+        narrowing. Each intent implementation MUST use a unique kind value.
+
+        Returns:
+            String identifier for the intent type.
+        """
+        ...
+
+    @property
+    def operation(self) -> str:
+        """The operation to perform (e.g., 'register', 'upsert', 'deregister').
+
+        Returns:
+            String identifier for the operation.
+        """
+        ...
+
+    @property
+    def node_id(self) -> UUID:
+        """The target node identifier.
+
+        Returns:
+            UUID of the node this intent operates on.
+        """
+        ...
+
+    @property
+    def correlation_id(self) -> UUID:
+        """Correlation ID for distributed tracing.
+
+        This ID enables tracing intent execution across services. It should
+        be propagated through all infrastructure operations triggered by
+        this intent.
+
+        Returns:
+            UUID for correlation/tracing.
+        """
+        ...
+
+
 if TYPE_CHECKING:
     from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
     from omnibase_infra.nodes.node_registration_orchestrator.models import (
@@ -355,4 +435,5 @@ class ProtocolEffect(Protocol):
 __all__ = [
     "ProtocolEffect",
     "ProtocolReducer",
+    "ProtocolRegistrationIntent",
 ]
