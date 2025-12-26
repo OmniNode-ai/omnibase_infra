@@ -68,7 +68,7 @@ def create_deterministic_event(
 
     return ModelNodeIntrospectionEvent(
         node_id=node_id,
-        node_type=node_type,
+        node_type=node_type.value,
         node_version=node_version,
         correlation_id=correlation_id,
         timestamp=timestamp,
@@ -423,6 +423,25 @@ class TestA5NormalizedDeterminism:
         assert "consul_confirmed" in result_data
         assert "postgres_confirmed" in result_data
 
+        # Assert - Intent payloads have node_type serialized as string (not enum)
+        # This guards against future serialization regressions where node_type
+        # might accidentally serialize as an object instead of a string value.
+        intents_data = normalized["intents"]
+        assert isinstance(intents_data, list), "intents should be a list"
+        for intent in intents_data:
+            assert isinstance(intent, dict), "each intent should be a dict"
+            payload = intent.get("payload", {})
+            # Check nested record for node_type
+            record = payload.get("record", {})
+            if "node_type" in record:
+                assert isinstance(record["node_type"], str), (
+                    f"node_type in record should be string, got {type(record['node_type'])}"
+                )
+                valid_types = {"effect", "compute", "reducer", "orchestrator"}
+                assert record["node_type"] in valid_types, (
+                    f"node_type should be one of {valid_types}, got {record['node_type']}"
+                )
+
 
 # =============================================================================
 # TEST CLASS: A6 - OBSERVABILITY
@@ -703,7 +722,7 @@ class TestA6Observability:
         # Create event with standard endpoints (not containing secrets)
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeKind.EFFECT,
+            node_type=EnumNodeKind.EFFECT.value,
             node_version="1.0.0",
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,

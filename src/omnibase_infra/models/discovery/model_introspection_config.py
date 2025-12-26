@@ -89,6 +89,7 @@ class ModelIntrospectionConfig(BaseModel):
     Example:
         ```python
         from uuid import UUID, uuid4
+        from omnibase_core.enums import EnumNodeKind
         from omnibase_infra.models.discovery import ModelIntrospectionConfig
         from omnibase_infra.mixins import MixinNodeIntrospection
 
@@ -96,7 +97,7 @@ class ModelIntrospectionConfig(BaseModel):
             def __init__(self, node_id: UUID, event_bus=None):
                 config = ModelIntrospectionConfig(
                     node_id=node_id,
-                    node_type="EFFECT",
+                    node_type=EnumNodeKind.EFFECT,  # Use enum directly (preferred)
                     event_bus=event_bus,
                     version="1.2.0",
                 )
@@ -107,7 +108,7 @@ class ModelIntrospectionConfig(BaseModel):
             def __init__(self, node_id: UUID | None = None, event_bus=None):
                 config = ModelIntrospectionConfig(
                     node_id=node_id or uuid4(),
-                    node_type="EFFECT",
+                    node_type=EnumNodeKind.EFFECT,  # Use enum directly (preferred)
                     event_bus=event_bus,
                     operation_keywords=frozenset({"fetch", "upload", "download"}),
                 )

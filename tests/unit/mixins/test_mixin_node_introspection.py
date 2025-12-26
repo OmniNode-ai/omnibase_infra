@@ -1771,13 +1771,14 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         assert "execute_task" not in operations
 
     async def test_node_type_specific_keywords_constant_exists(self) -> None:
-        """Test that NODE_TYPE_OPERATION_KEYWORDS constant exists."""
+        """Test that NODE_TYPE_OPERATION_KEYWORDS constant exists with EnumNodeKind keys."""
         assert hasattr(MixinNodeIntrospection, "NODE_TYPE_OPERATION_KEYWORDS")
         keywords_map = MixinNodeIntrospection.NODE_TYPE_OPERATION_KEYWORDS
-        assert "EFFECT" in keywords_map
-        assert "COMPUTE" in keywords_map
-        assert "REDUCER" in keywords_map
-        assert "ORCHESTRATOR" in keywords_map
+        # Keys should be EnumNodeKind members for type safety
+        assert EnumNodeKind.EFFECT in keywords_map
+        assert EnumNodeKind.COMPUTE in keywords_map
+        assert EnumNodeKind.REDUCER in keywords_map
+        assert EnumNodeKind.ORCHESTRATOR in keywords_map
         for keywords in keywords_map.values():
             assert isinstance(keywords, set)
 

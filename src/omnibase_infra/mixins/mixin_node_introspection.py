@@ -508,8 +508,10 @@ class MixinNodeIntrospection:
     )
 
     # Node-type-specific operation keyword suggestions
-    NODE_TYPE_OPERATION_KEYWORDS: ClassVar[dict[str, set[str]]] = {
-        "EFFECT": {
+    # Uses EnumNodeKind as keys to ensure type safety when accessing with node_type.
+    # Example: keywords = NODE_TYPE_OPERATION_KEYWORDS.get(node_type, set())
+    NODE_TYPE_OPERATION_KEYWORDS: ClassVar[dict[EnumNodeKind, set[str]]] = {
+        EnumNodeKind.EFFECT: {
             "execute",
             "handle",
             "process",
@@ -521,7 +523,7 @@ class MixinNodeIntrospection:
             "query",
             "connect",
         },
-        "COMPUTE": {
+        EnumNodeKind.COMPUTE: {
             "execute",
             "handle",
             "process",
@@ -532,7 +534,7 @@ class MixinNodeIntrospection:
             "convert",
             "parse",
         },
-        "REDUCER": {
+        EnumNodeKind.REDUCER: {
             "execute",
             "handle",
             "process",
@@ -543,7 +545,7 @@ class MixinNodeIntrospection:
             "combine",
             "accumulate",
         },
-        "ORCHESTRATOR": {
+        EnumNodeKind.ORCHESTRATOR: {
             "execute",
             "handle",
             "process",

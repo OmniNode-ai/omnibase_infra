@@ -162,12 +162,12 @@ class TestA0PurityGate:
         # Arrange
         request = ModelRegistryRequest(
             node_id=uuid4(),
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT.value,
             node_version="1.0.0",
             correlation_id=uuid4(),
-            service_name="onex-effect",
+            service_name=f"onex-{EnumNodeKind.EFFECT.value}",
             endpoints={"health": "http://localhost:8080/health"},
-            tags=["onex", "effect", "test"],
+            tags=["onex", EnumNodeKind.EFFECT.value, "test"],
             metadata={"environment": "test"},
         )
 

@@ -451,7 +451,7 @@ def sample_introspection_event() -> ModelNodeIntrospectionEvent:
     """
     return ModelNodeIntrospectionEvent(
         node_id=uuid4(),
-        node_type=EnumNodeKind.EFFECT,
+        node_type=EnumNodeKind.EFFECT.value,
         node_version="1.0.0",
         correlation_id=uuid4(),
         endpoints={"health": "http://localhost:8080/health"},
@@ -474,7 +474,7 @@ def introspection_event_factory() -> Callable[..., ModelNodeIntrospectionEvent]:
     ) -> ModelNodeIntrospectionEvent:
         return ModelNodeIntrospectionEvent(
             node_id=node_id or uuid4(),
-            node_type=node_type,
+            node_type=node_type.value,
             node_version=node_version,
             correlation_id=correlation_id or uuid4(),
             endpoints={"health": "http://localhost:8080/health"},
@@ -1190,7 +1190,7 @@ def deterministic_introspection_event_factory(
         """
         return ModelNodeIntrospectionEvent(
             node_id=node_id or uuid_generator.next(),
-            node_type=node_type,
+            node_type=node_type.value,
             node_version=node_version,
             capabilities=capabilities or ModelNodeCapabilities(),
             endpoints=endpoints or {"health": "http://localhost:8080/health"},
@@ -1243,15 +1243,14 @@ def registry_request_factory(
         Returns:
             ModelRegistryRequest with deterministic values.
         """
-        node_type_str = node_type.value
         return ModelRegistryRequest(
             node_id=node_id or uuid_generator.next(),
-            node_type=node_type_str,
+            node_type=node_type,
             node_version=node_version,
             correlation_id=correlation_id or uuid_generator.next(),
-            service_name=f"onex-{node_type_str}",
+            service_name=f"onex-{node_type.value}",
             endpoints=endpoints or {"health": "http://localhost:8080/health"},
-            tags=tags or ["onex", node_type_str, "test"],
+            tags=tags or ["onex", node_type.value, "test"],
             metadata=metadata or {"environment": "test"},
             timestamp=deterministic_clock.now(),
         )
