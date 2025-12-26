@@ -21,7 +21,7 @@ Environment Variables:
     POSTGRES_PASSWORD: PostgreSQL password (required if --enable-tracking)
 
 See Also:
-    docs/operations/DLQ_REPLAY_GUIDE.md - Complete replay documentation
+    docs/operations/DLQ_REPLAY_RUNBOOK.md - Complete replay documentation
     OMN-949 - DLQ configuration ticket
     OMN-1032 - PostgreSQL tracking integration (integrated)
 
@@ -144,6 +144,19 @@ def safe_truncate(text: str, max_chars: int, suffix: str = "...") -> str:
     if max_chars <= suffix_len:
         return suffix[:max_chars]
     return text[: max_chars - suffix_len] + suffix
+
+
+def generate_replay_correlation_id() -> UUID:
+    """Generate a new correlation ID for replay tracking.
+
+    This function provides a single point of correlation ID generation
+    for all replay outcomes (completed, failed, skipped), ensuring
+    consistency in tracking.
+
+    Returns:
+        UUID: A new unique correlation ID for the replay attempt.
+    """
+    return uuid4()
 
 
 # =============================================================================
@@ -942,7 +955,7 @@ class DLQReplayExecutor:
             should, reason = should_replay(message, self.config)
 
             if not should:
-                skip_correlation_id = uuid4()
+                skip_correlation_id = generate_replay_correlation_id()
                 result = ModelReplayResult(
                     correlation_id=message.correlation_id,
                     original_topic=message.original_topic,
@@ -963,7 +976,7 @@ class DLQReplayExecutor:
                 )
                 continue
 
-            replay_correlation_id = uuid4()
+            replay_correlation_id = generate_replay_correlation_id()
 
             if self.config.dry_run:
                 result = ModelReplayResult(
@@ -1194,7 +1207,7 @@ Examples:
   # Show DLQ statistics
   python scripts/dlq_replay.py stats --dlq-topic dlq-events
 
-See docs/operations/DLQ_REPLAY_GUIDE.md for complete documentation.
+See docs/operations/DLQ_REPLAY_RUNBOOK.md for complete documentation.
         """,
     )
 

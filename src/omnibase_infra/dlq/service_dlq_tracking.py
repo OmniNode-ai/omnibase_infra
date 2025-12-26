@@ -64,6 +64,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ logger = logging.getLogger(__name__)
 _TABLE_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
-class DLQReplayTracker:
+class DLQReplayTracker(MixinAsyncCircuitBreaker):
     """PostgreSQL-based service for tracking DLQ replay operations.
 
     This service provides persistent storage for DLQ replay history,
@@ -85,6 +86,15 @@ class DLQReplayTracker:
         - Replay history tracking with correlation IDs
         - Query methods for replay history analysis
         - Defense-in-depth table name validation for SQL injection prevention
+        - Circuit breaker pattern for fault tolerance (via MixinAsyncCircuitBreaker)
+
+    Circuit Breaker Pattern (Production-Grade):
+        - Uses MixinAsyncCircuitBreaker for consistent circuit breaker implementation
+        - Prevents cascading failures to PostgreSQL service
+        - Three states: CLOSED (normal), OPEN (blocking), HALF_OPEN (testing)
+        - Configurable failure_threshold (default: 5 consecutive failures)
+        - Configurable reset_timeout (default: 60 seconds)
+        - Raises InfraUnavailableError when circuit is OPEN
 
     Security:
         Table names are validated at two levels:
@@ -97,7 +107,8 @@ class DLQReplayTracker:
 
     Thread Safety:
         This service is thread-safe. The underlying asyncpg pool handles
-        connection management and concurrent access safely.
+        connection management and concurrent access safely. Circuit breaker
+        operations are protected by async locks (via MixinAsyncCircuitBreaker).
 
     Example:
         >>> from uuid import uuid4
@@ -139,6 +150,15 @@ class DLQReplayTracker:
         self._config = config
         self._pool: asyncpg.Pool | None = None
         self._initialized: bool = False
+
+        # Initialize circuit breaker for PostgreSQL fault tolerance
+        # Uses MixinAsyncCircuitBreaker for consistent implementation across infra services
+        self._init_circuit_breaker(
+            threshold=5,
+            reset_timeout=60.0,
+            service_name="dlq_tracking_service",
+            transport_type=EnumInfraTransportType.DATABASE,
+        )
 
         # Defense-in-depth: Validate table name at runtime even though
         # Pydantic config already validates it. This protects against:
@@ -333,12 +353,18 @@ class DLQReplayTracker:
         Inserts a new replay record into the database. Each replay attempt
         gets its own record, enabling full audit trail of replay operations.
 
+        Circuit breaker integration:
+            - Checks circuit state before execution (raises InfraUnavailableError if OPEN)
+            - Records success/failure for circuit state management
+            - Allows test request in HALF_OPEN state
+
         Args:
             record: The replay record to persist.
 
         Raises:
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If operation times out.
+            InfraUnavailableError: If circuit breaker is OPEN.
             RuntimeHostError: If service is not initialized.
         """
         correlation_id = record.replay_correlation_id
@@ -354,6 +380,10 @@ class DLQReplayTracker:
                 "Service not initialized - call initialize() first",
                 context=context,
             )
+
+        # Check circuit breaker before execution
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("record_replay_attempt", correlation_id)
 
         # storage_table is validated via regex in ModelDlqTrackingConfig
         insert_sql = f"""
@@ -390,18 +420,37 @@ class DLQReplayTracker:
                     },
                 )
 
+            # Record success for circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
         except asyncpg.QueryCanceledError as e:
+            # Record failure for circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "record_replay_attempt", correlation_id
+                )
             raise InfraTimeoutError(
                 f"Record replay attempt timed out after {self._config.command_timeout}s",
                 context=context,
                 timeout_seconds=self._config.command_timeout,
             ) from e
         except asyncpg.PostgresConnectionError as e:
+            # Record failure for circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "record_replay_attempt", correlation_id
+                )
             raise InfraConnectionError(
                 "Database connection lost during record_replay_attempt",
                 context=context,
             ) from e
         except asyncpg.PostgresError as e:
+            # Record failure for circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "record_replay_attempt", correlation_id
+                )
             raise RuntimeHostError(
                 f"Database error during record_replay_attempt: {type(e).__name__}",
                 context=context,
@@ -413,6 +462,11 @@ class DLQReplayTracker:
         Retrieves all replay attempts for a given original message ID,
         ordered by replay timestamp (most recent first).
 
+        Circuit breaker integration:
+            - Checks circuit state before execution (raises InfraUnavailableError if OPEN)
+            - Records success/failure for circuit state management
+            - Allows test request in HALF_OPEN state
+
         Args:
             message_id: The original message correlation ID to query.
 
@@ -422,13 +476,15 @@ class DLQReplayTracker:
         Raises:
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If query times out.
+            InfraUnavailableError: If circuit breaker is OPEN.
             RuntimeHostError: If service is not initialized.
         """
+        correlation_id = uuid4()
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="get_replay_history",
             target_name="dlq_tracking_service",
-            correlation_id=uuid4(),
+            correlation_id=correlation_id,
         )
 
         if not self._initialized or self._pool is None:
@@ -436,6 +492,10 @@ class DLQReplayTracker:
                 "Service not initialized - call initialize() first",
                 context=context,
             )
+
+        # Check circuit breaker before execution
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("get_replay_history", correlation_id)
 
         # storage_table is validated via regex in ModelDlqTrackingConfig
         query_sql = f"""
@@ -470,20 +530,33 @@ class DLQReplayTracker:
                         )
                     )
 
-                return records
+            # Record success for circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            return records
 
         except asyncpg.QueryCanceledError as e:
+            # Record failure for circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_replay_history", correlation_id)
             raise InfraTimeoutError(
                 f"get_replay_history timed out after {self._config.command_timeout}s",
                 context=context,
                 timeout_seconds=self._config.command_timeout,
             ) from e
         except asyncpg.PostgresConnectionError as e:
+            # Record failure for circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_replay_history", correlation_id)
             raise InfraConnectionError(
                 "Database connection lost during get_replay_history",
                 context=context,
             ) from e
         except asyncpg.PostgresError as e:
+            # Record failure for circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_replay_history", correlation_id)
             raise RuntimeHostError(
                 f"Database error during get_replay_history: {type(e).__name__}",
                 context=context,
