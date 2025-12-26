@@ -51,7 +51,7 @@ class TestWireRegistrationHandlers:
     @pytest.mark.asyncio
     async def test_registers_instances_with_correct_interfaces(self) -> None:
         """Test that handlers are registered with correct interface types."""
-        from omnibase_infra.orchestrators.registration.handlers import (
+        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
             HandlerNodeRegistrationAcked,
             HandlerRuntimeTick,
@@ -187,7 +187,7 @@ class TestGetHandlerNodeIntrospectedFromContainer:
     @pytest.mark.asyncio
     async def test_resolves_handler(self) -> None:
         """Test that handler is resolved from container."""
-        from omnibase_infra.orchestrators.registration.handlers import (
+        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
 
@@ -225,7 +225,7 @@ class TestGetHandlerRuntimeTickFromContainer:
     @pytest.mark.asyncio
     async def test_resolves_handler(self) -> None:
         """Test that handler is resolved from container."""
-        from omnibase_infra.orchestrators.registration.handlers import (
+        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerRuntimeTick,
         )
 
@@ -261,7 +261,7 @@ class TestGetHandlerNodeRegistrationAckedFromContainer:
     @pytest.mark.asyncio
     async def test_resolves_handler(self) -> None:
         """Test that handler is resolved from container."""
-        from omnibase_infra.orchestrators.registration.handlers import (
+        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeRegistrationAcked,
         )
 

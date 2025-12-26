@@ -32,7 +32,7 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.models.registration.events import ModelNodeRegistrationInitiated
-from omnibase_infra.orchestrators.registration.handlers.handler_node_introspected import (
+from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected import (
     HandlerNodeIntrospected,
 )
 from omnibase_infra.projectors.projection_reader_registration import (

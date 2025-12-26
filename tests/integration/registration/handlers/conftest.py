@@ -30,7 +30,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from omnibase_infra.orchestrators import DEFAULT_LIVENESS_WINDOW_SECONDS
+from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+    DEFAULT_LIVENESS_WINDOW_SECONDS,
+)
 
 # Import fixtures from projectors conftest (re-export for pytest discovery)
 from tests.integration.projectors.conftest import (
@@ -45,7 +47,7 @@ from tests.integration.projectors.conftest import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.orchestrators.registration.handlers import (
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeHeartbeat,
     )
     from omnibase_infra.projectors import (
@@ -85,7 +87,7 @@ def heartbeat_handler(
     Returns:
         HandlerNodeHeartbeat configured with default liveness window.
     """
-    from omnibase_infra.orchestrators.registration.handlers import (
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeHeartbeat,
     )
 
@@ -113,7 +115,7 @@ def heartbeat_handler_fast_window(
     Returns:
         HandlerNodeHeartbeat configured with 5-second liveness window.
     """
-    from omnibase_infra.orchestrators.registration.handlers import (
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeHeartbeat,
     )
 

@@ -62,7 +62,7 @@ if TYPE_CHECKING:
     import asyncpg
     from omnibase_core.container import ModelONEXContainer
 
-    from omnibase_infra.orchestrators.registration.handlers import (
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
@@ -707,12 +707,12 @@ async def wire_registration_handlers(
         >>> # Resolve handlers from container
         >>> handler = await container.service_registry.resolve_service(HandlerNodeIntrospected)
     """
-    from omnibase_infra.orchestrators.registration.handlers import (
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
     )
-    from omnibase_infra.orchestrators.registration.handlers.handler_node_registration_acked import (
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_registration_acked import (
         get_liveness_interval_seconds,
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
@@ -903,7 +903,7 @@ async def get_handler_node_introspected_from_container(
     Raises:
         RuntimeError: If handler not registered in container.
     """
-    from omnibase_infra.orchestrators.registration.handlers import (
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,
     )
 
@@ -942,7 +942,9 @@ async def get_handler_runtime_tick_from_container(
     Raises:
         RuntimeError: If handler not registered in container.
     """
-    from omnibase_infra.orchestrators.registration.handlers import HandlerRuntimeTick
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerRuntimeTick,
+    )
 
     try:
         handler: HandlerRuntimeTick = await container.service_registry.resolve_service(
@@ -979,7 +981,7 @@ async def get_handler_node_registration_acked_from_container(
     Raises:
         RuntimeError: If handler not registered in container.
     """
-    from omnibase_infra.orchestrators.registration.handlers import (
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeRegistrationAcked,
     )
 

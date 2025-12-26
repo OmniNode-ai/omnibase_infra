@@ -26,21 +26,21 @@ Related Tickets:
     - OMN-1006: Node Heartbeat for Liveness Tracking
 """
 
-from omnibase_infra.orchestrators.registration.handlers.handler_node_heartbeat import (
+from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_heartbeat import (
     DEFAULT_LIVENESS_WINDOW_SECONDS,
     HandlerNodeHeartbeat,
     ModelHeartbeatHandlerResult,
 )
-from omnibase_infra.orchestrators.registration.handlers.handler_node_introspected import (
+from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected import (
     HandlerNodeIntrospected,
 )
-from omnibase_infra.orchestrators.registration.handlers.handler_node_registration_acked import (
+from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_registration_acked import (
     DEFAULT_LIVENESS_INTERVAL_SECONDS,
     ENV_LIVENESS_INTERVAL_SECONDS,
     HandlerNodeRegistrationAcked,
     get_liveness_interval_seconds,
 )
-from omnibase_infra.orchestrators.registration.handlers.handler_runtime_tick import (
+from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_runtime_tick import (
     HandlerRuntimeTick,
 )
 

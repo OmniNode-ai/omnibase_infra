@@ -36,7 +36,7 @@ from omnibase_infra.models.registration.events import (
     ModelNodeBecameActive,
     ModelNodeRegistrationAckReceived,
 )
-from omnibase_infra.orchestrators.registration.handlers.handler_node_registration_acked import (
+from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_registration_acked import (
     DEFAULT_LIVENESS_INTERVAL_SECONDS,
     ENV_LIVENESS_INTERVAL_SECONDS,
     HandlerNodeRegistrationAcked,

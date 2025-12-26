@@ -62,7 +62,7 @@ Heartbeat Handling (OMN-1006):
 
     To wire heartbeat handling:
     ```python
-    from omnibase_infra.orchestrators.registration.handlers import HandlerNodeHeartbeat
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import HandlerNodeHeartbeat
 
     # Wire heartbeat handler with projection dependencies
     heartbeat_handler = HandlerNodeHeartbeat(
@@ -117,13 +117,13 @@ if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
     from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeHeartbeat,
+        ModelHeartbeatHandlerResult,
+    )
     from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
         ModelTimeoutCoordinationResult,
         TimeoutCoordinator,
-    )
-    from omnibase_infra.orchestrators.registration.handlers import (
-        HandlerNodeHeartbeat,
-        ModelHeartbeatHandlerResult,
     )
     from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 
