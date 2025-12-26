@@ -64,7 +64,6 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -167,7 +166,7 @@ class ModelReducerExecutionResult(BaseModel):
 
     @field_validator("intents", mode="before")
     @classmethod
-    def validate_intents(cls, v: Any) -> tuple[ModelRegistryIntent, ...]:
+    def validate_intents(cls, v: object) -> tuple[ModelRegistryIntent, ...]:
         """Resolve intent types dynamically from IntentRegistry.
 
         When deserializing from JSON/dict, uses the 'kind' field to look up
@@ -184,6 +183,13 @@ class ModelReducerExecutionResult(BaseModel):
         """
         if v is None:
             return ()
+
+        # Validate input is a proper sequence (not str/bytes)
+        if not isinstance(v, Sequence) or isinstance(v, str | bytes):
+            raise ValueError(
+                f"intents must be a tuple or Sequence (excluding str/bytes), "
+                f"got {type(v).__name__}"
+            )
 
         result: list[ModelRegistryIntent] = []
         for item in v:

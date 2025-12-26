@@ -64,7 +64,7 @@ class MyDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
 class KafkaDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
     """Dispatcher for Kafka message publishing."""
 
-    def __init__(self, kafka_producer: Any, topic: str):
+    def __init__(self, kafka_producer: object, topic: str):
         self._producer = kafka_producer
         self._topic = topic
         self._init_circuit_breaker(
@@ -81,7 +81,7 @@ class KafkaDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
 class HttpDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
     """Dispatcher for HTTP webhook calls."""
 
-    def __init__(self, http_client: Any, endpoint: str):
+    def __init__(self, http_client: object, endpoint: str):
         self._client = http_client
         self._endpoint = endpoint
         self._init_circuit_breaker(
@@ -98,7 +98,7 @@ class HttpDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
 class DatabaseDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
     """Dispatcher for database event storage."""
 
-    def __init__(self, db_pool: Any):
+    def __init__(self, db_pool: object):
         self._pool = db_pool
         self._init_circuit_breaker(
             threshold=5,           # Standard threshold

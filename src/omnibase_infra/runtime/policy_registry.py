@@ -82,6 +82,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import threading
+import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -792,6 +793,22 @@ class PolicyRegistry:
             ...     version="1.0.0",
             ... )
         """
+        # Check for non-normalized version and emit deprecation warning
+        # This implements the deprecation timeline documented in the docstring
+        try:
+            normalized = self._normalize_version(version)
+            if normalized != version:
+                warnings.warn(
+                    f"Passing non-normalized version '{version}' is deprecated. "
+                    f"Use normalized format '{normalized}' instead. "
+                    f"See docstring for deprecation timeline.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+        except ProtocolConfigurationError:
+            # Invalid version format - let ModelPolicyRegistration handle the error
+            pass
+
         # Version normalization is handled by ModelPolicyRegistration validator
         # which normalizes partial versions and v-prefixed versions automatically
         try:
