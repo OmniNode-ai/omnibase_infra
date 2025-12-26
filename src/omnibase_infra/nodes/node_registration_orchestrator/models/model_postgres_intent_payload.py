@@ -84,6 +84,7 @@ class ModelPostgresIntentPayload(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        strict=True,
     )
 
     node_id: UUID = Field(..., description="Unique node identifier")

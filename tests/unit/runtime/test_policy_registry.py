@@ -1420,26 +1420,30 @@ class TestPolicyRegistrySemverCaching:
         PolicyRegistry._reset_semver_cache()
 
         # Get the parser (initializes the cache)
-        parser = PolicyRegistry._get_semver_parser()
-        initial_info = parser.cache_info()
+        PolicyRegistry._get_semver_parser()
+        initial_info = PolicyRegistry._get_semver_cache_info()
+        assert initial_info is not None
         assert initial_info.hits == 0
         assert initial_info.misses == 0
 
         # First parse - should be a cache miss
         PolicyRegistry._parse_semver("1.0.0")
-        info_after_first = parser.cache_info()
+        info_after_first = PolicyRegistry._get_semver_cache_info()
+        assert info_after_first is not None
         assert info_after_first.misses == 1
         assert info_after_first.hits == 0
 
         # Second parse of same version - should be a cache hit
         PolicyRegistry._parse_semver("1.0.0")
-        info_after_second = parser.cache_info()
+        info_after_second = PolicyRegistry._get_semver_cache_info()
+        assert info_after_second is not None
         assert info_after_second.misses == 1
         assert info_after_second.hits == 1
 
         # Third parse - another hit
         PolicyRegistry._parse_semver("1.0.0")
-        info_after_third = parser.cache_info()
+        info_after_third = PolicyRegistry._get_semver_cache_info()
+        assert info_after_third is not None
         assert info_after_third.misses == 1
         assert info_after_third.hits == 2
 
@@ -1453,8 +1457,8 @@ class TestPolicyRegistrySemverCaching:
         PolicyRegistry._parse_semver("2.0.0")
         PolicyRegistry._parse_semver("3.0.0")
 
-        parser = PolicyRegistry._get_semver_parser()
-        info = parser.cache_info()
+        info = PolicyRegistry._get_semver_cache_info()
+        assert info is not None
         assert info.misses == 3
         assert info.hits == 0
         assert info.currsize == 3  # 3 entries cached
@@ -1475,15 +1479,17 @@ class TestPolicyRegistrySemverCaching:
                 version=f"{i}.0.0",
             )  # type: ignore[arg-type]
 
-        parser = PolicyRegistry._get_semver_parser()
-
         # First get() will parse all versions (cold cache)
         _ = policy_registry.get("perf-test")  # Gets latest version
-        first_misses = parser.cache_info().misses
+        first_info = PolicyRegistry._get_semver_cache_info()
+        assert first_info is not None
+        first_misses = first_info.misses
 
         # Second get() should hit cache (warm cache)
         _ = policy_registry.get("perf-test")
-        second_misses = parser.cache_info().misses
+        second_info = PolicyRegistry._get_semver_cache_info()
+        assert second_info is not None
+        second_misses = second_info.misses
 
         # Cache should have been hit (no new misses)
         assert second_misses == first_misses
@@ -1506,15 +1512,16 @@ class TestPolicyRegistrySemverCaching:
         # Note: omnibase_core's ModelSemVer ignores prerelease for comparison
         # All three versions have same major.minor.patch, so they compare equal
         # But cache still creates separate entries for different input strings
-        parser = PolicyRegistry._get_semver_parser()
-        info = parser.cache_info()
+        info = PolicyRegistry._get_semver_cache_info()
+        assert info is not None
         assert info.currsize == 3  # Three distinct input strings
 
         # Repeat parse should hit cache
         result1_repeat = PolicyRegistry._parse_semver("1.0.0-alpha")
         # Cache returns same parsed result
         assert result1_repeat == result1
-        info_after = parser.cache_info()
+        info_after = PolicyRegistry._get_semver_cache_info()
+        assert info_after is not None
         assert info_after.hits == 1
 
     def test_parse_semver_cache_size_limit(self) -> None:
@@ -1526,8 +1533,8 @@ class TestPolicyRegistrySemverCaching:
         for i in range(150):
             PolicyRegistry._parse_semver(f"{i}.0.0")
 
-        parser = PolicyRegistry._get_semver_parser()
-        info = parser.cache_info()
+        info = PolicyRegistry._get_semver_cache_info()
+        assert info is not None
         # Cache size should not exceed maxsize
         assert info.currsize <= 128
 
@@ -1548,8 +1555,8 @@ class TestPolicyRegistrySemverCaching:
 
         # "0.0.0" should still be in cache (was recently used)
         PolicyRegistry._parse_semver("0.0.0")
-        parser = PolicyRegistry._get_semver_parser()
-        info = parser.cache_info()
+        info = PolicyRegistry._get_semver_cache_info()
+        assert info is not None
         # Last access to "0.0.0" should be a hit
         assert info.hits > 0
 
@@ -1558,8 +1565,8 @@ class TestPolicyRegistrySemverCaching:
         # Parse some versions
         PolicyRegistry._parse_semver("1.0.0")
         PolicyRegistry._parse_semver("2.0.0")
-        parser = PolicyRegistry._get_semver_parser()
-        info_before = parser.cache_info()
+        info_before = PolicyRegistry._get_semver_cache_info()
+        assert info_before is not None
         assert info_before.currsize > 0
 
         # Reset cache
@@ -1567,11 +1574,12 @@ class TestPolicyRegistrySemverCaching:
 
         # After reset, the cache should be None (will be reinitialized on next use)
         assert PolicyRegistry._semver_cache is None
+        assert PolicyRegistry._semver_cache_inner is None
 
         # Next parse initializes a fresh cache
         PolicyRegistry._parse_semver("3.0.0")
-        new_parser = PolicyRegistry._get_semver_parser()
-        info_after = new_parser.cache_info()
+        info_after = PolicyRegistry._get_semver_cache_info()
+        assert info_after is not None
 
         # New cache should have only the one entry we just parsed
         assert info_after.currsize == 1
@@ -1600,12 +1608,12 @@ class TestPolicyRegistrySemverCacheConfiguration:
             PolicyRegistry._parse_semver("1.0.0")
 
             # Verify cache was created with the configured size
-            parser = PolicyRegistry._get_semver_parser()
             # The maxsize is stored in cache_parameters() for newer Python
             # or we can verify by filling it
             for i in range(100):
                 PolicyRegistry._parse_semver(f"{i}.0.0")
-            info = parser.cache_info()
+            info = PolicyRegistry._get_semver_cache_info()
+            assert info is not None
             # With maxsize=64, currsize should be <= 64
             assert info.currsize <= 64
         finally:
@@ -1644,8 +1652,8 @@ class TestPolicyRegistrySemverCacheConfiguration:
             for i in range(50):
                 PolicyRegistry._parse_semver(f"{i}.0.0")
 
-            parser = PolicyRegistry._get_semver_parser()
-            info = parser.cache_info()
+            info = PolicyRegistry._get_semver_cache_info()
+            assert info is not None
             # With maxsize=32, currsize should be <= 32
             assert info.currsize <= 32
         finally:

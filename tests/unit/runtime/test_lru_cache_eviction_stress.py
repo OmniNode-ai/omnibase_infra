@@ -82,8 +82,7 @@ class TestCacheMaxCapacity:
             PolicyRegistry._parse_semver(version)
 
             # Verify cache size after every insertion
-            parser = PolicyRegistry._get_semver_parser()
-            info = parser.cache_info()
+            info = PolicyRegistry._get_semver_cache_info()
             assert info.currsize <= cache_size, (
                 f"Cache size {info.currsize} exceeded max {cache_size} "
                 f"after inserting version {version}"
@@ -102,8 +101,7 @@ class TestCacheMaxCapacity:
         for i in range(cache_size):
             PolicyRegistry._parse_semver(f"{i}.0.0")
 
-        parser = PolicyRegistry._get_semver_parser()
-        info_at_capacity = parser.cache_info()
+        info_at_capacity = PolicyRegistry._get_semver_cache_info()
         assert info_at_capacity.currsize == cache_size
 
         # Continue with 1000 more unique versions
@@ -112,13 +110,13 @@ class TestCacheMaxCapacity:
 
             # Periodically verify size
             if i % 100 == 0:
-                info = parser.cache_info()
+                info = PolicyRegistry._get_semver_cache_info()
                 assert info.currsize == cache_size, (
                     f"Cache size {info.currsize} deviated from max {cache_size}"
                 )
 
         # Final verification
-        info_final = parser.cache_info()
+        info_final = PolicyRegistry._get_semver_cache_info()
         assert info_final.currsize == cache_size
 
     def test_cache_size_stability_with_mixed_operations(self) -> None:
@@ -135,8 +133,6 @@ class TestCacheMaxCapacity:
         for v in base_versions:
             PolicyRegistry._parse_semver(v)
 
-        parser = PolicyRegistry._get_semver_parser()
-
         # Mixed operations: 50% hits, 50% new insertions
         for iteration in range(500):
             if iteration % 2 == 0:
@@ -149,7 +145,7 @@ class TestCacheMaxCapacity:
             PolicyRegistry._parse_semver(version)
 
             # Verify size constraint
-            info = parser.cache_info()
+            info = PolicyRegistry._get_semver_cache_info()
             assert info.currsize <= cache_size
 
 
@@ -175,17 +171,16 @@ class TestLRUEvictionOrdering:
         for v in initial_versions:
             PolicyRegistry._parse_semver(v)
 
-        parser = PolicyRegistry._get_semver_parser()
-        info = parser.cache_info()
+        info = PolicyRegistry._get_semver_cache_info()
         assert info.currsize == cache_size
 
         # Add new version - should evict "0.0.0" (oldest)
         PolicyRegistry._parse_semver("100.0.0")
 
         # Access "0.0.0" - should be a miss (was evicted)
-        info_before = parser.cache_info()
+        info_before = PolicyRegistry._get_semver_cache_info()
         PolicyRegistry._parse_semver("0.0.0")
-        info_after = parser.cache_info()
+        info_after = PolicyRegistry._get_semver_cache_info()
 
         # If "0.0.0" was evicted, accessing it should cause a miss
         assert info_after.misses > info_before.misses, (
@@ -212,13 +207,12 @@ class TestLRUEvictionOrdering:
         for i in range(cache_size - 1):
             PolicyRegistry._parse_semver(f"{100 + i}.0.0")
 
-        parser = PolicyRegistry._get_semver_parser()
-        hits_before = parser.cache_info().hits
+        hits_before = PolicyRegistry._get_semver_cache_info().hits
 
         # "0.0.0" should still be in cache (was recently accessed)
         PolicyRegistry._parse_semver("0.0.0")
 
-        hits_after = parser.cache_info().hits
+        hits_after = PolicyRegistry._get_semver_cache_info().hits
         assert hits_after > hits_before, (
             "Recently accessed entry 0.0.0 was evicted when it should have been preserved"
         )
@@ -244,12 +238,11 @@ class TestLRUEvictionOrdering:
         # Now 3.0.0 is least recently used, should be evicted first
         PolicyRegistry._parse_semver("100.0.0")
 
-        parser = PolicyRegistry._get_semver_parser()
-        hits_before = parser.cache_info().hits
+        hits_before = PolicyRegistry._get_semver_cache_info().hits
 
         # 3.0.0 should have been evicted
         PolicyRegistry._parse_semver("3.0.0")
-        hits_after = parser.cache_info().hits
+        hits_after = PolicyRegistry._get_semver_cache_info().hits
 
         # If 3.0.0 was evicted (as expected), this should be a miss (no new hits)
         assert hits_after == hits_before, (
@@ -277,14 +270,12 @@ class TestLRUEvictionOrdering:
             if len(active_versions) > cache_size:
                 active_versions.pop(0)  # Remove oldest
 
-        parser = PolicyRegistry._get_semver_parser()
-
         # Verify all recently added versions are in cache (should be hits)
-        initial_hits = parser.cache_info().hits
+        initial_hits = PolicyRegistry._get_semver_cache_info().hits
         for v in active_versions:
             PolicyRegistry._parse_semver(v)
 
-        final_hits = parser.cache_info().hits
+        final_hits = PolicyRegistry._get_semver_cache_info().hits
         expected_hits = len(active_versions)
         actual_new_hits = final_hits - initial_hits
 
@@ -321,8 +312,7 @@ class TestRapidInsertEvictCycles:
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-        parser = PolicyRegistry._get_semver_parser()
-        info = parser.cache_info()
+        info = PolicyRegistry._get_semver_cache_info()
 
         # Verify cache integrity
         assert info.currsize <= cache_size, (
@@ -350,8 +340,7 @@ class TestRapidInsertEvictCycles:
         for i in range(cache_size):
             PolicyRegistry._parse_semver(f"{i}.0.0")
 
-        parser = PolicyRegistry._get_semver_parser()
-        info_at_capacity = parser.cache_info()
+        info_at_capacity = PolicyRegistry._get_semver_cache_info()
         assert info_at_capacity.currsize == cache_size
 
         # Add 500 more unique versions
@@ -359,7 +348,7 @@ class TestRapidInsertEvictCycles:
         for i in range(cache_size, cache_size + num_new_versions):
             PolicyRegistry._parse_semver(f"{i}.0.0")
 
-        info_after = parser.cache_info()
+        info_after = PolicyRegistry._get_semver_cache_info()
 
         # Cache size should remain at max
         assert info_after.currsize == cache_size
@@ -379,7 +368,6 @@ class TestRapidInsertEvictCycles:
         cache_size = 16
         PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
 
-        parser = PolicyRegistry._get_semver_parser()
         version_counter = 0
 
         for burst in range(10):
@@ -389,7 +377,7 @@ class TestRapidInsertEvictCycles:
                 version_counter += 1
 
             # Verify cache integrity after each burst
-            info = parser.cache_info()
+            info = PolicyRegistry._get_semver_cache_info()
             assert info.currsize <= cache_size, (
                 f"Cache exceeded limit after burst {burst}"
             )
@@ -411,8 +399,6 @@ class TestRapidInsertEvictCycles:
         for v in base_versions:
             PolicyRegistry._parse_semver(v)
 
-        parser = PolicyRegistry._get_semver_parser()
-
         # Alternate: insert new, access base, insert new, access base...
         for i in range(200):
             if i % 2 == 0:
@@ -423,7 +409,7 @@ class TestRapidInsertEvictCycles:
                 PolicyRegistry._parse_semver(base_versions[i % len(base_versions)])
 
             # Verify size constraint
-            info = parser.cache_info()
+            info = PolicyRegistry._get_semver_cache_info()
             assert info.currsize <= cache_size
 
 
@@ -453,14 +439,13 @@ class TestConcurrentCacheAccess:
 
         def insert_versions(thread_id: int, num_versions: int) -> None:
             try:
-                parser = PolicyRegistry._get_semver_parser()
                 for i in range(num_versions):
                     version = f"{thread_id}.{i}.0"
                     PolicyRegistry._parse_semver(version)
 
                     # Periodically check size (not on every iteration for performance)
                     if i % 50 == 0:
-                        info = parser.cache_info()
+                        info = PolicyRegistry._get_semver_cache_info()
                         if info.currsize > cache_size:
                             with lock:
                                 size_violations.append(info.currsize)
@@ -484,8 +469,7 @@ class TestConcurrentCacheAccess:
         )
 
         # Final size check
-        parser = PolicyRegistry._get_semver_parser()
-        info = parser.cache_info()
+        info = PolicyRegistry._get_semver_cache_info()
         assert info.currsize <= cache_size
 
     def test_concurrent_reads_and_writes_stability(self) -> None:
@@ -509,11 +493,10 @@ class TestConcurrentCacheAccess:
         def reader_thread(thread_id: int) -> None:
             """Repeatedly access base versions (should be cache hits)."""
             try:
-                parser = PolicyRegistry._get_semver_parser()
                 for _ in range(200):
                     version = base_versions[thread_id % len(base_versions)]
                     PolicyRegistry._parse_semver(version)
-                info = parser.cache_info()
+                info = PolicyRegistry._get_semver_cache_info()
                 with lock:
                     read_results.append((info.hits, info.misses, info.currsize))
             except Exception as e:
@@ -523,12 +506,11 @@ class TestConcurrentCacheAccess:
         def writer_thread(thread_id: int) -> None:
             """Insert new versions (cache misses, triggers eviction)."""
             try:
-                parser = PolicyRegistry._get_semver_parser()
                 for i in range(100):
                     # Use valid semver format: thread_id * 100 + i creates unique major versions
                     version = f"{thread_id * 100 + i}.{thread_id}.{i}"
                     PolicyRegistry._parse_semver(version)
-                info = parser.cache_info()
+                info = PolicyRegistry._get_semver_cache_info()
                 with lock:
                     read_results.append((info.hits, info.misses, info.currsize))
             except Exception as e:
@@ -591,8 +573,7 @@ class TestConcurrentCacheAccess:
         assert all(results), "Some threads failed to complete all operations"
 
         # Verify final cache state
-        parser = PolicyRegistry._get_semver_parser()
-        info = parser.cache_info()
+        info = PolicyRegistry._get_semver_cache_info()
         assert info.currsize == cache_size  # Should be at capacity
         assert info.misses >= 1000 - cache_size  # Most should be misses
 
@@ -668,15 +649,14 @@ class TestCacheHitMissRatios:
         for v in working_set:
             PolicyRegistry._parse_semver(v)
 
-        parser = PolicyRegistry._get_semver_parser()
-        hits_after_warmup = parser.cache_info().hits
+        hits_after_warmup = PolicyRegistry._get_semver_cache_info().hits
 
         # Access working set 1000 times
         for _ in range(1000):
             for v in working_set:
                 PolicyRegistry._parse_semver(v)
 
-        info = parser.cache_info()
+        info = PolicyRegistry._get_semver_cache_info()
         new_hits = info.hits - hits_after_warmup
         expected_hits = 1000 * len(working_set)
 
@@ -707,8 +687,7 @@ class TestCacheHitMissRatios:
         for v in working_set:
             PolicyRegistry._parse_semver(v)
 
-        parser = PolicyRegistry._get_semver_parser()
-        info_after_first_pass = parser.cache_info()
+        info_after_first_pass = PolicyRegistry._get_semver_cache_info()
 
         # All first accesses should be misses
         assert info_after_first_pass.misses == len(working_set), (
@@ -720,7 +699,7 @@ class TestCacheHitMissRatios:
         for v in working_set:
             PolicyRegistry._parse_semver(v)
 
-        info_after_second_pass = parser.cache_info()
+        info_after_second_pass = PolicyRegistry._get_semver_cache_info()
         second_pass_misses = (
             info_after_second_pass.misses - info_after_first_pass.misses
         )
@@ -736,11 +715,11 @@ class TestCacheHitMissRatios:
         # Now test with REVERSE order - should get some hits
         # The cache currently has entries 48-63 (last cache_size entries from second pass)
         # Accessing in reverse order: 63, 62, ... will hit those cached entries
-        info_before_reverse = parser.cache_info()
+        info_before_reverse = PolicyRegistry._get_semver_cache_info()
         for v in reversed(working_set):
             PolicyRegistry._parse_semver(v)
 
-        info_after_reverse = parser.cache_info()
+        info_after_reverse = PolicyRegistry._get_semver_cache_info()
         reverse_hits = info_after_reverse.hits - info_before_reverse.hits
 
         # Should get at least some hits when accessing in reverse
@@ -805,17 +784,16 @@ class TestCacheEdgeCases:
 
         # First entry
         PolicyRegistry._parse_semver("1.0.0")
-        parser = PolicyRegistry._get_semver_parser()
-        assert parser.cache_info().currsize == 1
+        assert PolicyRegistry._get_semver_cache_info().currsize == 1
 
         # Second entry should evict first
         PolicyRegistry._parse_semver("2.0.0")
-        assert parser.cache_info().currsize == 1
+        assert PolicyRegistry._get_semver_cache_info().currsize == 1
 
         # Access first entry - should be a miss (was evicted)
-        info_before = parser.cache_info()
+        info_before = PolicyRegistry._get_semver_cache_info()
         PolicyRegistry._parse_semver("1.0.0")
-        info_after = parser.cache_info()
+        info_after = PolicyRegistry._get_semver_cache_info()
 
         assert info_after.misses > info_before.misses, (
             "1.0.0 should have been evicted from size=1 cache"
@@ -828,17 +806,15 @@ class TestCacheEdgeCases:
         """
         PolicyRegistry.SEMVER_CACHE_SIZE = 1
 
-        parser = PolicyRegistry._get_semver_parser()
-
         for i in range(1000):
             PolicyRegistry._parse_semver(f"{i}.0.0")
-            info = parser.cache_info()
+            info = PolicyRegistry._get_semver_cache_info()
             assert info.currsize == 1, (
                 f"Cache size {info.currsize} != 1 after {i} insertions"
             )
 
         # All should be misses (no hits possible with size=1 and unique versions)
-        final_info = parser.cache_info()
+        final_info = PolicyRegistry._get_semver_cache_info()
         assert final_info.misses == 1000
         assert final_info.hits == 0
 
@@ -855,8 +831,7 @@ class TestCacheEdgeCases:
         for i in range(cache_size):
             PolicyRegistry._parse_semver(f"{i}.0.0")
 
-        parser = PolicyRegistry._get_semver_parser()
-        info = parser.cache_info()
+        info = PolicyRegistry._get_semver_cache_info()
         assert info.currsize == cache_size
         assert info.hits == 0
         assert info.misses == cache_size
@@ -864,7 +839,7 @@ class TestCacheEdgeCases:
         # Add one more - triggers eviction (use valid semver)
         PolicyRegistry._parse_semver("999.0.0")
 
-        info_after = parser.cache_info()
+        info_after = PolicyRegistry._get_semver_cache_info()
         assert info_after.currsize == cache_size  # Still at capacity
         assert info_after.misses == cache_size + 1  # One more miss
 
@@ -879,8 +854,7 @@ class TestCacheEdgeCases:
         # First access - miss
         PolicyRegistry._parse_semver("1.0.0")
 
-        parser = PolicyRegistry._get_semver_parser()
-        info = parser.cache_info()
+        info = PolicyRegistry._get_semver_cache_info()
         assert info.misses == 1
         assert info.hits == 0
 
@@ -888,40 +862,49 @@ class TestCacheEdgeCases:
         for _ in range(1000):
             PolicyRegistry._parse_semver("1.0.0")
 
-        info_after = parser.cache_info()
+        info_after = PolicyRegistry._get_semver_cache_info()
         assert info_after.misses == 1  # Still only the initial miss
         assert info_after.hits == 1000  # All subsequent were hits
 
     def test_version_format_variations(self) -> None:
-        """Different version formats are cached separately.
+        """Version strings are normalized before caching.
 
-        Verifies that versions with different formats (e.g., "1.0.0" vs "1.0")
-        are treated as distinct cache entries.
+        Verifies that versions are cached by their normalized form,
+        meaning equivalent versions share a cache entry. Distinct
+        versions (different major/minor/patch or prerelease) are
+        cached separately.
         """
         PolicyRegistry.SEMVER_CACHE_SIZE = 16
 
-        # Different representations that parse to similar values
-        versions = [
+        # These versions are semantically distinct and will each have their own cache entry
+        distinct_versions = [
             "1.0.0",
-            "1.0",
-            "1",
+            "1.0.1",
+            "1.1.0",
+            "2.0.0",
             "1.0.0-alpha",
             "1.0.0-beta",
-            "01.00.00",  # Leading zeros in string (different string, same parse result)
         ]
 
-        for v in versions:
+        for v in distinct_versions:
             try:
                 PolicyRegistry._parse_semver(v)
             except Exception:
                 pass  # Some formats may be invalid
 
-        parser = PolicyRegistry._get_semver_parser()
-        info = parser.cache_info()
+        info = PolicyRegistry._get_semver_cache_info()
 
-        # Valid versions should each be cached separately
-        # (based on string key, not parsed value)
-        assert info.currsize >= 5  # At least most should be valid
+        # All distinct versions should be cached separately
+        assert info.currsize == len(distinct_versions)
+
+        # Verify that equivalent versions share the same cache entry (normalization)
+        info_before = PolicyRegistry._get_semver_cache_info()
+        PolicyRegistry._parse_semver("1.0.0")  # Already cached
+        info_after = PolicyRegistry._get_semver_cache_info()
+
+        # Should be a cache hit, not a new entry
+        assert info_after.hits > info_before.hits
+        assert info_after.currsize == info_before.currsize
 
     def test_cache_behavior_after_clear(self) -> None:
         """Cache reset properly clears all entries.
@@ -935,8 +918,7 @@ class TestCacheEdgeCases:
         for i in range(16):
             PolicyRegistry._parse_semver(f"{i}.0.0")
 
-        parser = PolicyRegistry._get_semver_parser()
-        assert parser.cache_info().currsize == 16
+        assert PolicyRegistry._get_semver_cache_info().currsize == 16
 
         # Reset cache
         PolicyRegistry._reset_semver_cache()
@@ -947,8 +929,7 @@ class TestCacheEdgeCases:
 
         # First access reinitializes (use valid semver)
         PolicyRegistry._parse_semver("999.0.0")
-        new_parser = PolicyRegistry._get_semver_parser()
-        new_info = new_parser.cache_info()
+        new_info = PolicyRegistry._get_semver_cache_info()
 
         assert new_info.currsize == 1
         assert new_info.misses == 1
@@ -974,16 +955,15 @@ class TestCacheEdgeCases:
         for v in prerelease_versions:
             PolicyRegistry._parse_semver(v)
 
-        parser = PolicyRegistry._get_semver_parser()
-        assert parser.cache_info().currsize == cache_size
+        assert PolicyRegistry._get_semver_cache_info().currsize == cache_size
 
         # Add one more - should evict alpha (oldest)
         PolicyRegistry._parse_semver("1.0.0")
 
         # Check alpha was evicted
-        info_before = parser.cache_info()
+        info_before = PolicyRegistry._get_semver_cache_info()
         PolicyRegistry._parse_semver("1.0.0-alpha")
-        info_after = parser.cache_info()
+        info_after = PolicyRegistry._get_semver_cache_info()
 
         assert info_after.misses > info_before.misses, (
             "Expected 1.0.0-alpha to be evicted"
@@ -1061,10 +1041,8 @@ class TestCachePerformanceUnderStress:
         cache_size = 32
         PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
 
-        parser = PolicyRegistry._get_semver_parser()
-
         # Record initial state
-        initial_info = parser.cache_info()
+        initial_info = PolicyRegistry._get_semver_cache_info()
 
         # Perform many operations
         for i in range(50_000):
@@ -1072,12 +1050,12 @@ class TestCachePerformanceUnderStress:
 
             # Periodically verify cache state
             if i % 10_000 == 0 and i > 0:
-                info = parser.cache_info()
+                info = PolicyRegistry._get_semver_cache_info()
                 assert info.currsize == cache_size, (
                     f"Cache size drifted to {info.currsize} at iteration {i}"
                 )
 
         # Final verification
-        final_info = parser.cache_info()
+        final_info = PolicyRegistry._get_semver_cache_info()
         assert final_info.currsize == cache_size
         assert final_info.misses == 50_000  # All unique versions

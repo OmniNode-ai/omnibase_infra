@@ -82,6 +82,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import threading
+import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -443,7 +444,12 @@ class PolicyRegistry:
     SEMVER_CACHE_SIZE: int = 128
 
     # Cached semver parser function (lazily initialized)
+    # This is the outer wrapper function that normalizes before calling the cached function
     _semver_cache: Callable[[str], ModelSemVer] | None = None
+
+    # Inner LRU-cached function (stores reference for cache_clear() access)
+    # This is the actual @lru_cache decorated function
+    _semver_cache_inner: Callable[[str], ModelSemVer] | None = None
 
     # Lock for thread-safe cache initialization
     _semver_cache_lock: threading.Lock = threading.Lock()
@@ -716,12 +722,41 @@ class PolicyRegistry:
         Wraps parameters in ModelPolicyRegistration and calls register().
         This method preserves the original API for backwards compatibility.
 
+        .. deprecated:: 1.1.0
+            Passing non-normalized version strings (e.g., "1", "1.0", "v1.0.0")
+            is deprecated. Use fully normalized version strings in "x.y.z" format
+            (e.g., "1.0.0") or use ModelPolicyRegistration directly with its
+            built-in normalization.
+
+            Deprecation Timeline:
+                - v1.1.0: Deprecation warning added for non-normalized versions
+                - v1.2.0: Warning will be upgraded to DeprecationWarning (visible by default)
+                - v2.0.0: Non-normalized versions will raise ValueError
+
+            Recommended migration:
+                # Instead of:
+                registry.register_policy(policy_id="my_policy", ..., version="1.0")
+
+                # Use normalized version:
+                registry.register_policy(policy_id="my_policy", ..., version="1.0.0")
+
+                # Or use ModelPolicyRegistration (preferred):
+                registration = ModelPolicyRegistration(
+                    policy_id="my_policy",
+                    policy_class=MyPolicy,
+                    policy_type=EnumPolicyType.ORCHESTRATOR,
+                    version="1.0",  # Auto-normalized to "1.0.0"
+                )
+                registry.register(registration)
+
         Args:
             policy_id: Unique identifier for the policy (e.g., 'exponential_backoff')
             policy_class: The policy class to register. Must implement ProtocolPolicy.
             policy_type: Whether this is orchestrator or reducer policy.
                         Can be EnumPolicyType or string literal.
-            version: Semantic version string (default: "1.0.0")
+            version: Semantic version string (default: "1.0.0"). Should be in
+                    normalized "x.y.z" format. Non-normalized versions are
+                    deprecated and will raise ValueError in v2.0.0.
             allow_async: If True, allows async interface. MUST be explicitly
                                 flagged for policies with async methods.
 
@@ -739,6 +774,32 @@ class PolicyRegistry:
             ...     version="1.0.0",
             ... )
         """
+        # Check if version needs normalization and emit deprecation warning
+        # A normalized version has exactly 3 numeric parts (x.y.z)
+        if version:
+            stripped = version.strip()
+            # Check for 'v' prefix or partial versions (missing parts)
+            needs_normalization = False
+            if stripped.startswith(("v", "V")):
+                needs_normalization = True
+            else:
+                # Split off prerelease suffix if present
+                version_part = stripped.split("-", 1)[0]
+                parts = version_part.split(".")
+                if len(parts) < 3:
+                    needs_normalization = True
+
+            if needs_normalization:
+                normalized = self._normalize_version(version)
+                warnings.warn(
+                    f"Passing non-normalized version string '{version}' is deprecated. "
+                    f"Use normalized format '{normalized}' instead, or use "
+                    f"ModelPolicyRegistration which normalizes automatically. "
+                    f"Non-normalized versions will raise ValueError in v2.0.0.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
         try:
             registration = ModelPolicyRegistration(
                 policy_id=policy_id,
@@ -968,16 +1029,18 @@ class PolicyRegistry:
             >>> # Now cache will be initialized with size 64 on next use
         """
         with cls._semver_cache_lock:
-            old_cache = cls._semver_cache
-            if old_cache is not None:
+            # Clear the inner LRU-cached function (has the actual cache)
+            inner_cache = cls._semver_cache_inner
+            if inner_cache is not None:
                 # Clear internal LRU cache entries before releasing reference.
                 # This ensures prompt memory reclamation rather than waiting
                 # for garbage collection of the orphaned function object.
                 # Note: cache_clear() is added by @lru_cache decorator but not
                 # reflected in Callable type annotation. This is a known mypy
                 # limitation with lru_cache wrappers.
-                old_cache.cache_clear()  # type: ignore[attr-defined]
+                inner_cache.cache_clear()  # type: ignore[attr-defined]
             cls._semver_cache = None
+            cls._semver_cache_inner = None
 
     @classmethod
     def _get_semver_parser(cls) -> Callable[[str], ModelSemVer]:
@@ -992,12 +1055,18 @@ class PolicyRegistry:
             TOCTOU (time-of-check-time-of-use) race conditions where another thread
             could call _reset_semver_cache() between the None check and the return.
 
+        Cache Key Normalization:
+            Version strings are normalized BEFORE being used as cache keys to ensure
+            that equivalent versions (e.g., "1.0" and "1.0.0") share the same cache
+            entry. This prevents cache fragmentation and improves hit rates.
+
         Returns:
             Cached semver parsing function that returns ModelSemVer instances.
 
         Performance:
             - First call: Creates LRU-cached function (one-time cost)
             - Subsequent calls: Returns cached function reference (O(1))
+            - Cache hit rate improved by normalizing keys before lookup
         """
         # Fast path: cache already initialized
         # CRITICAL: Store in local variable to prevent TOCTOU race condition.
@@ -1014,24 +1083,62 @@ class PolicyRegistry:
                 return cls._semver_cache
 
             # Create LRU-cached parser with configured size
+            # The cache key is the NORMALIZED version string to prevent
+            # fragmentation (e.g., "1.0" and "1.0.0" share the same entry)
             @functools.lru_cache(maxsize=cls.SEMVER_CACHE_SIZE)
+            def _parse_semver_cached(normalized_version: str) -> ModelSemVer:
+                """Parse normalized semantic version string into ModelSemVer.
+
+                This function receives ALREADY NORMALIZED version strings.
+                The normalization is done by the wrapper function before
+                caching to ensure equivalent versions share cache entries.
+
+                Args:
+                    normalized_version: Pre-normalized version in "x.y.z" or
+                        "x.y.z-prerelease" format
+
+                Returns:
+                    ModelSemVer instance for comparison
+
+                Raises:
+                    ProtocolConfigurationError: If version format is invalid
+                """
+                from omnibase_core.models.errors import ModelOnexError
+
+                try:
+                    return ModelSemVer.parse(normalized_version)
+                except ModelOnexError as e:
+                    raise ProtocolConfigurationError(
+                        str(e),
+                        version=normalized_version,
+                    ) from e
+                except ValueError as e:
+                    raise ProtocolConfigurationError(
+                        str(e),
+                        version=normalized_version,
+                    ) from e
+
             def _parse_semver_impl(version: str) -> ModelSemVer:
                 """Parse semantic version string into ModelSemVer.
 
                 Implementation moved here to support configurable cache size.
                 See _parse_semver docstring for full documentation.
 
+                IMPORTANT: This wrapper normalizes version strings BEFORE
+                passing to the LRU-cached function. This ensures that equivalent
+                versions (e.g., "1.0" and "1.0.0", "v1.0.0" and "1.0.0") share
+                the same cache entry, improving cache hit rates.
+
                 Uses ModelSemVer.parse() from omnibase_core for actual parsing,
                 with preprocessing to handle:
                 - Whitespace trimming (core requires clean input)
+                - Leading 'v' or 'V' prefix removal
                 - Partial versions: "1" -> "1.0.0", "1.2" -> "1.2.0"
                 - Empty prerelease suffix: "1.0.0-" is invalid
 
                 Wraps ModelOnexError as ProtocolConfigurationError for
                 consistency with existing error handling.
                 """
-                from omnibase_core.models.errors import ModelOnexError
-
                 # Preprocess: trim whitespace
                 cleaned = version.strip()
 
@@ -1041,6 +1148,10 @@ class PolicyRegistry:
                         "Version string cannot be empty or whitespace-only",
                         version=version,
                     )
+
+                # Strip leading 'v' or 'V' prefix for normalization
+                if cleaned.startswith(("v", "V")):
+                    cleaned = cleaned[1:]
 
                 # Handle empty prerelease suffix (e.g., "1.0.0-")
                 if cleaned.endswith("-"):
@@ -1058,31 +1169,26 @@ class PolicyRegistry:
                 version_nums = version_part.split(".")
                 if len(version_nums) == 1:
                     # "1" -> "1.0.0"
-                    cleaned = f"{version_nums[0]}.0.0"
+                    normalized = f"{version_nums[0]}.0.0"
                 elif len(version_nums) == 2:
                     # "1.2" -> "1.2.0"
-                    cleaned = f"{version_nums[0]}.{version_nums[1]}.0"
+                    normalized = f"{version_nums[0]}.{version_nums[1]}.0"
                 else:
-                    cleaned = version_part
+                    normalized = version_part
 
                 # Re-add prerelease if present
                 if prerelease:
-                    cleaned = f"{cleaned}-{prerelease}"
+                    normalized = f"{normalized}-{prerelease}"
 
-                try:
-                    return ModelSemVer.parse(cleaned)
-                except ModelOnexError as e:
-                    raise ProtocolConfigurationError(
-                        str(e),
-                        version=version,
-                    ) from e
-                except ValueError as e:
-                    raise ProtocolConfigurationError(
-                        str(e),
-                        version=version,
-                    ) from e
+                # Now call the cached function with the NORMALIZED version
+                # This ensures "1.0", "1.0.0", "v1.0.0" all use the same cache entry
+                return _parse_semver_cached(normalized)
 
+            # Store both the outer wrapper and inner cached function
+            # The wrapper is what callers use (_semver_cache)
+            # The inner function is needed for cache_clear() access (_semver_cache_inner)
             cls._semver_cache = _parse_semver_impl
+            cls._semver_cache_inner = _parse_semver_cached
             return cls._semver_cache
 
     @classmethod
@@ -1163,6 +1269,36 @@ class PolicyRegistry:
         """
         parser = cls._get_semver_parser()
         return parser(version)
+
+    @classmethod
+    def _get_semver_cache_info(cls) -> functools._CacheInfo | None:
+        """Get cache statistics for the semver parser. For testing only.
+
+        Returns the cache_info() from the inner LRU-cached function.
+        This allows tests to verify cache behavior without accessing
+        internal implementation details.
+
+        Returns:
+            functools._CacheInfo with hits, misses, maxsize, currsize,
+            or None if cache not yet initialized.
+
+        Example:
+            >>> PolicyRegistry._reset_semver_cache()
+            >>> PolicyRegistry._parse_semver("1.0.0")
+            >>> info = PolicyRegistry._get_semver_cache_info()
+            >>> info.misses  # First call is a miss
+            1
+            >>> PolicyRegistry._parse_semver("1.0.0")
+            >>> info = PolicyRegistry._get_semver_cache_info()
+            >>> info.hits  # Second call is a hit
+            1
+        """
+        if cls._semver_cache_inner is None:
+            return None
+        # cache_info() is added by @lru_cache decorator
+        # The return type is functools._CacheInfo
+        result: functools._CacheInfo = cls._semver_cache_inner.cache_info()  # type: ignore[attr-defined]
+        return result
 
     def _list_internal(self) -> list[tuple[str, str, str]]:
         """Internal list method (assumes lock is held).

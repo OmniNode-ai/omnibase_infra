@@ -21,7 +21,7 @@ Note:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelValidationOutcome(BaseModel):
@@ -60,6 +60,12 @@ class ModelValidationOutcome(BaseModel):
         Changed ``error_message`` from ``str | None`` to ``str`` with empty string
         sentinel value. Added ``has_error`` property.
     """
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        strict=True,
+    )
 
     is_valid: bool = Field(
         description="Whether the validation passed.",

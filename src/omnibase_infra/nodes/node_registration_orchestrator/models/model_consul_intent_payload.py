@@ -51,6 +51,7 @@ class ModelConsulIntentPayload(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        strict=True,
     )
 
     service_name: str = Field(

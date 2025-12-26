@@ -134,6 +134,7 @@ class ModelCategoryMatchResult(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        strict=True,
     )
 
     matched: bool = Field(

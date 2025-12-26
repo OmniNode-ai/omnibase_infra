@@ -759,14 +759,43 @@ def _is_simple_optional(pattern: ModelUnionPattern) -> bool:
 # - archive/archived: Historical code not subject to current validation rules
 # - examples: Demo code that may intentionally show anti-patterns
 # - __pycache__: Compiled Python bytecode, not source code
+# - .git: Git repository metadata
+# - .venv/venv: Virtual environment directories
+# - .tox: Tox testing directory
+# - .mypy_cache: mypy type checking cache
+# - .pytest_cache: pytest cache directory
+# - build/dist: Build output directories
+# - .eggs: setuptools eggs directory
+# - node_modules: Node.js dependencies (if any JS in repo)
 #
 # The set is used for O(1) lookup when checking path components.
+#
+# Note: Matching is case-sensitive (Linux standard). On case-insensitive
+# filesystems (macOS, Windows), "Archive" would NOT match "archive".
+# This is intentional for portability and consistency.
 SKIP_DIRECTORY_NAMES: frozenset[str] = frozenset(
     {
+        # Historical/demo code
         "archive",
         "archived",
         "examples",
+        # Bytecode and caches
         "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        # Virtual environments
+        ".venv",
+        "venv",
+        # Build outputs
+        "build",
+        "dist",
+        ".eggs",
+        # Version control
+        ".git",
+        # Testing
+        ".tox",
+        # Node.js (if present)
+        "node_modules",
     }
 )
 
@@ -778,6 +807,9 @@ def _is_skip_directory(component: str) -> bool:
     This predicate is extracted for reuse and testability. It checks if the
     given component matches one of the known skip directory names exactly.
 
+    Uses exact string matching (case-sensitive) via set membership for O(1) lookup.
+    This prevents false positives from substring matching.
+
     Args:
         component: A single path component (directory or file name).
 
@@ -785,13 +817,26 @@ def _is_skip_directory(component: str) -> bool:
         True if the component is a skip directory name, False otherwise.
 
     Examples:
+        Exact matches (skipped):
         >>> _is_skip_directory("archived")
         True
         >>> _is_skip_directory("archive")
         True
-        >>> _is_skip_directory("archived_feature")  # Not a skip dir
+        >>> _is_skip_directory("__pycache__")
+        True
+        >>> _is_skip_directory(".venv")
+        True
+        >>> _is_skip_directory(".git")
+        True
+
+        Partial/similar names (NOT skipped - prevents false positives):
+        >>> _is_skip_directory("archived_feature")
         False
-        >>> _is_skip_directory("my_archive")  # Not a skip dir
+        >>> _is_skip_directory("my_archive")
+        False
+        >>> _is_skip_directory("Archive")  # Case-sensitive
+        False
+        >>> _is_skip_directory(".git_backup")
         False
     """
     return component in SKIP_DIRECTORY_NAMES
@@ -799,7 +844,7 @@ def _is_skip_directory(component: str) -> bool:
 
 def _should_skip_path(path: Path) -> bool:
     """
-    Check if a path should be skipped for union validation.
+    Check if a path should be skipped for validation.
 
     Uses exact path component matching to avoid false positives from substring
     matching. A path is skipped if ANY of its PARENT directory components match
@@ -812,18 +857,28 @@ def _should_skip_path(path: Path) -> bool:
     - /foo/archive_manager.py - NOT skipped (only checks parent dirs, not filename)
     - /foo/examples_utils.py - NOT skipped (only checks parent dirs, not filename)
     - /foo/my_archive/bar.py - NOT skipped ("my_archive" != "archive")
+    - /foo/.git_backup/bar.py - NOT skipped (".git_backup" != ".git")
 
     While correctly skipping:
     - /foo/archived/bar.py - Skipped (has "archived" directory component)
     - /foo/archive/bar.py - Skipped (has "archive" directory component)
     - /foo/examples/bar.py - Skipped (has "examples" directory component)
     - /foo/__pycache__/bar.pyc - Skipped (has "__pycache__" directory component)
+    - /foo/.venv/lib/bar.py - Skipped (has ".venv" directory component)
+    - /foo/.git/hooks/pre-commit - Skipped (has ".git" directory component)
+    - /foo/build/lib/bar.py - Skipped (has "build" directory component)
 
     Args:
         path: The file path to check.
 
     Returns:
         True if the path should be skipped, False otherwise.
+
+    Note:
+        Matching is case-sensitive (Linux standard). On case-insensitive
+        filesystems (macOS, Windows), directories like "Build" or "VENV"
+        would NOT be skipped. This is intentional for cross-platform
+        consistency - use lowercase directory names for skipped directories.
     """
     # Check PARENT directory components only (exclude the filename)
     # This prevents false positives from files named like skip directories
@@ -1100,6 +1155,8 @@ __all__ = [
     # Path utilities
     "_is_skip_directory",
     "_should_skip_path",
+    # Union pattern utilities
+    "_is_simple_optional",
     # Validators
     "validate_infra_architecture",
     "validate_infra_contracts",

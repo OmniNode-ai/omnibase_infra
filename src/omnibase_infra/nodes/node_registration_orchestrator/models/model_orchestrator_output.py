@@ -54,6 +54,7 @@ class ModelOrchestratorOutput(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        strict=True,
     )
 
     correlation_id: UUID = Field(

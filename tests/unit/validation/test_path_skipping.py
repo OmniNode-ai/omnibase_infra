@@ -32,7 +32,29 @@ class TestSkipDirectoryNames:
 
     def test_skip_directory_names_contains_expected_values(self) -> None:
         """Verify all expected directory names are in the set."""
-        expected = {"archive", "archived", "examples", "__pycache__"}
+        expected = {
+            # Historical/demo code
+            "archive",
+            "archived",
+            "examples",
+            # Bytecode and caches
+            "__pycache__",
+            ".mypy_cache",
+            ".pytest_cache",
+            # Virtual environments
+            ".venv",
+            "venv",
+            # Build outputs
+            "build",
+            "dist",
+            ".eggs",
+            # Version control
+            ".git",
+            # Testing
+            ".tox",
+            # Node.js (if present)
+            "node_modules",
+        }
         assert expected == SKIP_DIRECTORY_NAMES
 
     def test_skip_directory_names_is_immutable(self) -> None:
@@ -46,7 +68,22 @@ class TestIsSkipDirectory:
 
     @pytest.mark.parametrize(
         "component",
-        ["archive", "archived", "examples", "__pycache__"],
+        [
+            "archive",
+            "archived",
+            "examples",
+            "__pycache__",
+            ".mypy_cache",
+            ".pytest_cache",
+            ".venv",
+            "venv",
+            "build",
+            "dist",
+            ".eggs",
+            ".git",
+            ".tox",
+            "node_modules",
+        ],
     )
     def test_exact_match_returns_true(self, component: str) -> None:
         """Verify exact matches return True."""

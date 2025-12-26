@@ -31,6 +31,7 @@ class ModelPostgresUpsertIntent(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        strict=True,
     )
 
     kind: Literal["postgres"] = Field(
