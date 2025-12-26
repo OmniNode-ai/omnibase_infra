@@ -32,14 +32,12 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.services import (
-    ModelTimeoutEmissionResult,
-    ModelTimeoutQueryResult,
     TimeoutEmitter,
     TimeoutScanner,
 )

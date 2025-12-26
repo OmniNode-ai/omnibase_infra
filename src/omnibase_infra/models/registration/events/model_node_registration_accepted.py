@@ -44,15 +44,15 @@ class ModelNodeRegistrationAccepted(BaseModel):
         This ensures deterministic testing and consistent ordering across nodes.
 
     Example:
+        >>> from datetime import UTC, datetime, timedelta
         >>> from uuid import uuid4
-        >>> from datetime import datetime, timedelta, timezone
         >>> event = ModelNodeRegistrationAccepted(
         ...     entity_id=uuid4(),
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     causation_id=uuid4(),
-        ...     emitted_at=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
-        ...     ack_deadline=datetime(2025, 1, 15, 12, 0, 30, tzinfo=timezone.utc),
+        ...     emitted_at=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
+        ...     ack_deadline=datetime(2025, 1, 15, 12, 0, 30, tzinfo=UTC),
         ... )
     """
 

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Node introspection event model for capability discovery and reporting."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TypedDict
 from uuid import UUID
 

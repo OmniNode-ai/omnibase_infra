@@ -39,9 +39,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from omnibase_infra.models.projection.model_registration_projection import (
-    ModelRegistrationProjection,
-)
 from omnibase_infra.models.registration.events.model_node_liveness_expired import (
     ModelNodeLivenessExpired,
 )

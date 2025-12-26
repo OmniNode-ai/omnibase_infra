@@ -44,15 +44,15 @@ class ModelNodeRegistrationAckReceived(BaseModel):
         This ensures deterministic testing and consistent ordering across nodes.
 
     Example:
+        >>> from datetime import UTC, datetime, timedelta
         >>> from uuid import uuid4
-        >>> from datetime import datetime, timedelta, timezone
         >>> event = ModelNodeRegistrationAckReceived(
         ...     entity_id=uuid4(),
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     causation_id=uuid4(),
-        ...     emitted_at=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
-        ...     liveness_deadline=datetime(2025, 1, 15, 12, 1, 0, tzinfo=timezone.utc),
+        ...     emitted_at=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
+        ...     liveness_deadline=datetime(2025, 1, 15, 12, 1, 0, tzinfo=UTC),
         ... )
     """
 
