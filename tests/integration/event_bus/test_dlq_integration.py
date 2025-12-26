@@ -28,7 +28,8 @@ import asyncio
 import json
 import os
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable, Coroutine
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -96,12 +97,13 @@ def unique_group() -> str:
 @pytest.fixture
 async def kafka_event_bus_with_dlq(
     kafka_bootstrap_servers: str,
-    unique_dlq_topic: str,
+    created_unique_dlq_topic: str,
 ) -> AsyncGenerator[KafkaEventBus, None]:
     """Create KafkaEventBus with DLQ configured for integration testing.
 
     Yields a started KafkaEventBus instance with DLQ enabled and ensures
-    cleanup after test.
+    cleanup after test. The DLQ topic is pre-created by the
+    created_unique_dlq_topic fixture.
     """
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
     from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
@@ -116,7 +118,7 @@ async def kafka_event_bus_with_dlq(
         retry_backoff_base=0.1,  # Fast backoff for testing
         circuit_breaker_threshold=5,
         circuit_breaker_reset_timeout=10.0,
-        dead_letter_topic=unique_dlq_topic,
+        dead_letter_topic=created_unique_dlq_topic,
     )
 
     bus = KafkaEventBus.from_config(config)
@@ -274,7 +276,7 @@ class TestDlqTopicIntegration:
     async def test_dlq_topic_creation(
         self,
         started_dlq_bus: KafkaEventBus,
-        unique_dlq_topic: str,
+        created_unique_dlq_topic: str,
     ) -> None:
         """Verify DLQ topic can be created and published to.
 
@@ -294,10 +296,11 @@ class TestDlqTopicIntegration:
         headers = ModelEventHeaders(
             source="dlq-integration-test",
             event_type="test.dlq.creation",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         await started_dlq_bus.publish(
-            unique_dlq_topic,
+            created_unique_dlq_topic,
             test_key,
             test_value,
             headers,
@@ -319,8 +322,8 @@ class TestDlqPublishing:
     async def test_dlq_publish_on_handler_failure(
         self,
         started_dlq_bus: KafkaEventBus,
-        unique_topic: str,
-        unique_dlq_topic: str,
+        created_unique_topic: str,
+        created_unique_dlq_topic: str,
         unique_group: str,
     ) -> None:
         """Verify messages are published to DLQ after handler failure with exhausted retries.
@@ -347,7 +350,7 @@ class TestDlqPublishing:
 
         # Subscribe to source topic with failing handler
         unsubscribe_source = await started_dlq_bus.subscribe(
-            unique_topic,
+            created_unique_topic,
             unique_group,
             failing_handler,
         )
@@ -355,7 +358,7 @@ class TestDlqPublishing:
         # Subscribe to DLQ topic to capture messages
         dlq_group = f"dlq-collector-{uuid.uuid4().hex[:8]}"
         unsubscribe_dlq = await started_dlq_bus.subscribe(
-            unique_dlq_topic,
+            created_unique_dlq_topic,
             dlq_group,
             dlq_collector,
         )
@@ -371,10 +374,11 @@ class TestDlqPublishing:
             event_type="test.dlq.failure",
             retry_count=2,  # At max retries (max_retry_attempts=2)
             max_retries=2,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         await started_dlq_bus.publish(
-            unique_topic,
+            created_unique_topic,
             b"dlq-trigger-key",
             json.dumps(test_payload).encode(),
             headers,
@@ -425,8 +429,8 @@ class TestDlqMessageFormat:
     async def test_dlq_message_contains_original_context(
         self,
         started_dlq_bus: KafkaEventBus,
-        unique_topic: str,
-        unique_dlq_topic: str,
+        created_unique_topic: str,
+        created_unique_dlq_topic: str,
         unique_group: str,
     ) -> None:
         """Verify DLQ messages contain complete original message context.
@@ -452,10 +456,10 @@ class TestDlqMessageFormat:
 
         # Subscribe to both topics
         unsub_source = await started_dlq_bus.subscribe(
-            unique_topic, unique_group, failing_handler
+            created_unique_topic, unique_group, failing_handler
         )
         unsub_dlq = await started_dlq_bus.subscribe(
-            unique_dlq_topic, f"dlq-fmt-{uuid.uuid4().hex[:6]}", dlq_collector
+            created_unique_dlq_topic, f"dlq-fmt-{uuid.uuid4().hex[:6]}", dlq_collector
         )
 
         await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
@@ -470,11 +474,12 @@ class TestDlqMessageFormat:
             correlation_id=test_correlation_id,
             retry_count=3,
             max_retries=2,  # Already exceeded
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         original_payload = {"test": "dlq_format", "key": "value123"}
         await started_dlq_bus.publish(
-            unique_topic,
+            created_unique_topic,
             b"format-test-key",
             json.dumps(original_payload).encode(),
             headers,
@@ -494,7 +499,7 @@ class TestDlqMessageFormat:
 
             # Required fields in DLQ payload
             assert "original_topic" in dlq_payload
-            assert dlq_payload["original_topic"] == unique_topic
+            assert dlq_payload["original_topic"] == created_unique_topic
 
             assert "original_message" in dlq_payload
             assert "failure_reason" in dlq_payload
@@ -524,7 +529,7 @@ class TestDlqCallbacks:
     async def test_dlq_callback_invoked_on_publish(
         self,
         started_dlq_bus: KafkaEventBus,
-        unique_topic: str,
+        created_unique_topic: str,
         unique_group: str,
     ) -> None:
         """Verify DLQ callbacks are invoked when messages are published to DLQ."""
@@ -543,7 +548,7 @@ class TestDlqCallbacks:
 
         # Subscribe with failing handler
         unsub = await started_dlq_bus.subscribe(
-            unique_topic, unique_group, failing_handler
+            created_unique_topic, unique_group, failing_handler
         )
 
         await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
@@ -556,10 +561,11 @@ class TestDlqCallbacks:
             event_type="test.callback",
             retry_count=5,
             max_retries=2,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         await started_dlq_bus.publish(
-            unique_topic,
+            created_unique_topic,
             b"callback-key",
             b'{"test": "callback"}',
             headers,
@@ -575,7 +581,7 @@ class TestDlqCallbacks:
             # Verify callback was invoked with correct event
             assert len(callback_events) >= 1
             event = callback_events[0]
-            assert event.original_topic == unique_topic
+            assert event.original_topic == created_unique_topic
             assert event.error_type == "RuntimeError"
             assert "Callback test failure" in event.error_message
 
@@ -642,7 +648,7 @@ class TestDlqMetrics:
     async def test_dlq_metrics_increment_on_successful_publish(
         self,
         started_dlq_bus: KafkaEventBus,
-        unique_topic: str,
+        created_unique_topic: str,
     ) -> None:
         """Verify DLQ metrics are incremented when messages are published successfully.
 
@@ -665,9 +671,10 @@ class TestDlqMetrics:
             correlation_id=correlation_id,
             retry_count=5,  # Exhausted
             max_retries=3,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         failed_message = ModelEventMessage(
-            topic=unique_topic,
+            topic=created_unique_topic,
             key=b"metrics-key",
             value=b'{"test": "metrics_success"}',
             headers=headers,
@@ -676,7 +683,7 @@ class TestDlqMetrics:
 
         # Directly call _publish_to_dlq for deterministic testing
         await started_dlq_bus._publish_to_dlq(
-            original_topic=unique_topic,
+            original_topic=created_unique_topic,
             failed_message=failed_message,
             error=error,
             correlation_id=correlation_id,
@@ -696,8 +703,8 @@ class TestDlqMetrics:
             f"failed_publishes should remain at {initial_failed}, got {final_metrics.failed_publishes}"
         )
         # Verify per-topic and per-error-type metrics
-        assert final_metrics.get_topic_count(unique_topic) >= 1, (
-            f"topic_counts[{unique_topic}] should be at least 1"
+        assert final_metrics.get_topic_count(created_unique_topic) >= 1, (
+            f"topic_counts[{created_unique_topic}] should be at least 1"
         )
         assert final_metrics.get_error_type_count("RuntimeError") >= 1, (
             "error_type_counts['RuntimeError'] should be at least 1"
@@ -710,7 +717,7 @@ class TestDlqMetrics:
     async def test_dlq_metrics_increment_on_full_flow(
         self,
         started_dlq_bus: KafkaEventBus,
-        unique_topic: str,
+        created_unique_topic: str,
         unique_group: str,
     ) -> None:
         """Verify DLQ metrics are incremented in full consumer flow.
@@ -725,7 +732,7 @@ class TestDlqMetrics:
             raise RuntimeError("Metrics test failure")
 
         unsub = await started_dlq_bus.subscribe(
-            unique_topic, unique_group, failing_handler
+            created_unique_topic, unique_group, failing_handler
         )
 
         await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
@@ -738,10 +745,11 @@ class TestDlqMetrics:
             event_type="test.metrics",
             retry_count=10,  # Definitely exhausted
             max_retries=2,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         await started_dlq_bus.publish(
-            unique_topic,
+            created_unique_topic,
             b"metrics-key",
             b'{"test": "metrics"}',
             headers,

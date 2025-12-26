@@ -95,9 +95,12 @@ class TestSustainedLoad:
 
         await bus.close()
 
-        # Calculate throughput variance
+        # Calculate throughput variance (guard against division by zero)
         avg_count = mean(interval_counts)
-        max_variance = max(abs(c - avg_count) / avg_count for c in interval_counts)
+        if avg_count > 0:
+            max_variance = max(abs(c - avg_count) / avg_count for c in interval_counts)
+        else:
+            max_variance = 0.0
 
         print(f"\nSustained Load ({num_intervals} x {interval_duration}s):")
         print(f"  Interval counts: {interval_counts}")
@@ -232,7 +235,6 @@ class TestMemoryStability:
 
         # Add and remove many subscribers
         for iteration in range(100):
-            handlers = []
             unsubscribes = []
 
             # Create 10 subscribers
@@ -242,7 +244,6 @@ class TestMemoryStability:
                     pass
 
                 unsub = await bus.subscribe(topic, f"group-{iteration}-{i}", handler)
-                handlers.append(handler)
                 unsubscribes.append(unsub)
 
             # Unsubscribe all
@@ -346,7 +347,7 @@ class TestMultipleSubscriberLoad:
         # Create subscribers
         for idx in range(num_subscribers):
 
-            async def make_handler(
+            def make_handler(
                 i: int,
             ) -> Callable[[ModelEventMessage], Awaitable[None]]:
                 async def handler(msg: ModelEventMessage) -> None:
@@ -355,7 +356,7 @@ class TestMultipleSubscriberLoad:
 
                 return handler
 
-            h = await make_handler(idx)
+            h = make_handler(idx)
             await bus.subscribe(topic, f"fanout-{idx}", h)
 
         # Publish messages
@@ -416,7 +417,7 @@ class TestMultipleSubscriberLoad:
         for topic in topics:
             for i in range(subscribers_per_topic):
 
-                async def make_handler(
+                def make_handler(
                     t: str,
                 ) -> Callable[[ModelEventMessage], Awaitable[None]]:
                     async def handler(msg: ModelEventMessage) -> None:
@@ -425,7 +426,7 @@ class TestMultipleSubscriberLoad:
 
                     return handler
 
-                h = await make_handler(topic)
+                h = make_handler(topic)
                 await bus.subscribe(topic, f"sub-{i}", h)
 
         # Publish to all topics
@@ -543,7 +544,6 @@ class TestRecoveryResilience:
         await bus.start()
 
         fail_count = 0
-        success_after_open = 0
 
         async def failing_handler(msg: ModelEventMessage) -> None:
             nonlocal fail_count

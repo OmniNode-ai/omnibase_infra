@@ -483,6 +483,7 @@ class TestInvalidSchemaRejection:
                 source="test",
                 event_type="event",
                 priority="urgent",  # Invalid - should be 'critical'
+                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
             )
 
     def test_message_invalid_topic_type_rejected(self) -> None:

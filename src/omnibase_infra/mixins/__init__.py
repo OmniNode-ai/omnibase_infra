@@ -3,7 +3,7 @@
 """ONEX Infrastructure Mixins.
 
 Reusable mixin classes providing:
-- Thread-safe async operations
+- Coroutine-safe async operations (using asyncio.Lock)
 - Infrastructure error integration
 - Correlation ID propagation
 - Configurable behavior

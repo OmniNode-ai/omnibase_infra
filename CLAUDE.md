@@ -302,7 +302,7 @@ if is_open:
 **Related Work**:
 - Protocol definition: OMN-861 (Phase 2 - omnibase_spi)
 - Implementation: `src/omnibase_infra/mixins/mixin_async_circuit_breaker.py`
-- Thread safety docs: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`
+- Concurrency safety docs: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`
 - Example usage: VaultHandler, KafkaEventBus integration
 - Error handling: See "Error Recovery Patterns" section above
 
@@ -508,9 +508,9 @@ The mixin manages introspection cache with TTL-based invalidation:
   - `get_introspection_data()` - Returns cached data if TTL not expired, otherwise refreshes
   - `invalidate_introspection_cache()` - Clears cache to force refresh on next call (synchronous)
 
-**Thread Safety Considerations**:
+**Concurrency Safety Considerations**:
 
-The `MixinNodeIntrospection` is designed for **single-threaded asyncio usage** and does NOT provide internal thread synchronization. Cache operations require understanding the concurrency model for safe usage.
+The `MixinNodeIntrospection` is designed for **single-threaded asyncio usage** and does NOT provide internal thread synchronization. It provides **coroutine safety** (protection against concurrent asyncio coroutines) but NOT **thread safety** (protection against multiple OS threads). Cache operations require understanding the concurrency model for safe usage.
 
 **Instance-Level Cache** (`_introspection_cache`, `_introspection_cached_at`):
 - Cache operations are **synchronous** (no async locking)
@@ -557,7 +557,7 @@ class ThreadSafeNode(MixinNodeIntrospection):
 
 **Related**:
 - Implementation: `src/omnibase_infra/mixins/mixin_node_introspection.py`
-- Thread Safety Pattern: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md` (similar pattern)
+- Concurrency Safety Pattern: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md` (similar pattern)
 - Ticket: OMN-893
 - See `MixinNodeIntrospection.get_capabilities()` for filtering logic details
 
