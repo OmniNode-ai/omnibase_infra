@@ -46,9 +46,14 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_registrati
     IntentPayload,
     ModelRegistrationIntent,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_intent import (
+    IntentRegistry,
+    ModelRegistryIntent,
+)
 
 __all__ = [
     "IntentPayload",
+    "IntentRegistry",
     "ModelConsulIntentPayload",
     "ModelConsulRegistrationIntent",
     "ModelIntentExecutionResult",
@@ -62,4 +67,5 @@ __all__ = [
     "ModelReducerExecutionResult",
     "ModelReducerState",
     "ModelRegistrationIntent",
+    "ModelRegistryIntent",
 ]

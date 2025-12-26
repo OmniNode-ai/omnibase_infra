@@ -9,10 +9,16 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from omnibase_infra.handlers.models.consul.model_payload_consul import (
+    ModelPayloadConsul,
+    RegistryPayloadConsul,
+)
 
 
-class ModelConsulHealthCheckPayload(BaseModel):
+@RegistryPayloadConsul.register("health_check")
+class ModelConsulHealthCheckPayload(ModelPayloadConsul):
     """Payload for consul.health_check result.
 
     Attributes:

@@ -7,18 +7,24 @@ All models are strongly typed to eliminate Any usage.
 
 Exports:
     EnumVaultOperationType: Discriminator enum for Vault operation types
+    ModelPayloadVault: Base model for registry-managed Vault payloads
+    RegistryPayloadVault: Decorator-based registry for payload type discovery
     ModelVaultSecretPayload: Payload for vault.read_secret result
     ModelVaultWritePayload: Payload for vault.write_secret result
     ModelVaultDeletePayload: Payload for vault.delete_secret result
     ModelVaultListPayload: Payload for vault.list_secrets result
     ModelVaultRenewTokenPayload: Payload for vault.renew_token result
     ModelVaultHealthCheckPayload: Payload for vault.health_check result
-    VaultPayload: Discriminated union of all Vault payload types
+    VaultPayload: Discriminated union of all Vault payload types (deprecated)
     ModelVaultHandlerPayload: Wrapper containing discriminated union payload
 """
 
 from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
     EnumVaultOperationType,
+)
+from omnibase_infra.handlers.models.vault.model_payload_vault import (
+    ModelPayloadVault,
+    RegistryPayloadVault,
 )
 from omnibase_infra.handlers.models.vault.model_vault_delete_payload import (
     ModelVaultDeletePayload,
@@ -45,6 +51,8 @@ from omnibase_infra.handlers.models.vault.model_vault_write_payload import (
 
 __all__: list[str] = [
     "EnumVaultOperationType",
+    "ModelPayloadVault",
+    "RegistryPayloadVault",
     "ModelVaultSecretPayload",
     "ModelVaultWritePayload",
     "ModelVaultDeletePayload",

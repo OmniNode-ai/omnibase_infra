@@ -3,21 +3,34 @@
 """HTTP Health Check Payload Model.
 
 This module provides the Pydantic model for HTTP handler health check results.
+Uses the registry pattern for dynamic type resolution.
+
+Related:
+    - RegistryPayloadHttp: Payload type registration and lookup
+    - OMN-1007: Union reduction refactoring
 """
 
 from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.http.enum_http_operation_type import (
     EnumHttpOperationType,
 )
+from omnibase_infra.handlers.models.http.model_payload_http import (
+    ModelPayloadHttp,
+    RegistryPayloadHttp,
+)
 
 
-class ModelHttpHealthCheckPayload(BaseModel):
+@RegistryPayloadHttp.register("health_check")
+class ModelHttpHealthCheckPayload(ModelPayloadHttp):
     """Payload for HTTP handler health check result.
+
+    This model is registered with RegistryPayloadHttp for dynamic type resolution.
+    Use @RegistryPayloadHttp.register("health_check") decorator pattern.
 
     Contains HTTP handler health status and configuration metrics.
 
@@ -44,6 +57,12 @@ class ModelHttpHealthCheckPayload(BaseModel):
         ... )
         >>> print(payload.healthy)
         True
+
+        # Dynamic type lookup:
+        >>> from omnibase_infra.handlers.models.http import RegistryPayloadHttp
+        >>> payload_cls = RegistryPayloadHttp.get_type("health_check")
+        >>> payload_cls.__name__
+        'ModelHttpHealthCheckPayload'
     """
 
     model_config = ConfigDict(

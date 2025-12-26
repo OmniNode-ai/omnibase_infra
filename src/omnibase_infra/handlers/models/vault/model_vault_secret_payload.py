@@ -7,19 +7,22 @@ This module provides the Pydantic model for vault.read_secret operation results.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from omnibase_core.types import JsonValue
+from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
     EnumVaultOperationType,
 )
+from omnibase_infra.handlers.models.vault.model_payload_vault import (
+    ModelPayloadVault,
+    RegistryPayloadVault,
+)
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
 
-
-class ModelVaultSecretPayload(BaseModel):
+@RegistryPayloadVault.register("read_secret")
+class ModelVaultSecretPayload(ModelPayloadVault):
     """Payload for vault.read_secret operation result.
 
     Contains the secret data retrieved from Vault KV v2 secrets engine

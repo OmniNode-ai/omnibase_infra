@@ -16,18 +16,24 @@ Design Pattern:
     immutable tuple rather than a mutable list to maintain full immutability.
 
 Intent Typing:
-    The intents field accepts any model implementing ProtocolRegistrationIntent
-    from protocols.py. This protocol-based approach:
+    The intents field accepts any model inheriting from ModelRegistryIntent.
+    Intent types self-register via the @IntentRegistry.register() decorator,
+    enabling dynamic type resolution during deserialization without explicit unions.
+
+    This registry-based approach:
     - Eliminates duplicate union definitions across modules
-    - Allows future intent types to be added by implementing the protocol
-    - Follows ONEX duck typing principles
+    - Allows future intent types to be added by simply implementing ModelRegistryIntent
+      and registering with @IntentRegistry.register("kind")
+    - Uses the `kind` field as a discriminator for type resolution
+    - Follows ONEX duck typing principles while maintaining type safety
 
     Current implementations:
-    - ModelConsulRegistrationIntent: Consul service registration
-    - ModelPostgresUpsertIntent: PostgreSQL upsert operations
+    - ModelConsulRegistrationIntent (kind="consul"): Consul service registration
+    - ModelPostgresUpsertIntent (kind="postgres"): PostgreSQL upsert operations
 
     For type hints in external code, use ProtocolRegistrationIntent from
-    omnibase_infra.nodes.node_registration_orchestrator.protocols.
+    omnibase_infra.nodes.node_registration_orchestrator.protocols for duck-typed
+    signatures, or ModelRegistryIntent for concrete model requirements.
 
 Thread Safety:
     ModelReducerExecutionResult is immutable (frozen=True) after creation,
@@ -58,28 +64,17 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_registration_intent import (
-    ModelConsulRegistrationIntent,
-)
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_upsert_intent import (
-    ModelPostgresUpsertIntent,
-)
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_state import (
     ModelReducerState,
 )
-
-if TYPE_CHECKING:
-    from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
-        ProtocolRegistrationIntent,
-    )
-
-# Internal union type for Pydantic validation.
-# External code should use ProtocolRegistrationIntent from protocols.py for type hints.
-_IntentUnion = ModelConsulRegistrationIntent | ModelPostgresUpsertIntent
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_intent import (
+    IntentRegistry,
+    ModelRegistryIntent,
+)
 
 
 class ModelReducerExecutionResult(BaseModel):
@@ -157,13 +152,57 @@ class ModelReducerExecutionResult(BaseModel):
         ...,
         description="The updated reducer state after processing the event.",
     )
-    intents: tuple[_IntentUnion, ...] = Field(
+    intents: tuple[ModelRegistryIntent, ...] = Field(
         default=(),
         description=(
             "Tuple of registration intents to be executed by the effect node. "
-            "All intents implement ProtocolRegistrationIntent from protocols.py."
+            "All intents must inherit from ModelRegistryIntent and be registered "
+            "with IntentRegistry."
         ),
     )
+    # Note: When serializing this model, use model_dump(serialize_as_any=True)
+    # to ensure intent fields (like 'payload') that exist only on concrete types
+    # are included. Without this, Pydantic serializes according to the declared
+    # base type (ModelRegistryIntent) which omits subclass-specific fields.
+
+    @field_validator("intents", mode="before")
+    @classmethod
+    def validate_intents(cls, v: Any) -> tuple[ModelRegistryIntent, ...]:
+        """Resolve intent types dynamically from IntentRegistry.
+
+        When deserializing from JSON/dict, uses the 'kind' field to look up
+        the correct concrete intent class from the registry.
+
+        Args:
+            v: Raw input value (tuple, list, or sequence of dicts/models)
+
+        Returns:
+            Tuple of validated ModelRegistryIntent instances
+
+        Raises:
+            ValueError: If intent kind is not registered or dict missing 'kind' field
+        """
+        if v is None:
+            return ()
+
+        result: list[ModelRegistryIntent] = []
+        for item in v:
+            if isinstance(item, dict):
+                kind = item.get("kind")
+                if kind is None:
+                    raise ValueError("Intent dict missing required 'kind' field")
+                try:
+                    intent_cls = IntentRegistry.get_type(kind)
+                except KeyError as e:
+                    raise ValueError(str(e)) from e
+                result.append(intent_cls.model_validate(item))
+            elif isinstance(item, ModelRegistryIntent):
+                result.append(item)
+            else:
+                raise ValueError(
+                    f"Intent must be dict or ModelRegistryIntent, got {type(item).__name__}"
+                )
+        return tuple(result)
 
     @property
     def has_intents(self) -> bool:
@@ -251,14 +290,15 @@ class ModelReducerExecutionResult(BaseModel):
     def with_intents(
         cls,
         state: ModelReducerState,
-        intents: Sequence[ProtocolRegistrationIntent],
+        intents: Sequence[ModelRegistryIntent],
     ) -> ModelReducerExecutionResult:
         """Create a result with state and intents.
 
         Args:
             state: The updated reducer state.
             intents: Sequence of registration intents to execute. Each intent
-                must implement ProtocolRegistrationIntent (e.g., ModelConsulRegistrationIntent,
+                must inherit from ModelRegistryIntent and be registered with
+                IntentRegistry (e.g., ModelConsulRegistrationIntent,
                 ModelPostgresUpsertIntent). Will be converted to an immutable tuple.
 
         Returns:
@@ -275,8 +315,7 @@ class ModelReducerExecutionResult(BaseModel):
 
         .. versionadded:: 0.7.0
         """
-        # Cast to _IntentUnion for Pydantic validation while accepting any ProtocolRegistrationIntent
-        return cls(state=state, intents=tuple(intents))  # type: ignore[arg-type]
+        return cls(state=state, intents=tuple(intents))
 
     def __bool__(self) -> bool:
         """Allow using result in boolean context to check for pending work.
