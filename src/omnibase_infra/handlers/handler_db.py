@@ -78,7 +78,6 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.models import (
     ModelDbDescribeResponse,
-    ModelDbHealthResponse,
     ModelDbQueryPayload,
     ModelDbQueryResponse,
 )
@@ -110,8 +109,7 @@ class DbHandler(MixinEnvelopeExtraction):
            rather than exposing connection details
         3. The ``_sanitize_dsn()`` method is available if DSN info ever needs to be
            logged for debugging, but should only be used in development environments
-        4. Health check responses exclude connection string information
-        5. The ``describe()`` method returns capabilities without credentials
+        4. The ``describe()`` method returns capabilities without credentials
 
         See CLAUDE.md "Error Sanitization Guidelines" for the full security policy
         on what information is safe vs unsafe to include in errors and logs.
@@ -547,29 +545,6 @@ class DbHandler(MixinEnvelopeExtraction):
             correlation_id=correlation_id,
             handler_id=HANDLER_ID_DB,
             result=result,
-        )
-
-    async def health_check(self) -> ModelDbHealthResponse:
-        """Return handler health status."""
-        healthy = False
-        if self._initialized and self._pool is not None:
-            try:
-                async with self._pool.acquire() as conn:
-                    await conn.fetchval("SELECT 1")
-                    healthy = True
-            except Exception as e:
-                logger.warning(
-                    "Health check failed",
-                    extra={"error_type": type(e).__name__, "error": str(e)},
-                )
-                healthy = False
-
-        return ModelDbHealthResponse(
-            healthy=healthy,
-            initialized=self._initialized,
-            handler_type=self.handler_type.value,
-            pool_size=self._pool_size,
-            timeout_seconds=self._timeout,
         )
 
     def describe(self) -> ModelDbDescribeResponse:

@@ -18,7 +18,6 @@ Available Handlers:
 Response Models:
 - ModelDbQueryPayload: Database query result payload
 - ModelDbQueryResponse: Database query response envelope
-- ModelDbHealthResponse: Database health check response
 - ModelDbDescribeResponse: Database handler metadata
 - ModelConsulHandlerPayload: Consul operation result payload
 - ModelConsulHandlerResponse: Consul handler response envelope
@@ -32,7 +31,6 @@ from omnibase_infra.handlers.models import (
     ModelConsulHandlerPayload,
     ModelConsulHandlerResponse,
     ModelDbDescribeResponse,
-    ModelDbHealthResponse,
     ModelDbQueryPayload,
     ModelDbQueryResponse,
 )
@@ -46,6 +44,5 @@ __all__: list[str] = [
     "ModelConsulHandlerResponse",
     "ModelDbQueryPayload",
     "ModelDbQueryResponse",
-    "ModelDbHealthResponse",
     "ModelDbDescribeResponse",
 ]

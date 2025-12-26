@@ -23,7 +23,6 @@ class EnumConsulOperationType(str, Enum):
     KV_PUT = "kv_put"
     REGISTER = "register"
     DEREGISTER = "deregister"
-    HEALTH_CHECK = "health_check"
 
 
 __all__: list[str] = ["EnumConsulOperationType"]

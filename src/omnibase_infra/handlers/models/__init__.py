@@ -11,7 +11,6 @@ Generic Response Model:
 Database Models:
     ModelDbQueryPayload: Payload containing database query results
     ModelDbQueryResponse: Full database query response envelope
-    ModelDbHealthResponse: Database handler health check response
     ModelDbDescribeResponse: Database handler metadata and capabilities
 
 Consul Models:
@@ -25,7 +24,6 @@ Consul Models:
     ModelConsulKVPutPayload: Payload for consul.kv_put result
     ModelConsulRegisterPayload: Payload for consul.register result
     ModelConsulDeregisterPayload: Payload for consul.deregister result
-    ModelConsulHealthCheckPayload: Payload for consul.health_check result
     ConsulPayload: Discriminated union of all Consul payload types
 
 Vault Models:
@@ -37,7 +35,6 @@ Vault Models:
     ModelVaultDeletePayload: Payload for vault.delete_secret result
     ModelVaultListPayload: Payload for vault.list_secrets result
     ModelVaultRenewTokenPayload: Payload for vault.renew_token result
-    ModelVaultHealthCheckPayload: Payload for vault.health_check result
     VaultPayload: Discriminated union of all Vault payload types
 
 HTTP Models:
@@ -46,7 +43,6 @@ HTTP Models:
     EnumHttpOperationType: Discriminator enum for HTTP operation types
     ModelHttpGetPayload: Payload for http.get result
     ModelHttpPostPayload: Payload for http.post result
-    ModelHttpHealthCheckPayload: Payload for HTTP health check result
     HttpPayload: Discriminated union of all HTTP payload types
 """
 
@@ -55,7 +51,6 @@ from omnibase_infra.handlers.models.consul import (
     EnumConsulOperationType,
     ModelConsulDeregisterPayload,
     ModelConsulHandlerPayload,
-    ModelConsulHealthCheckPayload,
     ModelConsulKVGetFoundPayload,
     ModelConsulKVGetNotFoundPayload,
     ModelConsulKVGetRecursePayload,
@@ -68,7 +63,6 @@ from omnibase_infra.handlers.models.http import (
     HttpPayload,
     ModelHttpGetPayload,
     ModelHttpHandlerPayload,
-    ModelHttpHealthCheckPayload,
     ModelHttpPostPayload,
 )
 from omnibase_infra.handlers.models.model_consul_handler_response import (
@@ -76,9 +70,6 @@ from omnibase_infra.handlers.models.model_consul_handler_response import (
 )
 from omnibase_infra.handlers.models.model_db_describe_response import (
     ModelDbDescribeResponse,
-)
-from omnibase_infra.handlers.models.model_db_health_response import (
-    ModelDbHealthResponse,
 )
 from omnibase_infra.handlers.models.model_db_query_payload import ModelDbQueryPayload
 from omnibase_infra.handlers.models.model_db_query_response import ModelDbQueryResponse
@@ -95,7 +86,6 @@ from omnibase_infra.handlers.models.vault import (
     EnumVaultOperationType,
     ModelVaultDeletePayload,
     ModelVaultHandlerPayload,
-    ModelVaultHealthCheckPayload,
     ModelVaultListPayload,
     ModelVaultRenewTokenPayload,
     ModelVaultSecretPayload,
@@ -115,7 +105,6 @@ __all__: list[str] = [
     "ModelConsulKVPutPayload",
     "ModelConsulRegisterPayload",
     "ModelConsulDeregisterPayload",
-    "ModelConsulHealthCheckPayload",
     "ConsulPayload",
     # Consul wrapper models
     "ModelConsulHandlerPayload",
@@ -123,7 +112,6 @@ __all__: list[str] = [
     # Database models
     "ModelDbQueryPayload",
     "ModelDbQueryResponse",
-    "ModelDbHealthResponse",
     "ModelDbDescribeResponse",
     # Vault payload types (discriminated union)
     "EnumVaultOperationType",
@@ -132,7 +120,6 @@ __all__: list[str] = [
     "ModelVaultDeletePayload",
     "ModelVaultListPayload",
     "ModelVaultRenewTokenPayload",
-    "ModelVaultHealthCheckPayload",
     "VaultPayload",
     # Vault wrapper models
     "ModelVaultHandlerPayload",
@@ -141,7 +128,6 @@ __all__: list[str] = [
     "EnumHttpOperationType",
     "ModelHttpGetPayload",
     "ModelHttpPostPayload",
-    "ModelHttpHealthCheckPayload",
     "HttpPayload",
     # HTTP wrapper models
     "ModelHttpHandlerPayload",

@@ -20,12 +20,10 @@ class EnumHttpOperationType(str, Enum):
     Attributes:
         GET: GET request operation (ModelHttpGetPayload)
         POST: POST request operation (ModelHttpPostPayload)
-        HEALTH_CHECK: Health check operation (ModelHttpHealthCheckPayload)
     """
 
     GET = "get"
     POST = "post"
-    HEALTH_CHECK = "health_check"
 
 
 __all__: list[str] = ["EnumHttpOperationType"]

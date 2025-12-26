@@ -4,7 +4,7 @@
 """Unit tests for DbHandler.
 
 Comprehensive test suite covering initialization, query/execute operations,
-error handling, health checks, describe, and lifecycle management.
+error handling, describe, and lifecycle management.
 """
 
 from __future__ import annotations
@@ -23,9 +23,6 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_db import DbHandler
-from omnibase_infra.handlers.models import (
-    ModelDbHealthResponse,
-)
 from tests.helpers import filter_handler_warnings
 
 
@@ -821,109 +818,6 @@ class TestDbHandlerErrorHandling:
             await handler.shutdown()
 
 
-class TestDbHandlerHealthCheck:
-    """Test suite for health check operations."""
-
-    @pytest.fixture
-    def handler(self) -> DbHandler:
-        """Create DbHandler fixture."""
-        return DbHandler()
-
-    @pytest.fixture
-    def mock_pool(self) -> MagicMock:
-        """Create mock asyncpg pool fixture."""
-        return MagicMock(spec=asyncpg.Pool)
-
-    @pytest.mark.asyncio
-    async def test_health_check_structure(
-        self, handler: DbHandler, mock_pool: MagicMock
-    ) -> None:
-        """Test health_check returns correct structure."""
-        mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=1)
-
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = mock_pool
-
-            await handler.initialize({"dsn": "postgresql://localhost/db"})
-
-            health = await handler.health_check()
-
-            # Verify health response has all required fields
-            assert isinstance(health, ModelDbHealthResponse)
-            assert hasattr(health, "healthy")
-            assert hasattr(health, "initialized")
-            assert hasattr(health, "handler_type")
-            assert hasattr(health, "pool_size")
-            assert hasattr(health, "timeout_seconds")
-
-            await handler.shutdown()
-
-    @pytest.mark.asyncio
-    async def test_health_check_healthy_when_initialized(
-        self, handler: DbHandler, mock_pool: MagicMock
-    ) -> None:
-        """Test health_check shows healthy=True when initialized and DB responds."""
-        mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=1)
-
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = mock_pool
-
-            await handler.initialize({"dsn": "postgresql://localhost/db"})
-
-            health = await handler.health_check()
-
-            assert health.healthy is True
-            assert health.initialized is True
-            assert health.handler_type == "database"
-            assert health.pool_size == 5
-            assert health.timeout_seconds == 30.0
-
-            mock_conn.fetchval.assert_called_once_with("SELECT 1")
-
-            await handler.shutdown()
-
-    @pytest.mark.asyncio
-    async def test_health_check_unhealthy_when_not_initialized(
-        self, handler: DbHandler
-    ) -> None:
-        """Test health_check shows healthy=False when not initialized."""
-        health = await handler.health_check()
-
-        assert health.healthy is False
-        assert health.initialized is False
-
-    @pytest.mark.asyncio
-    async def test_health_check_unhealthy_when_db_unreachable(
-        self, handler: DbHandler, mock_pool: MagicMock
-    ) -> None:
-        """Test health_check shows healthy=False when DB check fails."""
-        mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(side_effect=Exception("Connection failed"))
-
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = mock_pool
-
-            await handler.initialize({"dsn": "postgresql://localhost/db"})
-
-            health = await handler.health_check()
-
-            assert health.healthy is False
-            assert health.initialized is True
-
-            await handler.shutdown()
-
-
 class TestDbHandlerDescribe:
     """Test suite for describe operations."""
 
@@ -1210,7 +1104,6 @@ class TestDbHandlerDsnSecurity:
     Security Policy: DSN contains credentials and must NEVER be exposed in:
     - Error messages
     - Log output
-    - Health check responses
     - describe() metadata
 
     See DbHandler class docstring "Security Policy - DSN Handling" for full policy.
@@ -1286,33 +1179,6 @@ class TestDbHandlerDsnSecurity:
             assert dsn not in error_str
             # Generic message should be present
             assert "check credentials" in error_str.lower()
-
-    @pytest.mark.asyncio
-    async def test_health_check_does_not_expose_dsn(self, handler: DbHandler) -> None:
-        """Test that health check response does NOT include DSN."""
-        mock_pool = MagicMock(spec=asyncpg.Pool)
-        mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=1)
-
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = mock_pool
-
-            secret_password = "health_check_secret_password"
-            dsn = f"postgresql://user:{secret_password}@localhost/db"
-            await handler.initialize({"dsn": dsn})
-
-            health = await handler.health_check()
-
-            # DSN or password must NOT be in health response
-            health_str = str(health)
-            assert secret_password not in health_str
-            assert dsn not in health_str
-            assert "dsn" not in health_str.lower()
-
-            await handler.shutdown()
 
     def test_describe_does_not_expose_dsn(self, handler: DbHandler) -> None:
         """Test that describe() does NOT include DSN."""
@@ -1427,89 +1293,12 @@ class TestDbHandlerLogWarnings:
             f"Unexpected warnings: {[w.message for w in handler_warnings]}"
         )
 
-    @pytest.mark.asyncio
-    async def test_health_check_logs_warning_on_failure(
-        self, handler: DbHandler, mock_pool: MagicMock, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Test that health check failure produces expected warning.
-
-        When the health check query fails (e.g., connection lost), the handler
-        should log a warning indicating the health check failed.
-        """
-        import logging
-
-        # Setup mock connection that fails on health check
-        mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(side_effect=Exception("Connection lost"))
-
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = mock_pool
-
-            await handler.initialize({"dsn": "postgresql://localhost/db"})
-
-            with caplog.at_level(logging.WARNING):
-                # Perform health check that will fail
-                health = await handler.health_check()
-
-                # Health check should return unhealthy
-                assert health.healthy is False
-                assert health.initialized is True
-
-            await handler.shutdown()
-
-        # Should have exactly one warning about health check failure
-        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
-        assert len(handler_warnings) == 1
-        assert "Health check failed" in handler_warnings[0].message
-
-    @pytest.mark.asyncio
-    async def test_no_warnings_on_successful_health_check(
-        self, handler: DbHandler, mock_pool: MagicMock, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Test that successful health check produces no warnings.
-
-        A successful health check should not log any warnings.
-        """
-        import logging
-
-        # Setup mock connection that succeeds on health check
-        mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=1)
-
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = mock_pool
-
-            await handler.initialize({"dsn": "postgresql://localhost/db"})
-
-            with caplog.at_level(logging.WARNING):
-                # Perform health check that will succeed
-                health = await handler.health_check()
-
-                # Health check should return healthy
-                assert health.healthy is True
-                assert health.initialized is True
-
-            await handler.shutdown()
-
-        # Should have no warnings
-        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
-        assert len(handler_warnings) == 0, (
-            f"Unexpected warnings: {[w.message for w in handler_warnings]}"
-        )
-
 
 __all__: list[str] = [
     "TestDbHandlerInitialization",
     "TestDbHandlerQueryOperations",
     "TestDbHandlerExecuteOperations",
     "TestDbHandlerErrorHandling",
-    "TestDbHandlerHealthCheck",
     "TestDbHandlerDescribe",
     "TestDbHandlerLifecycle",
     "TestDbHandlerCorrelationId",

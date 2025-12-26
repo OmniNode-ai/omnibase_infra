@@ -23,7 +23,6 @@ class EnumVaultOperationType(str, Enum):
         DELETE_SECRET: Delete secret operation (ModelVaultDeletePayload)
         LIST_SECRETS: List secrets operation (ModelVaultListPayload)
         RENEW_TOKEN: Renew token operation (ModelVaultRenewTokenPayload)
-        HEALTH_CHECK: Health check operation (ModelVaultHealthCheckPayload)
     """
 
     READ_SECRET = "read_secret"
@@ -31,7 +30,6 @@ class EnumVaultOperationType(str, Enum):
     DELETE_SECRET = "delete_secret"
     LIST_SECRETS = "list_secrets"
     RENEW_TOKEN = "renew_token"
-    HEALTH_CHECK = "health_check"
 
 
 __all__: list[str] = ["EnumVaultOperationType"]

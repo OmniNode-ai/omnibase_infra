@@ -829,94 +829,6 @@ class TestVaultHandlerErrorHandling:
             assert mock_hvac_client.secrets.kv.v2.read_secret_version.call_count == 3
 
 
-class TestVaultHandlerHealthCheck:
-    """Test VaultHandler health check functionality."""
-
-    @pytest.mark.asyncio
-    async def test_health_check_healthy(
-        self,
-        vault_config: dict[str, VaultConfigValue],
-        mock_hvac_client: MagicMock,
-    ) -> None:
-        """Test health check returns healthy status."""
-        handler = VaultHandler()
-
-        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
-            MockClient.return_value = mock_hvac_client
-
-            mock_hvac_client.sys.read_health_status.return_value = {
-                "initialized": True,
-                "sealed": False,
-            }
-
-            await handler.initialize(vault_config)
-
-            health = await handler.health_check()
-
-            assert health["healthy"] is True
-            assert health["initialized"] is True
-            assert health["handler_type"] == "vault"
-
-    @pytest.mark.asyncio
-    async def test_health_check_unhealthy(
-        self,
-        vault_config: dict[str, VaultConfigValue],
-        mock_hvac_client: MagicMock,
-    ) -> None:
-        """Test health check propagates errors instead of returning unhealthy."""
-        from omnibase_infra.errors import InfraConnectionError
-
-        handler = VaultHandler()
-
-        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
-            MockClient.return_value = mock_hvac_client
-
-            mock_hvac_client.sys.read_health_status.side_effect = Exception(
-                "Connection refused"
-            )
-
-            await handler.initialize(vault_config)
-
-            # Health check now propagates errors instead of returning healthy=False
-            with pytest.raises(InfraConnectionError):
-                await handler.health_check()
-
-    @pytest.mark.asyncio
-    async def test_health_check_operation_envelope(
-        self,
-        vault_config: dict[str, VaultConfigValue],
-        mock_hvac_client: MagicMock,
-    ) -> None:
-        """Test health check via envelope operation."""
-        handler = VaultHandler()
-
-        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
-            MockClient.return_value = mock_hvac_client
-
-            mock_hvac_client.sys.read_health_status.return_value = {
-                "initialized": True,
-                "sealed": False,
-            }
-
-            await handler.initialize(vault_config)
-
-            correlation_id = uuid4()
-            envelope = {
-                "operation": "vault.health_check",
-                "payload": {},
-                "correlation_id": correlation_id,
-            }
-
-            output = await handler.execute(envelope)
-            result = output.result
-
-            assert result["status"] == "success"
-            assert result["correlation_id"] == str(correlation_id)
-            payload = result["payload"]
-            assert isinstance(payload, dict)
-            assert payload["healthy"] is True
-
-
 class TestVaultHandlerDescribe:
     """Test VaultHandler describe functionality."""
 
@@ -943,7 +855,6 @@ class TestVaultHandlerDescribe:
             assert "vault.delete_secret" in supported_ops
             assert "vault.list_secrets" in supported_ops
             assert "vault.renew_token" in supported_ops
-            assert "vault.health_check" in supported_ops
             assert description["initialized"] is True
 
 
@@ -1931,30 +1842,6 @@ class TestVaultHandlerErrorCodeValidation:
             assert error.model.context is not None
             assert isinstance(error.model.context, dict)
             assert error.model.context.get("namespace") == "engineering"  # From fixture
-
-    @pytest.mark.asyncio
-    async def test_health_check_propagates_errors(
-        self,
-        vault_config: dict[str, VaultConfigValue],
-        mock_hvac_client: MagicMock,
-    ) -> None:
-        """Test health_check propagates errors instead of swallowing them per PR #38."""
-        from omnibase_infra.errors import InfraConnectionError
-
-        handler = VaultHandler()
-
-        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
-            MockClient.return_value = mock_hvac_client
-            await handler.initialize(vault_config)
-
-            # Simulate health check failure
-            mock_hvac_client.sys.read_health_status.side_effect = Exception(
-                "Health check failed"
-            )
-
-            # Health check should propagate error, not return healthy=False
-            with pytest.raises(InfraConnectionError):
-                await handler.health_check()
 
     @pytest.mark.asyncio
     async def test_all_error_codes_are_mapped_correctly(

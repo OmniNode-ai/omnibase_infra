@@ -706,87 +706,6 @@ class TestConsulHandlerServiceOperations:
             assert "service_id" in str(exc_info.value).lower()
 
 
-class TestConsulHandlerHealthOperations:
-    """Test ConsulHandler health check operations."""
-
-    @pytest.mark.asyncio
-    async def test_health_check_operation_success(
-        self,
-        consul_config: dict[str, object],
-        mock_consul_client: MagicMock,
-    ) -> None:
-        """Test health check via execute operation."""
-        handler = ConsulHandler()
-
-        with patch(
-            "omnibase_infra.handlers.handler_consul.consul.Consul"
-        ) as MockClient:
-            MockClient.return_value = mock_consul_client
-
-            await handler.initialize(consul_config)
-
-            envelope = {
-                "operation": "consul.health_check",
-                "payload": {},
-                "correlation_id": uuid4(),
-            }
-
-            output = await handler.execute(envelope)
-            result = output.result
-
-            assert result.status == "success"
-            # Access payload data through the discriminated union
-            payload_data = result.payload.data
-            assert payload_data.healthy is True
-
-    @pytest.mark.asyncio
-    async def test_handler_health_check_success(
-        self,
-        consul_config: dict[str, object],
-        mock_consul_client: MagicMock,
-    ) -> None:
-        """Test handler health check returns healthy status."""
-        handler = ConsulHandler()
-
-        with patch(
-            "omnibase_infra.handlers.handler_consul.consul.Consul"
-        ) as MockClient:
-            MockClient.return_value = mock_consul_client
-
-            await handler.initialize(consul_config)
-
-            health = await handler.health_check()
-
-            assert health["healthy"] is True
-            assert health["initialized"] is True
-            assert health["handler_type"] == "consul"
-
-    @pytest.mark.asyncio
-    async def test_handler_health_check_unhealthy(
-        self,
-        consul_config: dict[str, object],
-        mock_consul_client: MagicMock,
-    ) -> None:
-        """Test health check propagates errors."""
-        handler = ConsulHandler()
-
-        with patch(
-            "omnibase_infra.handlers.handler_consul.consul.Consul"
-        ) as MockClient:
-            MockClient.return_value = mock_consul_client
-
-            await handler.initialize(consul_config)
-
-            # Now set error for subsequent health check calls
-            mock_consul_client.status.leader.side_effect = consul.ConsulException(
-                "Connection refused"
-            )
-
-            # Health check should raise error per PR #38 pattern
-            with pytest.raises(InfraConnectionError):
-                await handler.health_check()
-
-
 class TestConsulHandlerExecuteRouting:
     """Test ConsulHandler execute operation routing."""
 
@@ -1022,7 +941,6 @@ class TestConsulHandlerDescribe:
             assert "consul.kv_put" in supported_ops
             assert "consul.register" in supported_ops
             assert "consul.deregister" in supported_ops
-            assert "consul.health_check" in supported_ops
             assert description["initialized"] is True
             assert description["version"] == "0.1.0-mvp"
 
@@ -1431,7 +1349,6 @@ __all__: list[str] = [
     "TestConsulHandlerType",
     "TestConsulHandlerKVOperations",
     "TestConsulHandlerServiceOperations",
-    "TestConsulHandlerHealthOperations",
     "TestConsulHandlerExecuteRouting",
     "TestConsulHandlerCorrelationId",
     "TestConsulHandlerDescribe",
