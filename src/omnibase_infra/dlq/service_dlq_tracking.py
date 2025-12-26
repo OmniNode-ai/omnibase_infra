@@ -105,7 +105,7 @@ class DLQReplayTracker:
         ...     dsn="postgresql://user:pass@localhost:5432/mydb",
         ...     storage_table="dlq_replay_history",
         ... )
-        >>> service = DLQTrackingService(config)
+        >>> service = DLQReplayTracker(config)
         >>> await service.initialize()
         >>> try:
         ...     record = ModelDlqReplayRecord(
@@ -151,6 +151,18 @@ class DLQReplayTracker:
     def is_initialized(self) -> bool:
         """Return True if the service has been initialized."""
         return self._initialized
+
+    @property
+    def is_tracking_enabled(self) -> bool:
+        """Return True if the service is initialized and ready to track replays.
+
+        This is an alias for is_initialized that provides clearer semantics
+        when the service is used specifically for replay tracking.
+
+        Returns:
+            True if tracking is available, False otherwise.
+        """
+        return self._initialized and self._pool is not None
 
     def _validate_storage_table(self, storage_table: str) -> None:
         """Validate storage table name for SQL injection prevention (defense-in-depth).
@@ -216,7 +228,7 @@ class DLQReplayTracker:
 
             self._initialized = True
             logger.info(
-                "DLQTrackingService initialized",
+                "DLQReplayTracker initialized",
                 extra={
                     "table_name": self._config.storage_table,
                     "pool_min_size": self._config.pool_min_size,
@@ -297,9 +309,12 @@ class DLQReplayTracker:
         """
 
         async with self._pool.acquire() as conn:
-            await conn.execute(create_table_sql)
-            await conn.execute(create_message_id_index_sql)
-            await conn.execute(create_timestamp_index_sql)
+            # Wrap DDL in transaction for atomicity - if index creation fails,
+            # the table creation will be rolled back to avoid partial schema state
+            async with conn.transaction():
+                await conn.execute(create_table_sql)
+                await conn.execute(create_message_id_index_sql)
+                await conn.execute(create_timestamp_index_sql)
 
     async def shutdown(self) -> None:
         """Close the connection pool and release resources."""
@@ -307,7 +322,7 @@ class DLQReplayTracker:
             await self._pool.close()
             self._pool = None
         self._initialized = False
-        logger.info("DLQTrackingService shutdown complete")
+        logger.info("DLQReplayTracker shutdown complete")
 
     async def record_replay_attempt(self, record: ModelDlqReplayRecord) -> None:
         """Record a DLQ replay attempt.
@@ -501,7 +516,7 @@ class DLQReplayTracker:
                 return table_exists is not None
 
         except Exception:
-            logger.exception("Health check failed")
+            logger.debug("Health check failed", exc_info=True)
             return False
 
 

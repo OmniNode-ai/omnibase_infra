@@ -109,14 +109,14 @@ def dlq_tracking_config() -> ModelDlqTrackingConfig:
 
     Example:
         >>> config = dlq_tracking_config()
-        >>> config.table_name  # 'dlq_replay_history_test_a1b2c3d4'
+        >>> config.storage_table  # 'dlq_replay_history_test_a1b2c3d4'
     """
     if not POSTGRES_PASSWORD:
         pytest.skip("POSTGRES_PASSWORD not set")
 
     return ModelDlqTrackingConfig(
         dsn=_build_postgres_dsn(),
-        table_name=f"dlq_replay_history_test_{uuid4().hex[:8]}",
+        storage_table=f"dlq_replay_history_test_{uuid4().hex[:8]}",
         pool_min_size=1,
         pool_max_size=3,
         command_timeout=30.0,
@@ -163,7 +163,7 @@ async def dlq_tracking_service(
         if service._pool is not None:
             async with service._pool.acquire() as conn:
                 await conn.execute(
-                    f"DROP TABLE IF EXISTS {dlq_tracking_config.table_name}"
+                    f"DROP TABLE IF EXISTS {dlq_tracking_config.storage_table}"
                 )
     except Exception:
         pass  # Ignore cleanup errors - table may not exist or pool closed

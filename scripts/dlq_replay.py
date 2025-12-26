@@ -44,14 +44,14 @@ from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import KafkaConnectionError, KafkaError
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from omnibase_infra.dlq import (
     DLQTrackingService,
+    EnumReplayStatus,
     ModelDlqReplayRecord,
     ModelDlqTrackingConfig,
 )
-from omnibase_infra.dlq import EnumReplayStatus as TrackingReplayStatus
 from omnibase_infra.enums import EnumNonRetryableErrorCategory
 
 if TYPE_CHECKING:
@@ -149,15 +149,6 @@ def safe_truncate(text: str, max_chars: int, suffix: str = "...") -> str:
 # =============================================================================
 # Enums and Models
 # =============================================================================
-
-
-class EnumReplayStatus(str, Enum):
-    """Status of a replay operation."""
-
-    PENDING = "pending"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
 
 
 class EnumFilterType(str, Enum):
@@ -308,6 +299,20 @@ class ModelReplayConfig(BaseModel):
                 f"rate_limit_per_second must be > 0, got {v}. "
                 "A zero or negative rate limit would cause division by zero."
             )
+        return v
+
+    @field_validator("filter_end_time", mode="after")
+    @classmethod
+    def validate_time_range(
+        cls, v: datetime | None, info: ValidationInfo
+    ) -> datetime | None:
+        """Validate that filter_end_time is after filter_start_time."""
+        if v is not None and info.data:
+            start_time = info.data.get("filter_start_time")
+            if start_time is not None and v < start_time:
+                raise ValueError(
+                    f"filter_end_time ({v}) must be after filter_start_time ({start_time})"
+                )
         return v
 
     @classmethod
@@ -812,8 +817,14 @@ def should_replay(
             if config.filter_end_time and failure_dt > config.filter_end_time:
                 return (False, f"After end time: {config.filter_end_time}")
         except ValueError:
-            # If timestamp can't be parsed, don't filter by time
-            pass
+            # If timestamp can't be parsed, log a warning and don't filter by time
+            logger.warning(
+                "Failed to parse failure_timestamp, skipping time filter",
+                extra={
+                    "correlation_id": str(message.correlation_id),
+                    "failure_timestamp": message.failure_timestamp,
+                },
+            )
 
     # Apply filters
     if config.filter_type == EnumFilterType.BY_TOPIC:
@@ -896,15 +907,13 @@ class DLQReplayExecutor:
             return
 
         try:
-            # Map local EnumReplayStatus to tracking EnumReplayStatus
-            tracking_status = TrackingReplayStatus(status.value)
             record = ModelDlqReplayRecord(
                 id=uuid4(),
                 original_message_id=message.correlation_id,
                 replay_correlation_id=replay_correlation_id,
                 original_topic=message.original_topic,
                 target_topic=message.original_topic,  # Same as original for replay
-                replay_status=tracking_status,
+                replay_status=status,
                 replay_timestamp=datetime.now(UTC),
                 success=status == EnumReplayStatus.COMPLETED,
                 error_message=error_message,
