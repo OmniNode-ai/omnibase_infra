@@ -628,6 +628,13 @@ class PolicyRegistry:
         if normalized.startswith(("v", "V")):
             normalized = normalized[1:]
 
+        # Check for empty prerelease suffix (e.g., "1.0.0-")
+        if normalized.endswith("-"):
+            raise ProtocolConfigurationError(
+                "Prerelease suffix cannot be empty after hyphen",
+                version=version,
+            )
+
         # Split on first hyphen to handle prerelease suffix
         parts = normalized.split("-", 1)
         version_part = parts[0]
