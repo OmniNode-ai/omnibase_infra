@@ -93,6 +93,7 @@ from pydantic import ValidationError
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
 from omnibase_infra.runtime.models import ModelPolicyKey, ModelPolicyRegistration
+from omnibase_infra.runtime.util_version import normalize_version
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -590,10 +591,13 @@ class PolicyRegistry:
 
     @staticmethod
     def _normalize_version(version: str) -> str:
-        """Normalize version string for consistent lookups using ModelSemVer.
+        """Normalize version string for consistent lookups.
 
-        Converts version strings to canonical x.y.z format using ModelSemVer.parse().
-        This is the local normalization method for PolicyRegistry.
+        Delegates to the shared normalize_version utility which is the
+        SINGLE SOURCE OF TRUTH for version normalization in omnibase_infra.
+
+        This method wraps the shared utility to convert ValueError to
+        ProtocolConfigurationError for PolicyRegistry's error contract.
 
         Normalization rules:
             1. Strip leading/trailing whitespace
@@ -617,53 +621,13 @@ class PolicyRegistry:
             >>> PolicyRegistry._normalize_version("v2.1")
             '2.1.0'
         """
-        if not version or not version.strip():
-            raise ProtocolConfigurationError(
-                "Version cannot be empty",
-                version=version,
-            )
-
-        # Strip whitespace
-        normalized = version.strip()
-
-        # Strip leading 'v' or 'V' prefix
-        if normalized.startswith(("v", "V")):
-            normalized = normalized[1:]
-
-        # Check for empty prerelease suffix (e.g., "1.0.0-")
-        if normalized.endswith("-"):
-            raise ProtocolConfigurationError(
-                "Prerelease suffix cannot be empty after hyphen",
-                version=version,
-            )
-
-        # Split on first hyphen to handle prerelease suffix
-        parts = normalized.split("-", 1)
-        version_part = parts[0]
-        prerelease = parts[1] if len(parts) > 1 else None
-
-        # Expand to three-part version (x.y.z) for ModelSemVer parsing
-        version_nums = version_part.split(".")
-        while len(version_nums) < 3:
-            version_nums.append("0")
-        expanded_version = ".".join(version_nums)
-
-        # Parse with ModelSemVer for validation
         try:
-            semver = ModelSemVer.parse(expanded_version)
-        except Exception as e:
+            return normalize_version(version)
+        except ValueError as e:
             raise ProtocolConfigurationError(
-                f"Invalid version format: {e}",
+                str(e),
                 version=version,
             ) from e
-
-        result: str = semver.to_string()
-
-        # Re-add prerelease if present
-        if prerelease:
-            result = f"{result}-{prerelease}"
-
-        return result
 
     def register(
         self,

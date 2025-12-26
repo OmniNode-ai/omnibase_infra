@@ -32,7 +32,7 @@ from omnibase_infra.mixins.mixin_node_introspection import (
 )
 from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
 
-__all__ = [
+__all__: list[str] = [
     "CircuitState",
     "MixinAsyncCircuitBreaker",
     "MixinEnvelopeExtraction",

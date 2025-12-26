@@ -70,8 +70,7 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
-# Default semantic version constant (1.0.0) using core ModelSemVer
-# Previously imported from local model_semver; now defined inline
+# Default semantic version constant for service metadata registration
 SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 
 logger = logging.getLogger(__name__)

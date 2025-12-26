@@ -79,7 +79,7 @@ from omnibase_infra.idempotency.protocol_idempotency_store import (
 from omnibase_infra.idempotency.store_inmemory import InMemoryIdempotencyStore
 from omnibase_infra.idempotency.store_postgres import PostgresIdempotencyStore
 
-__all__ = [
+__all__: list[str] = [
     # Protocol
     "ProtocolIdempotencyStore",
     # Models
