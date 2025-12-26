@@ -20,6 +20,7 @@ from collections.abc import Callable
 from uuid import uuid4
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 from omnibase_infra.nodes.effects import NodeRegistryEffect
 from omnibase_infra.nodes.effects.models import (
@@ -133,7 +134,7 @@ def request_factory() -> Callable[..., ModelRegistryRequest]:
     """
 
     def _create_request(
-        node_type: str = "effect",
+        node_type: EnumNodeKind = EnumNodeKind.EFFECT,
         node_version: str = "1.0.0",
     ) -> ModelRegistryRequest:
         return ModelRegistryRequest(
@@ -143,7 +144,7 @@ def request_factory() -> Callable[..., ModelRegistryRequest]:
             correlation_id=uuid4(),
             service_name=f"onex-{node_type}",
             endpoints={"health": "http://localhost:8080/health"},
-            tags=["onex", node_type, "test"],
+            tags=["onex", str(node_type), "test"],
             metadata={"environment": "test"},
         )
 

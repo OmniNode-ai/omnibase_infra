@@ -11,6 +11,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
+from omnibase_core.enums import (
+    EnumNodeKind,
+)
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.utils.util_semver import validate_semver as _validate_semver
@@ -25,7 +28,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
 
     Attributes:
         node_id: Node identifier.
-        node_type: ONEX node type string.
+        node_type: ONEX node type (EnumNodeKind).
         node_version: Semantic version of the node emitting this event.
         uptime_seconds: Node uptime in seconds (must be >= 0).
         active_operations_count: Number of active operations (must be >= 0).
@@ -36,9 +39,10 @@ class ModelNodeHeartbeatEvent(BaseModel):
 
     Example:
         >>> from uuid import uuid4
+        >>> from omnibase_core.enums import EnumNodeKind
         >>> event = ModelNodeHeartbeatEvent(
         ...     node_id=uuid4(),
-        ...     node_type="effect",
+        ...     node_type=EnumNodeKind.EFFECT,
         ...     node_version="1.2.3",
         ...     uptime_seconds=3600.5,
         ...     active_operations_count=5,
@@ -55,12 +59,11 @@ class ModelNodeHeartbeatEvent(BaseModel):
 
     # Required fields
     node_id: UUID = Field(..., description="Node identifier")
-    # Design Note: node_type uses relaxed `str` validation (not `Literal`) to support
-    # custom node types during development. This is intentional - heartbeats may come
-    # from experimental or plugin nodes not in the standard ONEX type set. For strict
-    # validation, see ModelNodeIntrospectionEvent which uses Literal["effect", "compute",
-    # "reducer", "orchestrator"]. Tests explicitly verify custom types are accepted.
-    node_type: str = Field(..., description="ONEX node type")
+    # Design Note: node_type uses EnumNodeKind for type consistency across the codebase.
+    # This aligns with ModelNodeIntrospectionEvent which also uses EnumNodeKind, ensuring
+    # consistent type handling for all node-related events. The previous relaxed `str`
+    # validation was speculative support for experimental/plugin nodes that never existed.
+    node_type: EnumNodeKind = Field(..., description="ONEX node type")
     node_version: str = Field(
         default="1.0.0",
         description="Semantic version of the node emitting this event",

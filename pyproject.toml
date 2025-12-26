@@ -135,7 +135,7 @@ ignore = [
     "BLE001",    # Blind exception catching (technical debt)
     "E402",      # Module level import not at top (technical debt)
     "TC001",     # Type checking imports (technical debt)
-    "TC002",     # Type checking imports - runtime imports needed for Pydantic models
+    "TC002",     # Third-party imports in TYPE_CHECKING (Pydantic needs runtime access)
     "TC003",     # Type checking imports (technical debt)
     "PLR0911",   # Too many returns (technical debt)
     "PLR0912",   # Too many branches (technical debt)

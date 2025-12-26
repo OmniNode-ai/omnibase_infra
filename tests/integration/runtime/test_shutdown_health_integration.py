@@ -25,6 +25,9 @@ from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.runtime.health_server import HealthServer
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
+# Module-level markers - all tests in this file are integration tests
+pytestmark = [pytest.mark.integration]
+
 
 class TestShutdownHealthIntegration:
     """Integration tests for shutdown and health check interaction."""
