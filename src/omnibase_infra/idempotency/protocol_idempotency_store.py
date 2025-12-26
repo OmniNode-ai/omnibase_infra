@@ -33,10 +33,13 @@ Implementations:
     - PostgresIdempotencyStore: Production PostgreSQL store (OMN-945)
 
 Security Considerations:
-    - Thread Safety: All implementations MUST be safe for concurrent access.
+    - Concurrency Safety: All implementations MUST be safe for concurrent access.
       Multiple coroutines may call check_and_record simultaneously with the
       same message_id. Implementations must use appropriate synchronization
       (e.g., asyncio.Lock for in-memory, database transactions for PostgreSQL).
+
+      Note: This is coroutine-safe for asyncio concurrent access, not thread-safe.
+      For multi-threaded access, additional synchronization would be required.
 
     - Atomicity: The check_and_record method MUST provide atomic check-and-set
       semantics. When multiple callers race with the same (domain, message_id),
@@ -76,7 +79,7 @@ class ProtocolIdempotencyStore(Protocol):
     ensure exactly-once processing guarantees.
 
     Key Properties:
-        - Thread-safe: All operations must be safe for concurrent access
+        - Coroutine-safe: All operations must be safe for concurrent async access
         - Atomic: check_and_record must provide atomic check-and-set semantics
         - Domain-isolated: Messages can be namespaced by domain for isolated deduplication
 

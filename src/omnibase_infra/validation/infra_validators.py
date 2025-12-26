@@ -355,7 +355,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # This is a COUNT threshold, not a violation threshold. The validator counts all
 # unions including the ONEX-preferred `X | None` patterns, which are valid.
 #
-# Current baseline (544 unions as of 2025-12-23):
+# Current baseline (~555 unions as of 2025-12-23):
 # - Most unions are legitimate `X | None` nullable patterns
 # - These are NOT flagged as violations, just counted
 # - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
@@ -371,12 +371,14 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 588 (2025-12-25): OMN-811 RegistryCompute merge (+2 unions)
 # - 589 (2025-12-25): OMN-881 PR review fixes - _EventBusType conditional alias (+1 union)
 # - 589 (2025-12-25): OMN-816 removed ProtocolEventBusLike (net zero change)
+# - 600 (2025-12-25): OMN-952 PR #79 merge with main (OMN-811 compute registry + models) (~11 added)
 # - 606 (2025-12-25): OMN-949 DLQ configuration merge (~17 unions from DLQ + topic validation)
-# - 620 (2025-12-25): OMN-1006 heartbeat handler + projector update_heartbeat (~11 unions)
+# - 610 (2025-12-25): OMN-952 declarative orchestrator refactor + container wiring (~3 unions added)
+# - 626 (2025-12-25): OMN-952 + OMN-949 + OMN-1006 merge (~6 unions from combined changes)
 #
-# Threshold: 620 (buffer above ~617 baseline after OMN-949 + OMN-1006 merge)
+# Threshold: 630 (buffer above ~626 baseline for codebase growth)
 # Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
-INFRA_MAX_UNIONS = 620
+INFRA_MAX_UNIONS = 630
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

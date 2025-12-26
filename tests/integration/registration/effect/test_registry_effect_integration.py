@@ -31,6 +31,7 @@ Related:
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -617,6 +618,7 @@ class TestIdempotencyVerification:
             endpoints={"health": "http://localhost:8080/health"},
             tags=["onex"],
             metadata={},
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         request2 = ModelRegistryRequest(
             node_id=base_node_id,  # Same node_id
@@ -627,6 +629,7 @@ class TestIdempotencyVerification:
             endpoints={"health": "http://localhost:8080/health"},
             tags=["onex"],
             metadata={},
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         # Act

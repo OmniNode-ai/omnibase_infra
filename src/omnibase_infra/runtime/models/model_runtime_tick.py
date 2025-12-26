@@ -37,11 +37,13 @@ Usage:
 Example:
     >>> from datetime import datetime, timezone
     >>> from uuid import uuid4
+    >>> # Use explicit timestamps (time injection pattern) - not datetime.now()
+    >>> tick_time = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
     >>> tick = ModelRuntimeTick(
-    ...     now=datetime.now(timezone.utc),
+    ...     now=tick_time,
     ...     tick_id=uuid4(),
     ...     sequence_number=42,
-    ...     scheduled_at=datetime.now(timezone.utc),
+    ...     scheduled_at=tick_time,
     ...     correlation_id=uuid4(),
     ...     scheduler_id="runtime-instance-001",
     ...     tick_interval_ms=1000,
@@ -99,11 +101,13 @@ class ModelRuntimeTick(BaseModel):
     Example:
         >>> from datetime import datetime, timezone
         >>> from uuid import uuid4
+        >>> # Use explicit timestamps (time injection pattern) - not datetime.now()
+        >>> tick_time = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
         >>> tick = ModelRuntimeTick(
-        ...     now=datetime.now(timezone.utc),
+        ...     now=tick_time,
         ...     tick_id=uuid4(),
         ...     sequence_number=1,
-        ...     scheduled_at=datetime.now(timezone.utc),
+        ...     scheduled_at=tick_time,
         ...     correlation_id=uuid4(),
         ...     scheduler_id="runtime-001",
         ...     tick_interval_ms=1000,

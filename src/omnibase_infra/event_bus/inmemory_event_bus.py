@@ -47,6 +47,7 @@ import json
 import logging
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -151,7 +152,7 @@ class InMemoryEventBus:
         # Topic -> offset counter for message ordering
         self._topic_offsets: dict[str, int] = defaultdict(int)
 
-        # Lock for thread safety
+        # Lock for coroutine safety
         self._lock = asyncio.Lock()
 
         # Started flag
@@ -281,6 +282,7 @@ class InMemoryEventBus:
             headers = ModelEventHeaders(
                 source=f"{self._environment}.{self._group}",
                 event_type=topic,
+                timestamp=datetime.now(UTC),
             )
 
         async with self._lock:
@@ -366,9 +368,13 @@ class InMemoryEventBus:
         # Note: envelope is expected to have a model_dump() method (Pydantic)
         envelope_dict: object
         if hasattr(envelope, "model_dump"):
-            envelope_dict = envelope.model_dump(mode="json")  # type: ignore[union-attr]
+            # Use getattr for type-safe method access after hasattr check
+            model_dump_method = envelope.model_dump
+            envelope_dict = model_dump_method(mode="json")
         elif hasattr(envelope, "dict"):
-            envelope_dict = envelope.dict()  # type: ignore[union-attr]
+            # Use getattr for type-safe method access after hasattr check
+            dict_method = envelope.dict
+            envelope_dict = dict_method()
         elif isinstance(envelope, dict):
             envelope_dict = envelope
         else:
@@ -383,6 +389,7 @@ class InMemoryEventBus:
             source=f"{self._environment}.{self._group}",
             event_type=topic,
             content_type="application/json",
+            timestamp=datetime.now(UTC),
         )
 
         await self.publish(topic, None, value, headers)
@@ -480,6 +487,7 @@ class InMemoryEventBus:
             source=f"{self._environment}.{self._group}",
             event_type="broadcast",
             content_type="application/json",
+            timestamp=datetime.now(UTC),
         )
 
         await self.publish(topic, None, value, headers)
@@ -507,6 +515,7 @@ class InMemoryEventBus:
             source=f"{self._environment}.{self._group}",
             event_type="group_command",
             content_type="application/json",
+            timestamp=datetime.now(UTC),
         )
 
         await self.publish(topic, None, value, headers)

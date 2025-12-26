@@ -160,6 +160,7 @@ def create_sample_introspection_event(
         endpoints={"health": "http://localhost:8080/health"},
         capabilities=ModelNodeCapabilities(postgres=True, read=True, write=True),
         metadata=ModelNodeMetadata(environment="test"),
+        timestamp=datetime.now(UTC),  # Required: time injection pattern
     )
 
 

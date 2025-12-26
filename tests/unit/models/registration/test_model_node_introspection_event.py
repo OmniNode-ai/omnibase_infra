@@ -25,6 +25,9 @@ from omnibase_infra.models.registration import (
     ModelNodeMetadata,
 )
 
+# Fixed test timestamp for deterministic testing (time injection pattern)
+TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+
 
 class TestModelNodeIntrospectionEventBasicInstantiation:
     """Tests for basic model instantiation."""
@@ -37,6 +40,7 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
             node_id=test_node_id,
             node_type="effect",
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.node_id == test_node_id
         assert event.node_type == "effect"
@@ -104,6 +108,7 @@ class TestModelNodeIntrospectionEventNodeVersion:
             node_id=test_node_id,
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.node_version == "1.0.0"
 
@@ -115,6 +120,7 @@ class TestModelNodeIntrospectionEventNodeVersion:
             node_type="effect",
             node_version="2.3.4",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.node_version == "2.3.4"
 
@@ -126,6 +132,7 @@ class TestModelNodeIntrospectionEventNodeVersion:
             node_type="effect",
             node_version="1.0.0-beta.2",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.node_version == "1.0.0-beta.2"
 
@@ -137,6 +144,7 @@ class TestModelNodeIntrospectionEventNodeVersion:
             node_type="effect",
             node_version="1.0.0+build.456",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.node_version == "1.0.0+build.456"
 
@@ -148,6 +156,7 @@ class TestModelNodeIntrospectionEventNodeVersion:
             node_type="effect",
             node_version="3.2.1",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         json_str = event.model_dump_json()
         restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
@@ -161,6 +170,7 @@ class TestModelNodeIntrospectionEventNodeVersion:
             node_type="effect",
             node_version="4.5.6",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         data = event.model_dump()
         assert "node_version" in data
@@ -174,7 +184,10 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
         """Test that 'effect' is a valid node_type."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
-            node_id=test_node_id, node_type="effect", correlation_id=uuid4()
+            node_id=test_node_id,
+            node_type="effect",
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.node_type == "effect"
 
@@ -182,7 +195,10 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
         """Test that 'compute' is a valid node_type."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
-            node_id=test_node_id, node_type="compute", correlation_id=uuid4()
+            node_id=test_node_id,
+            node_type="compute",
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.node_type == "compute"
 
@@ -190,7 +206,10 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
         """Test that 'reducer' is a valid node_type."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
-            node_id=test_node_id, node_type="reducer", correlation_id=uuid4()
+            node_id=test_node_id,
+            node_type="reducer",
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.node_type == "reducer"
 
@@ -198,7 +217,10 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
         """Test that 'orchestrator' is a valid node_type."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
-            node_id=test_node_id, node_type="orchestrator", correlation_id=uuid4()
+            node_id=test_node_id,
+            node_type="orchestrator",
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.node_type == "orchestrator"
 
@@ -210,6 +232,7 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
                 node_id=test_node_id,
                 node_type="invalid_type",  # type: ignore[arg-type]
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         assert "node_type" in str(exc_info.value)
 
@@ -221,6 +244,7 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
                 node_id=test_node_id,
                 node_type="",  # type: ignore[arg-type]
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
 
     def test_invalid_node_type_none(self) -> None:
@@ -231,6 +255,7 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
                 node_id=test_node_id,
                 node_type=None,  # type: ignore[arg-type]
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
 
 
@@ -244,6 +269,7 @@ class TestModelNodeIntrospectionEventSerialization:
             node_id=test_node_id,
             node_type="reducer",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         json_str = event.model_dump_json()
         restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
@@ -267,6 +293,7 @@ class TestModelNodeIntrospectionEventSerialization:
             network_id="network-001",
             deployment_id="deploy-001",
             epoch=5,
+            timestamp=TEST_TIMESTAMP,
         )
         json_str = event.model_dump_json()
         restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
@@ -292,6 +319,7 @@ class TestModelNodeIntrospectionEventSerialization:
             node_type="effect",
             capabilities=ModelNodeCapabilities(database=True),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         data = event.model_dump()
         assert isinstance(data, dict)
@@ -310,6 +338,7 @@ class TestModelNodeIntrospectionEventSerialization:
             node_id=test_node_id,
             node_type="compute",
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
         data = event.model_dump(mode="json")
         # UUID should be serialized as string in JSON mode
@@ -320,20 +349,23 @@ class TestModelNodeIntrospectionEventSerialization:
 
 
 class TestModelNodeIntrospectionEventTimestamp:
-    """Tests for timestamp auto-generation."""
+    """Tests for timestamp field (required, injected by caller)."""
 
-    def test_timestamp_auto_generation(self) -> None:
-        """Test that timestamp is auto-generated when not provided."""
+    def test_timestamp_is_required(self) -> None:
+        """Test that timestamp is required (time injection pattern).
+
+        Per ONEX time injection pattern, timestamps must be explicitly
+        injected by the caller for testability and deterministic behavior.
+        """
         test_node_id = uuid4()
-        before = datetime.now(UTC)
-        event = ModelNodeIntrospectionEvent(
-            node_id=test_node_id,
-            node_type="orchestrator",
-            correlation_id=uuid4(),
-        )
-        after = datetime.now(UTC)
-        assert event.timestamp is not None
-        assert before <= event.timestamp <= after
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type="orchestrator",
+                correlation_id=uuid4(),
+                # timestamp intentionally omitted
+            )
+        assert "timestamp" in str(exc_info.value)
 
     def test_timestamp_explicit_value(self) -> None:
         """Test that explicit timestamp is preserved."""
@@ -354,8 +386,31 @@ class TestModelNodeIntrospectionEventTimestamp:
             node_id=test_node_id,
             node_type="compute",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert isinstance(event.timestamp, datetime)
+
+    def test_naive_timestamp_rejected(self) -> None:
+        """Test that naive datetime (without tzinfo) is rejected.
+
+        Timezone-aware timestamps are required to prevent ambiguity in
+        distributed systems where events may be processed across time zones.
+        """
+        from datetime import datetime as dt
+
+        test_node_id = uuid4()
+        naive_timestamp = dt(2025, 1, 1, 12, 0, 0)  # No tzinfo
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                correlation_id=uuid4(),
+                timestamp=naive_timestamp,
+            )
+
+        error_str = str(exc_info.value).lower()
+        assert "timezone-aware" in error_str or "tzinfo" in error_str
 
 
 class TestModelNodeIntrospectionEventImmutability:
@@ -368,6 +423,7 @@ class TestModelNodeIntrospectionEventImmutability:
             node_id=test_node_id,
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         with pytest.raises(ValidationError):
             event.node_id = uuid4()  # type: ignore[misc]
@@ -379,6 +435,7 @@ class TestModelNodeIntrospectionEventImmutability:
             node_id=test_node_id,
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         with pytest.raises(ValidationError):
             event.node_type = "compute"  # type: ignore[misc]
@@ -391,6 +448,7 @@ class TestModelNodeIntrospectionEventImmutability:
             node_type="effect",
             node_version="1.0.0",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         with pytest.raises(ValidationError):
             event.node_version = "2.0.0"  # type: ignore[misc]
@@ -403,6 +461,7 @@ class TestModelNodeIntrospectionEventImmutability:
             node_type="effect",
             capabilities={"original": True},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         with pytest.raises(ValidationError):
             # Intentional: assigning dict to ModelNodeCapabilities to test frozen rejection
@@ -415,6 +474,7 @@ class TestModelNodeIntrospectionEventImmutability:
             node_id=test_node_id,
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         with pytest.raises(ValidationError):
             event.correlation_id = uuid4()  # type: ignore[misc]
@@ -426,6 +486,7 @@ class TestModelNodeIntrospectionEventImmutability:
             node_id=test_node_id,
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         with pytest.raises(ValidationError):
             event.timestamp = datetime.now(UTC)  # type: ignore[misc]
@@ -441,6 +502,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
                 node_id="",  # type: ignore[arg-type]
                 node_type="effect",
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
 
     def test_complex_capabilities_dict(self) -> None:
@@ -456,6 +518,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
                 "config": {"timeout": 30, "retries": 3},
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.capabilities.processing is True
         assert event.capabilities.max_batch == 1000
@@ -471,6 +534,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
             node_role="处理器",
             metadata={"description": "Узел обработки"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.node_id == test_node_id
         assert event.node_role == "处理器"
@@ -484,6 +548,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
                 node_id=test_node_id,
                 node_type="effect",
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
                 extra_field="not_allowed",  # type: ignore[call-arg]
             )
         assert "extra_field" in str(exc_info.value)
@@ -501,6 +566,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
                 node_type="effect",
                 epoch=-1,
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         assert "epoch" in str(exc_info.value)
 
@@ -512,6 +578,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
             node_type="effect",
             epoch=0,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.epoch == 0
 
@@ -523,6 +590,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
             node_type="effect",
             epoch=42,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.epoch == 42
 
@@ -534,6 +602,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
             node_type="effect",
             epoch=2**31,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.epoch == 2**31
 
@@ -635,6 +704,7 @@ class TestModelNodeIntrospectionEventEquality:
             node_id=test_node_id,
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event != "not a model"
         assert event != 42
@@ -680,6 +750,7 @@ class TestModelNodeIntrospectionEventStringRepresentation:
             node_id=test_node_id,
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         str_repr = str(event)
         # Pydantic models include field values in string representation
@@ -692,6 +763,7 @@ class TestModelNodeIntrospectionEventStringRepresentation:
             node_id=test_node_id,
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         repr_str = repr(event)
         assert isinstance(repr_str, str)
@@ -704,6 +776,7 @@ class TestModelNodeIntrospectionEventStringRepresentation:
             node_id=test_node_id,
             node_type="orchestrator",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         str_repr = str(event)
         repr_str = repr(event)
@@ -721,6 +794,7 @@ class TestModelNodeIntrospectionEventCopying:
             node_id=test_node_id,
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         copied = event.model_copy()
         assert copied is not event
@@ -734,6 +808,7 @@ class TestModelNodeIntrospectionEventCopying:
             node_id=test_node_id,
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         copied = event.model_copy(update={"node_id": new_node_id})
         assert copied.node_id == new_node_id
@@ -749,6 +824,7 @@ class TestModelNodeIntrospectionEventCopying:
             node_type="effect",
             capabilities={"key": "value"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         copied = event.model_copy(deep=True)
         # Both should have same values
@@ -773,6 +849,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 "metrics": "http://localhost:8080/metrics",
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.endpoints["health"] == "http://localhost:8080/health"
         assert event.endpoints["metrics"] == "http://localhost:8080/metrics"
@@ -788,6 +865,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 "health": "https://api.example.com/health",
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.endpoints["api"] == "https://api.example.com:443/v1"
         assert event.endpoints["health"] == "https://api.example.com/health"
@@ -802,6 +880,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 "health": "http://localhost:8080/api/v1/health?timeout=30&verbose=true",
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert (
             event.endpoints["health"]
@@ -816,6 +895,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
             node_type="effect",
             endpoints={},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.endpoints == {}
 
@@ -828,6 +908,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 node_type="effect",
                 endpoints={"health": "localhost:8080/health"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -843,6 +924,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 node_type="effect",
                 endpoints={"health": "http:///health"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -857,6 +939,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 node_type="effect",
                 endpoints={"api": "not-a-url"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -872,6 +955,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 node_type="effect",
                 endpoints={"health": ""},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -886,6 +970,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 node_type="effect",
                 endpoints={"health": "/health"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -904,6 +989,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                     "api": "http://localhost:8080/api",
                 },
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -919,6 +1005,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 node_type="effect",
                 endpoints={"my_bad_endpoint": "no-scheme"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "my_bad_endpoint" in error_str
@@ -934,6 +1021,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 "metrics": "https://api.example.com/metrics",
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         json_str = event.model_dump_json()
         restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)

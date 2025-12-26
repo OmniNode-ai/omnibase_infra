@@ -44,7 +44,7 @@ from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
-from omnibase_infra.orchestrators.registration.handlers import (
+from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
     DEFAULT_LIVENESS_WINDOW_SECONDS,
     HandlerNodeHeartbeat,
     ModelHeartbeatHandlerResult,
@@ -1010,7 +1010,7 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
 
         liveness_deadline = event.timestamp + liveness_window_seconds
         """
-        from omnibase_infra.orchestrators.registration.handlers import (
+        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeHeartbeat,
         )
 

@@ -34,8 +34,10 @@ Production Warning:
     For production distributed deployments, implement
     ProtocolEffectIdempotencyStore with a persistent backend.
 
-Thread Safety:
-    All operations are protected by asyncio.Lock for safe concurrent access.
+Concurrency Safety:
+    All operations are protected by asyncio.Lock for safe concurrent coroutine
+    access. Note: This is coroutine-safe, not thread-safe. For multi-threaded
+    access, additional synchronization would be required.
 
 Related:
     - ProtocolEffectIdempotencyStore: Protocol interface
@@ -102,9 +104,10 @@ class InMemoryEffectIdempotencyStore(ProtocolEffectIdempotencyStore):
         2. If exceeded, evict oldest entries (LRU order) until under limit
         3. Periodically cleanup expired entries (TTL-based)
 
-    Thread Safety:
+    Concurrency Safety:
         All operations are protected by asyncio.Lock for atomic access.
-        Safe for concurrent async access from multiple coroutines.
+        Safe for concurrent async access from multiple coroutines. Note:
+        This is coroutine-safe, not thread-safe.
 
     Memory Characteristics:
         - Per-entry overhead: ~100 bytes

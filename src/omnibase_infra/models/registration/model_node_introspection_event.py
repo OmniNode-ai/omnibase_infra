@@ -8,7 +8,7 @@ in the ONEX 2-way registration pattern.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -44,6 +44,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
 
     Example:
         >>> from uuid import uuid4
+        >>> from datetime import datetime, timezone
         >>> event = ModelNodeIntrospectionEvent(
         ...     node_id=uuid4(),
         ...     node_type="effect",
@@ -51,6 +52,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
         ...     capabilities={"postgres": True, "read": True, "write": True},
         ...     endpoints={"health": "http://localhost:8080/health"},
         ...     correlation_id=uuid4(),
+        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
         ... )
     """
 
@@ -134,11 +136,32 @@ class ModelNodeIntrospectionEvent(BaseModel):
         description="Registration epoch for ordering (monotonically increasing counter)",
     )
 
-    # Timestamps
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        ...,
         description="Event timestamp",
     )
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
+        """Validate that timestamp is timezone-aware.
+
+        Args:
+            v: The timestamp value to validate.
+
+        Returns:
+            The validated timestamp.
+
+        Raises:
+            ValueError: If timestamp is naive (no timezone info).
+        """
+        if v.tzinfo is None:
+            raise ValueError(
+                "timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            )
+        return v
 
 
 __all__ = ["ModelNodeIntrospectionEvent"]

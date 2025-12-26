@@ -233,8 +233,8 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 config = dict(config)  # Make mutable copy
                 config["token"] = SecretStr(token_raw)
 
-            # Type ignore for dict unpacking - Pydantic handles validation
-            self._config = ModelVaultHandlerConfig(**config)  # type: ignore[arg-type]
+            # Use model_validate for type-safe dict parsing (Pydantic v2 pattern)
+            self._config = ModelVaultHandlerConfig.model_validate(config)
         except ValidationError as e:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,

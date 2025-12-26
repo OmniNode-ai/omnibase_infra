@@ -397,7 +397,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             str, list[tuple[str, str, Callable[[ModelEventMessage], Awaitable[None]]]]
         ] = defaultdict(list)
 
-        # Lock for thread safety (protects all shared state)
+        # Lock for coroutine safety (protects all shared state)
         self._lock = asyncio.Lock()
 
         # State flags
@@ -860,6 +860,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             headers = ModelEventHeaders(
                 source=f"{self._environment}.{self._group}",
                 event_type=topic,
+                timestamp=datetime.now(UTC),
             )
 
         # Validate topic name
@@ -1051,6 +1052,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             source=f"{self._environment}.{self._group}",
             event_type=topic,
             content_type="application/json",
+            timestamp=datetime.now(UTC),
         )
 
         await self.publish(topic, None, value, headers)
@@ -1483,6 +1485,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             source=f"{self._environment}.{self._group}",
             event_type="broadcast",
             content_type="application/json",
+            timestamp=datetime.now(UTC),
         )
 
         await self.publish(topic, None, value, headers)
@@ -1510,6 +1513,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             source=f"{self._environment}.{self._group}",
             event_type="group_command",
             content_type="application/json",
+            timestamp=datetime.now(UTC),
         )
 
         await self.publish(topic, None, value, headers)
@@ -1726,7 +1730,11 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             ModelEventHeaders instance
         """
         if not kafka_headers:
-            return ModelEventHeaders(source="unknown", event_type="unknown")
+            return ModelEventHeaders(
+                source="unknown",
+                event_type="unknown",
+                timestamp=datetime.now(UTC),
+            )
 
         headers_dict: dict[str, str] = {}
         for key, value in kafka_headers:
@@ -1913,6 +1921,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             event_type="dlq_message",
             content_type="application/json",
             correlation_id=correlation_id,
+            timestamp=datetime.now(UTC),
         )
 
         # Convert DLQ payload to JSON bytes
@@ -2192,6 +2201,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             event_type="dlq_raw_message",
             content_type="application/json",
             correlation_id=correlation_id,
+            timestamp=start_time,
         )
 
         # Convert DLQ payload to JSON bytes

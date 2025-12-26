@@ -1141,8 +1141,6 @@ class TestVaultHandlerCircuitBreaker:
             assert handler._circuit_breaker_open is True
 
             # Mock time.time() to simulate timeout passage instead of sleeping
-            import time
-
             original_time = time.time
             mock_time_offset = 0.0
 
@@ -1201,8 +1199,6 @@ class TestVaultHandlerCircuitBreaker:
                     await handler.execute(envelope)
 
             # Mock time.time() to simulate timeout passage instead of sleeping
-            import time
-
             original_time = time.time
             mock_time_offset = 0.0
 
@@ -1268,8 +1264,6 @@ class TestVaultHandlerCircuitBreaker:
             assert handler._circuit_breaker_open is True
 
             # Mock time.time() to simulate timeout passage instead of sleeping
-            import time
-
             original_time = time.time
             mock_time_offset = 0.0
 

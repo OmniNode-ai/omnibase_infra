@@ -170,6 +170,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
@@ -1054,7 +1055,7 @@ class MixinNodeIntrospection:
 
         # Check for get_state method
         if hasattr(self, "get_state"):
-            method = self.get_state  # type: ignore[attr-defined]
+            method = self.get_state
             if callable(method):
                 try:
                     result = method()
@@ -1100,7 +1101,6 @@ class MixinNodeIntrospection:
 
         # Collect metrics values in local variables (model is frozen)
         get_capabilities_ms = 0.0
-        discover_capabilities_ms = 0.0
         get_endpoints_ms = 0.0
         get_current_state_ms = 0.0
         method_count = 0
@@ -1113,7 +1113,7 @@ class MixinNodeIntrospection:
             and current_time - self._introspection_cached_at
             < self._introspection_cache_ttl
         ):
-            # Return cached data with updated timestamp
+            # Return cached data (timestamp reflects when cache was populated, not current time)
             cached_event = ModelNodeIntrospectionEvent(**self._introspection_cache)
 
             # Record cache hit metrics
@@ -1133,6 +1133,12 @@ class MixinNodeIntrospection:
             return cached_event
 
         # Build fresh introspection data with timing for each component
+        # First, measure the class method signature discovery time separately.
+        # This is cached at the class level, so subsequent calls are instant.
+        discover_start = time.perf_counter()
+        self._get_class_method_signatures()  # Force cache population if not already done
+        discover_capabilities_ms = (time.perf_counter() - discover_start) * 1000
+
         cap_start = time.perf_counter()
         capabilities = await self.get_capabilities()
         get_capabilities_ms = (time.perf_counter() - cap_start) * 1000
@@ -1224,6 +1230,7 @@ class MixinNodeIntrospection:
             version=self._introspection_version,
             reason="cache_refresh",
             correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
             performance_metrics=metrics,
         )
 
@@ -1318,9 +1325,12 @@ class MixinNodeIntrospection:
             )
 
             # Publish to event bus using configured topic
+            # Type narrowing: we've already checked _introspection_event_bus is not None above
+            event_bus = self._introspection_event_bus
+            assert event_bus is not None  # Redundant but helps mypy
             topic = self._introspection_topic
-            if hasattr(self._introspection_event_bus, "publish_envelope"):
-                await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
+            if hasattr(event_bus, "publish_envelope"):
+                await event_bus.publish_envelope(
                     envelope=publish_event,
                     topic=topic,
                 )
@@ -1328,7 +1338,7 @@ class MixinNodeIntrospection:
                 # Fallback to publish method with raw bytes
                 event_data = publish_event.model_dump(mode="json")
                 value = json.dumps(event_data).encode("utf-8")
-                await self._introspection_event_bus.publish(
+                await event_bus.publish(
                     topic=topic,
                     key=str(self._introspection_node_id).encode("utf-8")
                     if self._introspection_node_id is not None
@@ -1403,6 +1413,7 @@ class MixinNodeIntrospection:
                 node_type = EnumNodeKind.EFFECT
 
             # Create heartbeat event
+            now = datetime.now(UTC)
             heartbeat = ModelNodeHeartbeatEvent(
                 node_id=node_id,
                 node_type=node_type,
@@ -1417,18 +1428,22 @@ class MixinNodeIntrospection:
                 # is implemented. See MixinNodeIntrospection docstring note.
                 active_operations_count=0,
                 correlation_id=uuid4(),
+                timestamp=now,  # Required: time injection pattern
             )
 
             # Publish to event bus using configured topic
+            # Type narrowing: we've already checked _introspection_event_bus is not None above
+            event_bus = self._introspection_event_bus
+            assert event_bus is not None  # Redundant but helps mypy
             topic = self._heartbeat_topic
-            if hasattr(self._introspection_event_bus, "publish_envelope"):
-                await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
+            if hasattr(event_bus, "publish_envelope"):
+                await event_bus.publish_envelope(
                     envelope=heartbeat,
                     topic=topic,
                 )
             else:
                 value = json.dumps(heartbeat.model_dump(mode="json")).encode("utf-8")
-                await self._introspection_event_bus.publish(
+                await event_bus.publish(
                     topic=topic,
                     key=str(self._introspection_node_id).encode("utf-8")
                     if self._introspection_node_id is not None
@@ -1639,7 +1654,7 @@ class MixinNodeIntrospection:
                 if not hasattr(message, "value") or not message.value:
                     await self.publish_introspection(
                         reason="request",
-                        correlation_id=None,
+                        correlation_id=uuid4(),
                     )
                     self._registry_callback_consecutive_failures = 0
                     return

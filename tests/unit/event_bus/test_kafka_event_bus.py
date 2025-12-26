@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
@@ -303,6 +304,7 @@ class TestKafkaEventBusPublish:
                 source="custom-source",
                 event_type="custom-event",
                 priority="high",
+                timestamp=datetime.now(UTC),
             )
             await kafka_event_bus.publish("test-topic", None, b"value", headers)
 
@@ -1046,6 +1048,7 @@ class TestKafkaEventBusHeaderConversion:
             event_type="test-event",
             priority="high",
             routing_key="test.route",
+            timestamp=datetime.now(UTC),
         )
 
         kafka_headers = event_bus._model_headers_to_kafka(headers)
@@ -1629,6 +1632,7 @@ class TestKafkaEventBusDLQRouting:
                 source="test-source",
                 event_type="test-event",
                 correlation_id=correlation_id,
+                timestamp=datetime.now(UTC),
                 retry_count=3,  # Exhausted
                 max_retries=3,
             )
@@ -1786,6 +1790,7 @@ class TestKafkaEventBusDLQRouting:
                 source="test-source",
                 event_type="test-event",
                 correlation_id=correlation_id,
+                timestamp=datetime.now(UTC),
                 retry_count=3,
                 max_retries=3,
             )
@@ -1858,6 +1863,7 @@ class TestKafkaEventBusDLQRouting:
                 source="test-source",
                 event_type="test-event",
                 correlation_id=correlation_id,
+                timestamp=datetime.now(UTC),
                 retry_count=3,
                 max_retries=3,
             )

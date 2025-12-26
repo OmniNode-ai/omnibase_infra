@@ -72,6 +72,7 @@ Related:
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from uuid import UUID
 
 from omnibase_infra.nodes.effects.models.model_backend_result import (
@@ -212,9 +213,9 @@ class NodeRegistryEffect:
         - PostgreSQL upsert: typically 1-5ms (network dependent)
         - Idempotency overhead: <0.1ms
 
-    Thread Safety:
+    Coroutine Safety:
         This class is async-safe. The underlying idempotency store
-        uses asyncio.Lock for thread-safe operations.
+        uses asyncio.Lock for coroutine-safe operations.
 
     Attributes:
         consul_client: Client for Consul service registration.
@@ -347,6 +348,7 @@ class NodeRegistryEffect:
             correlation_id=correlation_id,
             consul_result=consul_result,
             postgres_result=postgres_result,
+            timestamp=datetime.now(UTC),
         )
 
     async def _register_consul(
