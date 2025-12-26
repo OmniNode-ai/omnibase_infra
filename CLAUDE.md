@@ -293,6 +293,64 @@ async def process_event(envelope: ModelEventEnvelope[Any]) -> str:  # Avoid
 
 **See also**: `src/omnibase_infra/runtime/message_dispatch_engine.py` for the complete design note.
 
+**Type Alias vs Protocol Pattern**
+
+ONEX uses a specific pattern for protocol-based models where Pydantic validation and type hints serve different purposes:
+
+| Context | Pattern | Example |
+|---------|---------|---------|
+| Pydantic field validators | Underscore-prefixed union | `_IntentUnion = ModelCommandIntent \| ModelEventIntent` |
+| Function type hints | Protocol interface | `def register(intent: ProtocolRegistrationIntent)` |
+
+**Why this pattern exists**:
+- **Pydantic validation**: Requires concrete union types to instantiate and validate model fields at runtime
+- **Type hints**: Use protocols for duck typing and interface definitions (structural subtyping)
+- **Internal vs External**: Underscore prefix signals internal implementation detail not part of public API
+
+**Example**:
+```python
+from pydantic import BaseModel
+
+from omnibase_core.protocols import ProtocolRegistrationIntent
+from omnibase_infra.models import ModelCommandIntent, ModelEventIntent, ModelQueryIntent
+
+# Internal: Concrete union for Pydantic validation
+# Underscore prefix indicates this is an implementation detail
+_IntentUnion = ModelCommandIntent | ModelEventIntent | ModelQueryIntent
+
+
+class RegistrationRequest(BaseModel):
+    """Request model with intent field requiring Pydantic validation."""
+
+    # Pydantic needs concrete types to validate and instantiate
+    intent: _IntentUnion
+
+
+# External: Protocol for function signatures
+def process_registration(intent: ProtocolRegistrationIntent) -> ModelRegistrationResult:
+    """Process any registration intent.
+
+    Protocol enables duck typing - any object implementing the protocol
+    interface is accepted, not just the concrete union types.
+    """
+    ...
+```
+
+**When to use each**:
+
+| Scenario | Use | Rationale |
+|----------|-----|-----------|
+| Pydantic model field | `_IntentUnion` (concrete union) | Pydantic must instantiate concrete types for validation |
+| Function parameter type hint | `ProtocolRegistrationIntent` | Enables duck typing, accepts any conforming object |
+| Return type annotation | Protocol or concrete type | Depends on whether caller needs specific type or interface |
+| Internal helper functions | Either | Context-dependent; prefer protocol for flexibility |
+
+**Naming convention**:
+- Underscore-prefixed unions: `_<Name>Union` (e.g., `_IntentUnion`, `_HandlerUnion`)
+- Protocols: `Protocol<Name>` (e.g., `ProtocolRegistrationIntent`, `ProtocolHandler`)
+
+**Related**: OMN-1007 (Union Reduction)
+
 ### ONEX Architecture
 - **Contract-Driven** - All tools/services follow contract patterns
 - **Container Injection** - `def __init__(self, container: ModelONEXContainer)`
