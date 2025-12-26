@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from omnibase_core.types import JsonValue  # noqa: TC002 - Pydantic needs runtime access
+from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.handlers.models.http.enum_http_operation_type import (

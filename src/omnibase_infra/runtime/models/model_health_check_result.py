@@ -31,7 +31,7 @@ Example:
 
 from __future__ import annotations
 
-from omnibase_core.types import JsonValue  # noqa: TC002 - Pydantic needs runtime access
+from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field
 
 

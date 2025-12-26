@@ -17,7 +17,7 @@ Note on row typing:
 from __future__ import annotations
 
 from omnibase_core.types import (
-    JsonValue,  # noqa: TC002 - Required at runtime for Pydantic
+    JsonValue,
 )
 from pydantic import BaseModel, ConfigDict, Field
 

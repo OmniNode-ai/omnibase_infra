@@ -140,7 +140,7 @@ from typing import cast
 from uuid import UUID
 
 # ModelEventEnvelope is used at runtime in function parameter types, not just for type hints
-from omnibase_core.models.events.model_event_envelope import (  # noqa: TC002
+from omnibase_core.models.events.model_event_envelope import (
     ModelEventEnvelope,
 )
 
