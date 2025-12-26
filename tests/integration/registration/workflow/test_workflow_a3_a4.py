@@ -61,6 +61,9 @@ from .conftest import (
     TrackedRegistrationReducer,
 )
 
+# Module-level pytest markers applied to all tests
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
 
 def _convert_intents_to_request(
     event: ModelNodeIntrospectionEvent,
@@ -97,7 +100,6 @@ def _convert_intents_to_request(
     )
 
 
-@pytest.mark.integration
 class TestA3OrchestratedDualRegistration:
     """Test A3: Orchestrator calls reducer, then effect.
 
@@ -108,7 +110,6 @@ class TestA3OrchestratedDualRegistration:
         4. Results aggregated correctly
     """
 
-    @pytest.mark.asyncio
     async def test_a3_orchestrated_dual_registration(
         self,
         tracked_reducer: TrackedRegistrationReducer,
@@ -206,7 +207,6 @@ class TestA3OrchestratedDualRegistration:
         assert pg_reg.node_id == event.node_id
         assert pg_reg.node_type == event.node_type
 
-    @pytest.mark.asyncio
     async def test_a3_reducer_produces_typed_intents(
         self,
         tracked_reducer: TrackedRegistrationReducer,
@@ -244,7 +244,6 @@ class TestA3OrchestratedDualRegistration:
                 assert "correlation_id" in intent.payload
                 assert "record" in intent.payload
 
-    @pytest.mark.asyncio
     async def test_a3_multiple_node_types(
         self,
         tracked_reducer: TrackedRegistrationReducer,
@@ -292,7 +291,6 @@ class TestA3OrchestratedDualRegistration:
             ], f"Wrong order for {node_type}"
 
 
-@pytest.mark.integration
 class TestA4IdempotentReplay:
     """Test A4: Re-emit identical event, state unchanged.
 
@@ -304,7 +302,6 @@ class TestA4IdempotentReplay:
         5. Effect idempotency store tracks completed backends
     """
 
-    @pytest.mark.asyncio
     async def test_a4_idempotent_replay(
         self,
         tracked_reducer: TrackedRegistrationReducer,
@@ -393,7 +390,6 @@ class TestA4IdempotentReplay:
         assert "consul" in completed_backends
         assert "postgres" in completed_backends
 
-    @pytest.mark.asyncio
     async def test_a4_reducer_idempotency_with_event_id(
         self,
         tracked_reducer: TrackedRegistrationReducer,
@@ -430,7 +426,6 @@ class TestA4IdempotentReplay:
         assert output_2.result.consul_confirmed == output_1.result.consul_confirmed
         assert output_2.result.postgres_confirmed == output_1.result.postgres_confirmed
 
-    @pytest.mark.asyncio
     async def test_a4_effect_idempotency_store_tracks_backends(
         self,
         tracked_effect: TrackedNodeRegistryEffect,
@@ -444,9 +439,16 @@ class TestA4IdempotentReplay:
         correlation_id, enabling safe retries.
         """
         event = sample_introspection_event
+        # node_type may be string (from Pydantic Literal) or EnumNodeKind
+        # Handle both cases for type safety, matching _convert_intents_to_request
+        node_type_value = (
+            event.node_type.value
+            if isinstance(event.node_type, EnumNodeKind)
+            else event.node_type
+        )
         request = ModelRegistryRequest(
             node_id=event.node_id,
-            node_type=event.node_type,
+            node_type=node_type_value,
             node_version=event.node_version,
             correlation_id=event.correlation_id,
             endpoints=dict(event.endpoints),
@@ -479,7 +481,6 @@ class TestA4IdempotentReplay:
         assert consul_client.call_count == 1  # Unchanged
         assert postgres_adapter.call_count == 1  # Unchanged
 
-    @pytest.mark.asyncio
     async def test_a4_different_correlation_ids_processed_independently(
         self,
         tracked_reducer: TrackedRegistrationReducer,
@@ -531,7 +532,6 @@ class TestA4IdempotentReplay:
         assert "consul" in completed_2
         assert "postgres" in completed_2
 
-    @pytest.mark.asyncio
     async def test_a4_state_immutability_on_replay(
         self,
         tracked_reducer: TrackedRegistrationReducer,
@@ -572,14 +572,12 @@ class TestA4IdempotentReplay:
         )
 
 
-@pytest.mark.integration
 class TestOrchestratedWorkflowIntegration:
     """Additional integration tests for the orchestrated workflow.
 
     These tests verify edge cases and error handling in the workflow.
     """
 
-    @pytest.mark.asyncio
     async def test_workflow_with_partial_failure_then_retry(
         self,
         tracked_reducer: TrackedRegistrationReducer,
@@ -639,7 +637,6 @@ class TestOrchestratedWorkflowIntegration:
         assert len(consul_client.registrations) == 1
         assert len(postgres_adapter.registrations) == 1
 
-    @pytest.mark.asyncio
     async def test_workflow_correlation_id_propagation(
         self,
         tracked_reducer: TrackedRegistrationReducer,

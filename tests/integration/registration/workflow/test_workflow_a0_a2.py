@@ -51,6 +51,15 @@ if TYPE_CHECKING:
         TrackedRegistrationReducer,
     )
 
+# Module-level marker: all tests in this module are integration tests
+pytestmark = pytest.mark.integration
+
+# =============================================================================
+# Test Constants
+# =============================================================================
+
+# Expected number of intents emitted by reducer (Consul + PostgreSQL)
+EXPECTED_INTENT_COUNT = 2
 
 # =============================================================================
 # A0 - Purity Gate Tests
@@ -74,7 +83,6 @@ class TestA0PurityGate:
         - Call counts verify correct architecture separation
     """
 
-    @pytest.mark.integration
     async def test_a0_purity_gate_reducer_no_io(
         self,
         registration_reducer: RegistrationReducer,
@@ -118,8 +126,9 @@ class TestA0PurityGate:
         )
 
         # Assert: Reducer did emit intents for Effect layer
-        assert len(output.intents) == 2, (
-            f"Reducer should emit 2 intents (Consul + PostgreSQL), got {len(output.intents)}"
+        assert len(output.intents) == EXPECTED_INTENT_COUNT, (
+            f"Reducer should emit {EXPECTED_INTENT_COUNT} intents (Consul + PostgreSQL), "
+            f"got {len(output.intents)}"
         )
 
         # Verify intent types
@@ -129,7 +138,6 @@ class TestA0PurityGate:
             "Missing postgres.upsert_registration intent"
         )
 
-    @pytest.mark.integration
     async def test_a0_purity_gate_effect_performs_io(
         self,
         tracked_effect: TrackedNodeRegistryEffect,
@@ -190,7 +198,6 @@ class TestA0PurityGate:
         effect_calls = call_tracker.get_effect_calls()
         assert len(effect_calls) == 1, "Effect call should be tracked in call_tracker"
 
-    @pytest.mark.integration
     async def test_a0_purity_gate_complete_workflow_with_tracking(
         self,
         tracked_reducer: TrackedRegistrationReducer,
@@ -223,6 +230,9 @@ class TestA0PurityGate:
         assert postgres_adapter.call_count == 0, "Reducer must not call PostgreSQL"
 
         # Act - Phase 2: Effect executes registration (with I/O)
+        # Note: event.node_type is a Literal["effect", "compute", "reducer", "orchestrator"]
+        # string, not an EnumNodeKind. Pydantic coerces the EnumNodeKind from the factory
+        # to its string value during model construction.
         request = ModelRegistryRequest(
             node_id=event.node_id,
             node_type=event.node_type,
@@ -268,7 +278,6 @@ class TestA1IntrospectionPublish:
         - Event contains correlation_id (UUID)
     """
 
-    @pytest.mark.integration
     async def test_a1_introspection_event_structure(
         self,
         test_node: IntrospectableTestNode,
@@ -327,7 +336,6 @@ class TestA1IntrospectionPublish:
         assert isinstance(correlation_id, str), "correlation_id should be string"
         UUID(correlation_id)  # Raises if invalid UUID
 
-    @pytest.mark.integration
     async def test_a1_introspection_event_stable_node_id(
         self,
         test_node_factory: Callable[..., IntrospectableTestNode],
@@ -367,7 +375,6 @@ class TestA1IntrospectionPublish:
             f"Node ID mismatch: expected {fixed_node_id}, got {node_ids[0]}"
         )
 
-    @pytest.mark.integration
     async def test_a1_introspection_event_valid_node_types(
         self,
         test_node_factory: Callable[..., IntrospectableTestNode],
@@ -405,7 +412,6 @@ class TestA1IntrospectionPublish:
                 f"node_type mismatch: expected {node_type.value}, got {event_data['node_type']}"
             )
 
-    @pytest.mark.integration
     async def test_a1_introspection_event_endpoints_and_metadata(
         self,
         test_node: IntrospectableTestNode,
@@ -459,7 +465,6 @@ class TestA2TwoWayIntrospectionLoop:
         - Complete round-trip works with mocked infrastructure
     """
 
-    @pytest.mark.integration
     async def test_a2_registry_requests_introspection(
         self,
         event_bus: InMemoryEventBus,
@@ -496,7 +501,6 @@ class TestA2TwoWayIntrospectionLoop:
             "Correlation ID should be preserved in published request"
         )
 
-    @pytest.mark.integration
     async def test_a2_node_responds_to_introspection_request(
         self,
         test_node: IntrospectableTestNode,
@@ -547,7 +551,6 @@ class TestA2TwoWayIntrospectionLoop:
         )
         assert "node_id" in response_data, "Response must include node_id"
 
-    @pytest.mark.integration
     async def test_a2_correlation_id_preserved_in_loop(
         self,
         event_bus: InMemoryEventBus,
@@ -612,7 +615,6 @@ class TestA2TwoWayIntrospectionLoop:
             f"Correlation ID should match original: {correlation_id}"
         )
 
-    @pytest.mark.integration
     async def test_a2_multiple_nodes_respond_with_unique_correlation(
         self,
         test_node_factory: Callable[..., IntrospectableTestNode],
@@ -668,7 +670,6 @@ class TestWorkflowIntegration:
     that all components work together correctly.
     """
 
-    @pytest.mark.integration
     async def test_complete_registration_workflow_mocked(
         self,
         tracked_reducer: TrackedRegistrationReducer,
@@ -703,10 +704,12 @@ class TestWorkflowIntegration:
         correlation_id = UUID(introspection_data["correlation_id"])
 
         # Create ModelNodeIntrospectionEvent from the data
-        # Convert node_type string from JSON to EnumNodeKind
+        # Note: introspection_data["node_type"] is already a string from JSON serialization
+        # (e.g., "effect", "compute") which matches the Literal type expected by the model.
+        # No conversion to EnumNodeKind is needed.
         introspection_event = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type=EnumNodeKind(introspection_data.get("node_type", "effect")),
+            node_type=introspection_data.get("node_type", "effect"),
             node_version=introspection_data.get("node_version", "1.0.0"),
             correlation_id=correlation_id,
             endpoints=introspection_data.get("endpoints", {}),
@@ -719,9 +722,13 @@ class TestWorkflowIntegration:
         # Verify reducer purity
         assert consul_client.call_count == 0, "Reducer must not call Consul"
         assert postgres_adapter.call_count == 0, "Reducer must not call Postgres"
-        assert len(output.intents) == 2, "Reducer should emit 2 intents"
+        assert len(output.intents) == EXPECTED_INTENT_COUNT, (
+            f"Reducer should emit {EXPECTED_INTENT_COUNT} intents"
+        )
 
         # Step 3: Effect executes registration (A0 - I/O separation)
+        # Note: introspection_event.node_type is a Literal string (e.g., "effect"),
+        # not an EnumNodeKind. The model's type annotation ensures this.
         request = ModelRegistryRequest(
             node_id=node_id,
             node_type=introspection_event.node_type,
