@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from pydantic import ValidationError
 
 # Create SEMVER_DEFAULT inline as the core module doesn't export it
 SEMVER_DEFAULT = ModelSemVer(major=1, minor=0, patch=0)
@@ -33,7 +34,7 @@ class TestModelSemVerBasics:
 
     def test_fields_are_required(self) -> None:
         """Test that all version fields are required (no defaults)."""
-        with pytest.raises(Exception):  # ValidationError from Pydantic
+        with pytest.raises(ValidationError):
             ModelSemVer()  # type: ignore[call-arg]
 
 

@@ -1654,6 +1654,94 @@ class TestModelNodeHeartbeatEventModelValidate:
         assert event.node_type == "effect"
 
 
+class TestModelNodeHeartbeatEventDeprecationWarning:
+    """Tests for node_type string deprecation warning."""
+
+    def test_string_node_type_emits_deprecation_warning(self) -> None:
+        """Test that passing node_type as string emits DeprecationWarning."""
+        from omnibase_core.enums import EnumNodeKind
+
+        test_node_id = uuid4()
+        with pytest.warns(
+            DeprecationWarning, match="node_type as string is deprecated"
+        ):
+            event = ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",  # String triggers warning
+                uptime_seconds=100.0,
+            )
+        # Verify coercion still works
+        assert event.node_type == EnumNodeKind.EFFECT
+
+    def test_enum_node_type_no_deprecation_warning(self) -> None:
+        """Test that passing node_type as EnumNodeKind does not emit warning."""
+        import warnings
+
+        from omnibase_core.enums import EnumNodeKind
+
+        test_node_id = uuid4()
+        # Should not emit deprecation warnings
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("always")
+            event = ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type=EnumNodeKind.EFFECT,
+                uptime_seconds=100.0,
+            )
+        # Filter for DeprecationWarning only
+        deprecation_warnings = [
+            w for w in record if issubclass(w.category, DeprecationWarning)
+        ]
+        assert len(deprecation_warnings) == 0
+        assert event.node_type == EnumNodeKind.EFFECT
+
+    def test_uppercase_string_node_type_coerced_with_warning(self) -> None:
+        """Test that uppercase string is lowercased and warns."""
+        from omnibase_core.enums import EnumNodeKind
+
+        test_node_id = uuid4()
+        with pytest.warns(
+            DeprecationWarning, match="node_type as string is deprecated"
+        ):
+            event = ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="EFFECT",  # Uppercase string
+                uptime_seconds=100.0,
+            )
+        assert event.node_type == EnumNodeKind.EFFECT
+
+    def test_mixed_case_string_node_type_coerced_with_warning(self) -> None:
+        """Test that mixed case string is lowercased and warns."""
+        from omnibase_core.enums import EnumNodeKind
+
+        test_node_id = uuid4()
+        with pytest.warns(
+            DeprecationWarning, match="node_type as string is deprecated"
+        ):
+            event = ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="Compute",  # Mixed case string
+                uptime_seconds=100.0,
+            )
+        assert event.node_type == EnumNodeKind.COMPUTE
+
+    def test_all_enum_values_work_as_strings_with_warning(self) -> None:
+        """Test that all EnumNodeKind values work as strings with warning."""
+        from omnibase_core.enums import EnumNodeKind
+
+        for node_kind in EnumNodeKind:
+            test_node_id = uuid4()
+            with pytest.warns(
+                DeprecationWarning, match="node_type as string is deprecated"
+            ):
+                event = ModelNodeHeartbeatEvent(
+                    node_id=test_node_id,
+                    node_type=node_kind.value,  # String value from enum
+                    uptime_seconds=100.0,
+                )
+            assert event.node_type == node_kind
+
+
 class TestModelNodeHeartbeatEventRepr:
     """Tests for model representation."""
 

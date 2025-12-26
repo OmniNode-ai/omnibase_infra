@@ -11,7 +11,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumPolicyType
-from omnibase_infra.utils.util_semver import normalize_version
+from omnibase_infra.utils.util_semver import normalize_version_cached
 
 
 class ModelPolicyKey(BaseModel):
@@ -59,8 +59,13 @@ class ModelPolicyKey(BaseModel):
     def validate_and_normalize_version(cls, v: str) -> str:
         """Normalize version string for consistent lookups.
 
-        Delegates to the centralized normalize_version function from util_semver,
-        which is the SINGLE SOURCE OF TRUTH for version normalization.
+        Delegates to the centralized normalize_version_cached function from
+        util_semver, which is the SINGLE SOURCE OF TRUTH for version normalization.
+
+        Uses the cached version for:
+        - Consistent behavior with PolicyRegistry._normalize_version()
+        - Reduced deprecation warnings (only emits once per unique version string)
+        - Better performance through caching
 
         This ensures consistent version handling across all ONEX components,
         preventing lookup mismatches where "1.0.0" and "1.0" might be treated
@@ -81,7 +86,7 @@ class ModelPolicyKey(BaseModel):
             >>> ModelPolicyKey(policy_id="test", policy_type="orchestrator", version="v2.1")
             ModelPolicyKey(policy_id='test', policy_type='orchestrator', version='2.1.0')
         """
-        return normalize_version(v)
+        return normalize_version_cached(v)
 
     @field_validator("policy_type")
     @classmethod

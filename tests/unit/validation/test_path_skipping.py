@@ -19,10 +19,10 @@ import pytest
 
 from omnibase_infra.validation.infra_validators import (
     SKIP_DIRECTORY_NAMES,
-    _is_skip_directory,
-    _load_skip_directories_from_yaml,
-    _should_skip_path,
     get_skip_directories,
+    is_skip_directory,
+    load_skip_directories_from_yaml,
+    should_skip_path,
 )
 
 
@@ -67,7 +67,7 @@ class TestSkipDirectoryNames:
 
 
 class TestIsSkipDirectory:
-    """Tests for the _is_skip_directory function."""
+    """Tests for the is_skip_directory function."""
 
     @pytest.mark.parametrize(
         "component",
@@ -90,7 +90,7 @@ class TestIsSkipDirectory:
     )
     def test_exact_match_returns_true(self, component: str) -> None:
         """Verify exact matches return True."""
-        assert _is_skip_directory(component) is True
+        assert is_skip_directory(component) is True
 
     @pytest.mark.parametrize(
         "component",
@@ -126,11 +126,11 @@ class TestIsSkipDirectory:
     )
     def test_non_exact_match_returns_false(self, component: str) -> None:
         """Verify non-exact matches return False (no false positives)."""
-        assert _is_skip_directory(component) is False
+        assert is_skip_directory(component) is False
 
 
 class TestShouldSkipPath:
-    """Tests for the _should_skip_path function."""
+    """Tests for the should_skip_path function."""
 
     # Paths that SHOULD be skipped (true positives)
     @pytest.mark.parametrize(
@@ -156,7 +156,7 @@ class TestShouldSkipPath:
     )
     def test_skip_directory_in_path_returns_true(self, path: Path) -> None:
         """Verify paths containing skip directories are skipped."""
-        assert _should_skip_path(path) is True
+        assert should_skip_path(path) is True
 
     # Paths that should NOT be skipped (avoiding false positives)
     @pytest.mark.parametrize(
@@ -192,37 +192,37 @@ class TestShouldSkipPath:
     )
     def test_similar_path_not_skipped(self, path: Path, description: str) -> None:
         """Verify similar-looking paths are NOT skipped (no false positives)."""
-        assert _should_skip_path(path) is False, f"False positive for: {description}"
+        assert should_skip_path(path) is False, f"False positive for: {description}"
 
     def test_root_path_not_skipped(self) -> None:
         """Verify files at root level are not skipped."""
-        assert _should_skip_path(Path("foo.py")) is False
-        assert _should_skip_path(Path("archive.py")) is False
+        assert should_skip_path(Path("foo.py")) is False
+        assert should_skip_path(Path("archive.py")) is False
 
     def test_empty_parent_path(self) -> None:
         """Verify files with no parent directory work correctly."""
         # Path("file.py").parent is Path(".") which has parts (".",)
-        assert _should_skip_path(Path("file.py")) is False
+        assert should_skip_path(Path("file.py")) is False
 
     def test_absolute_vs_relative_paths(self) -> None:
         """Verify both absolute and relative paths work correctly."""
         # Relative path with skip directory
-        assert _should_skip_path(Path("src/archive/foo.py")) is True
+        assert should_skip_path(Path("src/archive/foo.py")) is True
         # Absolute path with skip directory
-        assert _should_skip_path(Path("/workspace/src/archive/foo.py")) is True
+        assert should_skip_path(Path("/workspace/src/archive/foo.py")) is True
         # Relative path without skip directory
-        assert _should_skip_path(Path("src/models/foo.py")) is False
+        assert should_skip_path(Path("src/models/foo.py")) is False
         # Absolute path without skip directory
-        assert _should_skip_path(Path("/workspace/src/models/foo.py")) is False
+        assert should_skip_path(Path("/workspace/src/models/foo.py")) is False
 
     def test_deeply_nested_skip_directory(self) -> None:
         """Verify skip directories work at any depth in the path."""
         # Skip directory early in path
-        assert _should_skip_path(Path("archive/a/b/c/d/e/foo.py")) is True
+        assert should_skip_path(Path("archive/a/b/c/d/e/foo.py")) is True
         # Skip directory deep in path
-        assert _should_skip_path(Path("a/b/c/d/e/archive/foo.py")) is True
+        assert should_skip_path(Path("a/b/c/d/e/archive/foo.py")) is True
         # Skip directory in middle of path
-        assert _should_skip_path(Path("a/b/archive/c/d/foo.py")) is True
+        assert should_skip_path(Path("a/b/archive/c/d/foo.py")) is True
 
 
 class TestPathSkippingIntegration:
@@ -236,7 +236,7 @@ class TestPathSkippingIntegration:
             Path("src/omnibase_infra/archived/v1_implementation.py"),
         ]
         for path in archive_files:
-            assert _should_skip_path(path) is True, f"Should skip: {path}"
+            assert should_skip_path(path) is True, f"Should skip: {path}"
 
     def test_typical_examples_structure(self) -> None:
         """Verify typical examples directory structure is skipped."""
@@ -246,7 +246,7 @@ class TestPathSkippingIntegration:
             Path("examples/advanced/complex_example.py"),
         ]
         for path in example_files:
-            assert _should_skip_path(path) is True, f"Should skip: {path}"
+            assert should_skip_path(path) is True, f"Should skip: {path}"
 
     def test_typical_pycache_structure(self) -> None:
         """Verify typical __pycache__ directory structure is skipped."""
@@ -256,7 +256,7 @@ class TestPathSkippingIntegration:
             Path("tests/__pycache__/conftest.cpython-311.pyc"),
         ]
         for path in cache_files:
-            assert _should_skip_path(path) is True, f"Should skip: {path}"
+            assert should_skip_path(path) is True, f"Should skip: {path}"
 
     def test_normal_source_files_not_skipped(self) -> None:
         """Verify normal source files are not skipped."""
@@ -267,7 +267,7 @@ class TestPathSkippingIntegration:
             Path("tests/unit/validation/test_path_skipping.py"),
         ]
         for path in source_files:
-            assert _should_skip_path(path) is False, f"Should NOT skip: {path}"
+            assert should_skip_path(path) is False, f"Should NOT skip: {path}"
 
 
 class TestGetSkipDirectories:
@@ -306,21 +306,21 @@ class TestGetSkipDirectories:
 
 
 class TestLoadSkipDirectoriesFromYaml:
-    """Tests for the _load_skip_directories_from_yaml function."""
+    """Tests for the load_skip_directories_from_yaml function."""
 
     def test_yaml_loader_returns_frozenset_or_none(self) -> None:
         """Verify YAML loader returns frozenset or None."""
         # Clear the cache to ensure fresh load
-        _load_skip_directories_from_yaml.cache_clear()
-        result = _load_skip_directories_from_yaml()
+        load_skip_directories_from_yaml.cache_clear()
+        result = load_skip_directories_from_yaml()
         assert result is None or isinstance(result, frozenset)
 
     def test_yaml_loader_is_cached(self) -> None:
         """Verify YAML loader caches results for performance."""
         # Clear cache and load twice
-        _load_skip_directories_from_yaml.cache_clear()
-        result1 = _load_skip_directories_from_yaml()
-        result2 = _load_skip_directories_from_yaml()
+        load_skip_directories_from_yaml.cache_clear()
+        result1 = load_skip_directories_from_yaml()
+        result2 = load_skip_directories_from_yaml()
         # Both calls should return the same object (cached)
         if result1 is not None:
             assert result1 is result2

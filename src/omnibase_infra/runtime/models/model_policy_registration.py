@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumPolicyType
-from omnibase_infra.utils.util_semver import normalize_version
+from omnibase_infra.utils.util_semver import normalize_version_cached
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -89,8 +89,13 @@ class ModelPolicyRegistration(BaseModel):
     def validate_and_normalize_version(cls, v: str) -> str:
         """Normalize version string for consistent storage.
 
-        Delegates to the centralized normalize_version function from util_semver,
-        which is the SINGLE SOURCE OF TRUTH for version normalization.
+        Delegates to the centralized normalize_version_cached function from
+        util_semver, which is the SINGLE SOURCE OF TRUTH for version normalization.
+
+        Uses the cached version for:
+        - Consistent behavior with PolicyRegistry._normalize_version()
+        - Reduced deprecation warnings (only emits once per unique version string)
+        - Better performance through caching
 
         This ensures version strings are consistent across the registry,
         preventing storage/lookup mismatches.
@@ -104,7 +109,7 @@ class ModelPolicyRegistration(BaseModel):
         Raises:
             ValueError: If the version string is invalid and cannot be parsed
         """
-        return normalize_version(v)
+        return normalize_version_cached(v)
 
     @field_validator("policy_type")
     @classmethod

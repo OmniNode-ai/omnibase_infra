@@ -33,6 +33,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import InfraConnectionError
@@ -797,7 +798,7 @@ class TestModelHeartbeatHandlerResult:
         result = await heartbeat_handler.handle(event)
 
         # Attempt to modify should fail
-        with pytest.raises(Exception):  # ValidationError for frozen models
+        with pytest.raises(ValidationError):
             result.success = False  # type: ignore[misc]
 
     async def test_result_contains_all_expected_fields(

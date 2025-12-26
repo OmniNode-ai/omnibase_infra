@@ -281,7 +281,7 @@ class TestVaultRetryConfig:
         """Test config is immutable (frozen)."""
         config = ModelVaultRetryConfig()
 
-        with pytest.raises(Exception):  # Pydantic raises on mutation
+        with pytest.raises(ValidationError):
             config.max_attempts = 5  # type: ignore[misc]
 
 

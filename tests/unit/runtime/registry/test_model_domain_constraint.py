@@ -3,6 +3,7 @@
 """Tests for ModelDomainConstraint."""
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.runtime.registry.model_domain_constraint import (
     ModelDomainConstraint,
@@ -103,17 +104,17 @@ class TestModelDomainConstraint:
     def test_immutable(self) -> None:
         """Test that ModelDomainConstraint is immutable."""
         constraint = ModelDomainConstraint(owning_domain="user")
-        with pytest.raises(Exception):  # Pydantic raises ValidationError
+        with pytest.raises(ValidationError):
             constraint.owning_domain = "order"  # type: ignore[misc]
 
     def test_owning_domain_required(self) -> None:
         """Test that owning_domain is required."""
-        with pytest.raises(Exception):  # Pydantic validation error
+        with pytest.raises(ValidationError):
             ModelDomainConstraint()  # type: ignore[call-arg]
 
     def test_owning_domain_min_length(self) -> None:
         """Test owning_domain minimum length validation."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelDomainConstraint(owning_domain="")
 
 

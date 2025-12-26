@@ -730,7 +730,7 @@ _contract_validator = ProtocolContractValidator()
 
 
 @lru_cache(maxsize=1)
-def _load_skip_directories_from_yaml() -> frozenset[str] | None:
+def load_skip_directories_from_yaml() -> frozenset[str] | None:
     """
     Load skip directory configuration from YAML.
 
@@ -786,13 +786,13 @@ def get_skip_directories() -> frozenset[str]:
     Returns:
         frozenset of directory names that should be excluded from validation.
     """
-    yaml_dirs = _load_skip_directories_from_yaml()
+    yaml_dirs = load_skip_directories_from_yaml()
     if yaml_dirs is not None:
         return yaml_dirs
     return SKIP_DIRECTORY_NAMES
 
 
-def _is_simple_optional(pattern: ModelUnionPattern) -> bool:
+def is_simple_optional(pattern: ModelUnionPattern) -> bool:
     """
     Determine if a union pattern is a simple optional (`X | None`).
 
@@ -815,13 +815,13 @@ def _is_simple_optional(pattern: ModelUnionPattern) -> bool:
         True if the pattern is a simple optional (`X | None`), False otherwise.
 
     Examples:
-        >>> _is_simple_optional(ModelUnionPattern(["str", "None"], 1, "test.py"))
+        >>> is_simple_optional(ModelUnionPattern(["str", "None"], 1, "test.py"))
         True
-        >>> _is_simple_optional(ModelUnionPattern(["int", "None"], 1, "test.py"))
+        >>> is_simple_optional(ModelUnionPattern(["int", "None"], 1, "test.py"))
         True
-        >>> _is_simple_optional(ModelUnionPattern(["str", "int"], 1, "test.py"))
+        >>> is_simple_optional(ModelUnionPattern(["str", "int"], 1, "test.py"))
         False
-        >>> _is_simple_optional(ModelUnionPattern(["str", "int", "None"], 1, "test.py"))
+        >>> is_simple_optional(ModelUnionPattern(["str", "int", "None"], 1, "test.py"))
         False
     """
     # Simple optional: exactly 2 types, one of which is None
@@ -877,7 +877,7 @@ SKIP_DIRECTORY_NAMES: frozenset[str] = frozenset(
 )
 
 
-def _is_skip_directory(component: str) -> bool:
+def is_skip_directory(component: str) -> bool:
     """
     Check if a path component is a directory that should be skipped.
 
@@ -899,31 +899,31 @@ def _is_skip_directory(component: str) -> bool:
 
     Examples:
         Exact matches (skipped):
-        >>> _is_skip_directory("archived")
+        >>> is_skip_directory("archived")
         True
-        >>> _is_skip_directory("archive")
+        >>> is_skip_directory("archive")
         True
-        >>> _is_skip_directory("__pycache__")
+        >>> is_skip_directory("__pycache__")
         True
-        >>> _is_skip_directory(".venv")
+        >>> is_skip_directory(".venv")
         True
-        >>> _is_skip_directory(".git")
+        >>> is_skip_directory(".git")
         True
 
         Partial/similar names (NOT skipped - prevents false positives):
-        >>> _is_skip_directory("archived_feature")
+        >>> is_skip_directory("archived_feature")
         False
-        >>> _is_skip_directory("my_archive")
+        >>> is_skip_directory("my_archive")
         False
-        >>> _is_skip_directory("Archive")  # Case-sensitive
+        >>> is_skip_directory("Archive")  # Case-sensitive
         False
-        >>> _is_skip_directory(".git_backup")
+        >>> is_skip_directory(".git_backup")
         False
     """
     return component in get_skip_directories()
 
 
-def _should_skip_path(path: Path) -> bool:
+def should_skip_path(path: Path) -> bool:
     """
     Check if a path should be skipped for validation.
 
@@ -972,7 +972,7 @@ def _should_skip_path(path: Path) -> bool:
     # "/foo/archived/bar.py" -> ('/', 'foo', 'archived')
     #
     # Using parent.parts ensures we only match DIRECTORY names, not filenames
-    return any(_is_skip_directory(part) for part in path.parent.parts)
+    return any(is_skip_directory(part) for part in path.parent.parts)
 
 
 def _count_non_optional_unions(directory: Path) -> tuple[int, int, list[str]]:
@@ -997,7 +997,7 @@ def _count_non_optional_unions(directory: Path) -> tuple[int, int, list[str]]:
 
     for py_file in directory.rglob("*.py"):
         # Filter out archived files, examples, and __pycache__
-        if _should_skip_path(py_file):
+        if should_skip_path(py_file):
             continue
 
         union_count, issues, patterns = validate_union_usage_file(py_file)
@@ -1005,7 +1005,7 @@ def _count_non_optional_unions(directory: Path) -> tuple[int, int, list[str]]:
 
         # Count non-optional patterns
         for pattern in patterns:
-            if not _is_simple_optional(pattern):
+            if not is_simple_optional(pattern):
                 non_optional_unions += 1
 
         # Prefix issues with file path
@@ -1080,7 +1080,7 @@ def validate_infra_union_usage(
 
     # Count Python files for metadata (excluding archive, examples, __pycache__)
     python_files = list(dir_path.rglob("*.py"))
-    files_processed = len([f for f in python_files if not _should_skip_path(f)])
+    files_processed = len([f for f in python_files if not should_skip_path(f)])
 
     # Create result with enhanced metadata showing both counts
     return ModelValidationResult(
@@ -1235,12 +1235,12 @@ __all__ = [
     "get_architecture_exemptions",
     # Path skip configuration
     "get_skip_directories",
-    "_load_skip_directories_from_yaml",
+    "load_skip_directories_from_yaml",
     # Path utilities
-    "_is_skip_directory",
-    "_should_skip_path",
+    "is_skip_directory",
+    "should_skip_path",
     # Union pattern utilities
-    "_is_simple_optional",
+    "is_simple_optional",
     # Validators
     "validate_infra_architecture",
     "validate_infra_contracts",

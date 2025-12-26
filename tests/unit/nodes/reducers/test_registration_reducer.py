@@ -5360,7 +5360,7 @@ class TestBoundaryConditions:
 
         # Verify the state is frozen (immutable)
         # Attempting to modify should raise an error
-        with pytest.raises(Exception):  # Pydantic raises ValidationError on mutation
+        with pytest.raises(ValidationError):
             consul_confirmed.status = "complete"  # type: ignore[misc]
 
         # Track results from concurrent reads

@@ -155,7 +155,7 @@ class TestModelMessageTypeEntry:
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
         )
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             entry.message_type = "Modified"  # type: ignore[misc]
 
     def test_registered_at_default(self) -> None:
@@ -176,7 +176,7 @@ class TestModelMessageTypeEntryValidation:
 
     def test_message_type_required(self) -> None:
         """Test that message_type is required."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelMessageTypeEntry(
                 handler_ids=("handler",),
                 allowed_categories=frozenset([EnumMessageCategory.EVENT]),
@@ -185,7 +185,7 @@ class TestModelMessageTypeEntryValidation:
 
     def test_handler_ids_required(self) -> None:
         """Test that handler_ids is required."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelMessageTypeEntry(
                 message_type="UserCreated",
                 allowed_categories=frozenset([EnumMessageCategory.EVENT]),
@@ -194,7 +194,7 @@ class TestModelMessageTypeEntryValidation:
 
     def test_handler_ids_min_length(self) -> None:
         """Test that handler_ids requires at least one handler."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelMessageTypeEntry(
                 message_type="UserCreated",
                 handler_ids=(),  # Empty tuple
@@ -204,7 +204,7 @@ class TestModelMessageTypeEntryValidation:
 
     def test_allowed_categories_required(self) -> None:
         """Test that allowed_categories is required."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelMessageTypeEntry(
                 message_type="UserCreated",
                 handler_ids=("handler",),
@@ -213,7 +213,7 @@ class TestModelMessageTypeEntryValidation:
 
     def test_domain_constraint_required(self) -> None:
         """Test that domain_constraint is required."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelMessageTypeEntry(
                 message_type="UserCreated",
                 handler_ids=("handler",),
@@ -232,7 +232,7 @@ class TestModelMessageTypeEntryValidation:
         assert len(entry.message_type) == 200
 
         # Should fail with too long
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelMessageTypeEntry(
                 message_type="A" * 201,
                 handler_ids=("handler",),

@@ -8,15 +8,52 @@ in the ONEX 2-way registration pattern.
 
 from __future__ import annotations
 
+import warnings
 from datetime import UTC, datetime
+from typing import Annotated
 from uuid import UUID
 
-from omnibase_core.enums import (
-    EnumNodeKind,  # noqa: TC002 - runtime import required for Pydantic field
-)
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from omnibase_core.enums import EnumNodeKind
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 from omnibase_infra.utils.util_semver import validate_semver as _validate_semver
+
+
+def _validate_node_type(v: EnumNodeKind | str) -> EnumNodeKind:
+    """Validate and coerce node_type, warning on deprecated string usage.
+
+    Accepts both EnumNodeKind values directly and string values for backwards
+    compatibility. String values are coerced to EnumNodeKind with a deprecation
+    warning to encourage migration to enum usage.
+
+    Note: EnumNodeKind is a str enum, so isinstance(EnumNodeKind.EFFECT, str)
+    returns True. We must check for EnumNodeKind first to avoid false positives.
+
+    Args:
+        v: The node_type value, either EnumNodeKind or string.
+
+    Returns:
+        EnumNodeKind value.
+
+    Raises:
+        ValueError: If string value cannot be converted to EnumNodeKind.
+    """
+    # EnumNodeKind is a str enum, so isinstance(v, str) is True for both
+    # plain strings AND enum values. Check for enum first.
+    if isinstance(v, EnumNodeKind):
+        return v
+    if isinstance(v, str):
+        warnings.warn(
+            "Passing node_type as string is deprecated. Use EnumNodeKind.",
+            DeprecationWarning,
+            stacklevel=4,  # Adjusted for Pydantic call stack
+        )
+        return EnumNodeKind(v.lower())
+    # Let Pydantic handle any other types (will raise validation error)
+    return v  # type: ignore[return-value]
+
+
+NodeTypeWithDeprecation = Annotated[EnumNodeKind, BeforeValidator(_validate_node_type)]
 
 
 class ModelNodeHeartbeatEvent(BaseModel):
@@ -63,7 +100,9 @@ class ModelNodeHeartbeatEvent(BaseModel):
     # This aligns with ModelNodeIntrospectionEvent which also uses EnumNodeKind, ensuring
     # consistent type handling for all node-related events. The previous relaxed `str`
     # validation was speculative support for experimental/plugin nodes that never existed.
-    node_type: EnumNodeKind = Field(..., description="ONEX node type")
+    # String values are accepted for backwards compatibility with a DeprecationWarning.
+    node_type: NodeTypeWithDeprecation = Field(..., description="ONEX node type")
+
     node_version: str = Field(
         default="1.0.0",
         description="Semantic version of the node emitting this event",

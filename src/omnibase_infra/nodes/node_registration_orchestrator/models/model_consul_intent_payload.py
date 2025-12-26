@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -70,18 +69,18 @@ class ModelConsulIntentPayload(BaseModel):
 
     @field_validator("tags", mode="before")
     @classmethod
-    def _coerce_tags_to_tuple(cls, v: Any) -> tuple[str, ...]:
+    def _coerce_tags_to_tuple(cls, v: object) -> tuple[str, ...]:
         """Convert list/sequence to tuple for immutability."""
         if isinstance(v, tuple):
             return v  # type: ignore[return-value]  # Runtime validated by Pydantic
         if isinstance(v, list | set | frozenset):
             return tuple(str(item) for item in v)
-        # For unrecognized types, wrap in tuple and let Pydantic validate contents
-        return (v,) if v is not None else ()
+        # For unrecognized types, convert to string and wrap in tuple
+        return (str(v),) if v is not None else ()
 
     @field_validator("meta", mode="before")
     @classmethod
-    def _coerce_meta_to_tuple(cls, v: Any) -> tuple[tuple[str, str], ...]:
+    def _coerce_meta_to_tuple(cls, v: object) -> tuple[tuple[str, str], ...]:
         """Convert dict/mapping to tuple of pairs for immutability."""
         if isinstance(v, tuple):
             return v  # type: ignore[return-value]  # Runtime validated by Pydantic
