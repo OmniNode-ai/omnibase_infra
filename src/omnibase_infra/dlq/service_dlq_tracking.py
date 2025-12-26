@@ -520,4 +520,10 @@ class DLQReplayTracker:
             return False
 
 
-__all__: list[str] = ["DLQReplayTracker"]
+# ONEX Naming Convention Compliance:
+# The primary class name is DLQReplayTracker (descriptive domain name).
+# ServiceDlqTracking alias follows ONEX service naming convention (service_<name>.py → Service<Name>).
+# Both names are exported for flexibility in different contexts.
+ServiceDlqTracking = DLQReplayTracker
+
+__all__: list[str] = ["DLQReplayTracker", "ServiceDlqTracking"]

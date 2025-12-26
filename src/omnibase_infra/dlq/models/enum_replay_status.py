@@ -23,9 +23,9 @@ class EnumReplayStatus(str, Enum):
     - FAILED: Replay attempt failed (will be recorded with error_message)
     - SKIPPED: Message was intentionally not replayed (e.g., non-retryable error)
 
-    Note:
-        This enum is also defined in scripts/dlq_replay.py for CLI usage.
-        Both definitions must be kept in sync.
+    Usage:
+        This enum is the canonical definition for replay status tracking.
+        It is imported by scripts/dlq_replay.py for CLI usage.
     """
 
     PENDING = "pending"

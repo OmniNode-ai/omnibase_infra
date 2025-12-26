@@ -45,6 +45,7 @@ Related Ticket: OMN-1032 - Complete DLQ Replay PostgreSQL Tracking Integration
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -378,8 +379,6 @@ class TestDLQTrackingServiceQuery:
         message_id = uuid4()
 
         # Record multiple attempts with slight timestamp offsets
-        import time
-
         for i in range(3):
             record = ModelDlqReplayRecord(
                 id=uuid4(),
