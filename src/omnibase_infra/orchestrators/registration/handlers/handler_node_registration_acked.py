@@ -192,7 +192,15 @@ class HandlerNodeRegistrationAcked:
 
         Raises:
             RuntimeHostError: If projection query fails (propagated from reader).
+            ValueError: If now is naive (no timezone info).
         """
+        # Validate timezone-awareness for time injection pattern
+        if now.tzinfo is None:
+            raise ValueError(
+                "now must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            )
+
         node_id = command.node_id
 
         # Query current projection state

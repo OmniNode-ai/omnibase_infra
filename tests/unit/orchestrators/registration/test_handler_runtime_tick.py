@@ -509,3 +509,55 @@ class TestHandlerRuntimeTickInjectedNow:
         assert len(events) == 1
         # emitted_at should be the injected now, not system time
         assert events[0].emitted_at == custom_now
+
+
+class TestHandlerRuntimeTickTimezoneValidation:
+    """Test that handler validates timezone-awareness of now parameter."""
+
+    @pytest.mark.asyncio
+    async def test_raises_value_error_for_naive_datetime(self) -> None:
+        """Test that handler raises ValueError if now is naive (no tzinfo)."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerRuntimeTick(mock_reader)
+
+        # Create a naive datetime (no timezone info)
+        naive_now = datetime(2025, 1, 15, 12, 0, 0)  # No tzinfo!
+        assert naive_now.tzinfo is None  # Confirm it's naive
+
+        tick = create_runtime_tick(now=TEST_NOW)
+        correlation_id = uuid4()
+
+        with pytest.raises(ValueError) as exc_info:
+            await handler.handle(
+                tick=tick,
+                now=naive_now,
+                correlation_id=correlation_id,
+            )
+
+        assert "timezone-aware" in str(exc_info.value)
+        assert "naive" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_accepts_timezone_aware_datetime(self) -> None:
+        """Test that handler accepts timezone-aware datetime."""
+        mock_reader = create_mock_projection_reader()
+        mock_reader.get_overdue_ack_registrations.return_value = []
+        mock_reader.get_overdue_liveness_registrations.return_value = []
+
+        handler = HandlerRuntimeTick(mock_reader)
+
+        # Use timezone-aware datetime
+        aware_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+        assert aware_now.tzinfo is not None  # Confirm it's aware
+
+        tick = create_runtime_tick(now=aware_now)
+        correlation_id = uuid4()
+
+        # Should not raise - timezone-aware datetime is valid
+        events = await handler.handle(
+            tick=tick,
+            now=aware_now,
+            correlation_id=correlation_id,
+        )
+
+        assert events == []  # No events expected (empty projections)

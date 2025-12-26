@@ -592,3 +592,53 @@ class TestGetLivenessIntervalSeconds:
 
         # Handler should use the value from env var (resolved via get_liveness_interval_seconds)
         assert handler._liveness_interval_seconds == 300
+
+
+class TestHandlerAckedTimezoneValidation:
+    """Test that handler validates timezone-awareness of now parameter."""
+
+    @pytest.mark.asyncio
+    async def test_raises_value_error_for_naive_datetime(self) -> None:
+        """Test that handler raises ValueError if now is naive (no tzinfo)."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerNodeRegistrationAcked(mock_reader)
+
+        # Create a naive datetime (no timezone info)
+        naive_now = datetime(2025, 1, 15, 12, 0, 0)  # No tzinfo!
+        assert naive_now.tzinfo is None  # Confirm it's naive
+
+        ack_command = create_ack_command(uuid4())
+
+        with pytest.raises(ValueError) as exc_info:
+            await handler.handle(
+                command=ack_command,
+                now=naive_now,
+                correlation_id=uuid4(),
+            )
+
+        assert "timezone-aware" in str(exc_info.value)
+        assert "naive" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_accepts_timezone_aware_datetime(self) -> None:
+        """Test that handler accepts timezone-aware datetime."""
+        mock_reader = create_mock_projection_reader()
+        mock_reader.get_entity_state.return_value = None
+
+        handler = HandlerNodeRegistrationAcked(mock_reader)
+
+        # Use timezone-aware datetime
+        aware_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+        assert aware_now.tzinfo is not None  # Confirm it's aware
+
+        ack_command = create_ack_command(uuid4())
+
+        # Should not raise - timezone-aware datetime is valid
+        events = await handler.handle(
+            command=ack_command,
+            now=aware_now,
+            correlation_id=uuid4(),
+        )
+
+        # Unknown node - returns empty list (but should not raise)
+        assert events == []

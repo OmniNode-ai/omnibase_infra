@@ -422,3 +422,52 @@ class TestHandlerNodeIntrospectedProjectionQueries:
             domain="registration",
             correlation_id=correlation_id,
         )
+
+
+class TestHandlerNodeIntrospectedTimezoneValidation:
+    """Test that handler validates timezone-awareness of now parameter."""
+
+    @pytest.mark.asyncio
+    async def test_raises_value_error_for_naive_datetime(self) -> None:
+        """Test that handler raises ValueError if now is naive (no tzinfo)."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerNodeIntrospected(mock_reader)
+
+        # Create a naive datetime (no timezone info)
+        naive_now = datetime(2025, 1, 15, 12, 0, 0)  # No tzinfo!
+        assert naive_now.tzinfo is None  # Confirm it's naive
+
+        introspection_event = create_introspection_event(node_id=uuid4())
+
+        with pytest.raises(ValueError) as exc_info:
+            await handler.handle(
+                event=introspection_event,
+                now=naive_now,
+                correlation_id=uuid4(),
+            )
+
+        assert "timezone-aware" in str(exc_info.value)
+        assert "naive" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_accepts_timezone_aware_datetime(self) -> None:
+        """Test that handler accepts timezone-aware datetime."""
+        mock_reader = create_mock_projection_reader()
+        mock_reader.get_entity_state.return_value = None
+
+        handler = HandlerNodeIntrospected(mock_reader)
+
+        # Use timezone-aware datetime
+        aware_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+        assert aware_now.tzinfo is not None  # Confirm it's aware
+
+        introspection_event = create_introspection_event(node_id=uuid4())
+
+        # Should not raise - timezone-aware datetime is valid
+        events = await handler.handle(
+            event=introspection_event,
+            now=aware_now,
+            correlation_id=uuid4(),
+        )
+
+        assert len(events) == 1  # New node triggers registration

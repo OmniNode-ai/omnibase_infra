@@ -36,6 +36,7 @@ Related:
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -95,6 +96,7 @@ def _convert_intents_to_request(
             f"node_version:{event.node_version}",
         ],
         metadata={},
+        timestamp=datetime.now(UTC),
     )
 
 
@@ -443,6 +445,7 @@ class TestA4IdempotentReplay:
             node_version=event.node_version,
             correlation_id=event.correlation_id,
             endpoints=dict(event.endpoints),
+            timestamp=datetime.now(UTC),
         )
 
         # Before registration

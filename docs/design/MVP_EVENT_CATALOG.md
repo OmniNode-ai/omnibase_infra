@@ -1,7 +1,7 @@
 # MVP Event Catalog
 
 > **Status**: Living Document
-> **Document Version**: 1.0.1
+> **Document Version**: 1.0.2
 > **Phase**: 9 (Event Bus Integration)
 > **Ticket**: OMN-57
 > **Last Updated**: 2025-12-26
@@ -131,7 +131,7 @@ class ModelEventHeaders(BaseModel):
     # Correlation and Identity
     correlation_id: UUID = Field(default_factory=uuid4)
     message_id: UUID = Field(default_factory=uuid4)
-    timestamp: datetime                      # Required: must be explicitly injected
+    timestamp: datetime                      # Required: must be explicitly injected (timezone-aware)
 
     # Routing
     source: str                              # Required: producing service
@@ -149,10 +149,26 @@ class ModelEventHeaders(BaseModel):
 
     # Priority and Retry
     priority: Literal["low", "normal", "high", "critical"] = "normal"
-    retry_count: int = 0
-    max_retries: int = 3
+    retry_count: int = 0                     # MESSAGE-LEVEL retry (application-level)
+    max_retries: int = 3                     # MESSAGE-LEVEL max retries
     ttl_seconds: int | None = None
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 ```
+
+**Example** (with time injection):
+```python
+from datetime import UTC, datetime
+
+headers = ModelEventHeaders(
+    source="order-service",
+    event_type="order.created",
+    routing_key="orders.us-east",
+    timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),  # Must be timezone-aware
+)
+```
+
+**Time Injection Rule**: The `timestamp` field has no default value and must be explicitly provided at construction time. This ensures deterministic behavior for replay and testing. Always use timezone-aware datetimes (e.g., `datetime.now(UTC)` or `datetime(..., tzinfo=UTC)`).
 
 ### Required vs Optional Headers
 
@@ -160,7 +176,7 @@ class ModelEventHeaders(BaseModel):
 |--------|----------|-------------|
 | `source` | Yes | Service that produced the message |
 | `event_type` | Yes | Type identifier for the event |
-| `timestamp` | Yes | Message creation timestamp (must be explicitly injected) |
+| `timestamp` | Yes | Message creation timestamp (must be explicitly injected, timezone-aware) |
 | `correlation_id` | Auto-generated | UUID for correlating related messages |
 | `message_id` | Auto-generated | Unique identifier for this message |
 | `schema_version` | Default "1.0.0" | Version of the message schema |
@@ -259,10 +275,28 @@ class ModelNodeIntrospectionEvent(BaseModel):
     epoch: int | None = None                 # Registration epoch for ordering
 
     # Timing
-    timestamp: datetime                      # Event timestamp (injected)
+    timestamp: datetime                      # Event timestamp (injected, timezone-aware)
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 ```
 
-**Example**:
+**Example** (Python):
+```python
+from uuid import uuid4
+from datetime import datetime, timezone
+
+event = ModelNodeIntrospectionEvent(
+    node_id=uuid4(),
+    node_type="effect",
+    node_version="1.2.3",
+    capabilities={"postgres": True, "read": True, "write": True},
+    endpoints={"health": "http://localhost:8080/health"},
+    correlation_id=uuid4(),
+    timestamp=datetime(2025, 1, 15, 10, 30, 0, tzinfo=timezone.utc),
+)
+```
+
+**Example** (JSON serialized):
 ```json
 {
   "node_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -271,7 +305,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
   "capabilities": {"postgres": true, "read": true, "write": true},
   "endpoints": {"health": "http://localhost:8080/health"},
   "correlation_id": "660e8400-e29b-41d4-a716-446655440001",
-  "timestamp": "2025-01-15T10:30:00Z"
+  "timestamp": "2025-01-15T10:30:00+00:00"
 }
 ```
 
@@ -291,7 +325,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
 class ModelNodeHeartbeatEvent(BaseModel):
     # Identity
     node_id: UUID                            # Node identifier
-    node_type: str                           # ONEX node type (relaxed validation)
+    node_type: EnumNodeKind                  # ONEX node type (from omnibase_core.enums)
     node_version: str = "1.0.0"
 
     # Health Metrics
@@ -302,10 +336,30 @@ class ModelNodeHeartbeatEvent(BaseModel):
 
     # Metadata
     correlation_id: UUID | None = None
-    timestamp: datetime                      # Event timestamp (injected)
+    timestamp: datetime                      # Event timestamp (injected, timezone-aware)
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 ```
 
-**Example**:
+**Example** (Python):
+```python
+from uuid import uuid4
+from datetime import datetime, timezone
+from omnibase_core.enums import EnumNodeKind
+
+event = ModelNodeHeartbeatEvent(
+    node_id=uuid4(),
+    node_type=EnumNodeKind.EFFECT,
+    node_version="1.2.3",
+    uptime_seconds=3600.5,
+    active_operations_count=5,
+    memory_usage_mb=256.0,
+    cpu_usage_percent=15.5,
+    timestamp=datetime(2025, 1, 15, 11, 30, 0, tzinfo=timezone.utc),
+)
+```
+
+**Example** (JSON serialized):
 ```json
 {
   "node_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -315,7 +369,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
   "active_operations_count": 5,
   "memory_usage_mb": 256.0,
   "cpu_usage_percent": 15.5,
-  "timestamp": "2025-01-15T11:30:00Z"
+  "timestamp": "2025-01-15T11:30:00+00:00"
 }
 ```
 
@@ -849,5 +903,6 @@ from omnibase_infra.enums import (
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.0.2 | 2025-12-26 | Fixed ModelNodeHeartbeatEvent to show EnumNodeKind (not str); added ModelEventHeaders example with time-injection; updated timestamps to show timezone-aware format |
 | 1.0.1 | 2025-12-25 | Clarified distinct registration vs discovery ModelNodeIntrospectionEvent schemas; completed metadata |
 | 1.0.0 | 2025-12-24 | Initial MVP catalog |

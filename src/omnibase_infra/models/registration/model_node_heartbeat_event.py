@@ -8,7 +8,7 @@ in the ONEX 2-way registration pattern.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from omnibase_core.enums import (
@@ -38,8 +38,8 @@ class ModelNodeHeartbeatEvent(BaseModel):
         timestamp: Event timestamp.
 
     Example:
+        >>> from datetime import UTC, datetime
         >>> from uuid import uuid4
-        >>> from datetime import datetime, timezone
         >>> from omnibase_core.enums import EnumNodeKind
         >>> event = ModelNodeHeartbeatEvent(
         ...     node_id=uuid4(),
@@ -49,7 +49,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
         ...     active_operations_count=5,
         ...     memory_usage_mb=256.0,
         ...     cpu_usage_percent=15.5,
-        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
+        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
         ... )
     """
 
@@ -97,6 +97,27 @@ class ModelNodeHeartbeatEvent(BaseModel):
     )
     # Timestamps - MUST be explicitly injected (no default_factory for testability)
     timestamp: datetime = Field(..., description="Event timestamp")
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
+        """Validate that timestamp is timezone-aware.
+
+        Args:
+            v: The timestamp value to validate.
+
+        Returns:
+            The validated timestamp.
+
+        Raises:
+            ValueError: If timestamp is naive (no timezone info).
+        """
+        if v.tzinfo is None:
+            raise ValueError(
+                "timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            )
+        return v
 
 
 __all__ = ["ModelNodeHeartbeatEvent"]

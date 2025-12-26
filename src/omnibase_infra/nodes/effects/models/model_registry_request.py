@@ -24,11 +24,11 @@ Related:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelRegistryRequest(BaseModel):
@@ -55,6 +55,7 @@ class ModelRegistryRequest(BaseModel):
         timestamp: When this request was created.
 
     Example:
+        >>> from datetime import UTC, datetime
         >>> from uuid import uuid4
         >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
         >>> request = ModelRegistryRequest(
@@ -64,6 +65,7 @@ class ModelRegistryRequest(BaseModel):
         ...     correlation_id=uuid4(),
         ...     service_name="onex-effect",
         ...     endpoints={"health": "http://localhost:8080/health"},
+        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
         ... )
         >>> request.node_type
         <EnumNodeKind.EFFECT: 'effect'>
@@ -112,6 +114,27 @@ class ModelRegistryRequest(BaseModel):
         ...,
         description="When this request was created (must be explicitly provided)",
     )
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
+        """Validate that timestamp is timezone-aware.
+
+        Args:
+            v: The timestamp value to validate.
+
+        Returns:
+            The validated timestamp.
+
+        Raises:
+            ValueError: If timestamp is naive (no timezone info).
+        """
+        if v.tzinfo is None:
+            raise ValueError(
+                "timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            )
+        return v
 
 
 __all__ = ["ModelRegistryRequest"]
