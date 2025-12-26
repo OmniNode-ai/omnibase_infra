@@ -178,6 +178,7 @@ from omnibase_core.enums import EnumNodeKind
 
 from omnibase_infra.models.discovery import (
     ModelIntrospectionConfig,
+    ModelIntrospectionTaskConfig,
     ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
@@ -1911,6 +1912,53 @@ class MixinNodeIntrospection:
                 f"Started registry listener task for {self._introspection_node_id}",
                 extra={"node_id": self._introspection_node_id},
             )
+
+    async def start_introspection_tasks_from_config(
+        self,
+        config: ModelIntrospectionTaskConfig,
+    ) -> None:
+        """Start background introspection tasks from a configuration model.
+
+        This method provides an alternative to ``start_introspection_tasks()``
+        using a configuration model instead of individual parameters. This
+        reduces union types in calling code and follows ONEX patterns.
+
+        Args:
+            config: Configuration model containing task settings.
+                See ModelIntrospectionTaskConfig for available options.
+
+        Raises:
+            RuntimeError: If initialize_introspection() was not called.
+
+        Example:
+            ```python
+            from omnibase_infra.models.discovery import ModelIntrospectionTaskConfig
+
+            class MyNode(MixinNodeIntrospection):
+                async def startup(self):
+                    config = ModelIntrospectionTaskConfig(
+                        enable_heartbeat=True,
+                        heartbeat_interval_seconds=15.0,
+                        enable_registry_listener=True,
+                    )
+                    await self.start_introspection_tasks_from_config(config)
+
+            # Using defaults
+            class SimpleNode(MixinNodeIntrospection):
+                async def startup(self):
+                    config = ModelIntrospectionTaskConfig()
+                    await self.start_introspection_tasks_from_config(config)
+            ```
+
+        See Also:
+            start_introspection_tasks: Original method with parameters.
+            ModelIntrospectionTaskConfig: Configuration model with all options.
+        """
+        await self.start_introspection_tasks(
+            enable_heartbeat=config.enable_heartbeat,
+            heartbeat_interval_seconds=config.heartbeat_interval_seconds,
+            enable_registry_listener=config.enable_registry_listener,
+        )
 
     async def stop_introspection_tasks(self) -> None:
         """Stop all background introspection tasks.

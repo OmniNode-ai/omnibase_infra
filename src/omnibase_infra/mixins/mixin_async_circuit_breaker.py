@@ -104,6 +104,7 @@ from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
+from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +277,50 @@ class MixinAsyncCircuitBreaker:
                 "reset_timeout": reset_timeout,
                 "transport_type": transport_type.value,
             },
+        )
+
+    def _init_circuit_breaker_from_config(
+        self,
+        config: ModelCircuitBreakerConfig,
+    ) -> None:
+        """Initialize circuit breaker from a configuration model.
+
+        This method provides an alternative initialization path using a
+        configuration model instead of individual parameters. This reduces
+        union types in calling code and follows ONEX patterns.
+
+        Args:
+            config: Configuration model containing all circuit breaker settings.
+                See ModelCircuitBreakerConfig for available options.
+
+        Raises:
+            ValueError: If config contains invalid values (validated by Pydantic).
+
+        Example:
+            ```python
+            from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+            from omnibase_infra.enums import EnumInfraTransportType
+
+            class KafkaEventBus(MixinAsyncCircuitBreaker):
+                def __init__(self, environment: str):
+                    config = ModelCircuitBreakerConfig(
+                        threshold=5,
+                        reset_timeout_seconds=60.0,
+                        service_name=f"kafka.{environment}",
+                        transport_type=EnumInfraTransportType.KAFKA,
+                    )
+                    self._init_circuit_breaker_from_config(config)
+            ```
+
+        See Also:
+            _init_circuit_breaker: Original initialization method with parameters.
+            ModelCircuitBreakerConfig: Configuration model with all options.
+        """
+        self._init_circuit_breaker(
+            threshold=config.threshold,
+            reset_timeout=config.reset_timeout_seconds,
+            service_name=config.service_name,
+            transport_type=config.transport_type,
         )
 
     async def _check_circuit_breaker(
@@ -547,4 +592,4 @@ class MixinAsyncCircuitBreaker:
         self._circuit_breaker_open_until = 0.0
 
 
-__all__ = ["MixinAsyncCircuitBreaker", "CircuitState"]
+__all__ = ["MixinAsyncCircuitBreaker", "CircuitState", "ModelCircuitBreakerConfig"]

@@ -4,7 +4,7 @@
 """Unit tests for HttpRestHandler.
 
 Comprehensive test suite covering initialization, GET/POST operations,
-error handling, health checks, describe, and lifecycle management.
+error handling, describe, and lifecycle management.
 """
 
 from __future__ import annotations
@@ -814,68 +814,6 @@ class TestHttpRestHandlerErrorHandling:
         await handler.shutdown()
 
 
-class TestHttpRestHandlerHealthCheck:
-    """Test suite for health check operations."""
-
-    @pytest.fixture
-    def handler(self) -> HttpRestHandler:
-        """Create HttpRestHandler fixture."""
-        return HttpRestHandler()
-
-    @pytest.mark.asyncio
-    async def test_health_check_structure(self, handler: HttpRestHandler) -> None:
-        """Test health_check returns correct structure."""
-        await handler.initialize({})
-
-        health = await handler.health_check()
-
-        assert "healthy" in health
-        assert "initialized" in health
-        assert "handler_type" in health
-        assert "timeout_seconds" in health
-
-        await handler.shutdown()
-
-    @pytest.mark.asyncio
-    async def test_health_check_healthy_when_initialized(
-        self, handler: HttpRestHandler
-    ) -> None:
-        """Test health_check shows healthy=True when initialized."""
-        await handler.initialize({})
-
-        health = await handler.health_check()
-
-        assert health["healthy"] is True
-        assert health["initialized"] is True
-        assert health["handler_type"] == "http"
-        assert health["timeout_seconds"] == 30.0
-
-        await handler.shutdown()
-
-    @pytest.mark.asyncio
-    async def test_health_check_unhealthy_when_not_initialized(
-        self, handler: HttpRestHandler
-    ) -> None:
-        """Test health_check shows healthy=False when not initialized."""
-        health = await handler.health_check()
-
-        assert health["healthy"] is False
-        assert health["initialized"] is False
-
-    @pytest.mark.asyncio
-    async def test_health_check_unhealthy_after_shutdown(
-        self, handler: HttpRestHandler
-    ) -> None:
-        """Test health_check shows healthy=False after shutdown."""
-        await handler.initialize({})
-        await handler.shutdown()
-
-        health = await handler.health_check()
-
-        assert health["healthy"] is False
-        assert health["initialized"] is False
-
-
 class TestHttpRestHandlerDescribe:
     """Test suite for describe operations."""
 
@@ -1555,22 +1493,6 @@ class TestHttpRestHandlerSizeLimits:
 
         await handler.shutdown()
 
-    @pytest.mark.asyncio
-    async def test_size_limits_in_health_check(self, handler: HttpRestHandler) -> None:
-        """Test that size limits are included in health check response."""
-        config: dict[str, object] = {
-            "max_request_size": 5000,
-            "max_response_size": 10000,
-        }
-        await handler.initialize(config)
-
-        health = await handler.health_check()
-
-        assert health["max_request_size"] == 5000
-        assert health["max_response_size"] == 10000
-
-        await handler.shutdown()
-
     def test_size_limits_in_describe(self, handler: HttpRestHandler) -> None:
         """Test that size limits are included in describe response."""
         description = handler.describe()
@@ -2172,7 +2094,6 @@ __all__: list[str] = [
     "TestHttpRestHandlerGetOperations",
     "TestHttpRestHandlerPostOperations",
     "TestHttpRestHandlerErrorHandling",
-    "TestHttpRestHandlerHealthCheck",
     "TestHttpRestHandlerDescribe",
     "TestHttpRestHandlerLifecycle",
     "TestHttpRestHandlerCorrelationId",

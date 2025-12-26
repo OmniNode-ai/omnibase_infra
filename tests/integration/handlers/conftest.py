@@ -39,15 +39,15 @@ Example CI/CD Behavior::
 
     # In CI without infrastructure access:
     $ pytest tests/integration/handlers/ -v
-    tests/.../test_db_handler_integration.py::TestDbHandlerConnection::test_db_health_check SKIPPED
-    tests/.../test_vault_handler_integration.py::TestVaultHandlerConnection::test_vault_health_check SKIPPED
-    tests/.../test_consul_handler_integration.py::TestConsulHandlerHealthCheck::test_consul_health_check SKIPPED
+    tests/.../test_db_handler_integration.py::TestDbHandlerConnection::test_db_describe SKIPPED
+    tests/.../test_vault_handler_integration.py::TestVaultHandlerConnection::test_vault_describe SKIPPED
+    tests/.../test_consul_handler_integration.py::TestConsulHandlerConnection::test_consul_describe SKIPPED
     tests/.../test_http_handler_integration.py::TestHttpRestHandlerIntegration::test_simple_get_request PASSED
 
     # With infrastructure access (using REMOTE_INFRA_HOST server):
     $ export POSTGRES_HOST=$REMOTE_INFRA_HOST POSTGRES_PASSWORD=xxx ...
     $ pytest tests/integration/handlers/ -v
-    tests/.../test_db_handler_integration.py::TestDbHandlerConnection::test_db_health_check PASSED
+    tests/.../test_db_handler_integration.py::TestDbHandlerConnection::test_db_describe PASSED
 
 HTTP Handlers
 =============

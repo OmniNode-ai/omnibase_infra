@@ -97,6 +97,7 @@ See Also:
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
+from omnibase_infra.models.dispatch.model_dispatch_error import ModelDispatchError
 from omnibase_infra.models.dispatch.model_dispatch_log_context import (
     ModelDispatchLogContext,
 )
@@ -119,6 +120,7 @@ from omnibase_infra.models.dispatch.model_topic_parser import (
     clear_topic_parse_cache,
     get_topic_parse_cache_info,
 )
+from omnibase_infra.models.dispatch.model_tracing_context import ModelTracingContext
 
 __all__ = [
     # Enums
@@ -126,6 +128,7 @@ __all__ = [
     "EnumTopicStandard",
     # Models
     "ModelDispatchContext",
+    "ModelDispatchError",
     "ModelDispatchMetadata",
     "ModelDispatchMetrics",
     "ModelDispatchOutputs",
@@ -137,6 +140,7 @@ __all__ = [
     "ModelDispatchOutcome",
     "ModelParsedTopic",
     "ModelTopicParser",
+    "ModelTracingContext",
     # Cache utilities
     "CacheInfo",
     "get_topic_parse_cache_info",
