@@ -6,7 +6,7 @@ ProtocolEventHeaders from omnibase_spi for use with event bus implementations.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -47,10 +47,12 @@ class ModelEventHeaders(BaseModel):
 
     Example:
         ```python
+        from datetime import UTC, datetime
         headers = ModelEventHeaders(
             source="order-service",
             event_type="order.created",
             routing_key="orders.us-east",
+            timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
         )
         is_valid = await headers.validate_headers()
         ```

@@ -695,7 +695,7 @@ architecture_exemptions:
     reason: >
       Domain-grouped protocols for registration orchestrator workflow. ProtocolReducer and ProtocolEffect define the complete interface for the reducer-effect pattern in node registration. Per CLAUDE.md convention.
 
-      Architectural documentation included in module: - Thread safety requirements (lines 13-24): Implementations MUST be thread-safe - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors - Protocol contracts with examples in docstrings
+      Architectural documentation included in module: - Concurrency safety requirements (lines 13-24): Implementations MUST be coroutine-safe - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors - Protocol contracts with examples in docstrings
 
       Full architectural documentation: - Node architecture: docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md - Protocol design: docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md - Node README: src/omnibase_infra/nodes/node_registration_orchestrator/README.md
 

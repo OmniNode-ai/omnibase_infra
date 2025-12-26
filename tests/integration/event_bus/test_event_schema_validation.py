@@ -43,8 +43,6 @@ pytestmark = [
 @pytest.fixture
 def sample_headers() -> dict[str, object]:
     """Create sample valid headers for testing."""
-    from omnibase_infra.event_bus.models import ModelEventHeaders
-
     return {
         "source": "test-service",
         "event_type": "test.event.created",

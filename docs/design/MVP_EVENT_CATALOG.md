@@ -131,7 +131,7 @@ class ModelEventHeaders(BaseModel):
     # Correlation and Identity
     correlation_id: UUID = Field(default_factory=uuid4)
     message_id: UUID = Field(default_factory=uuid4)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    timestamp: datetime                      # Required: must be explicitly injected
 
     # Routing
     source: str                              # Required: producing service
@@ -160,9 +160,9 @@ class ModelEventHeaders(BaseModel):
 |--------|----------|-------------|
 | `source` | Yes | Service that produced the message |
 | `event_type` | Yes | Type identifier for the event |
+| `timestamp` | Yes | Message creation timestamp (must be explicitly injected) |
 | `correlation_id` | Auto-generated | UUID for correlating related messages |
 | `message_id` | Auto-generated | Unique identifier for this message |
-| `timestamp` | Auto-generated | Message creation timestamp |
 | `schema_version` | Default "1.0.0" | Version of the message schema |
 
 **Source File**: `src/omnibase_infra/event_bus/models/model_event_headers.py`

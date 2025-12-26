@@ -477,9 +477,9 @@ payload: ModelPostgresIntentPayload
 | `{env}.{namespace}.onex.evt.node-became-active.v1` | `NodeBecameActive` | Node activated |
 | `{env}.{namespace}.onex.evt.node-liveness-expired.v1` | `NodeLivenessExpired` | Liveness expired |
 
-## Thread Safety
+## Coroutine Safety
 
-This orchestrator is **NOT thread-safe**. Each instance should handle one workflow at a time. For concurrent workflows, create multiple instances.
+This orchestrator is **NOT coroutine-safe** for concurrent workflow invocations. Each instance should handle one workflow at a time. For concurrent workflows, create multiple instances.
 
 ## Limitations & Implementation Status
 

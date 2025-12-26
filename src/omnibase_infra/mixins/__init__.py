@@ -25,14 +25,12 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     PerformanceMetricsCacheDict,
 )
 from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
-from omnibase_infra.models.discovery import ModelIntrospectionConfig
 
 __all__ = [
     "CircuitState",
     "MixinAsyncCircuitBreaker",
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
-    "ModelIntrospectionConfig",
     "PerformanceMetricsCacheDict",
     "ProtocolEventBusLike",
 ]

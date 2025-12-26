@@ -99,7 +99,10 @@ class HandlerRuntimeTick:
         ...     now=tick_time,
         ...     correlation_id=runtime_tick.correlation_id,
         ... )
-        >>> # events may contain timeout events
+        >>> # Output events use injected `now` for emitted_at:
+        >>> # ModelNodeRegistrationAckTimedOut(emitted_at=tick_time, ...)
+        >>> # ModelNodeLivenessExpired(emitted_at=tick_time, last_heartbeat_at=<datetime|None>, ...)
+        >>> # Note: last_heartbeat_at is None if no heartbeats were ever received
     """
 
     def __init__(self, projection_reader: ProjectionReaderRegistration) -> None:

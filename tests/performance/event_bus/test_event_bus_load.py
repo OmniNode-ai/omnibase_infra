@@ -32,7 +32,6 @@ import gc
 import time
 from collections.abc import Awaitable, Callable
 from statistics import mean
-from uuid import uuid4
 
 import pytest
 

@@ -262,7 +262,7 @@ consumed_events:
 #   - Receive `now` parameter for deterministic time-based decisions
 #   - Query projection state via ProjectionReaderRegistration (read-only)
 #   - Return a list of event models (never intents or projections)
-#   - Are thread-safe for concurrent calls with different event instances
+#   - Are coroutine-safe for concurrent async calls with different event instances
 handler_routing:
   # Handler routing is keyed by the model class name of the event payload.
   # The orchestrator extracts the payload from ModelEventEnvelope and routes

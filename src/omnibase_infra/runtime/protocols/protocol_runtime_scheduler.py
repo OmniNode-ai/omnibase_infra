@@ -46,7 +46,9 @@ Example:
                 self._scheduler_id = "test-scheduler-001"
                 self._running = False
                 self._sequence = 0
+                self._total_ticks_emitted = 0
                 self._interval = interval_seconds
+                self._state_lock = asyncio.Lock()
 
             @property
             def scheduler_id(self) -> str:
@@ -69,6 +71,7 @@ Example:
 
             async def emit_tick(self, now: datetime | None = None) -> None:
                 self._sequence += 1
+                self._total_ticks_emitted += 1
                 tick_time = now or datetime.now(timezone.utc)
                 # Emit event to Kafka...
 
@@ -79,7 +82,7 @@ Example:
                     return ModelRuntimeSchedulerMetrics(
                         scheduler_id=self._scheduler_id,
                         status=EnumSchedulerStatus.RUNNING if self._running else EnumSchedulerStatus.STOPPED,
-                        ticks_emitted=self._sequence,
+                        ticks_emitted=self._total_ticks_emitted,
                     )
 
         # Protocol conformance check via duck typing (per ONEX conventions)
