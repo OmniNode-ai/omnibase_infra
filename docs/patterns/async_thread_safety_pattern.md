@@ -84,6 +84,17 @@ class OperationTracker:
 ### Pattern: State Transition Locking
 
 ```python
+import asyncio
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+# Type alias for async callbacks with no parameters
+# Callbacks that perform I/O or state transitions typically have this signature
+AsyncCallback = Callable[[], Awaitable[None]]
+
+
 @dataclass
 class StateManager:
     """Manages state with atomic transitions.
@@ -95,12 +106,27 @@ class StateManager:
     Lock Scope:
         - PROTECTED: is_active, state_data modifications
         - NOT PROTECTED: Transition callbacks (may perform I/O)
+
+    Callback Type:
+        transition_callbacks expects functions with signature:
+            async def callback() -> None
+
+        Callbacks are awaited sequentially after state transition completes.
     """
 
     is_active: bool = False
-    state_data: dict = field(default_factory=dict)
-    transition_callbacks: list = field(default_factory=list)
+    state_data: dict[str, Any] = field(default_factory=dict)
+    transition_callbacks: list[AsyncCallback] = field(default_factory=list)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    def register_transition_callback(self, callback: AsyncCallback) -> None:
+        """Register a callback to be invoked after state transitions.
+
+        Args:
+            callback: Async function with signature `async def fn() -> None`.
+                      Will be awaited after transition completes.
+        """
+        self.transition_callbacks.append(callback)
 
     async def transition_to_active(self) -> None:
         """Transition to active state.
@@ -117,6 +143,24 @@ class StateManager:
         # Callbacks execute OUTSIDE lock (may perform I/O, acquire other locks)
         for callback in self.transition_callbacks:
             await callback()
+
+
+# Example callback implementations
+async def log_activation() -> None:
+    """Example callback - logs activation event."""
+    print("State activated")
+
+
+async def notify_subscribers() -> None:
+    """Example callback - notifies external subscribers."""
+    await asyncio.sleep(0.01)  # Simulate I/O
+
+
+# Usage
+manager = StateManager()
+manager.register_transition_callback(log_activation)
+manager.register_transition_callback(notify_subscribers)
+await manager.transition_to_active()
 ```
 
 ## Counter Accuracy Pattern
@@ -149,34 +193,54 @@ assert executor.execution_count + executor.failed_count == 3
 ### Test Utility
 
 ```python
+import asyncio
+from collections.abc import Awaitable, Coroutine
+from typing import TypeVar
+
+# TypeVar for generic result type
+T = TypeVar("T")
+
+
 async def gather_with_error_collection(
-    coroutines: list,
+    coroutines: list[Coroutine[None, None, T]],
     *,
     return_exceptions: bool = True,
-) -> tuple[list[object], list[Exception]]:
+) -> tuple[list[T], list[Exception]]:
     """Execute coroutines concurrently and separate successes from failures.
 
     Simplifies the common pattern of running multiple async operations
     and classifying their outcomes.
 
+    Type Parameters:
+        T: The return type of the coroutines. All coroutines should return
+           the same type for type-safe result handling.
+
     Args:
         coroutines: List of coroutines to execute concurrently.
+                    Each coroutine should have signature:
+                    `async def fn(...) -> T`
         return_exceptions: If True, exceptions are captured instead of raised.
 
     Returns:
         Tuple of (successful_results, exceptions).
+        - successful_results: List of T values from successful operations
+        - exceptions: List of Exception instances from failed operations
 
     Example:
+        >>> # Type-safe usage with bool-returning operations
+        >>> async def operation(i: int) -> bool:
+        ...     return i % 2 == 0
+        ...
         >>> successes, failures = await gather_with_error_collection(
         ...     [operation(i) for i in range(10)]
         ... )
-        >>> # Both lists are complete - safe to check counters now
+        >>> # successes is list[bool], failures is list[Exception]
         >>> assert len(successes) + len(failures) == 10
     """
     results = await asyncio.gather(*coroutines, return_exceptions=return_exceptions)
 
-    successes = [r for r in results if not isinstance(r, Exception)]
-    failures = [r for r in results if isinstance(r, Exception)]
+    successes: list[T] = [r for r in results if not isinstance(r, Exception)]
+    failures: list[Exception] = [r for r in results if isinstance(r, Exception)]
 
     return successes, failures
 ```
@@ -194,28 +258,105 @@ async def gather_with_error_collection(
 ### Pattern: Capture-Then-Execute
 
 ```python
-async def simulate_recovery_with_callbacks(
-    self,
-    duration_ms: int = 100,
-) -> None:
-    """Recover from failure state with callbacks.
+import asyncio
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 
-    Thread Safety:
-        Acquires lock for state transition only. Callbacks execute
-        outside lock to allow concurrent I/O operations.
+# Type aliases for callback signatures
+# Use descriptive names to clarify the callback's purpose
+
+# Simple async callback with no parameters
+AsyncCallback = Callable[[], Awaitable[None]]
+
+# Callback that receives recovery context (e.g., recovery duration, timestamp)
+RecoveryCallback = Callable[[float], Awaitable[None]]
+
+
+@dataclass
+class RecoveryManager:
+    """Manages recovery with typed callbacks.
+
+    Callback Types:
+        recovery_callbacks: list[AsyncCallback]
+            Simple callbacks invoked after recovery completes.
+            Signature: async def callback() -> None
+
+        recovery_with_context_callbacks: list[RecoveryCallback]
+            Callbacks that receive the recovery timestamp.
+            Signature: async def callback(recovered_at: float) -> None
     """
-    await asyncio.sleep(duration_ms / 1000.0)
 
-    # Step 1: Acquire lock and update state atomically
-    async with self._lock:
-        self.is_recovering = False
-        self.recovered_at = time.time()
-        # Capture callbacks to execute (could also copy list if mutable)
-        callbacks_to_run = self.recovery_callbacks
+    is_recovering: bool = False
+    recovered_at: float = 0.0
+    recovery_callbacks: list[AsyncCallback] = field(default_factory=list)
+    recovery_with_context_callbacks: list[RecoveryCallback] = field(
+        default_factory=list
+    )
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-    # Step 2: Execute callbacks OUTSIDE lock
-    for callback in callbacks_to_run:
-        await callback()  # May perform I/O, acquire other locks safely
+    def register_recovery_callback(self, callback: AsyncCallback) -> None:
+        """Register a simple recovery callback.
+
+        Args:
+            callback: Async function with signature `async def fn() -> None`.
+        """
+        self.recovery_callbacks.append(callback)
+
+    def register_recovery_with_context(self, callback: RecoveryCallback) -> None:
+        """Register a callback that receives recovery context.
+
+        Args:
+            callback: Async function with signature
+                      `async def fn(recovered_at: float) -> None`.
+        """
+        self.recovery_with_context_callbacks.append(callback)
+
+    async def simulate_recovery_with_callbacks(
+        self,
+        duration_ms: int = 100,
+    ) -> None:
+        """Recover from failure state with callbacks.
+
+        Thread Safety:
+            Acquires lock for state transition only. Callbacks execute
+            outside lock to allow concurrent I/O operations.
+        """
+        await asyncio.sleep(duration_ms / 1000.0)
+
+        # Step 1: Acquire lock and update state atomically
+        async with self._lock:
+            self.is_recovering = False
+            self.recovered_at = time.time()
+            # Capture callbacks to execute (could also copy list if mutable)
+            simple_callbacks = self.recovery_callbacks
+            context_callbacks = self.recovery_with_context_callbacks
+            recovery_time = self.recovered_at
+
+        # Step 2: Execute callbacks OUTSIDE lock
+        for callback in simple_callbacks:
+            await callback()  # May perform I/O, acquire other locks safely
+
+        for callback in context_callbacks:
+            await callback(recovery_time)  # Pass recovery context
+
+
+# Example callback implementations
+async def log_recovery() -> None:
+    """Simple callback - logs recovery completion."""
+    print("System recovered")
+
+
+async def update_metrics(recovered_at: float) -> None:
+    """Context callback - updates metrics with recovery timestamp."""
+    print(f"Recovery completed at {recovered_at}")
+
+
+# Usage
+manager = RecoveryManager()
+manager.register_recovery_callback(log_recovery)
+manager.register_recovery_with_context(update_metrics)
+await manager.simulate_recovery_with_callbacks(duration_ms=50)
 ```
 
 ### Anti-Pattern: Lock Held During Callbacks
@@ -227,6 +368,313 @@ async with self._lock:
     for callback in self.recovery_callbacks:
         await callback()  # If this acquires _lock -> DEADLOCK
                           # If this is slow -> all waiters blocked
+```
+
+## Callback Type Patterns Reference
+
+This section provides a comprehensive reference for callback type hints used throughout ONEX infrastructure.
+
+### Common Callback Type Aliases
+
+```python
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
+from uuid import UUID
+
+# ============================================================
+# SIMPLE CALLBACKS (no parameters)
+# ============================================================
+
+# Async callback with no parameters, no return value
+# Use for: notifications, cleanup, logging
+AsyncCallback = Callable[[], Awaitable[None]]
+
+# Sync callback with no parameters, no return value
+# Use for: synchronous cleanup, simple state updates
+SyncCallback = Callable[[], None]
+
+
+# ============================================================
+# CALLBACKS WITH CONTEXT (single parameter)
+# ============================================================
+
+# Callback that receives a timestamp (float)
+# Use for: metrics, timing, recovery tracking
+TimestampCallback = Callable[[float], Awaitable[None]]
+
+# Callback that receives a correlation ID
+# Use for: distributed tracing, request tracking
+CorrelationCallback = Callable[[UUID], Awaitable[None]]
+
+# Callback that receives an error
+# Use for: error handlers, failure notifications
+ErrorCallback = Callable[[Exception], Awaitable[None]]
+
+# Callback that receives a generic message/payload
+MessageCallback = Callable[[str], Awaitable[None]]
+
+
+# ============================================================
+# CALLBACKS WITH MULTIPLE PARAMETERS
+# ============================================================
+
+# Callback for operation completion (operation_id, success, duration)
+OperationCompleteCallback = Callable[[UUID, bool, float], Awaitable[None]]
+
+# Callback for state transitions (old_state, new_state)
+StateTransitionCallback = Callable[[str, str], Awaitable[None]]
+
+
+# ============================================================
+# CALLBACKS THAT RETURN VALUES
+# ============================================================
+
+# Validator callback - returns True if valid
+ValidatorCallback = Callable[[], Awaitable[bool]]
+
+# Transform callback - receives input, returns transformed output
+T = TypeVar("T")
+U = TypeVar("U")
+TransformCallback = Callable[[T], Awaitable[U]]
+
+# Decision callback - returns action to take
+DecisionCallback = Callable[[], Awaitable[str]]
+```
+
+### Callback Registration Pattern
+
+```python
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from uuid import UUID
+
+# Define descriptive type aliases for your domain
+OnConnectCallback = Callable[[], Awaitable[None]]
+OnDisconnectCallback = Callable[[str], Awaitable[None]]  # receives reason
+OnErrorCallback = Callable[[Exception, UUID], Awaitable[None]]  # error + correlation
+
+
+@dataclass
+class ConnectionManager:
+    """Connection manager with typed callback registration.
+
+    Callback Types:
+        on_connect: Called when connection established.
+            Signature: async def callback() -> None
+
+        on_disconnect: Called when connection lost.
+            Signature: async def callback(reason: str) -> None
+
+        on_error: Called when connection error occurs.
+            Signature: async def callback(error: Exception, correlation_id: UUID) -> None
+    """
+
+    on_connect_callbacks: list[OnConnectCallback] = field(default_factory=list)
+    on_disconnect_callbacks: list[OnDisconnectCallback] = field(default_factory=list)
+    on_error_callbacks: list[OnErrorCallback] = field(default_factory=list)
+
+    def on_connect(self, callback: OnConnectCallback) -> OnConnectCallback:
+        """Register a connection callback. Can be used as decorator.
+
+        Example:
+            @manager.on_connect
+            async def handle_connect() -> None:
+                print("Connected!")
+        """
+        self.on_connect_callbacks.append(callback)
+        return callback  # Return for decorator pattern
+
+    def on_disconnect(self, callback: OnDisconnectCallback) -> OnDisconnectCallback:
+        """Register a disconnection callback. Can be used as decorator.
+
+        Example:
+            @manager.on_disconnect
+            async def handle_disconnect(reason: str) -> None:
+                print(f"Disconnected: {reason}")
+        """
+        self.on_disconnect_callbacks.append(callback)
+        return callback
+
+    def on_error(self, callback: OnErrorCallback) -> OnErrorCallback:
+        """Register an error callback. Can be used as decorator.
+
+        Example:
+            @manager.on_error
+            async def handle_error(error: Exception, correlation_id: UUID) -> None:
+                logger.error(f"Error {correlation_id}: {error}")
+        """
+        self.on_error_callbacks.append(callback)
+        return callback
+
+    async def _notify_connect(self) -> None:
+        """Notify all connect callbacks (called outside lock)."""
+        for callback in self.on_connect_callbacks:
+            await callback()
+
+    async def _notify_disconnect(self, reason: str) -> None:
+        """Notify all disconnect callbacks (called outside lock)."""
+        for callback in self.on_disconnect_callbacks:
+            await callback(reason)
+
+    async def _notify_error(self, error: Exception, correlation_id: UUID) -> None:
+        """Notify all error callbacks (called outside lock)."""
+        for callback in self.on_error_callbacks:
+            await callback(error, correlation_id)
+```
+
+### Event-Based Callback Pattern
+
+```python
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel
+
+
+class EventType(str, Enum):
+    """Event types for callback dispatch."""
+    CONNECTED = "connected"
+    DISCONNECTED = "disconnected"
+    MESSAGE_RECEIVED = "message_received"
+    ERROR = "error"
+
+
+# Event payload model for type-safe event data
+class EventPayload(BaseModel):
+    """Base event payload."""
+    event_type: EventType
+    timestamp: float
+    data: dict[str, Any] = {}
+
+
+# Callback that receives typed event payload
+EventCallback = Callable[[EventPayload], Awaitable[None]]
+
+
+@dataclass
+class EventEmitter:
+    """Event emitter with typed callbacks per event type.
+
+    Supports registering multiple callbacks per event type.
+    All callbacks receive a typed EventPayload.
+    """
+
+    _callbacks: dict[EventType, list[EventCallback]] = field(
+        default_factory=lambda: {et: [] for et in EventType}
+    )
+
+    def on(self, event_type: EventType, callback: EventCallback) -> EventCallback:
+        """Register callback for event type.
+
+        Args:
+            event_type: The event type to listen for.
+            callback: Async function with signature:
+                      `async def fn(payload: EventPayload) -> None`
+
+        Returns:
+            The callback (for decorator pattern).
+
+        Example:
+            @emitter.on(EventType.CONNECTED)
+            async def handle_connected(payload: EventPayload) -> None:
+                print(f"Connected at {payload.timestamp}")
+        """
+        self._callbacks[event_type].append(callback)
+        return callback
+
+    async def emit(self, payload: EventPayload) -> None:
+        """Emit event to all registered callbacks.
+
+        Args:
+            payload: The event payload to dispatch.
+        """
+        for callback in self._callbacks[payload.event_type]:
+            await callback(payload)
+```
+
+### Callable Protocol Pattern
+
+For more complex callback requirements, use `Protocol` instead of `Callable`:
+
+```python
+import asyncio
+from typing import Protocol
+from uuid import UUID
+
+
+class ReconnectionHandler(Protocol):
+    """Protocol for reconnection handling callbacks.
+
+    Implementations must be async and accept reconnection context.
+    Using Protocol allows for more complex signatures and documentation.
+    """
+
+    async def __call__(
+        self,
+        attempt: int,
+        max_attempts: int,
+        last_error: Exception | None,
+        correlation_id: UUID,
+    ) -> bool:
+        """Handle reconnection attempt.
+
+        Args:
+            attempt: Current attempt number (1-indexed).
+            max_attempts: Maximum attempts configured.
+            last_error: The error from previous attempt, or None for first.
+            correlation_id: Request correlation ID.
+
+        Returns:
+            True to continue reconnection, False to abort.
+        """
+        ...
+
+
+class BackoffCalculator(Protocol):
+    """Protocol for backoff delay calculation."""
+
+    def __call__(self, attempt: int, base_delay: float) -> float:
+        """Calculate delay for attempt.
+
+        Args:
+            attempt: Current attempt number.
+            base_delay: Base delay in seconds.
+
+        Returns:
+            Delay in seconds before next attempt.
+        """
+        ...
+
+
+# Usage with Protocol
+async def reconnect_with_handler(
+    handler: ReconnectionHandler,
+    backoff: BackoffCalculator,
+    correlation_id: UUID,
+) -> bool:
+    """Reconnect using typed handlers.
+
+    Args:
+        handler: Reconnection decision handler.
+        backoff: Backoff calculation function.
+        correlation_id: Request correlation ID.
+    """
+    for attempt in range(1, 6):
+        should_continue = await handler(
+            attempt=attempt,
+            max_attempts=5,
+            last_error=None,
+            correlation_id=correlation_id,
+        )
+        if not should_continue:
+            return False
+
+        delay = backoff(attempt, 1.0)
+        await asyncio.sleep(delay)
+
+    return True
 ```
 
 ## Test Isolation Recommendations
@@ -428,6 +876,9 @@ class ChaosEffectExecutor:
 - Provide fresh fixtures per test
 - Document thread safety in class docstrings
 - Clearly specify what is protected vs not protected
+- Use typed callback aliases (e.g., `AsyncCallback = Callable[[], Awaitable[None]]`)
+- Document callback signatures in class docstrings
+- Use `Protocol` for complex callback signatures with documentation
 
 ### DON'T
 
@@ -436,6 +887,8 @@ class ChaosEffectExecutor:
 - Share mutable instances across tests without reset
 - Use same lock for unrelated state (creates contention)
 - Call lock-acquiring methods from within callbacks
+- Use untyped `list` for callback collections (always use `list[CallbackType]`)
+- Use `Any` in callback type hints (use `object` or specific types)
 
 ## Multi-Threading Warning
 

@@ -27,6 +27,11 @@ Example usage:
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+__all__ = [
+    "DeterministicClock",
+    "DeterministicIdGenerator",
+]
+
 
 class DeterministicIdGenerator:
     """Generates predictable UUIDs for testing.

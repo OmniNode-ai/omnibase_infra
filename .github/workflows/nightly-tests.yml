@@ -98,7 +98,7 @@ jobs:
         with:
           name: nightly-test-results
           path: nightly-junit.xml
-          retention-days: 30
+          retention-days: 14
 
   # Summary job to report overall status
   nightly-summary:
