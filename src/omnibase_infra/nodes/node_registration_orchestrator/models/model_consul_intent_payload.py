@@ -70,24 +70,68 @@ class ModelConsulIntentPayload(BaseModel):
     @field_validator("tags", mode="before")
     @classmethod
     def _coerce_tags_to_tuple(cls, v: object) -> tuple[str, ...]:
-        """Convert list/sequence to tuple for immutability."""
+        """Convert list/sequence to tuple for immutability.
+
+        This validator ensures explicit handling of all input types rather than
+        silent fallback, which could mask invalid input.
+
+        Args:
+            v: The input value to coerce. Must be a tuple, list, set, or frozenset.
+
+        Returns:
+            A tuple of string tags.
+
+        Raises:
+            ValueError: If the input is not a recognized sequence type.
+                This ensures invalid input types are explicitly rejected rather
+                than silently coerced to unexpected values.
+
+        Edge Cases:
+            - ``None``: Raises ValueError (explicit rejection)
+            - Empty sequence ``[]``, ``()``: Returns empty tuple
+            - Invalid types (int, str, dict): Raises ValueError
+            - Valid sequences: Converts to tuple of strings
+        """
         if isinstance(v, tuple):
             return v  # type: ignore[return-value]  # Runtime validated by Pydantic
         if isinstance(v, list | set | frozenset):
             return tuple(str(item) for item in v)
-        # For unrecognized types, convert to string and wrap in tuple
-        return (str(v),) if v is not None else ()
+        raise ValueError(
+            f"tags must be a tuple, list, set, or frozenset, got {type(v).__name__}"
+        )
 
     @field_validator("meta", mode="before")
     @classmethod
     def _coerce_meta_to_tuple(cls, v: object) -> tuple[tuple[str, str], ...]:
-        """Convert dict/mapping to tuple of pairs for immutability."""
+        """Convert dict/mapping to tuple of pairs for immutability.
+
+        This validator ensures explicit handling of all input types rather than
+        silent fallback to empty tuple, which could mask invalid input.
+
+        Args:
+            v: The input value to coerce. Must be either a tuple of (key, value)
+                pairs or a Mapping (dict-like object).
+
+        Returns:
+            A tuple of (key, value) string pairs.
+
+        Raises:
+            ValueError: If the input is neither a tuple nor a Mapping type.
+                This ensures invalid input types are explicitly rejected rather
+                than silently converted to empty tuple.
+
+        Edge Cases:
+            - ``None``: Raises ValueError (explicit rejection)
+            - Empty Mapping ``{}``: Returns empty tuple
+            - Empty tuple ``()``: Passed through (same as default)
+            - Invalid types (list, int, str): Raises ValueError
+            - Non-empty Mapping: Converts to tuple of (key, value) pairs
+        """
         if isinstance(v, tuple):
             return v  # type: ignore[return-value]  # Runtime validated by Pydantic
         if isinstance(v, Mapping):
             return tuple((str(k), str(val)) for k, val in v.items())
-        # For unrecognized types, return empty tuple (Pydantic will validate)
-        return ()
+        raise ValueError(f"meta must be a tuple or Mapping, got {type(v).__name__}")
 
     @property
     def meta_dict(self) -> MappingProxyType[str, str]:

@@ -96,13 +96,49 @@ class ModelOrchestratorOutput(BaseModel):
     def _coerce_intent_results_to_tuple(
         cls, v: object
     ) -> tuple[ModelIntentExecutionResult, ...]:
-        """Convert list/sequence to tuple for immutability."""
+        """Convert list/sequence to tuple for immutability.
+
+        This validator ensures explicit handling of all input types rather than
+        silent fallback to empty tuple, which could mask invalid input.
+
+        Args:
+            v: The input value to coerce. Must be either a tuple or a Sequence
+                (excluding str and bytes).
+
+        Returns:
+            A tuple of ModelIntentExecutionResult items.
+
+        Raises:
+            ValueError: If the input is None, str, bytes, or any other non-sequence
+                type. This ensures invalid input types are explicitly rejected
+                rather than silently converted to empty tuple.
+
+        Edge Cases:
+            - ``None``: Raises ValueError (explicit rejection)
+            - ``str`` or ``bytes``: Raises ValueError (not valid sequences for this field)
+            - Empty tuple ``()``: Passed through (same as default)
+            - Empty list ``[]``: Converted to empty tuple
+            - Other non-sequence types (int, dict, etc.): Raises ValueError
+            - Non-empty Sequence: Converts to tuple
+
+        Example:
+            >>> # Valid inputs
+            >>> _coerce_intent_results_to_tuple([result1, result2])
+            (result1, result2)
+            >>> _coerce_intent_results_to_tuple(())
+            ()
+            >>> # Invalid inputs raise ValueError
+            >>> _coerce_intent_results_to_tuple(None)  # Raises ValueError
+            >>> _coerce_intent_results_to_tuple("not a sequence")  # Raises ValueError
+        """
         if isinstance(v, tuple):
             return v  # type: ignore[return-value]  # Runtime validated by Pydantic
         if isinstance(v, Sequence) and not isinstance(v, str | bytes):
             return tuple(v)  # type: ignore[return-value]  # Runtime validated by Pydantic
-        # For unrecognized types, return empty tuple (Pydantic will validate)
-        return ()
+        raise ValueError(
+            f"intent_results must be a tuple or Sequence (excluding str/bytes), "
+            f"got {type(v).__name__}"
+        )
 
 
 __all__ = ["ModelOrchestratorOutput"]

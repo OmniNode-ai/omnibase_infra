@@ -48,10 +48,25 @@ PATTERN_FIELDS = (
 # Required fields for each exemption entry
 REQUIRED_EXEMPTION_FIELDS = frozenset({"file_pattern", "violation_pattern", "reason"})
 
+# Key files that have exemptions defined - used for existence validation
+KEY_EXEMPTION_FILES = (
+    "src/omnibase_infra/event_bus/kafka_event_bus.py",
+    "src/omnibase_infra/runtime/runtime_host_process.py",
+    "src/omnibase_infra/runtime/message_dispatch_engine.py",
+    "src/omnibase_infra/mixins/mixin_node_introspection.py",
+    "src/omnibase_infra/validation/execution_shape_validator.py",
+)
+
 
 # -----------------------------------------------------------------------------
 # Module-level fixtures for shared use across test classes
 # -----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def project_root() -> Path:
+    """Return the project root path for consistent path resolution."""
+    return _PROJECT_ROOT
 
 
 @pytest.fixture
@@ -74,26 +89,26 @@ def source_files() -> list[str]:
     return [str(f.relative_to(_PROJECT_ROOT)) for f in src_path.rglob("*.py")]
 
 
+@pytest.fixture
+def all_regex_patterns(exemptions_yaml: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """Extract all regex patterns from the exemptions YAML file.
+
+    Returns:
+        List of tuples: (section_name, pattern_field, pattern_value)
+    """
+    patterns: list[tuple[str, str, str]] = []
+
+    for section in EXEMPTION_SECTIONS:
+        for exemption in exemptions_yaml.get(section, []):
+            for field in PATTERN_FIELDS:
+                if field in exemption:
+                    patterns.append((section, field, exemption[field]))
+
+    return patterns
+
+
 class TestValidationExemptionsRegex:
     """Tests for validation_exemptions.yaml regex pattern validity."""
-
-    def _extract_all_patterns(
-        self, exemptions_yaml: dict[str, Any]
-    ) -> list[tuple[str, str, str]]:
-        """Extract all regex patterns from the YAML file.
-
-        Returns:
-            List of tuples: (section_name, pattern_field, pattern_value)
-        """
-        patterns: list[tuple[str, str, str]] = []
-
-        for section in EXEMPTION_SECTIONS:
-            for exemption in exemptions_yaml.get(section, []):
-                for field in PATTERN_FIELDS:
-                    if field in exemption:
-                        patterns.append((section, field, exemption[field]))
-
-        return patterns
 
     def test_yaml_file_exists(self, exemptions_yaml_path: Path) -> None:
         """Verify the exemptions YAML file exists."""
@@ -119,17 +134,16 @@ class TestValidationExemptionsRegex:
         )
 
     def test_all_regex_patterns_are_valid(
-        self, exemptions_yaml: dict[str, Any]
+        self, all_regex_patterns: list[tuple[str, str, str]]
     ) -> None:
         """Verify all regex patterns compile without errors.
 
         This is the critical pre-commit test that catches invalid regex patterns
         before they reach production and cause runtime errors.
         """
-        patterns = self._extract_all_patterns(exemptions_yaml)
         invalid_patterns: list[tuple[str, str, str, str]] = []
 
-        for section, field, pattern in patterns:
+        for section, field, pattern in all_regex_patterns:
             try:
                 re.compile(pattern)
             except re.error as e:
@@ -173,13 +187,14 @@ class TestValidationExemptionsRegex:
                 + "\n".join(missing_fields_errors)
             )
 
-    def test_pattern_count_sanity_check(self, exemptions_yaml: dict[str, Any]) -> None:
+    def test_pattern_count_sanity_check(
+        self, all_regex_patterns: list[tuple[str, str, str]]
+    ) -> None:
         """Verify a reasonable number of patterns exist (sanity check)."""
-        patterns = self._extract_all_patterns(exemptions_yaml)
         # At the time of writing, there are many patterns. This test ensures
         # the extraction is working and we have a reasonable number.
-        assert len(patterns) >= 50, (
-            f"Expected at least 50 patterns, found {len(patterns)}. "
+        assert len(all_regex_patterns) >= 50, (
+            f"Expected at least 50 patterns, found {len(all_regex_patterns)}. "
             "This may indicate a problem with pattern extraction."
         )
 
@@ -215,17 +230,10 @@ class TestExemptionPatternsMatchFiles:
                 "(files may have been renamed or deleted):\n" + "\n".join(warnings)
             )
 
-    def test_known_exemption_files_exist(self) -> None:
+    def test_known_exemption_files_exist(self, project_root: Path) -> None:
         """Verify key files that have exemptions actually exist."""
-        key_files = [
-            "src/omnibase_infra/event_bus/kafka_event_bus.py",
-            "src/omnibase_infra/runtime/runtime_host_process.py",
-            "src/omnibase_infra/runtime/message_dispatch_engine.py",
-            "src/omnibase_infra/mixins/mixin_node_introspection.py",
-            "src/omnibase_infra/validation/execution_shape_validator.py",
-        ]
-        for file_path in key_files:
-            full_path = _PROJECT_ROOT / file_path
+        for file_path in KEY_EXEMPTION_FILES:
+            full_path = project_root / file_path
             assert full_path.exists(), (
                 f"Expected file {file_path} to exist (has exemptions defined)"
             )

@@ -47,12 +47,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-logger = logging.getLogger(__name__)
-
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
+
+# Module-level initialization (after all imports)
+logger = logging.getLogger(__name__)
 
 
 class ModelPostgresIntentPayload(BaseModel):

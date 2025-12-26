@@ -624,9 +624,9 @@ class TestMixinNodeIntrospectionCaching:
         # node_id is a UUID passed via config
         assert isinstance(data.node_id, UUID)
         assert data.node_id == TEST_NODE_UUID_1
-        # node_type is serialized as the enum value (lowercase string "effect")
-        # Use .value for explicit string comparison, consistent with integration tests
-        assert data.node_type == EnumNodeKind.EFFECT.value
+        # node_type is stored as EnumNodeKind (a StrEnum that inherits from str).
+        # Compare directly to the enum for type consistency with _introspection_node_type.
+        assert data.node_type == EnumNodeKind.EFFECT
         assert isinstance(data.capabilities, dict)
         assert isinstance(data.endpoints, dict)
         assert data.version == "1.0.0"
@@ -1773,9 +1773,15 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         assert "execute_task" not in operations
 
     async def test_node_type_specific_keywords_constant_exists(self) -> None:
-        """Test that NODE_TYPE_OPERATION_KEYWORDS constant exists."""
+        """Test that NODE_TYPE_OPERATION_KEYWORDS constant exists.
+
+        The keywords map uses uppercase string keys ("EFFECT", "COMPUTE", etc.)
+        matching the uppercase representation of node types. This allows easy
+        lookup using node_type.upper() or EnumNodeKind.name.
+        """
         assert hasattr(MixinNodeIntrospection, "NODE_TYPE_OPERATION_KEYWORDS")
         keywords_map = MixinNodeIntrospection.NODE_TYPE_OPERATION_KEYWORDS
+        # Keys are uppercase strings, matching EnumNodeKind.name
         assert "EFFECT" in keywords_map
         assert "COMPUTE" in keywords_map
         assert "REDUCER" in keywords_map

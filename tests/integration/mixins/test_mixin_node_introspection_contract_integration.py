@@ -439,8 +439,9 @@ class TestEndToEndIntrospectionWorkflow:
         assert isinstance(envelope, ModelNodeIntrospectionEvent)
         # node_id is a UUID, verify it matches the node's internal ID
         assert envelope.node_id == node._introspection_node_id
-        # node_type is serialized as the enum value (lowercase)
-        assert envelope.node_type == EnumNodeKind.EFFECT.value
+        # node_type is stored as EnumNodeKind (a StrEnum that inherits from str).
+        # Compare directly to the enum for type consistency with _introspection_node_type.
+        assert envelope.node_type == EnumNodeKind.EFFECT
         assert envelope.version == "1.5.0"
         assert envelope.reason == "startup"
 
@@ -473,8 +474,9 @@ class TestEndToEndIntrospectionWorkflow:
         from omnibase_core.enums import EnumNodeKind
 
         assert data.node_id == node._introspection_node_id
-        # node_type is serialized as the enum value (lowercase)
-        assert data.node_type == EnumNodeKind.EFFECT.value
+        # node_type is stored as EnumNodeKind (a StrEnum that inherits from str).
+        # Compare directly to the enum for type consistency with _introspection_node_type.
+        assert data.node_type == EnumNodeKind.EFFECT
         assert data.version == "1.0.0"
 
         # Verify capabilities were discovered
