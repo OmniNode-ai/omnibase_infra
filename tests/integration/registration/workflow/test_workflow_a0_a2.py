@@ -162,7 +162,7 @@ class TestA0PurityGate:
         # Arrange
         request = ModelRegistryRequest(
             node_id=uuid4(),
-            node_type=EnumNodeKind.EFFECT.value,
+            node_type=EnumNodeKind.EFFECT,
             node_version="1.0.0",
             correlation_id=uuid4(),
             service_name=f"onex-{EnumNodeKind.EFFECT.value}",
@@ -231,11 +231,10 @@ class TestA0PurityGate:
 
         # Act - Phase 2: Effect executes registration (with I/O)
         # Note: event.node_type is a Literal["effect", "compute", "reducer", "orchestrator"]
-        # string, not an EnumNodeKind. Pydantic coerces the EnumNodeKind from the factory
-        # to its string value during model construction.
+        # string, not an EnumNodeKind. Convert to EnumNodeKind for ModelRegistryRequest.
         request = ModelRegistryRequest(
             node_id=event.node_id,
-            node_type=event.node_type,
+            node_type=EnumNodeKind(event.node_type),
             node_version=event.node_version,
             correlation_id=correlation_id,
             service_name=f"onex-{event.node_type}",
@@ -728,10 +727,10 @@ class TestWorkflowIntegration:
 
         # Step 3: Effect executes registration (A0 - I/O separation)
         # Note: introspection_event.node_type is a Literal string (e.g., "effect"),
-        # not an EnumNodeKind. The model's type annotation ensures this.
+        # not an EnumNodeKind. Convert to EnumNodeKind for ModelRegistryRequest.
         request = ModelRegistryRequest(
             node_id=node_id,
-            node_type=introspection_event.node_type,
+            node_type=EnumNodeKind(introspection_event.node_type),
             node_version=introspection_event.node_version,
             correlation_id=correlation_id,
             service_name=f"onex-{introspection_event.node_type}",

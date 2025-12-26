@@ -49,7 +49,7 @@ class TestCircuitBreakerService(MixinAsyncCircuitBreaker):
         reset_timeout: float = 60.0,
         service_name: str = "test-service",
         transport_type: EnumInfraTransportType = EnumInfraTransportType.HTTP,
-    ):
+    ) -> None:
         """Initialize test service with circuit breaker.
 
         Args:

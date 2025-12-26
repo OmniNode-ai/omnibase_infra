@@ -81,11 +81,11 @@ def _convert_intents_to_request(
     Returns:
         ModelRegistryRequest for the effect node.
     """
-    # Note: event.node_type is a Literal string from ModelNodeIntrospectionEvent,
-    # so we can use it directly in string interpolation without .value
+    # Note: event.node_type is a Literal string from ModelNodeIntrospectionEvent.
+    # Convert to EnumNodeKind for ModelRegistryRequest which expects the enum type.
     return ModelRegistryRequest(
         node_id=event.node_id,
-        node_type=event.node_type,
+        node_type=EnumNodeKind(event.node_type),
         node_version=event.node_version,
         correlation_id=event.correlation_id,
         service_name=f"onex-{event.node_type}",
@@ -439,7 +439,7 @@ class TestA4IdempotentReplay:
         event = sample_introspection_event
         request = ModelRegistryRequest(
             node_id=event.node_id,
-            node_type=event.node_type,
+            node_type=EnumNodeKind(event.node_type),
             node_version=event.node_version,
             correlation_id=event.correlation_id,
             endpoints=dict(event.endpoints),

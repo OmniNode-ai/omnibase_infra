@@ -22,7 +22,7 @@ from datetime import datetime
 from uuid import UUID
 
 from omnibase_core.enums import (
-    EnumNodeKind,  # noqa: TC002 - runtime import required for Pydantic field
+    EnumNodeKind,
 )
 from pydantic import BaseModel, ConfigDict, Field
 

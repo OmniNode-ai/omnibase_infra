@@ -572,8 +572,9 @@ class MixinNodeIntrospection:
                 See ModelIntrospectionConfig for available options.
 
         Raises:
-            ValueError: If config.node_id or config.node_type is empty
-                (validated by Pydantic min_length=1)
+            ValueError: If config.node_id is not a valid UUID or config.node_type
+                is not a valid EnumNodeKind member.
+            TypeError: If node_type is neither EnumNodeKind nor str.
 
         Example:
             ```python
@@ -605,11 +606,24 @@ class MixinNodeIntrospection:
         See Also:
             ModelIntrospectionConfig: Configuration model with all available options.
         """
-        # Note: Pydantic validates node_id is a valid UUID and node_type has min_length=1
+        # Note: Pydantic validates node_id is a valid UUID and node_type is EnumNodeKind
 
         # Configuration - extract from config model
         self._introspection_node_id = config.node_id
-        self._introspection_node_type = config.node_type
+
+        # Defensive type handling for node_type: accept both EnumNodeKind and string.
+        # While ModelIntrospectionConfig's validator ensures EnumNodeKind, this defensive
+        # check handles edge cases like mocked configs or direct attribute access patterns.
+        if isinstance(config.node_type, EnumNodeKind):
+            self._introspection_node_type = config.node_type
+        elif isinstance(config.node_type, str):
+            # Coerce string to EnumNodeKind (handles both "effect" and "EFFECT")
+            self._introspection_node_type = EnumNodeKind(config.node_type.lower())
+        else:
+            # Should never happen with proper ModelIntrospectionConfig, but handle gracefully
+            raise TypeError(
+                f"node_type must be EnumNodeKind or str, got {type(config.node_type).__name__}"
+            )
         self._introspection_event_bus = config.event_bus
         self._introspection_version = config.version
         self._introspection_cache_ttl = config.cache_ttl

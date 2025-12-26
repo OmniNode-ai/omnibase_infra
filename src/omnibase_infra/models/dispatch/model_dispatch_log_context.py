@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode  # noqa: TC002
+from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
