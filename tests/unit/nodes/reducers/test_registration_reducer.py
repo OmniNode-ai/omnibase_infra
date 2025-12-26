@@ -48,6 +48,7 @@ from omnibase_infra.models.registration import (
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 from omnibase_infra.nodes.reducers.models.model_registration_state import FailureReason
+from tests.helpers import create_introspection_event
 
 if TYPE_CHECKING:
     from typing import Literal
@@ -126,36 +127,6 @@ def event_without_health_endpoint() -> ModelNodeIntrospectionEvent:
         endpoints={},
         capabilities=ModelNodeCapabilities(),
         metadata=ModelNodeMetadata(),
-        timestamp=TEST_TIMESTAMP,
-    )
-
-
-def create_introspection_event(
-    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
-    node_id: UUID | None = None,
-    correlation_id: UUID | None = None,
-    endpoints: dict[str, str] | None = None,
-) -> ModelNodeIntrospectionEvent:
-    """Helper factory for creating introspection events.
-
-    Args:
-        node_type: Type of node (default: "effect").
-        node_id: Optional node ID (generates if not provided).
-        correlation_id: Optional correlation ID (generates if not provided).
-        endpoints: Optional endpoints dict (default: health endpoint).
-
-    Returns:
-        Configured ModelNodeIntrospectionEvent instance.
-    """
-    return ModelNodeIntrospectionEvent(
-        node_id=node_id or uuid4(),
-        node_type=node_type,
-        node_version="1.0.0",
-        capabilities=ModelNodeCapabilities(postgres=True, read=True),
-        endpoints=endpoints
-        if endpoints is not None
-        else {"health": "http://localhost:8080/health"},
-        correlation_id=correlation_id or uuid4(),
         timestamp=TEST_TIMESTAMP,
     )
 

@@ -1059,7 +1059,7 @@ class TestVaultHandlerThreadPool:
             # Spy on executor to verify it's used
             original_executor = handler._executor
             with patch.object(
-                asyncio.get_event_loop(), "run_in_executor"
+                asyncio.get_running_loop(), "run_in_executor"
             ) as mock_run_in_executor:
                 mock_run_in_executor.return_value = asyncio.Future()
                 mock_run_in_executor.return_value.set_result(

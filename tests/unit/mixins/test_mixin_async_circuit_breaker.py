@@ -703,7 +703,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
         service = TestCircuitBreakerService(threshold=1, reset_timeout=reset_timeout)
 
         # Open circuit
-        start_time = time.time()
+        start_time = time.perf_counter()
         await service.record_failure("test_operation")
 
         # Check immediately - should fail
@@ -711,7 +711,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
             await service.check_circuit("test_operation")
 
         # Wait exactly reset_timeout
-        elapsed = time.time() - start_time
+        elapsed = time.perf_counter() - start_time
         remaining = reset_timeout - elapsed
         if remaining > 0:
             await asyncio.sleep(remaining + 0.05)  # Small buffer for precision

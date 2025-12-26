@@ -232,6 +232,8 @@ markers = [
     "unit: Unit tests that test individual components in isolation",
     "integration: Integration tests that test multiple components together",
     "slow: Tests that take a long time to run (>1s)",
+    "chaos: Chaos engineering tests for fault injection and resilience validation",
+    "replay: Event replay and recovery tests",
     "smoke: Quick smoke tests for basic functionality",
     "performance: Performance and benchmark tests",
     "benchmark: Benchmark tests for performance measurement",

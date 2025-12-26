@@ -60,13 +60,15 @@ jobs:
             exit 1
           }
 
-      # Run full test suite, excluding Docker integration tests
+      # Run fast test suite, excluding Docker integration tests and slow/chaos tests
       # Docker tests run in dedicated docker-build.yml workflow with proper Buildx setup
+      # Slow and chaos tests run in nightly-tests.yml on schedule (too slow for CI)
       # This prevents pytest-xdist worker crashes during Docker builds
-      - name: Run full test suite
+      - name: Run fast test suite
         run: |
           poetry run pytest tests/ \
             --ignore=tests/integration/docker \
+            -m "not slow and not chaos" \
             -n auto \
             --timeout=60 \
             --timeout-method=thread \

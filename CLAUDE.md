@@ -317,6 +317,8 @@ if is_open:
 - Never suppress InfraUnavailableError from circuit breaker
 - Never use circuit breaker for non-transient errors
 
+**See Also**: `docs/patterns/async_thread_safety_pattern.md` - Lock scope, counter accuracy, and callback execution patterns for asyncio concurrency.
+
 ### Dispatcher Resilience Pattern
 
 **Dispatchers own their own resilience** - the `MessageDispatchEngine` does NOT wrap dispatchers with circuit breakers.
