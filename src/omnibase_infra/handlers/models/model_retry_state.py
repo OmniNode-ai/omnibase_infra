@@ -37,6 +37,13 @@ class ModelRetryState(BaseModel):
         The last_error field should contain SANITIZED error descriptions only.
         Never include credentials, tokens, or other sensitive data in this field.
         See CLAUDE.md "Error Sanitization Guidelines" for the security policy.
+
+    Design Rationale:
+        This model stores error messages as strings rather than exception objects.
+        This trade-off ensures: (1) immutability (frozen=True), (2) serialization
+        safety for logging/persistence, and (3) model simplicity. The original
+        exception should be handled by the caller if traceback preservation is
+        needed (e.g., wrap in try/except and log before calling next_attempt()).
     """
 
     model_config = ConfigDict(

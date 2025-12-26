@@ -109,6 +109,10 @@ class ModelOperationContext(BaseModel):
 
         Returns:
             Elapsed time in seconds since started_at.
+
+        Note:
+            Calls time.time() on each invocation. Multiple calls within
+            a tight loop may return slightly different values.
         """
         return time.time() - self.started_at
 
@@ -117,6 +121,10 @@ class ModelOperationContext(BaseModel):
 
         Returns:
             Remaining time in seconds (can be negative if timed out).
+
+        Note:
+            Calls elapsed_seconds() internally, which uses time.time().
+            Multiple calls may return slightly different values.
         """
         return self.timeout_seconds - self.elapsed_seconds()
 
@@ -125,6 +133,10 @@ class ModelOperationContext(BaseModel):
 
         Returns:
             True if elapsed time exceeds timeout_seconds, False otherwise.
+
+        Note:
+            Calls elapsed_seconds() internally, which uses time.time().
+            Result may change between calls if near the timeout boundary.
         """
         return self.elapsed_seconds() > self.timeout_seconds
 
