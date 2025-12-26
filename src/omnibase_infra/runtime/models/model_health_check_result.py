@@ -67,7 +67,7 @@ class ModelHealthCheckResult(BaseModel):
         ...,
         description="Whether the handler is healthy",
     )
-    details: dict[str, object] = Field(
+    details: dict[str, JsonValue] = Field(
         default_factory=dict,
         description="Detailed health check data from the handler",
     )
@@ -92,7 +92,7 @@ class ModelHealthCheckResult(BaseModel):
             >>> result.healthy
             True
         """
-        details: dict[str, object] = {"healthy": True}
+        details: dict[str, JsonValue] = {"healthy": True}
         if note:
             details["note"] = note
         return cls(handler_type=handler_type, healthy=True, details=details)

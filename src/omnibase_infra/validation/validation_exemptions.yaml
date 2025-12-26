@@ -644,6 +644,36 @@ pattern_exemptions:
       Result model with comprehensive API: computed properties (has_blocking, violation_count, blocking_count, warning_count), factory methods (from_violations, success, from_legacy_result), utility methods (to_legacy_result, format_for_ci), and dunder methods (__bool__, __str__). This is intentional API design for CI integration and developer ergonomics.
 
     ticket: OMN-1003
+  # ==========================================================================
+  # OMN-1004: Union Reduction Phase 4 - New Model Exemptions
+  # ==========================================================================
+  # ModelCircuitBreakerConfig - service_name is a service identifier string
+  - file_pattern: 'model_circuit_breaker_config\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name is a string identifier for circuit breaker monitoring (e.g., "kafka.producer", "consul.client"). It is NOT an entity reference but a simple label for observability and logging purposes.
+
+    documentation:
+      - CLAUDE.md (Circuit Breaker Pattern section)
+    ticket: OMN-1004
+  # ModelOperationContext - operation_name is an operation identifier string
+  - file_pattern: 'model_operation_context\.py'
+    violation_pattern: "Field 'operation_name' might reference an entity"
+    reason: >
+      operation_name is a string identifier for handler operations (e.g., "connect", "publish", "query"). It is NOT an entity reference but a simple label for operation tracking and timeout context.
+
+    documentation:
+      - CLAUDE.md (Handler Refactoring section)
+    ticket: OMN-1004
+  # ModelValidationResult - field_name is the name of a validated field
+  - file_pattern: 'registration_reducer\.py'
+    violation_pattern: "Field 'field_name' might reference an entity"
+    reason: >
+      field_name is a string containing the name of a field being validated (e.g., "node_id", "name"). It is NOT an entity reference but metadata about validation errors for debugging purposes.
+
+    documentation:
+      - docs/architecture/REGISTRATION_REDUCER.md
+    ticket: OMN-1004
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
@@ -700,10 +730,8 @@ architecture_exemptions:
   - file_pattern: 'services/timeout_emitter\.py'
     violation_pattern: '\d+ models in one file'
     reason: >
-      Domain-grouped models for timeout emission. ModelTimeoutEmissionResult
-      and ModelTimeoutEmissionConfig define the complete interface for the
-      TimeoutEmitter. Per CLAUDE.md domain-grouping convention for cohesive
-      models that are always used together.
+      Domain-grouped models for timeout emission. ModelTimeoutEmissionResult and ModelTimeoutEmissionConfig define the complete interface for the TimeoutEmitter. Per CLAUDE.md domain-grouping convention for cohesive models that are always used together.
+
     ticket: OMN-932
 # Union usage validator exemptions
 # These handle complex union type violations

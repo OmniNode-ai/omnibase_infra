@@ -5,6 +5,10 @@
 This module exports Pydantic models for handler request/response structures.
 All models are strongly typed to eliminate Any usage.
 
+Common Models:
+    ModelRetryState: Encapsulates retry state for handler operations
+    ModelOperationContext: Encapsulates operation context for handler tracking
+
 Generic Response Model:
     ModelHandlerResponse: Generic handler response envelope (parameterized by payload type)
 
@@ -88,6 +92,10 @@ from omnibase_infra.handlers.models.model_handler_response import (
 from omnibase_infra.handlers.models.model_http_handler_response import (
     ModelHttpHandlerResponse,
 )
+from omnibase_infra.handlers.models.model_operation_context import (
+    ModelOperationContext,
+)
+from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
 from omnibase_infra.handlers.models.model_vault_handler_response import (
     ModelVaultHandlerResponse,
 )
@@ -104,6 +112,9 @@ from omnibase_infra.handlers.models.vault import (
 )
 
 __all__: list[str] = [
+    # Common models for retry and operation tracking
+    "ModelRetryState",
+    "ModelOperationContext",
     # Generic response model
     "ModelHandlerResponse",
     # Consul payload types (discriminated union)
