@@ -997,9 +997,9 @@ class TestMixinNodeIntrospectionPerformance:
         mock_node._introspection_cached_at = None
 
         threshold_ms = 50 * PERF_MULTIPLIER
-        start = time.time()
+        start = time.perf_counter()
         await mock_node.get_introspection_data()
-        elapsed_ms = (time.time() - start) * 1000
+        elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < threshold_ms, (
             f"Introspection took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
@@ -1011,9 +1011,9 @@ class TestMixinNodeIntrospectionPerformance:
         await mock_node.get_introspection_data()
 
         threshold_ms = 1 * PERF_MULTIPLIER
-        start = time.time()
+        start = time.perf_counter()
         await mock_node.get_introspection_data()
-        elapsed_ms = (time.time() - start) * 1000
+        elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < threshold_ms, (
             f"Cached introspection took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
@@ -1022,9 +1022,9 @@ class TestMixinNodeIntrospectionPerformance:
     async def test_capability_extraction_under_10ms(self, mock_node: MockNode) -> None:
         """Test that capability extraction completes within threshold."""
         threshold_ms = 10 * PERF_MULTIPLIER
-        start = time.time()
+        start = time.perf_counter()
         await mock_node.get_capabilities()
-        elapsed_ms = (time.time() - start) * 1000
+        elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < threshold_ms, (
             f"Capability extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
@@ -1033,9 +1033,9 @@ class TestMixinNodeIntrospectionPerformance:
     async def test_endpoint_discovery_under_10ms(self, mock_node: MockNode) -> None:
         """Test that endpoint discovery completes within threshold."""
         threshold_ms = 10 * PERF_MULTIPLIER
-        start = time.time()
+        start = time.perf_counter()
         await mock_node.get_endpoints()
-        elapsed_ms = (time.time() - start) * 1000
+        elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < threshold_ms, (
             f"Endpoint discovery took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
@@ -1044,9 +1044,9 @@ class TestMixinNodeIntrospectionPerformance:
     async def test_state_extraction_under_1ms(self, mock_node: MockNode) -> None:
         """Test that state extraction completes within threshold."""
         threshold_ms = 1 * PERF_MULTIPLIER
-        start = time.time()
+        start = time.perf_counter()
         await mock_node.get_current_state()
-        elapsed_ms = (time.time() - start) * 1000
+        elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < threshold_ms, (
             f"State extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
@@ -1063,9 +1063,9 @@ class TestMixinNodeIntrospectionPerformance:
             mock_node._introspection_cache = None
             mock_node._introspection_cached_at = None
 
-            start = time.time()
+            start = time.perf_counter()
             await mock_node.get_introspection_data()
-            elapsed_ms = (time.time() - start) * 1000
+            elapsed_ms = (time.perf_counter() - start) * 1000
             times.append(elapsed_ms)
 
         avg_time = sum(times) / len(times)
@@ -1392,9 +1392,9 @@ class TestMixinNodeIntrospectionEdgeCases:
         node.initialize_introspection(config)
 
         threshold_ms = 50 * PERF_MULTIPLIER
-        start = time.time()
+        start = time.perf_counter()
         capabilities = await node.get_capabilities()
-        elapsed_ms = (time.time() - start) * 1000
+        elapsed_ms = (time.perf_counter() - start) * 1000
 
         # Should include all 10 operation methods
         operations = capabilities["operations"]
@@ -1597,16 +1597,16 @@ class TestMixinNodeIntrospectionClassLevelCache:
         node.initialize_introspection(config)
 
         # First call (cold cache) - populates cache
-        start1 = time.time()
+        start1 = time.perf_counter()
         await node.get_capabilities()
-        first_call_ms = (time.time() - start1) * 1000
+        first_call_ms = (time.perf_counter() - start1) * 1000
 
         # Subsequent calls (warm cache) - uses cached signatures
         times_warm = []
         for _ in range(10):
-            start = time.time()
+            start = time.perf_counter()
             await node.get_capabilities()
-            times_warm.append((time.time() - start) * 1000)
+            times_warm.append((time.perf_counter() - start) * 1000)
 
         avg_warm_ms = sum(times_warm) / len(times_warm)
 
@@ -1773,19 +1773,14 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         assert "execute_task" not in operations
 
     async def test_node_type_specific_keywords_constant_exists(self) -> None:
-        """Test that NODE_TYPE_OPERATION_KEYWORDS constant exists.
-
-        The keywords map uses uppercase string keys ("EFFECT", "COMPUTE", etc.)
-        matching the uppercase representation of node types. This allows easy
-        lookup using node_type.upper() or EnumNodeKind.name.
-        """
+        """Test that NODE_TYPE_OPERATION_KEYWORDS constant exists with EnumNodeKind keys."""
         assert hasattr(MixinNodeIntrospection, "NODE_TYPE_OPERATION_KEYWORDS")
         keywords_map = MixinNodeIntrospection.NODE_TYPE_OPERATION_KEYWORDS
-        # Keys are uppercase strings, matching EnumNodeKind.name
-        assert "EFFECT" in keywords_map
-        assert "COMPUTE" in keywords_map
-        assert "REDUCER" in keywords_map
-        assert "ORCHESTRATOR" in keywords_map
+        # Keys should be EnumNodeKind members for type safety
+        assert EnumNodeKind.EFFECT in keywords_map
+        assert EnumNodeKind.COMPUTE in keywords_map
+        assert EnumNodeKind.REDUCER in keywords_map
+        assert EnumNodeKind.ORCHESTRATOR in keywords_map
         for keywords in keywords_map.values():
             assert isinstance(keywords, set)
 

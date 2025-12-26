@@ -18,12 +18,15 @@ Related:
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
+
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 
 
+@runtime_checkable
 class ProtocolPostgresAdapter(Protocol):
     """Protocol for PostgreSQL registration persistence.
 
@@ -47,7 +50,7 @@ class ProtocolPostgresAdapter(Protocol):
     async def upsert(
         self,
         node_id: UUID,
-        node_type: str,
+        node_type: EnumNodeKind,
         node_version: str,
         endpoints: dict[str, str],
         metadata: dict[str, str],
@@ -56,7 +59,7 @@ class ProtocolPostgresAdapter(Protocol):
 
         Args:
             node_id: Unique identifier for the node.
-            node_type: Type of ONEX node.
+            node_type: Type of ONEX node (EnumNodeKind).
             node_version: Semantic version of the node.
             endpoints: Dict of endpoint type to URL.
             metadata: Additional metadata.

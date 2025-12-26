@@ -89,6 +89,7 @@ class ModelIntrospectionConfig(BaseModel):
     Example:
         ```python
         from uuid import UUID, uuid4
+        from omnibase_core.enums import EnumNodeKind
         from omnibase_infra.models.discovery import ModelIntrospectionConfig
         from omnibase_infra.mixins import MixinNodeIntrospection
 
@@ -96,7 +97,7 @@ class ModelIntrospectionConfig(BaseModel):
             def __init__(self, node_id: UUID, event_bus=None):
                 config = ModelIntrospectionConfig(
                     node_id=node_id,
-                    node_type="EFFECT",
+                    node_type=EnumNodeKind.EFFECT,  # Use enum directly (preferred)
                     event_bus=event_bus,
                     version="1.2.0",
                 )
@@ -107,7 +108,7 @@ class ModelIntrospectionConfig(BaseModel):
             def __init__(self, node_id: UUID | None = None, event_bus=None):
                 config = ModelIntrospectionConfig(
                     node_id=node_id or uuid4(),
-                    node_type="EFFECT",
+                    node_type=EnumNodeKind.EFFECT,  # Use enum directly (preferred)
                     event_bus=event_bus,
                     operation_keywords=frozenset({"fetch", "upload", "download"}),
                 )
@@ -185,7 +186,7 @@ class ModelIntrospectionConfig(BaseModel):
 
     @field_validator("node_type", mode="before")
     @classmethod
-    def validate_node_type(cls, v: EnumNodeKind | str) -> EnumNodeKind:
+    def validate_node_type(cls, v: object) -> EnumNodeKind:
         """Validate and coerce node_type to EnumNodeKind.
 
         Args:
@@ -200,6 +201,10 @@ class ModelIntrospectionConfig(BaseModel):
         """
         if isinstance(v, EnumNodeKind):
             return v
+        if not isinstance(v, str):
+            raise ValueError(
+                f"node_type must be EnumNodeKind or str, got {type(v).__name__}"
+            )
         if not v:
             raise ValueError("node_type cannot be empty")
         # Coerce string to EnumNodeKind (handles both "EFFECT" and "effect")

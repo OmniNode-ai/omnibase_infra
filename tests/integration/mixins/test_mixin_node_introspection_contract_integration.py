@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
 
 from omnibase_infra.mixins import MixinNodeIntrospection
 from omnibase_infra.models.discovery import (
@@ -313,7 +314,6 @@ class TestContractToIntrospectionIntegration:
 
         # Verify node metadata from contract
         # node_id is now a UUID (generated at initialization)
-        from omnibase_core.enums import EnumNodeKind
 
         assert isinstance(node._introspection_node_id, UUID)
         assert node._contract_node_name == "test-effect-node"
@@ -434,7 +434,6 @@ class TestEndToEndIntrospectionWorkflow:
         assert topic == "onex.workflow.introspection.published.v1"
 
         # Verify envelope content
-        from omnibase_core.enums import EnumNodeKind
 
         assert isinstance(envelope, ModelNodeIntrospectionEvent)
         # node_id is a UUID, verify it matches the node's internal ID
@@ -471,7 +470,6 @@ class TestEndToEndIntrospectionWorkflow:
 
         # Verify node identification
         # node_id is a UUID, verify it matches the node's internal ID
-        from omnibase_core.enums import EnumNodeKind
 
         assert data.node_id == node._introspection_node_id
         # node_type is stored as EnumNodeKind (a StrEnum that inherits from str).

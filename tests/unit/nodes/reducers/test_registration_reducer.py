@@ -37,6 +37,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums import EnumReductionType, EnumStreamingMode
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
 from pydantic import ValidationError
@@ -49,6 +50,7 @@ from omnibase_infra.models.registration import (
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 from omnibase_infra.nodes.reducers.models.model_registration_state import FailureReason
+from tests.helpers import create_introspection_event
 
 if TYPE_CHECKING:
     from typing import Literal
@@ -123,35 +125,6 @@ def event_without_health_endpoint() -> ModelNodeIntrospectionEvent:
         endpoints={},
         capabilities=ModelNodeCapabilities(),
         metadata=ModelNodeMetadata(),
-    )
-
-
-def create_introspection_event(
-    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
-    node_id: UUID | None = None,
-    correlation_id: UUID | None = None,
-    endpoints: dict[str, str] | None = None,
-) -> ModelNodeIntrospectionEvent:
-    """Helper factory for creating introspection events.
-
-    Args:
-        node_type: Type of node (default: "effect").
-        node_id: Optional node ID (generates if not provided).
-        correlation_id: Optional correlation ID (generates if not provided).
-        endpoints: Optional endpoints dict (default: health endpoint).
-
-    Returns:
-        Configured ModelNodeIntrospectionEvent instance.
-    """
-    return ModelNodeIntrospectionEvent(
-        node_id=node_id or uuid4(),
-        node_type=node_type,
-        node_version="1.0.0",
-        capabilities=ModelNodeCapabilities(postgres=True, read=True),
-        endpoints=endpoints
-        if endpoints is not None
-        else {"health": "http://localhost:8080/health"},
-        correlation_id=correlation_id or uuid4(),
     )
 
 
@@ -2720,14 +2693,21 @@ class TestDeterminismProperty:
     """
 
     @given(
-        node_type=st.sampled_from(["effect", "compute", "reducer", "orchestrator"]),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
         major=st.integers(min_value=0, max_value=99),
         minor=st.integers(min_value=0, max_value=99),
         patch=st.integers(min_value=0, max_value=99),
     )
     @settings(max_examples=50)
     def test_reduce_is_deterministic_for_any_valid_input(
-        self, node_type: str, major: int, minor: int, patch: int
+        self, node_type: EnumNodeKind, major: int, minor: int, patch: int
     ) -> None:
         """Property: reduce(state, event) is deterministic for any valid input.
 
@@ -2835,10 +2815,17 @@ class TestDeterminismProperty:
             current_state = replay_output.result
 
     @given(
-        node_type=st.sampled_from(["effect", "compute", "reducer", "orchestrator"]),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
     )
     @settings(max_examples=20)
-    def test_derived_event_id_is_deterministic(self, node_type: str) -> None:
+    def test_derived_event_id_is_deterministic(self, node_type: EnumNodeKind) -> None:
         """Property: Derived event IDs are deterministic.
 
         When an event lacks a correlation_id, the reducer derives an event_id
@@ -3046,10 +3033,19 @@ class TestDeterminismProperty:
             current_state = replay_output.result
 
     @given(
-        node_type=st.sampled_from(["effect", "compute", "reducer", "orchestrator"]),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
     )
     @settings(max_examples=20)
-    def test_state_hash_stability_across_reduce_calls(self, node_type: str) -> None:
+    def test_state_hash_stability_across_reduce_calls(
+        self, node_type: EnumNodeKind
+    ) -> None:
         """Property: State model hash is stable across identical reduce calls.
 
         The ModelRegistrationState uses Pydantic's frozen models. The resulting
@@ -4776,10 +4772,17 @@ class TestPropertyBasedStateInvariants:
                 )
 
     @given(
-        node_type=st.sampled_from(["effect", "compute", "reducer", "orchestrator"]),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
     )
     @settings(max_examples=20)
-    def test_state_transition_preserves_node_id(self, node_type: str) -> None:
+    def test_state_transition_preserves_node_id(self, node_type: EnumNodeKind) -> None:
         """Property: All with_* transitions preserve node_id (except with_reset).
 
         This invariant ensures traceability and consistency:
@@ -4838,11 +4841,20 @@ class TestPropertyBasedStateInvariants:
         )
 
     @given(
-        node_type=st.sampled_from(["effect", "compute", "reducer", "orchestrator"]),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
         replay_count=st.integers(min_value=2, max_value=5),
     )
     @settings(max_examples=25)
-    def test_idempotency_property(self, node_type: str, replay_count: int) -> None:
+    def test_idempotency_property(
+        self, node_type: EnumNodeKind, replay_count: int
+    ) -> None:
         """Property: Processing the same event twice always yields identical state.
 
         This invariant ensures safe event replay for:

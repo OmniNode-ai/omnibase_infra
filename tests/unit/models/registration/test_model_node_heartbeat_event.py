@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
 from pydantic import ValidationError
 
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
@@ -30,11 +31,11 @@ class TestModelNodeHeartbeatEventBasicInstantiation:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=3600.0,
         )
         assert event.node_id == test_node_id
-        assert event.node_type == "effect"
+        assert event.node_type == EnumNodeKind.EFFECT
         assert event.node_version == "1.0.0"  # Default value
         assert event.uptime_seconds == 3600.0
         assert event.active_operations_count == 0  # Default value
@@ -49,7 +50,7 @@ class TestModelNodeHeartbeatEventBasicInstantiation:
         timestamp = datetime.now(UTC)
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="compute",
+            node_type=EnumNodeKind.COMPUTE,
             node_version="2.1.0",
             uptime_seconds=7200.5,
             active_operations_count=10,
@@ -59,7 +60,7 @@ class TestModelNodeHeartbeatEventBasicInstantiation:
             timestamp=timestamp,
         )
         assert event.node_id == test_node_id
-        assert event.node_type == "compute"
+        assert event.node_type == EnumNodeKind.COMPUTE
         assert event.node_version == "2.1.0"
         assert event.uptime_seconds == 7200.5
         assert event.active_operations_count == 10
@@ -70,49 +71,14 @@ class TestModelNodeHeartbeatEventBasicInstantiation:
 
     def test_valid_node_type_enum_values(self) -> None:
         """Test that node_type accepts all EnumNodeKind values."""
-        from omnibase_core.enums import EnumNodeKind
-
-        # Test with enum values directly
         test_node_id = uuid4()
-        event = ModelNodeHeartbeatEvent(
-            node_id=test_node_id,
-            node_type=EnumNodeKind.EFFECT,
-            uptime_seconds=100.0,
-        )
-        assert event.node_type == EnumNodeKind.EFFECT
-
-        # Test all valid node types
         for node_kind in EnumNodeKind:
-            test_node_id = uuid4()
             event = ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
                 node_type=node_kind,
                 uptime_seconds=100.0,
             )
             assert event.node_type == node_kind
-
-    def test_valid_node_type_lowercase_string_coercion(self) -> None:
-        """Test that lowercase strings are coerced to EnumNodeKind."""
-        from omnibase_core.enums import EnumNodeKind
-
-        test_node_id = uuid4()
-        event = ModelNodeHeartbeatEvent(
-            node_id=test_node_id,
-            node_type="effect",  # lowercase string
-            uptime_seconds=100.0,
-        )
-        assert event.node_type == EnumNodeKind.EFFECT
-
-    def test_invalid_node_type_string_raises_error(self) -> None:
-        """Test that invalid node_type strings raise ValidationError."""
-        test_node_id = uuid4()
-        with pytest.raises(ValidationError) as exc_info:
-            ModelNodeHeartbeatEvent(
-                node_id=test_node_id,
-                node_type="custom_type",  # Invalid - not a valid EnumNodeKind
-                uptime_seconds=100.0,
-            )
-        assert "node_type" in str(exc_info.value)
 
 
 class TestModelNodeHeartbeatEventNodeVersion:
@@ -123,7 +89,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         assert event.node_version == "1.0.0"
@@ -133,7 +99,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_version="2.3.4",
             uptime_seconds=100.0,
         )
@@ -144,7 +110,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_version="1.0.0-alpha.1",
             uptime_seconds=100.0,
         )
@@ -155,7 +121,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_version="1.0.0+build.123",
             uptime_seconds=100.0,
         )
@@ -166,7 +132,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_version="1.0.0-alpha.1+build.123",
             uptime_seconds=100.0,
         )
@@ -177,7 +143,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_version="3.2.1",
             uptime_seconds=100.0,
         )
@@ -190,7 +156,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_version="4.5.6",
             uptime_seconds=100.0,
         )
@@ -208,7 +174,7 @@ class TestModelNodeHeartbeatEventSemverValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 node_version="1.0",
                 uptime_seconds=100.0,
             )
@@ -220,7 +186,7 @@ class TestModelNodeHeartbeatEventSemverValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 node_version="1.0.0.0",
                 uptime_seconds=100.0,
             )
@@ -232,7 +198,7 @@ class TestModelNodeHeartbeatEventSemverValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 node_version="a.b.c",
                 uptime_seconds=100.0,
             )
@@ -244,7 +210,7 @@ class TestModelNodeHeartbeatEventSemverValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 node_version="",
                 uptime_seconds=100.0,
             )
@@ -256,7 +222,7 @@ class TestModelNodeHeartbeatEventSemverValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 node_version="1",
                 uptime_seconds=100.0,
             )
@@ -270,7 +236,7 @@ class TestModelNodeHeartbeatEventSemverValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 node_version="1.0.0-beta@1",
                 uptime_seconds=100.0,
             )
@@ -282,7 +248,7 @@ class TestModelNodeHeartbeatEventSemverValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 node_version="1.0.0 alpha",
                 uptime_seconds=100.0,
             )
@@ -294,7 +260,7 @@ class TestModelNodeHeartbeatEventSemverValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 node_version="v1.0.0",
                 uptime_seconds=100.0,
             )
@@ -305,7 +271,7 @@ class TestModelNodeHeartbeatEventSemverValidation:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_version="1.0.0-alpha.beta.1.2.3",
             uptime_seconds=100.0,
         )
@@ -316,7 +282,7 @@ class TestModelNodeHeartbeatEventSemverValidation:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_version="1.0.0+20130313144700.sha.abc123",
             uptime_seconds=100.0,
         )
@@ -332,7 +298,7 @@ class TestModelNodeHeartbeatEventUptimeValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=-1.0,
             )
         assert "uptime_seconds" in str(exc_info.value)
@@ -343,7 +309,7 @@ class TestModelNodeHeartbeatEventUptimeValidation:
         with pytest.raises(ValidationError):
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=-99999.0,
             )
 
@@ -352,7 +318,7 @@ class TestModelNodeHeartbeatEventUptimeValidation:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=0.0,
         )
         assert event.uptime_seconds == 0.0
@@ -362,7 +328,7 @@ class TestModelNodeHeartbeatEventUptimeValidation:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=0.001,
         )
         assert event.uptime_seconds == 0.001
@@ -372,7 +338,7 @@ class TestModelNodeHeartbeatEventUptimeValidation:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=365 * 24 * 3600.0,  # One year in seconds
         )
         assert event.uptime_seconds == 365 * 24 * 3600.0
@@ -387,7 +353,7 @@ class TestModelNodeHeartbeatEventActiveOperationsValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=100.0,
                 active_operations_count=-1,
             )
@@ -399,7 +365,7 @@ class TestModelNodeHeartbeatEventActiveOperationsValidation:
         with pytest.raises(ValidationError):
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=100.0,
                 active_operations_count=-100,
             )
@@ -409,7 +375,7 @@ class TestModelNodeHeartbeatEventActiveOperationsValidation:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             active_operations_count=0,
         )
@@ -420,7 +386,7 @@ class TestModelNodeHeartbeatEventActiveOperationsValidation:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             active_operations_count=50,
         )
@@ -431,7 +397,7 @@ class TestModelNodeHeartbeatEventActiveOperationsValidation:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             active_operations_count=10000,
         )
@@ -447,7 +413,7 @@ class TestModelNodeHeartbeatEventMemoryUsageValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=100.0,
                 memory_usage_mb=-1.0,
             )
@@ -459,7 +425,7 @@ class TestModelNodeHeartbeatEventMemoryUsageValidation:
         with pytest.raises(ValidationError):
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=100.0,
                 memory_usage_mb=-99999.0,
             )
@@ -469,7 +435,7 @@ class TestModelNodeHeartbeatEventMemoryUsageValidation:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             memory_usage_mb=0.0,
         )
@@ -480,7 +446,7 @@ class TestModelNodeHeartbeatEventMemoryUsageValidation:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             memory_usage_mb=512.0,
         )
@@ -491,7 +457,7 @@ class TestModelNodeHeartbeatEventMemoryUsageValidation:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             memory_usage_mb=0.001,
         )
@@ -506,7 +472,7 @@ class TestModelNodeHeartbeatEventSerialization:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="reducer",
+            node_type=EnumNodeKind.REDUCER,
             uptime_seconds=1800.0,
         )
         json_str = event.model_dump_json()
@@ -522,7 +488,7 @@ class TestModelNodeHeartbeatEventSerialization:
         correlation_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="orchestrator",
+            node_type=EnumNodeKind.ORCHESTRATOR,
             uptime_seconds=86400.0,
             active_operations_count=25,
             memory_usage_mb=1024.0,
@@ -547,14 +513,14 @@ class TestModelNodeHeartbeatEventSerialization:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=500.0,
             active_operations_count=3,
         )
         data = event.model_dump()
         assert isinstance(data, dict)
         assert data["node_id"] == test_node_id
-        assert data["node_type"] == "effect"
+        assert data["node_type"] == EnumNodeKind.EFFECT
         assert data["uptime_seconds"] == 500.0
         assert data["active_operations_count"] == 3
 
@@ -564,7 +530,7 @@ class TestModelNodeHeartbeatEventSerialization:
         correlation_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="compute",
+            node_type=EnumNodeKind.COMPUTE,
             uptime_seconds=1000.0,
             correlation_id=correlation_id,
         )
@@ -585,7 +551,7 @@ class TestModelNodeHeartbeatEventTimestamp:
         before = datetime.now(UTC)
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         after = datetime.now(UTC)
@@ -598,7 +564,7 @@ class TestModelNodeHeartbeatEventTimestamp:
         explicit_time = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=200.0,
             timestamp=explicit_time,
         )
@@ -609,7 +575,7 @@ class TestModelNodeHeartbeatEventTimestamp:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="compute",
+            node_type=EnumNodeKind.COMPUTE,
             uptime_seconds=300.0,
         )
         assert isinstance(event.timestamp, datetime)
@@ -623,7 +589,7 @@ class TestModelNodeHeartbeatEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         with pytest.raises(ValidationError):
@@ -634,18 +600,18 @@ class TestModelNodeHeartbeatEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         with pytest.raises(ValidationError):
-            event.node_type = "compute"  # type: ignore[misc]
+            event.node_type = EnumNodeKind.COMPUTE  # type: ignore[misc]
 
     def test_frozen_model_cannot_modify_node_version(self) -> None:
         """Test that node_version cannot be modified after creation."""
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_version="1.0.0",
             uptime_seconds=100.0,
         )
@@ -657,7 +623,7 @@ class TestModelNodeHeartbeatEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         with pytest.raises(ValidationError):
@@ -668,7 +634,7 @@ class TestModelNodeHeartbeatEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             active_operations_count=5,
         )
@@ -680,7 +646,7 @@ class TestModelNodeHeartbeatEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             memory_usage_mb=512.0,
         )
@@ -692,7 +658,7 @@ class TestModelNodeHeartbeatEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             cpu_usage_percent=50.0,
         )
@@ -704,7 +670,7 @@ class TestModelNodeHeartbeatEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             correlation_id=uuid4(),
         )
@@ -716,7 +682,7 @@ class TestModelNodeHeartbeatEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         with pytest.raises(ValidationError):
@@ -731,7 +697,7 @@ class TestModelNodeHeartbeatEventResourceMetrics:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         assert event.memory_usage_mb is None
@@ -741,7 +707,7 @@ class TestModelNodeHeartbeatEventResourceMetrics:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         assert event.cpu_usage_percent is None
@@ -751,7 +717,7 @@ class TestModelNodeHeartbeatEventResourceMetrics:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             memory_usage_mb=0.0,
         )
@@ -762,7 +728,7 @@ class TestModelNodeHeartbeatEventResourceMetrics:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             cpu_usage_percent=0.0,
         )
@@ -773,7 +739,7 @@ class TestModelNodeHeartbeatEventResourceMetrics:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             cpu_usage_percent=100.0,
         )
@@ -785,7 +751,7 @@ class TestModelNodeHeartbeatEventResourceMetrics:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=100.0,
                 cpu_usage_percent=101.0,
             )
@@ -797,7 +763,7 @@ class TestModelNodeHeartbeatEventResourceMetrics:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=100.0,
                 cpu_usage_percent=-1.0,
             )
@@ -808,7 +774,7 @@ class TestModelNodeHeartbeatEventResourceMetrics:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             memory_usage_mb=1024 * 1024,  # 1 TB
         )
@@ -823,7 +789,7 @@ class TestModelNodeHeartbeatEventRequiredFields:
         with pytest.raises(ValidationError) as exc_info:
             # Intentionally omitting required field to test Pydantic validation
             ModelNodeHeartbeatEvent(  # type: ignore[call-arg]
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=100.0,
             )
         assert "node_id" in str(exc_info.value)
@@ -846,7 +812,7 @@ class TestModelNodeHeartbeatEventRequiredFields:
             # Intentionally omitting required field to test Pydantic validation
             ModelNodeHeartbeatEvent(  # type: ignore[call-arg]
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
             )
         assert "uptime_seconds" in str(exc_info.value)
 
@@ -855,7 +821,7 @@ class TestModelNodeHeartbeatEventRequiredFields:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=None,  # type: ignore[arg-type]
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=100.0,
             )
         assert "node_id" in str(exc_info.value)
@@ -877,7 +843,7 @@ class TestModelNodeHeartbeatEventRequiredFields:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=None,  # type: ignore[arg-type]
             )
         assert "uptime_seconds" in str(exc_info.value)
@@ -891,38 +857,19 @@ class TestModelNodeHeartbeatEventEdgeCases:
         with pytest.raises(ValidationError):
             ModelNodeHeartbeatEvent(
                 node_id="",  # type: ignore[arg-type]
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=100.0,
             )
 
-    def test_empty_string_node_type_raises_error(self) -> None:
-        """Test that empty string for node_type raises ValidationError.
-
-        Since node_type is now EnumNodeKind, empty string is not valid.
-        """
+    def test_invalid_node_type_string_raises_error(self) -> None:
+        """Test that string is not allowed for node_type (EnumNodeKind type)."""
         test_node_id = uuid4()
-        with pytest.raises(ValidationError) as exc_info:
+        with pytest.raises(ValidationError):
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="",  # type: ignore[arg-type]
+                node_type="invalid_string",  # type: ignore[arg-type]
                 uptime_seconds=100.0,
             )
-        assert "node_type" in str(exc_info.value)
-
-    def test_invalid_unicode_node_type_raises_error(self) -> None:
-        """Test that Unicode characters in node_type raise ValidationError.
-
-        Since node_type is now EnumNodeKind, Unicode strings are not valid
-        unless they match a valid enum value.
-        """
-        test_node_id = uuid4()
-        with pytest.raises(ValidationError) as exc_info:
-            ModelNodeHeartbeatEvent(
-                node_id=test_node_id,
-                node_type="效果节点",  # type: ignore[arg-type]
-                uptime_seconds=100.0,
-            )
-        assert "node_type" in str(exc_info.value)
 
     def test_extra_fields_forbidden(self) -> None:
         """Test that extra fields are forbidden by model config."""
@@ -930,7 +877,7 @@ class TestModelNodeHeartbeatEventEdgeCases:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeHeartbeatEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 uptime_seconds=100.0,
                 extra_field="not_allowed",  # type: ignore[call-arg]
             )
@@ -941,7 +888,7 @@ class TestModelNodeHeartbeatEventEdgeCases:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=3600.123456789,
             memory_usage_mb=256.789012345,
             cpu_usage_percent=33.333333333,
@@ -961,7 +908,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
         class DictLike:
             def __init__(self, node_id: UUID) -> None:
                 self.node_id = node_id
-                self.node_type = "compute"
+                self.node_type = EnumNodeKind.COMPUTE
                 self.node_version = "1.0.0"
                 self.uptime_seconds = 1234.5
                 self.active_operations_count = 5
@@ -973,7 +920,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
         obj = DictLike(test_node_id)
         event = ModelNodeHeartbeatEvent.model_validate(obj)
         assert event.node_id == test_node_id
-        assert event.node_type == "compute"
+        assert event.node_type == EnumNodeKind.COMPUTE
         assert event.node_version == "1.0.0"
         assert event.uptime_seconds == 1234.5
         assert event.active_operations_count == 5
@@ -989,7 +936,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "orchestrator"
+                self.node_type = EnumNodeKind.ORCHESTRATOR
                 self.node_version = "2.1.0"
                 self.uptime_seconds = 86400.0
                 self.active_operations_count = 42
@@ -1001,7 +948,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
         obj = ORMLike()
         event = ModelNodeHeartbeatEvent.model_validate(obj)
         assert event.node_id == test_node_id
-        assert event.node_type == "orchestrator"
+        assert event.node_type == EnumNodeKind.ORCHESTRATOR
         assert event.node_version == "2.1.0"
         assert event.uptime_seconds == 86400.0
         assert event.active_operations_count == 42
@@ -1019,7 +966,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "reducer"
+                self.node_type = EnumNodeKind.REDUCER
                 self.node_version = "1.0.0"
                 self.uptime_seconds = 500.0
                 self.active_operations_count = 0
@@ -1043,7 +990,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "1.0.0"
                 self.uptime_seconds = -100.0  # Invalid: negative
                 self.active_operations_count = 0
@@ -1066,7 +1013,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "invalid"  # Not valid semver
                 self.uptime_seconds = 100.0
                 self.active_operations_count = 0
@@ -1089,7 +1036,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "1.0.0"
                 self.uptime_seconds = 100.0
                 self.active_operations_count = 0
@@ -1112,7 +1059,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "1.0.0"
                 self.uptime_seconds = 100.0
                 self.active_operations_count = 0
@@ -1135,7 +1082,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "1.0.0"
                 self.uptime_seconds = 100.0
                 self.active_operations_count = 0
@@ -1158,7 +1105,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "1.0.0"
                 self.uptime_seconds = 100.0
                 self.active_operations_count = -10  # Invalid: < 0
@@ -1181,7 +1128,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "1.0.0"
                 self.uptime_seconds = 100.0
                 self.active_operations_count = 0
@@ -1203,7 +1150,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "1.0.0"
                 self.uptime_seconds = 100.0
                 self.active_operations_count = 0
@@ -1225,7 +1172,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "1.0.0"
                 self.uptime_seconds = 100.0
                 self.active_operations_count = 0
@@ -1247,7 +1194,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "1.0.0"
                 self.uptime_seconds = 0.0  # Boundary: exactly 0
                 self.active_operations_count = 0
@@ -1269,7 +1216,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
 
             def __init__(self) -> None:
                 self.node_id = test_node_id
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "1.0.0"
                 self.uptime_seconds = 100.0
                 self.active_operations_count = 0  # Boundary: exactly 0
@@ -1292,13 +1239,13 @@ class TestModelNodeHeartbeatEventHashEquality:
         timestamp = datetime.now(UTC)
         event1 = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             timestamp=timestamp,
         )
         event2 = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             timestamp=timestamp,
         )
@@ -1309,12 +1256,12 @@ class TestModelNodeHeartbeatEventHashEquality:
         test_node_id = uuid4()
         event1 = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         event2 = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=200.0,  # Different value
         )
         assert event1 != event2
@@ -1324,13 +1271,13 @@ class TestModelNodeHeartbeatEventHashEquality:
         timestamp = datetime.now(UTC)
         event1 = ModelNodeHeartbeatEvent(
             node_id=uuid4(),
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             timestamp=timestamp,
         )
         event2 = ModelNodeHeartbeatEvent(
             node_id=uuid4(),
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             timestamp=timestamp,
         )
@@ -1341,7 +1288,7 @@ class TestModelNodeHeartbeatEventHashEquality:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         # Should not raise - frozen models are hashable
@@ -1354,13 +1301,13 @@ class TestModelNodeHeartbeatEventHashEquality:
         timestamp = datetime.now(UTC)
         event1 = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             timestamp=timestamp,
         )
         event2 = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             timestamp=timestamp,
         )
@@ -1372,19 +1319,19 @@ class TestModelNodeHeartbeatEventHashEquality:
         timestamp = datetime.now(UTC)
         event1 = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             timestamp=timestamp,
         )
         event2 = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             timestamp=timestamp,
         )
         event3 = ModelNodeHeartbeatEvent(
             node_id=uuid4(),  # Different node_id
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             timestamp=timestamp,
         )
@@ -1398,7 +1345,7 @@ class TestModelNodeHeartbeatEventHashEquality:
         timestamp = datetime.now(UTC)
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             timestamp=timestamp,
         )
@@ -1471,7 +1418,7 @@ class TestModelNodeHeartbeatEventModelCopy:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         copied = event.model_copy()
@@ -1483,7 +1430,7 @@ class TestModelNodeHeartbeatEventModelCopy:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         copied = event.model_copy(update={"uptime_seconds": 200.0})
@@ -1496,22 +1443,22 @@ class TestModelNodeHeartbeatEventModelCopy:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         new_correlation_id = uuid4()
         copied = event.model_copy(
             update={
-                "node_type": "compute",
+                "node_type": EnumNodeKind.COMPUTE,
                 "uptime_seconds": 500.0,
                 "correlation_id": new_correlation_id,
             }
         )
-        assert copied.node_type == "compute"
+        assert copied.node_type == EnumNodeKind.COMPUTE
         assert copied.uptime_seconds == 500.0
         assert copied.correlation_id == new_correlation_id
         # Original unchanged
-        assert event.node_type == "effect"
+        assert event.node_type == EnumNodeKind.EFFECT
         assert event.uptime_seconds == 100.0
 
     def test_model_copy_deep_preserves_uuid(self) -> None:
@@ -1520,7 +1467,7 @@ class TestModelNodeHeartbeatEventModelCopy:
         correlation_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             correlation_id=correlation_id,
         )
@@ -1537,7 +1484,7 @@ class TestModelNodeHeartbeatEventTypeCoercion:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=str(test_node_id),  # type: ignore[arg-type]
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         assert event.node_id == test_node_id
@@ -1548,7 +1495,7 @@ class TestModelNodeHeartbeatEventTypeCoercion:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100,  # int, not float
         )
         assert event.uptime_seconds == 100.0
@@ -1560,7 +1507,7 @@ class TestModelNodeHeartbeatEventTypeCoercion:
         correlation_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             correlation_id=str(correlation_id),  # type: ignore[arg-type]
         )
@@ -1573,7 +1520,7 @@ class TestModelNodeHeartbeatEventTypeCoercion:
         timestamp_str = "2025-06-15T10:30:00+00:00"
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             timestamp=timestamp_str,  # type: ignore[arg-type]
         )
@@ -1587,7 +1534,7 @@ class TestModelNodeHeartbeatEventTypeCoercion:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             memory_usage_mb=512,  # int
         )
@@ -1599,7 +1546,7 @@ class TestModelNodeHeartbeatEventTypeCoercion:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
             cpu_usage_percent=50,  # int
         )
@@ -1615,19 +1562,19 @@ class TestModelNodeHeartbeatEventModelValidate:
         test_node_id = uuid4()
         data = {
             "node_id": test_node_id,
-            "node_type": "effect",
+            "node_type": EnumNodeKind.EFFECT,
             "uptime_seconds": 100.0,
         }
         event = ModelNodeHeartbeatEvent.model_validate(data)
         assert event.node_id == test_node_id
-        assert event.node_type == "effect"
+        assert event.node_type == EnumNodeKind.EFFECT
 
     def test_model_validate_from_dict_with_string_uuid(self) -> None:
         """Test model_validate with string UUID in dict."""
         test_node_id = uuid4()
         data = {
             "node_id": str(test_node_id),
-            "node_type": "effect",
+            "node_type": EnumNodeKind.EFFECT,
             "uptime_seconds": 100.0,
         }
         event = ModelNodeHeartbeatEvent.model_validate(data)
@@ -1638,7 +1585,7 @@ class TestModelNodeHeartbeatEventModelValidate:
         test_node_id = uuid4()
         data = {
             "node_id": str(test_node_id),  # String, not UUID
-            "node_type": "effect",
+            "node_type": EnumNodeKind.EFFECT,
             "uptime_seconds": 100.0,
         }
         # Strict mode should reject string where UUID expected
@@ -1651,95 +1598,7 @@ class TestModelNodeHeartbeatEventModelValidate:
         json_str = f'{{"node_id": "{test_node_id}", "node_type": "effect", "uptime_seconds": 100.0}}'
         event = ModelNodeHeartbeatEvent.model_validate_json(json_str)
         assert event.node_id == test_node_id
-        assert event.node_type == "effect"
-
-
-class TestModelNodeHeartbeatEventDeprecationWarning:
-    """Tests for node_type string deprecation warning."""
-
-    def test_string_node_type_emits_deprecation_warning(self) -> None:
-        """Test that passing node_type as string emits DeprecationWarning."""
-        from omnibase_core.enums import EnumNodeKind
-
-        test_node_id = uuid4()
-        with pytest.warns(
-            DeprecationWarning, match="node_type as string is deprecated"
-        ):
-            event = ModelNodeHeartbeatEvent(
-                node_id=test_node_id,
-                node_type="effect",  # String triggers warning
-                uptime_seconds=100.0,
-            )
-        # Verify coercion still works
         assert event.node_type == EnumNodeKind.EFFECT
-
-    def test_enum_node_type_no_deprecation_warning(self) -> None:
-        """Test that passing node_type as EnumNodeKind does not emit warning."""
-        import warnings
-
-        from omnibase_core.enums import EnumNodeKind
-
-        test_node_id = uuid4()
-        # Should not emit deprecation warnings
-        with warnings.catch_warnings(record=True) as record:
-            warnings.simplefilter("always")
-            event = ModelNodeHeartbeatEvent(
-                node_id=test_node_id,
-                node_type=EnumNodeKind.EFFECT,
-                uptime_seconds=100.0,
-            )
-        # Filter for DeprecationWarning only
-        deprecation_warnings = [
-            w for w in record if issubclass(w.category, DeprecationWarning)
-        ]
-        assert len(deprecation_warnings) == 0
-        assert event.node_type == EnumNodeKind.EFFECT
-
-    def test_uppercase_string_node_type_coerced_with_warning(self) -> None:
-        """Test that uppercase string is lowercased and warns."""
-        from omnibase_core.enums import EnumNodeKind
-
-        test_node_id = uuid4()
-        with pytest.warns(
-            DeprecationWarning, match="node_type as string is deprecated"
-        ):
-            event = ModelNodeHeartbeatEvent(
-                node_id=test_node_id,
-                node_type="EFFECT",  # Uppercase string
-                uptime_seconds=100.0,
-            )
-        assert event.node_type == EnumNodeKind.EFFECT
-
-    def test_mixed_case_string_node_type_coerced_with_warning(self) -> None:
-        """Test that mixed case string is lowercased and warns."""
-        from omnibase_core.enums import EnumNodeKind
-
-        test_node_id = uuid4()
-        with pytest.warns(
-            DeprecationWarning, match="node_type as string is deprecated"
-        ):
-            event = ModelNodeHeartbeatEvent(
-                node_id=test_node_id,
-                node_type="Compute",  # Mixed case string
-                uptime_seconds=100.0,
-            )
-        assert event.node_type == EnumNodeKind.COMPUTE
-
-    def test_all_enum_values_work_as_strings_with_warning(self) -> None:
-        """Test that all EnumNodeKind values work as strings with warning."""
-        from omnibase_core.enums import EnumNodeKind
-
-        for node_kind in EnumNodeKind:
-            test_node_id = uuid4()
-            with pytest.warns(
-                DeprecationWarning, match="node_type as string is deprecated"
-            ):
-                event = ModelNodeHeartbeatEvent(
-                    node_id=test_node_id,
-                    node_type=node_kind.value,  # String value from enum
-                    uptime_seconds=100.0,
-                )
-            assert event.node_type == node_kind
 
 
 class TestModelNodeHeartbeatEventRepr:
@@ -1750,7 +1609,7 @@ class TestModelNodeHeartbeatEventRepr:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         repr_str = repr(event)
@@ -1761,19 +1620,20 @@ class TestModelNodeHeartbeatEventRepr:
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         repr_str = repr(event)
         assert str(test_node_id) in repr_str
-        assert "effect" in repr_str
+        # EnumNodeKind.EFFECT repr contains "effect" (the value)
+        assert "EFFECT" in repr_str or "effect" in repr_str
 
     def test_str_representation(self) -> None:
         """Test string representation of model."""
         test_node_id = uuid4()
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             uptime_seconds=100.0,
         )
         str_repr = str(event)

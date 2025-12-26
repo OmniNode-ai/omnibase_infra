@@ -35,7 +35,9 @@ Usage:
                 transport_type=EnumInfraTransportType.KAFKA,
             )
 
-        async def publish(self, topic, key, value, correlation_id=None):
+        async def publish(
+            self, topic: str, key: str, value: bytes, correlation_id: UUID | None = None
+        ) -> None:
             # Check circuit before operation
             async with self._circuit_breaker_lock:
                 await self._check_circuit_breaker(
@@ -177,7 +179,9 @@ class MixinAsyncCircuitBreaker:
                     transport_type=EnumInfraTransportType.CONSUL,
                 )
 
-            async def register_service(self, service, correlation_id=None):
+            async def register_service(
+                self, service: str, correlation_id: UUID | None = None
+            ) -> None:
                 # Check circuit (thread-safe)
                 async with self._circuit_breaker_lock:
                     await self._check_circuit_breaker(
@@ -309,7 +313,9 @@ class MixinAsyncCircuitBreaker:
 
         Example:
             ```python
-            async def perform_operation(self, correlation_id=None):
+            async def perform_operation(
+                self, correlation_id: UUID | None = None
+            ) -> Result:
                 # Check circuit before operation (thread-safe)
                 async with self._circuit_breaker_lock:
                     await self._check_circuit_breaker(
@@ -407,7 +413,9 @@ class MixinAsyncCircuitBreaker:
 
         Example:
             ```python
-            async def perform_operation(self, correlation_id=None):
+            async def perform_operation(
+                self, correlation_id: UUID | None = None
+            ) -> Result:
                 try:
                     result = await self._do_work()
                     return result

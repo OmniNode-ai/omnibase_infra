@@ -775,7 +775,7 @@ class TestDeterminismGates:
             timestamp=fixed_timestamp,
         )
 
-        def run_reduce():
+        def run_reduce() -> object:
             """Execute reduce() and return result for comparison."""
             return reducer.reduce(state, event)
 
@@ -1005,7 +1005,7 @@ class TestBehavioralPurityGates:
             "test_reducer_purity.py",  # Exclude this test file itself
         )
 
-        def tracking_open(*args, **kwargs):
+        def tracking_open(*args: object, **kwargs: object) -> object:
             # Inspect call stack to determine origin
             stack = traceback.extract_stack()
 

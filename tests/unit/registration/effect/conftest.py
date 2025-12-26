@@ -46,6 +46,7 @@ from omnibase_infra.models.registration import (
     ModelNodeMetadata,
     ModelNodeRegistration,
 )
+from tests.helpers import create_introspection_event
 
 # -----------------------------------------------------------------------------
 # Idempotency Fixtures
@@ -348,47 +349,6 @@ def sample_node_registration(
 # -----------------------------------------------------------------------------
 # Factory Fixtures
 # -----------------------------------------------------------------------------
-
-
-def create_introspection_event(
-    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
-    node_id: UUID | None = None,
-    correlation_id: UUID | None = None,
-    endpoints: dict[str, str] | None = None,
-    node_version: str = "1.0.0",
-) -> ModelNodeIntrospectionEvent:
-    """Factory function for creating introspection events.
-
-    Provides flexibility for creating custom events in tests while
-    maintaining sensible defaults.
-
-    Args:
-        node_type: Type of node (default: "effect").
-        node_id: Optional node ID (generates if not provided).
-        correlation_id: Optional correlation ID (generates if not provided).
-        endpoints: Optional endpoints dict (default: health endpoint).
-        node_version: Semantic version string (default: "1.0.0").
-
-    Returns:
-        ModelNodeIntrospectionEvent: Configured event instance.
-
-    Example:
-        >>> event = create_introspection_event(
-        ...     node_type="reducer",
-        ...     node_version="2.0.0",
-        ... )
-        >>> assert event.node_type == "reducer"
-    """
-    return ModelNodeIntrospectionEvent(
-        node_id=node_id or uuid4(),
-        node_type=node_type,
-        node_version=node_version,
-        correlation_id=correlation_id or uuid4(),
-        endpoints=endpoints
-        if endpoints is not None
-        else {"health": "http://localhost:8080/health"},
-        capabilities=ModelNodeCapabilities(postgres=True, read=True),
-    )
 
 
 def create_node_registration(

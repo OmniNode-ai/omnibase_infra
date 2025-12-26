@@ -25,13 +25,10 @@ Related:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal
 from uuid import UUID, uuid4
 
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field
-
-# Type alias for valid ONEX node types
-NodeType = Literal["effect", "compute", "reducer", "orchestrator"]
 
 
 class ModelRegistryRequest(BaseModel):
@@ -59,16 +56,17 @@ class ModelRegistryRequest(BaseModel):
 
     Example:
         >>> from uuid import uuid4
+        >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
         >>> request = ModelRegistryRequest(
         ...     node_id=uuid4(),
-        ...     node_type="effect",
+        ...     node_type=EnumNodeKind.EFFECT,
         ...     node_version="1.0.0",
         ...     correlation_id=uuid4(),
         ...     service_name="onex-effect",
         ...     endpoints={"health": "http://localhost:8080/health"},
         ... )
         >>> request.node_type
-        'effect'
+        <EnumNodeKind.EFFECT: 'effect'>
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -77,7 +75,7 @@ class ModelRegistryRequest(BaseModel):
         ...,
         description="Unique identifier for the node being registered",
     )
-    node_type: NodeType = Field(
+    node_type: EnumNodeKind = Field(
         ...,
         description="Type of ONEX node (effect, compute, reducer, orchestrator)",
     )
@@ -115,4 +113,4 @@ class ModelRegistryRequest(BaseModel):
     )
 
 
-__all__ = ["ModelRegistryRequest", "NodeType"]
+__all__ = ["ModelRegistryRequest"]

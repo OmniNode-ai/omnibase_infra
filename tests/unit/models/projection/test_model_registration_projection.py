@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -783,7 +784,7 @@ class TestModelRegistrationProjectionFromAttributes:
             entity_id: UUID
             domain: str
             current_state: EnumRegistrationState
-            node_type: str
+            node_type: EnumNodeKind
             node_version: str
             capabilities: ModelNodeCapabilities
             ack_deadline: datetime | None
@@ -802,7 +803,7 @@ class TestModelRegistrationProjectionFromAttributes:
                 self.entity_id = entity_id
                 self.domain = "registration"
                 self.current_state = EnumRegistrationState.ACTIVE
-                self.node_type = "effect"
+                self.node_type = EnumNodeKind.EFFECT
                 self.node_version = "1.0.0"
                 self.capabilities = ModelNodeCapabilities()
                 self.ack_deadline = None
@@ -821,7 +822,7 @@ class TestModelRegistrationProjectionFromAttributes:
         proj = ModelRegistrationProjection.model_validate(row)
         assert proj.entity_id == entity_id
         assert proj.current_state == EnumRegistrationState.ACTIVE
-        assert proj.node_type == "effect"
+        assert proj.node_type == EnumNodeKind.EFFECT
 
 
 class TestModelRegistrationProjectionCapabilities:
@@ -883,21 +884,89 @@ class TestModelRegistrationProjectionAllStates:
 
 
 class TestModelRegistrationProjectionAllNodeTypes:
-    """Tests for all node types."""
+    """Tests for all canonical ONEX node types.
+
+    Scope Clarification:
+        "All node types" refers to the four canonical ONEX node archetypes:
+        - EFFECT: External I/O operations (Kafka, PostgreSQL, HTTP, etc.)
+        - COMPUTE: Pure transformations and algorithms
+        - REDUCER: State aggregation with FSM-driven projections
+        - ORCHESTRATOR: Workflow coordination
+
+        These are the only valid node types in the ONEX ecosystem. Custom or
+        experimental node types are not supported in ModelRegistrationProjection
+        because projections represent persisted registry state that must align
+        with the canonical node catalog.
+    """
 
     @pytest.mark.parametrize(
         "node_type",
-        ["effect", "compute", "reducer", "orchestrator"],
+        [
+            EnumNodeKind.EFFECT,
+            EnumNodeKind.COMPUTE,
+            EnumNodeKind.REDUCER,
+            EnumNodeKind.ORCHESTRATOR,
+        ],
     )
-    def test_all_node_types_are_valid(self, node_type: str) -> None:
-        """Test that all node types are valid."""
+    def test_all_node_types_are_valid(self, node_type: EnumNodeKind) -> None:
+        """Test that all canonical ONEX node types are valid."""
         now = datetime.now(UTC)
         proj = ModelRegistrationProjection(
             entity_id=uuid4(),
             current_state=EnumRegistrationState.ACTIVE,
-            node_type=node_type,  # type: ignore[arg-type]
+            node_type=node_type,
             last_applied_event_id=uuid4(),
             registered_at=now,
             updated_at=now,
         )
         assert proj.node_type == node_type
+
+    def test_json_serialization_uses_string_value(self) -> None:
+        """Test that JSON serialization produces string value, not enum member name.
+
+        This test guards against regressions in enum serialization behavior.
+        Pydantic serializes enums by their .value attribute in JSON mode.
+        """
+        import json
+
+        now = datetime.now(UTC)
+        proj = ModelRegistrationProjection(
+            entity_id=uuid4(),
+            current_state=EnumRegistrationState.ACTIVE,
+            node_type=EnumNodeKind.EFFECT,
+            last_applied_event_id=uuid4(),
+            registered_at=now,
+            updated_at=now,
+        )
+
+        # Serialize to JSON
+        json_data = json.loads(proj.model_dump_json())
+
+        # node_type should be the string value "effect", not "EFFECT"
+        assert json_data["node_type"] == "effect"
+        assert json_data["node_type"] == EnumNodeKind.EFFECT.value
+
+    def test_string_coercion_on_deserialization(self) -> None:
+        """Test that string values are coerced to EnumNodeKind on deserialization.
+
+        Pydantic automatically coerces string values to enum members when the
+        string matches the enum value. This enables backward compatibility with
+        data that was serialized as strings.
+        """
+        now = datetime.now(UTC)
+        entity_id = uuid4()
+        event_id = uuid4()
+
+        # Create projection using string value (simulating deserialization)
+        proj = ModelRegistrationProjection(
+            entity_id=entity_id,
+            current_state=EnumRegistrationState.ACTIVE,
+            node_type="reducer",  # type: ignore[arg-type]  # Intentional string for test
+            last_applied_event_id=event_id,
+            registered_at=now,
+            updated_at=now,
+        )
+
+        # Value should be coerced to EnumNodeKind
+        assert proj.node_type == EnumNodeKind.REDUCER
+        assert isinstance(proj.node_type, EnumNodeKind)

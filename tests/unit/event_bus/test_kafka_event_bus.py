@@ -214,7 +214,7 @@ class TestKafkaEventBusPublish:
         mock_record_metadata.partition = 0
         mock_record_metadata.offset = 42
 
-        async def mock_send(*args, **kwargs):
+        async def mock_send(*args: object, **kwargs: object) -> asyncio.Future[object]:
             future = asyncio.get_running_loop().create_future()
             future.set_result(mock_record_metadata)
             return future
@@ -787,7 +787,7 @@ class TestKafkaEventBusPublishRetry:
         mock_record_metadata.partition = 0
         mock_record_metadata.offset = 42
 
-        async def mock_send(*args, **kwargs):
+        async def mock_send(*args: object, **kwargs: object) -> asyncio.Future[object]:
             nonlocal call_count
             call_count += 1
             if call_count < 3:
@@ -823,7 +823,7 @@ class TestKafkaEventBusPublishRetry:
     ) -> None:
         """Test publish fails after exhausting all retries."""
 
-        async def mock_send(*args, **kwargs):
+        async def mock_send(*args: object, **kwargs: object) -> None:
             raise KafkaError("Persistent error")
 
         mock_producer.send = AsyncMock(side_effect=mock_send)
@@ -862,7 +862,7 @@ class TestKafkaEventBusPublishEnvelope:
         mock_record_metadata.partition = 0
         mock_record_metadata.offset = 42
 
-        async def mock_send(*args, **kwargs):
+        async def mock_send(*args: object, **kwargs: object) -> asyncio.Future[object]:
             future = asyncio.get_running_loop().create_future()
             future.set_result(mock_record_metadata)
             return future
@@ -943,7 +943,7 @@ class TestKafkaEventBusBroadcast:
         mock_record_metadata.partition = 0
         mock_record_metadata.offset = 42
 
-        async def mock_send(*args, **kwargs):
+        async def mock_send(*args: object, **kwargs: object) -> asyncio.Future[object]:
             future = asyncio.get_running_loop().create_future()
             future.set_result(mock_record_metadata)
             return future

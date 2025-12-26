@@ -812,8 +812,8 @@ class TestDockerHealthCheck:
             ), f"Unexpected initial health status: {initial_status}"
 
             # Wait for healthy status (with timeout)
-            start_time = time.time()
-            while time.time() - start_time < HEALTH_CHECK_TIMEOUT:
+            start_time = time.monotonic()
+            while time.monotonic() - start_time < HEALTH_CHECK_TIMEOUT:
                 result = subprocess.run(
                     [
                         "docker",
