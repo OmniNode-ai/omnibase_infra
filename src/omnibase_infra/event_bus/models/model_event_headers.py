@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelEventHeaders(BaseModel):
@@ -47,10 +47,12 @@ class ModelEventHeaders(BaseModel):
 
     Example:
         ```python
+        from datetime import UTC, datetime
         headers = ModelEventHeaders(
             source="order-service",
             event_type="order.created",
             routing_key="orders.us-east",
+            timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
         )
         is_valid = await headers.validate_headers()
         ```
@@ -59,7 +61,32 @@ class ModelEventHeaders(BaseModel):
     content_type: str = Field(default="application/json")
     correlation_id: UUID = Field(default_factory=uuid4)
     message_id: UUID = Field(default_factory=uuid4)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
+    timestamp: datetime = Field(
+        ..., description="Message creation timestamp (must be explicitly provided)"
+    )
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
+        """Validate that timestamp is timezone-aware.
+
+        Args:
+            v: The timestamp value to validate.
+
+        Returns:
+            The validated timestamp.
+
+        Raises:
+            ValueError: If timestamp is naive (no timezone info).
+        """
+        if v.tzinfo is None:
+            raise ValueError(
+                "timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            )
+        return v
+
     source: str
     event_type: str
     schema_version: str = Field(default="1.0.0")

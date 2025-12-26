@@ -29,6 +29,7 @@ Related:
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -104,6 +105,7 @@ def sample_registry_request() -> ModelRegistryRequest:
         endpoints={"health": "http://localhost:8080/health"},
         tags=["test", "effect"],
         metadata={"environment": "test"},
+        timestamp=datetime(2025, 1, 1, tzinfo=UTC),
     )
 
 
@@ -310,6 +312,7 @@ class TestEffectPartialFailure:
             node_version="1.0.0",
             correlation_id=correlation_id,
             service_name="test-service",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         # Arrange - First attempt: Consul succeeds, PostgreSQL fails
@@ -528,6 +531,7 @@ class TestPartialFailureEdgeCases:
             node_type="effect",
             node_version="1.0.0",
             correlation_id=correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         # First registration - both succeed
@@ -680,6 +684,7 @@ class TestModelRegistryResponseFactory:
             correlation_id=correlation_id,
             consul_result=consul,
             postgres_result=postgres,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         assert response.status == "success"
@@ -703,6 +708,7 @@ class TestModelRegistryResponseFactory:
             correlation_id=correlation_id,
             consul_result=consul,
             postgres_result=postgres,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         assert response.status == "partial"
@@ -728,6 +734,7 @@ class TestModelRegistryResponseFactory:
             correlation_id=correlation_id,
             consul_result=consul,
             postgres_result=postgres,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         assert response.status == "failed"

@@ -1,10 +1,16 @@
-# Circuit Breaker Thread Safety Implementation
+# Circuit Breaker Concurrency Safety Implementation
 
 ## Overview
 
-The ONEX infrastructure layer uses `MixinAsyncCircuitBreaker` to provide production-grade fault tolerance for infrastructure components. This mixin uses `asyncio.Lock` with a caller-held locking pattern to ensure thread-safe concurrent access.
+The ONEX infrastructure layer uses `MixinAsyncCircuitBreaker` to provide production-grade fault tolerance for infrastructure components. This mixin uses `asyncio.Lock` with a caller-held locking pattern to ensure **coroutine-safe** concurrent access.
 
-## Thread Safety Implementation
+**Important Terminology Clarification**:
+- **Coroutine safety** (asyncio.Lock): Protects against concurrent access from multiple asyncio coroutines within a single event loop
+- **Thread safety** (threading.Lock): Protects against concurrent access from multiple OS threads
+
+This implementation provides **coroutine safety**, not full thread safety. For multi-threaded asyncio usage, additional synchronization (e.g., `threading.Lock`) would be required. Most ONEX infrastructure uses single-threaded asyncio event loops, making coroutine safety sufficient.
+
+## Coroutine Safety Implementation
 
 ### Lock Type: `asyncio.Lock` (Async Lock)
 
@@ -25,7 +31,7 @@ self._circuit_breaker_lock = asyncio.Lock()
 The `MixinAsyncCircuitBreaker` uses a **caller-held locking pattern** where the caller must acquire the lock before calling circuit breaker methods. This pattern is documented in each method's docstring with:
 
 ```
-Thread Safety:
+Concurrency Safety:
     REQUIRES: self._circuit_breaker_lock must be held by caller.
 ```
 
@@ -309,11 +315,11 @@ circuit_breaker_reset_timeout_seconds=30.0      # Auto-reset timeout
 
 ## Conclusion
 
-The circuit breaker implementation provides production-grade thread safety with:
+The circuit breaker implementation provides production-grade coroutine safety with:
 - **Async-native design** using asyncio.Lock
 - **Caller-held locking** for flexibility and clear responsibility
 - **Comprehensive state machine** (CLOSED -> OPEN -> HALF_OPEN -> CLOSED)
 - **Proper error context** with correlation ID propagation
 - **Minimal overhead** < 10us per operation
 
-Thread safety is guaranteed for all production workloads when callers follow the documented pattern of acquiring `_circuit_breaker_lock` before calling circuit breaker methods.
+Coroutine safety is guaranteed for all single-threaded asyncio workloads when callers follow the documented pattern of acquiring `_circuit_breaker_lock` before calling circuit breaker methods. For multi-threaded usage, additional synchronization would be required.

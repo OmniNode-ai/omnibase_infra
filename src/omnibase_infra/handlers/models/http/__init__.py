@@ -11,8 +11,7 @@ Exports:
     RegistryPayloadHttp: Decorator-based registry for HTTP payload types
     ModelHttpGetPayload: Payload for http.get result
     ModelHttpPostPayload: Payload for http.post result
-    ModelHttpHealthCheckPayload: Payload for HTTP health check result
-    HttpPayload: Discriminated union of all HTTP payload types (legacy)
+    HttpPayload: Discriminated union of all HTTP payload types
     ModelHttpHandlerPayload: Wrapper containing discriminated union payload
 """
 
@@ -25,9 +24,6 @@ from omnibase_infra.handlers.models.http.model_http_get_payload import (
 from omnibase_infra.handlers.models.http.model_http_handler_payload import (
     HttpPayload,
     ModelHttpHandlerPayload,
-)
-from omnibase_infra.handlers.models.http.model_http_health_check_payload import (
-    ModelHttpHealthCheckPayload,
 )
 from omnibase_infra.handlers.models.http.model_http_post_payload import (
     ModelHttpPostPayload,
@@ -43,7 +39,6 @@ __all__: list[str] = [
     "RegistryPayloadHttp",
     "ModelHttpGetPayload",
     "ModelHttpPostPayload",
-    "ModelHttpHealthCheckPayload",
     "HttpPayload",
     "ModelHttpHandlerPayload",
 ]

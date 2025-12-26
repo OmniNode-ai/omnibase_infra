@@ -47,7 +47,7 @@ See Also:
 
 import re
 from functools import cached_property
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -154,10 +154,10 @@ class ModelDispatchRoute(BaseModel):
         max_length=1000,
     )
 
-    # ---- Optional Metadata ----
-    correlation_id: UUID | None = Field(
-        default=None,
-        description="Optional correlation ID for tracing route creation.",
+    # ---- Tracing Context ----
+    correlation_id: UUID = Field(
+        default_factory=uuid4,
+        description="Correlation ID for tracing route creation (auto-generated if not provided).",
     )
     metadata: ModelDispatchMetadata | None = Field(
         default=None,

@@ -28,10 +28,12 @@ Design Principles:
     - **Version Tracking**: Monotonic versions for conflict resolution
     - **Circuit Breaker**: Resilience against Kafka failures
 
-Thread Safety:
-    This implementation is thread-safe for concurrent publishing.
+Concurrency Safety:
+    This implementation is coroutine-safe for concurrent async publishing.
     Uses asyncio locks for circuit breaker state management and
-    version tracker synchronization.
+    version tracker synchronization. Note: This is coroutine-safe, not
+    thread-safe. For multi-threaded access, additional synchronization
+    would be required.
 
 Error Handling:
     All methods raise ONEX error types:
@@ -153,7 +155,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             - delete_snapshot clears the version tracker entry for that entity
             - For persistent version tracking across restarts, inject a shared
               snapshot_version_tracker dict in __init__
-            - Thread-safe: Uses asyncio.Lock for concurrent access
+            - Coroutine-safe: Uses asyncio.Lock for concurrent access
 
     NOTE: Snapshots are for READ OPTIMIZATION only. The immutable event
     log remains the authoritative source of truth. Snapshots can be
@@ -304,9 +306,9 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         Versions are monotonically increasing within the lifetime of
         this publisher instance.
 
-        Thread Safety:
-            Uses _version_tracker_lock to ensure atomic read-modify-write
-            operations in concurrent async contexts.
+        Concurrency Safety:
+            Uses _version_tracker_lock (asyncio.Lock) to ensure atomic
+            read-modify-write operations in concurrent coroutine contexts.
 
         Args:
             entity_id: The entity identifier

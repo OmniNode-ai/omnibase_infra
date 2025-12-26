@@ -14,6 +14,9 @@ from omnibase_infra.models.discovery.model_introspection_config import (
 from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
     ModelIntrospectionPerformanceMetrics,
 )
+from omnibase_infra.models.discovery.model_introspection_task_config import (
+    ModelIntrospectionTaskConfig,
+)
 from omnibase_infra.models.discovery.model_node_introspection_event import (
     CapabilitiesTypedDict,
     ModelNodeIntrospectionEvent,
@@ -29,5 +32,6 @@ __all__ = [
     "VERSION_SUFFIX_PATTERN",
     "ModelIntrospectionConfig",
     "ModelIntrospectionPerformanceMetrics",
+    "ModelIntrospectionTaskConfig",
     "ModelNodeIntrospectionEvent",
 ]

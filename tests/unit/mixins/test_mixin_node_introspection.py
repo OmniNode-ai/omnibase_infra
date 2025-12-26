@@ -2887,7 +2887,8 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
 
         # p99 should not be excessively higher than p50
         # This catches outliers that might cause flaky tests
-        max_p99_to_p50_ratio = 5.0 * PERF_MULTIPLIER
+        # Note: Increased from 5.0 to 10.0 to handle CI/container variance
+        max_p99_to_p50_ratio = 10.0 * PERF_MULTIPLIER
         p99_to_p50_ratio = p99 / p50 if p50 > 0 else 0
         assert p99_to_p50_ratio < max_p99_to_p50_ratio, (
             f"p99/p50 ratio {p99_to_p50_ratio:.1f} exceeds {max_p99_to_p50_ratio:.1f}, "

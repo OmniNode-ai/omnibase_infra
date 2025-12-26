@@ -10,6 +10,7 @@ and concurrent operation handling under production load scenarios.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import threading
 from itertools import cycle
 from unittest.mock import MagicMock, patch
@@ -321,33 +322,6 @@ class TestVaultHandlerConcurrency:
             assert (
                 mock_hvac_client.secrets.kv.v2.create_or_update_secret.call_count == 30
             )
-
-    @pytest.mark.asyncio
-    async def test_concurrent_health_checks(
-        self,
-        vault_config: dict[str, VaultConfigValue],
-        mock_hvac_client: MagicMock,
-    ) -> None:
-        """Test concurrent health checks are thread-safe."""
-        handler = VaultHandler()
-
-        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
-            MockClient.return_value = mock_hvac_client
-
-            mock_hvac_client.sys.read_health_status.return_value = {
-                "initialized": True,
-                "sealed": False,
-            }
-
-            await handler.initialize(vault_config)
-
-            # Launch 20 concurrent health checks
-            tasks = [handler.health_check() for _ in range(20)]
-            results = await asyncio.gather(*tasks)
-
-            # All should report healthy
-            assert all(result["healthy"] is True for result in results)
-            assert all(result["initialized"] is True for result in results)
 
     @pytest.mark.asyncio
     async def test_shutdown_during_concurrent_operations(

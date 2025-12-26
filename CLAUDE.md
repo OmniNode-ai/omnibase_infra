@@ -1,13 +1,11 @@
 # Claude Code Rules for ONEX Infrastructure
 
-**Quick Start**: Essential rules and references for ONEX development.
+**Quick Start**: Essential rules for ONEX development.
 
 **Detailed Patterns**: See `docs/patterns/` for implementation guides:
 - `container_dependency_injection.md` - Complete DI patterns
 - `error_handling_patterns.md` - Error hierarchy and usage
 - `error_recovery_patterns.md` - Backoff, circuit breakers, degradation
-- `retry_backoff_compensation_strategy.md` - Retry policies, compensation for partial failures
-- `correlation_id_tracking.md` - Request tracing
 - `circuit_breaker_implementation.md` - Circuit breaker details
 
 ---
@@ -22,69 +20,74 @@
 | Complex workflows | `agent-onex-coordinator` → `agent-workflow-coordinator` |
 | Multi-domain | `agent-ticket-manager` for planning, orchestrators for execution |
 
-## 🚫 NO BACKGROUND AGENTS
+**Prefer `subagent_type: "polymorphic-agent"`** for ONEX development workflows.
 
-**NEVER use `run_in_background: true` for Task tool invocations.**
+## 🚫 CRITICAL POLICIES
 
-- All agents run in **foreground** (blocking until complete)
-- Parallel execution is achieved by calling multiple Task tools in a **single message** - they run concurrently and all complete before continuing
-- Background + polling wastes tokens and provides no benefit
-- If you need parallelism, launch multiple foreground agents in one turn
+### No Background Agents
+- **NEVER** use `run_in_background: true` for Task tool
+- Parallel execution: call multiple Task tools in a **single message**
 
-## 🔮 USE POLYMORPHIC AGENTS
-
-**Prefer `subagent_type: "polymorphic-agent"` for all development tasks.**
-
-The polymorphic-agent is the primary agent for ONEX development workflows:
-- Intelligent routing and multi-agent orchestration
-- ONEX 4-node architecture navigation (Effect/Compute/Reducer/Orchestrator)
-- Workflow coordination with quality gates
-
-**Other specialized subagent_types:**
-- `Explore` - Fast codebase exploration and search
-- `Plan` - Architecture planning and implementation design
-- `claude-code-guide` - Claude Code documentation queries
-- `general-purpose` - Fallback for non-ONEX tasks
-
-## 🚫 CRITICAL POLICY: NO BACKWARDS COMPATIBILITY
-
+### No Backwards Compatibility
 - Breaking changes are always acceptable
-- No deprecated code maintenance
 - Remove old patterns immediately
 
-## 🚫 CRITICAL POLICY: NO VERSIONED DIRECTORIES
+### No Versioned Directories
+- **NEVER** create `v1_0_0/`, `v2/` directories
+- Version through `contract.yaml` fields only
 
-**Versioning is logical, not structural.**
+## 🎯 MANDATORY: Declarative Nodes
 
-- **NEVER create** directories like `v1_0_0/`, `v2/`, `v1/`, etc.
-- **Version through contracts**: Use `contract_version` field in `contract.yaml`
-- **Semantic versioning**: Version is metadata, not file structure
+**ALL nodes MUST be declarative - no custom Python logic in node.py**
 
+```python
+# CORRECT - Declarative node (extends base, no custom logic)
+from omnibase_core.nodes import NodeOrchestrator
+
+class NodeRegistrationOrchestrator(NodeOrchestrator):
+    """Declarative orchestrator - all behavior defined in contract.yaml."""
+    pass  # No custom code - driven entirely by contract
+```
+
+```python
+# WRONG - Imperative node with custom logic
+class NodeRegistrationOrchestrator:
+    def __init__(self, projection_reader):  # Direct injection
+        self._handlers = {...}  # Manual handler wiring
+
+    async def handle(self, envelope):
+        if isinstance(payload, EventA):  # Manual routing
+            return self._handler_a.handle(...)
+```
+
+**Declarative Pattern Requirements:**
+1. Extend base class from `omnibase_core.nodes` (`NodeEffect`, `NodeCompute`, `NodeReducer`, `NodeOrchestrator`)
+2. Use `container: ModelONEXContainer` for dependency injection
+3. Define all behavior in `contract.yaml` (handlers, routing, workflows)
+4. `node.py` contains ONLY the class definition extending base - no custom logic
+5. Base class handles routing, wiring, and execution from contract
+
+**Contract-Driven Handler Routing:**
 ```yaml
-# CORRECT: Version in contract.yaml
-meta:
-  contract_version: "1.0.0"
-  node_version: "1.2.3"
+# contract.yaml - handler_routing section
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model: "ModelNodeIntrospectionEvent"
+      handler_class: "HandlerNodeIntrospected"
+    - event_model: "ModelRuntimeTick"
+      handler_class: "HandlerRuntimeTick"
 ```
-
-```
-# WRONG: Versioned directories
-nodes/postgres_adapter/v1_0_0/  # DO NOT CREATE
-nodes/postgres_adapter/v2/      # DO NOT CREATE
-```
-
-**Legacy Exception**: Any `v1_0_0/` directories (e.g., `nodes/<name>/v1_0_0/`) are legacy patterns from earlier architectural decisions that must be migrated to the flat structure. The omnibase_infra4 codebase has completed this migration. For migration guidance, see:
-- `docs/architecture/LEGACY_V1_MIGRATION.md` - Complete migration plan and verification steps
-- `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` - Ticket H1 (Legacy Component Refactor Plan)
 
 ## 🎯 Core ONEX Principles
 
 ### Strong Typing & Models
-- **NEVER use `Any`** - Always use specific types
+- **NEVER use `Any`** - Use `object` for generic payloads
 - **Pydantic Models** - All data structures must be proper Pydantic models
 - **One model per file** - Each file contains exactly one `Model*` class
+- **PEP 604 unions** - Use `X | None` not `Optional[X]`
 
-### File & Class Naming Conventions
+### File & Class Naming
 
 | Type | File Pattern | Class Pattern | Example |
 |------|-------------|---------------|---------|
@@ -398,562 +401,115 @@ from omnibase_core.nodes import (
 
 ```python
 from omnibase_core.container import ModelONEXContainer
-from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+from omnibase_core.nodes import NodeOrchestrator
 
-# Bootstrap and resolve
-container = ModelONEXContainer()
-wire_infrastructure_services(container)
-service = container.service_registry.resolve_service(ServiceType)
+class MyOrchestrator(NodeOrchestrator):
+    def __init__(self, container: ModelONEXContainer) -> None:
+        super().__init__(container)
+        # Dependencies resolved from container, not passed directly
 ```
 
-**See**: `docs/patterns/container_dependency_injection.md` for complete patterns and examples
+### Node Archetypes (from `omnibase_core`)
+
+| Layer | Responsibility |
+|-------|---------------|
+| `omnibase_core` | Node archetypes, I/O models, enums |
+| `omnibase_spi` | Protocol definitions |
+| `omnibase_infra` | Infrastructure implementations |
+
+```python
+from omnibase_core.nodes import (
+    NodeEffect,        # External I/O operations
+    NodeCompute,       # Pure transformations
+    NodeReducer,       # State aggregation (FSM-driven)
+    NodeOrchestrator,  # Workflow coordination
+)
+```
+
+### Enum Usage
+
+| Enum | Purpose |
+|------|---------|
+| `EnumMessageCategory` | Message routing (`EVENT`, `COMMAND`, `INTENT`) |
+| `EnumNodeOutputType` | Node validation (adds `PROJECTION` for reducers) |
 
 ## 🚨 Infrastructure Error Patterns
 
-### Error Class Selection (Quick Reference)
+### Error Class Selection
 
-| Scenario | Error Class | Transport Code |
-|----------|-------------|----------------|
-| Config invalid | `ProtocolConfigurationError` | N/A |
-| Secret not found | `SecretResolutionError` | N/A |
-| Connection failed | `InfraConnectionError` | `DATABASE_CONNECTION_ERROR` / `NETWORK_ERROR` / `SERVICE_UNAVAILABLE` |
-| Timeout | `InfraTimeoutError` | Same as connection |
-| Auth failed | `InfraAuthenticationError` | Same as connection |
-| Unavailable | `InfraUnavailableError` | `SERVICE_UNAVAILABLE` |
+| Scenario | Error Class |
+|----------|-------------|
+| Config invalid | `ProtocolConfigurationError` |
+| Connection failed | `InfraConnectionError` |
+| Timeout | `InfraTimeoutError` |
+| Auth failed | `InfraAuthenticationError` |
+| Unavailable | `InfraUnavailableError` |
 
-### Error Context Example
-
+### Error Context
 ```python
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 
 context = ModelInfraErrorContext(
     transport_type=EnumInfraTransportType.DATABASE,
     operation="execute_query",
-    target_name="postgresql-primary",
     correlation_id=request.correlation_id,
 )
-raise InfraConnectionError("Failed to connect", context=context) from original_error
+raise InfraConnectionError("Failed to connect", context=context) from e
 ```
 
-**See Also**:
-- `docs/patterns/error_handling_patterns.md` - Complete error hierarchy and usage
-- `docs/patterns/error_recovery_patterns.md` - Recovery strategies (backoff, circuit breaker, degradation)
-- `docs/patterns/retry_backoff_compensation_strategy.md` - Retry policies, backoff formulas, compensation for partial failures
-- `docs/patterns/correlation_id_tracking.md` - Request tracing patterns
-- `docs/patterns/circuit_breaker_implementation.md` - Circuit breaker details
+### Error Hierarchy
+```
+ModelOnexError (omnibase_core)
+└── RuntimeHostError
+    ├── ProtocolConfigurationError
+    ├── InfraConnectionError (transport-aware codes)
+    ├── InfraTimeoutError
+    ├── InfraAuthenticationError
+    └── InfraUnavailableError
+```
 
-## 🏗️ Infrastructure Architecture
+### Error Sanitization
+**NEVER include**: passwords, API keys, PII, connection strings with credentials
+**SAFE to include**: service names, operation names, correlation IDs, ports
 
-### Correlation ID Assignment Rules
+## 🏗️ Infrastructure Patterns
 
-Correlation IDs enable distributed tracing across infrastructure components:
+### Correlation ID Rules
+1. Always propagate from incoming requests
+2. Auto-generate with `uuid4()` if missing
+3. Include in all error context
 
-1. **Always propagate**: Pass `correlation_id` from incoming requests to error context
-2. **Auto-generation**: If no `correlation_id` exists, generate one using `uuid4()`
-3. **UUID format**: Use UUID4 format for all new correlation IDs
-4. **Include everywhere**: Add `correlation_id` in all error context for tracing
+### Circuit Breaker (MixinAsyncCircuitBreaker)
 
+Use for external service integrations:
 ```python
-from uuid import UUID, uuid4
-
-# Pattern 1: Propagate from request
-correlation_id = request.correlation_id or uuid4()
-
-# Pattern 2: Generate if not available
-context = ModelInfraErrorContext(
-    transport_type=EnumInfraTransportType.KAFKA,
-    operation="produce_message",
-    correlation_id=correlation_id,
-)
-
-# Pattern 3: Extract from incoming event
-correlation_id = event.metadata.get("correlation_id")
-if isinstance(correlation_id, str):
-    correlation_id = UUID(correlation_id)
-```
-
-### Error Sanitization Guidelines
-
-**NEVER include in error messages or context**:
-- Passwords, API keys, tokens, secrets
-- Full connection strings with credentials
-- PII (names, emails, SSNs, phone numbers)
-- Internal IP addresses (in production logs)
-- Private keys or certificates
-- Session tokens or cookies
-
-**SAFE to include**:
-- Service names (e.g., "postgresql", "kafka")
-- Operation names (e.g., "connect", "query", "authenticate")
-- Correlation IDs (always include for tracing)
-- Error codes (e.g., `EnumCoreErrorCode.DATABASE_CONNECTION_ERROR`)
-- Sanitized hostnames (e.g., "db.example.com")
-- Port numbers
-- Retry counts and timeout values
-- Resource identifiers (non-sensitive)
-
-```python
-# BAD - Exposes credentials
-raise InfraConnectionError(
-    f"Failed to connect with password={password}",  # NEVER DO THIS
-    context=context,
-)
-
-# GOOD - Sanitized error message
-raise InfraConnectionError(
-    "Failed to connect to database",
-    context=context,
-    host="db.example.com",
-    port=5432,
-    retry_count=3,
-)
-
-# BAD - Full connection string
-raise InfraConnectionError(
-    f"Connection failed: {connection_string}",  # May contain credentials
-    context=context,
-)
-
-# GOOD - Sanitized connection info
-raise InfraConnectionError(
-    "Connection failed",
-    context=context,
-    host=parsed_host,
-    port=parsed_port,
-    database=database_name,
-)
-```
-
-### Error Hierarchy Reference
-
-```
-ModelOnexError (from omnibase_core)
-└── RuntimeHostError (base infrastructure error)
-    ├── ProtocolConfigurationError  # Config validation failures
-    ├── SecretResolutionError       # Secret/credential resolution
-    ├── InfraConnectionError        # Connection failures
-    ├── InfraTimeoutError           # Operation timeouts
-    ├── InfraAuthenticationError    # Auth/authz failures
-    └── InfraUnavailableError           # Resource unavailable
-```
-
-### Error Code Mapping Reference
-
-| Error Class | EnumCoreErrorCode | HTTP Equivalent |
-|-------------|-------------------|-----------------|
-| `ProtocolConfigurationError` | `INVALID_CONFIGURATION` | 400 Bad Request |
-| `SecretResolutionError` | `RESOURCE_NOT_FOUND` | 404 Not Found |
-| `InfraConnectionError` | **Transport-aware** (see below) | 503 Service Unavailable |
-| `InfraTimeoutError` | `TIMEOUT_ERROR` | 504 Gateway Timeout |
-| `InfraAuthenticationError` | `AUTHENTICATION_ERROR` | 401 Unauthorized |
-| `InfraUnavailableError` | `SERVICE_UNAVAILABLE` | 503 Service Unavailable |
-
-#### InfraConnectionError Transport-Aware Error Codes
-
-`InfraConnectionError` automatically selects the appropriate error code based on `context.transport_type`:
-
-| Transport Type | EnumCoreErrorCode | Rationale |
-|----------------|-------------------|-----------|
-| `DATABASE` | `DATABASE_CONNECTION_ERROR` | Specific database connection error |
-| `HTTP` | `NETWORK_ERROR` | Network-level transport failure |
-| `GRPC` | `NETWORK_ERROR` | Network-level transport failure |
-| `KAFKA` | `SERVICE_UNAVAILABLE` | Message broker service unavailable |
-| `CONSUL` | `SERVICE_UNAVAILABLE` | Service discovery unavailable |
-| `VAULT` | `SERVICE_UNAVAILABLE` | Secret management service unavailable |
-| `VALKEY` | `SERVICE_UNAVAILABLE` | Cache service unavailable |
-| `None` (no context) | `SERVICE_UNAVAILABLE` | Generic fallback |
-
-```python
-# Example: Transport-aware error code selection
-from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
-from omnibase_infra.enums import EnumInfraTransportType
-
-# Database connection -> DATABASE_CONNECTION_ERROR
-db_context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.DATABASE)
-db_error = InfraConnectionError("DB failed", context=db_context)
-assert db_error.model.error_code.name == "DATABASE_CONNECTION_ERROR"
-
-# HTTP connection -> NETWORK_ERROR
-http_context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.HTTP)
-http_error = InfraConnectionError("API failed", context=http_context)
-assert http_error.model.error_code.name == "NETWORK_ERROR"
-
-# Kafka connection -> SERVICE_UNAVAILABLE
-kafka_context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.KAFKA)
-kafka_error = InfraConnectionError("Kafka failed", context=kafka_context)
-assert kafka_error.model.error_code.name == "SERVICE_UNAVAILABLE"
-```
-
-### Error Recovery Patterns
-
-Infrastructure errors often require recovery strategies. Here are common patterns for handling infrastructure failures:
-
-#### Retry with Exponential Backoff (Connection Errors)
-
-Use exponential backoff for transient connection failures. This pattern is ideal for `InfraConnectionError` when services are temporarily unavailable:
-
-```python
-import time
-from uuid import uuid4
-from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
-from omnibase_infra.enums import EnumInfraTransportType
-
-def connect_with_retry(host: str, port: int, max_retries: int = 3) -> Connection:
-    """Connect to database with exponential backoff retry strategy."""
-    correlation_id = uuid4()
-    context = ModelInfraErrorContext(
-        transport_type=EnumInfraTransportType.DATABASE,
-        operation="connect",
-        target_name="postgresql-primary",
-        correlation_id=correlation_id,
-    )
-
-    for attempt in range(max_retries):
-        try:
-            return create_connection(host, port)
-        except ConnectionError as e:
-            if attempt == max_retries - 1:
-                raise InfraConnectionError(
-                    f"Failed to connect after {max_retries} attempts",
-                    context=context,
-                    host=host,
-                    port=port,
-                    retry_count=attempt + 1,
-                ) from e
-
-            # Exponential backoff: 1s, 2s, 4s
-            wait_time = 2 ** attempt
-            time.sleep(wait_time)
-```
-
-#### Circuit Breaker Pattern (Unavailable Services)
-
-Use the circuit breaker pattern for `InfraUnavailableError` to prevent cascading failures and give services time to recover:
-
-```python
-import time
-from enum import Enum
-from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
-from omnibase_infra.enums import EnumInfraTransportType
-
-class CircuitState(str, Enum):
-    """Circuit breaker state machine."""
-    CLOSED = "closed"        # Normal operation
-    OPEN = "open"            # Blocking requests
-    HALF_OPEN = "half_open"  # Testing recovery
-
-class CircuitBreaker:
-    """Prevents cascading failures with configurable circuit breaker."""
-
-    def __init__(
-        self,
-        failure_threshold: int = 5,
-        reset_timeout: float = 30.0,
-        context: ModelInfraErrorContext = None,
-    ):
-        self.failure_count = 0
-        self.threshold = failure_threshold
-        self.reset_timeout = reset_timeout
-        self.last_failure_time = 0.0
-        self.state = CircuitState.CLOSED
-        self.context = context or ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.HTTP,
-            operation="circuit_breaker",
-            target_name="service",
-        )
-
-    def call(self, func, *args, **kwargs):
-        """Execute function through circuit breaker protection."""
-        if self.state == CircuitState.OPEN:
-            # Check if reset timeout has passed
-            if time.time() - self.last_failure_time > self.reset_timeout:
-                self.state = CircuitState.HALF_OPEN
-                self.failure_count = 0
-            else:
-                raise InfraUnavailableError(
-                    "Circuit breaker is open - service temporarily unavailable",
-                    context=self.context,
-                    circuit_state=self.state.value,
-                    retry_after_seconds=int(
-                        self.reset_timeout - (time.time() - self.last_failure_time)
-                    ),
-                )
-
-        try:
-            result = func(*args, **kwargs)
-
-            # Success - reset circuit
-            if self.state == CircuitState.HALF_OPEN:
-                self.state = CircuitState.CLOSED
-            self.failure_count = 0
-            return result
-
-        except Exception as e:
-            self.failure_count += 1
-            self.last_failure_time = time.time()
-
-            # Open circuit if threshold exceeded
-            if self.failure_count >= self.threshold:
-                self.state = CircuitState.OPEN
-
-            raise
-```
-
-#### Graceful Degradation (Timeout Errors)
-
-Use graceful degradation for `InfraTimeoutError` to maintain service availability with reduced functionality:
-
-```python
-from collections.abc import Callable
-from types import FrameType
-from typing import TypeVar
-from uuid import UUID
-
-from pydantic import BaseModel
-
-from omnibase_infra.errors import InfraTimeoutError, ModelInfraErrorContext
-from omnibase_infra.enums import EnumInfraTransportType
-
-# TypeVar for generic data types in fetch operations
-T = TypeVar("T", bound=BaseModel)
-
-
-class ModelFetchResult(BaseModel):
-    """Result model for fetch operations with graceful degradation."""
-
-    data: BaseModel
-    source: str  # "primary" or "fallback"
-    degraded: bool
-    warning: str | None = None
-
-
-def fetch_with_timeout_fallback(
-    primary_func: Callable[[], T],
-    fallback_func: Callable[[], T],
-    timeout_seconds: float = 5.0,
-    correlation_id: UUID | None = None,
-) -> ModelFetchResult:
-    """Fetch from primary source with graceful degradation to fallback."""
-    import signal
-
-    context = ModelInfraErrorContext(
-        transport_type=EnumInfraTransportType.DATABASE,
-        operation="fetch",
-        target_name="primary-source",
-        correlation_id=correlation_id,
-    )
-
-    def timeout_handler(signum: int, frame: FrameType | None) -> None:
-        raise TimeoutError("Operation exceeded timeout")
-
-    # Set timeout handler
-    signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(int(timeout_seconds))
-
-    try:
-        # Try primary data source
-        return ModelFetchResult(
-            data=primary_func(),
-            source="primary",
-            degraded=False,
-        )
-
-    except TimeoutError:
-        # Log timeout but continue with fallback
-        context_with_fallback = ModelInfraErrorContext(
-            transport_type=context.transport_type,
-            operation=context.operation,
-            target_name=context.target_name,
-            correlation_id=context.correlation_id,
-        )
-
-        try:
-            # Use fallback source (cache, secondary database, etc.)
-            return ModelFetchResult(
-                data=fallback_func(),
-                source="fallback",
-                degraded=True,
-                warning="Primary source timed out, using fallback data",
-            )
-
-        except Exception as fallback_error:
-            raise InfraTimeoutError(
-                "Primary timeout and fallback failed",
-                context=context_with_fallback,
-                timeout_seconds=timeout_seconds,
-            ) from fallback_error
-
-    finally:
-        signal.alarm(0)  # Cancel alarm
-```
-
-#### Credential Refresh (Authentication Errors)
-
-Use credential refresh for `InfraAuthenticationError` to handle token expiration gracefully:
-
-```python
-from omnibase_infra.errors import InfraAuthenticationError, ModelInfraErrorContext
-from omnibase_infra.enums import EnumInfraTransportType
-import time
-
-class CredentialRefreshManager:
-    """Manages credential refresh with automatic token renewal."""
-
-    def __init__(
-        self,
-        credential_provider,
-        refresh_threshold_seconds: float = 300.0,
-    ):
-        self.provider = credential_provider
-        self.refresh_threshold = refresh_threshold_seconds
-        self.current_credential = None
-        self.credential_expires_at = 0.0
-        self.context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            operation="credential_refresh",
-            target_name="vault-server",
-        )
-
-    def get_valid_credential(self):
-        """Get credential, refreshing if near expiration."""
-        current_time = time.time()
-
-        # Check if credential exists and is still valid
-        if (
-            self.current_credential is not None
-            and current_time < self.credential_expires_at - self.refresh_threshold
-        ):
-            return self.current_credential
-
-        # Credential missing, expired, or approaching expiration - refresh
-        try:
-            credential = self.provider.refresh_credential()
-            self.current_credential = credential
-            self.credential_expires_at = (
-                current_time + credential.get("ttl_seconds", 3600)
-            )
-            return credential
-
-        except Exception as e:
-            raise InfraAuthenticationError(
-                "Failed to refresh authentication credentials",
-                context=self.context,
-                provider="vault",
-            ) from e
-
-    def call_with_auth(self, func, *args, **kwargs):
-        """Execute function with automatic credential refresh on auth failure."""
-        max_retries = 2
-
-        for attempt in range(max_retries):
-            try:
-                credential = self.get_valid_credential()
-                return func(*args, credential=credential, **kwargs)
-
-            except InfraAuthenticationError as e:
-                if attempt == max_retries - 1:
-                    # Last attempt failed - propagate error
-                    raise
-
-                # Force refresh and retry
-                self.current_credential = None
-                self.credential_expires_at = 0.0
-```
-
-### Transport Type Reference
-
-Use `EnumInfraTransportType` for transport identification in error context:
-
-| Transport Type | Value | Usage |
-|---------------|-------|-------|
-| `HTTP` | `"http"` | REST API transport |
-| `DATABASE` | `"db"` | PostgreSQL, etc. |
-| `KAFKA` | `"kafka"` | Kafka message broker |
-| `CONSUL` | `"consul"` | Service discovery |
-| `VAULT` | `"vault"` | Secret management |
-| `VALKEY` | `"valkey"` | Cache/message transport |
-| `GRPC` | `"grpc"` | gRPC protocol |
-
-## 🏗️ Infrastructure-Specific Patterns
-
-### Accepted Pattern Exceptions
-
-**KafkaEventBus Complexity** (Documented Exception):
-The KafkaEventBus intentionally violates pattern validator thresholds:
-- **14 methods** (threshold: 10) - Required for event bus pattern implementation
-- **10 __init__ parameters** (threshold: 5) - Backwards compatibility during config migration
-
-This complexity is acceptable and documented because:
-1. **Event Bus Pattern Requirements**: Lifecycle, pub/sub, circuit breaker, protocol compatibility
-2. **Backwards Compatibility**: Gradual migration from direct parameters to config objects
-3. **Infrastructure Cohesion**: Keeping related event bus operations together improves maintainability
-4. **Well-Documented**: Design rationale documented in class and method docstrings
-
-The violations are **intentional infrastructure patterns**, not code smells. See:
-- `src/omnibase_infra/event_bus/kafka_event_bus.py` - Full design documentation
-- `src/omnibase_infra/validation/infra_validators.py` - Validation notes
-
-### Circuit Breaker Pattern (MixinAsyncCircuitBreaker)
-
-All infrastructure adapters and services should use `MixinAsyncCircuitBreaker` for fault tolerance and automatic recovery.
-
-**When to Use**:
-- External service integrations (Kafka, Consul, Vault, Redis, PostgreSQL)
-- Network operations that can fail transiently
-- Any infrastructure component requiring automatic fault recovery
-- Services with configurable failure thresholds and reset timeouts
-
-**Integration Pattern**:
-```python
-from omnibase_infra.mixins import MixinAsyncCircuitBreaker
-from omnibase_infra.enums import EnumInfraTransportType
-from uuid import uuid4
-
-class MyInfrastructureAdapter(MixinAsyncCircuitBreaker):
-    def __init__(self, config: MyConfig):
-        # Initialize circuit breaker with service-specific settings
-        # This creates self._circuit_breaker_lock automatically
+class MyAdapter(MixinAsyncCircuitBreaker):
+    def __init__(self, config):
         self._init_circuit_breaker(
-            threshold=5,                    # Max failures before opening
-            reset_timeout=60.0,             # Seconds until auto-reset
-            service_name=f"my-service.{environment}",
-            transport_type=EnumInfraTransportType.HTTP,  # Or KAFKA, CONSUL, etc.
+            threshold=5, reset_timeout=60.0,
+            service_name="my-service",
+            transport_type=EnumInfraTransportType.HTTP,
         )
 
-    async def connect(self) -> None:
-        """Connect to external service with circuit breaker protection."""
-        correlation_id = uuid4()
-
-        # Check circuit breaker before operation (caller-held lock pattern)
+    async def connect(self):
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("connect", correlation_id)
-
-        try:
-            # Attempt connection (outside lock for I/O operations)
-            await self._do_connect()
-
-            # Record success (resets circuit breaker)
-            async with self._circuit_breaker_lock:
-                await self._reset_circuit_breaker()
-
-        except Exception as e:
-            # Record failure (may open circuit)
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure("connect", correlation_id)
-            raise
+        # ... operation ...
 ```
 
-**Thread Safety**:
-- Circuit breaker methods REQUIRE caller to hold `self._circuit_breaker_lock`
-- The lock is created automatically by `_init_circuit_breaker()`
-- Always use `async with self._circuit_breaker_lock:` before calling circuit breaker methods
-- Never call circuit breaker methods without lock protection
+**States**: CLOSED → OPEN (after failures) → HALF_OPEN → CLOSED (on success)
 
-**State Transitions**:
-- **CLOSED**: Normal operation, requests allowed
-- **OPEN**: Too many failures, requests blocked (raises `InfraUnavailableError`)
-- **HALF_OPEN**: After timeout, testing if service recovered
-- **CLOSED**: Service recovered, normal operation resumed
+**See**: `docs/patterns/circuit_breaker_implementation.md` for full details
+
+### Transport Types
+| Type | Value |
+|------|-------|
+| `DATABASE` | `"db"` |
+| `KAFKA` | `"kafka"` |
+| `HTTP` | `"http"` |
+| `CONSUL` | `"consul"` |
+| `VAULT` | `"vault"` |
+| `VALKEY` | `"valkey"` |
 
 **Error Context**:
 - Blocked requests raise `InfraUnavailableError` with proper `ModelInfraErrorContext`
@@ -1043,7 +599,7 @@ if is_open:
 **Related Work**:
 - Protocol definition: OMN-861 (Phase 2 - omnibase_spi)
 - Implementation: `src/omnibase_infra/mixins/mixin_async_circuit_breaker.py`
-- Thread safety docs: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`
+- Concurrency safety docs: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`
 - Example usage: VaultHandler, KafkaEventBus integration
 - Error handling: See "Error Recovery Patterns" section above
 
@@ -1251,9 +807,9 @@ The mixin manages introspection cache with TTL-based invalidation:
   - `get_introspection_data()` - Returns cached data if TTL not expired, otherwise refreshes
   - `invalidate_introspection_cache()` - Clears cache to force refresh on next call (synchronous)
 
-**Thread Safety Considerations**:
+**Concurrency Safety Considerations**:
 
-The `MixinNodeIntrospection` is designed for **single-threaded asyncio usage** and does NOT provide internal thread synchronization. Cache operations require understanding the concurrency model for safe usage.
+The `MixinNodeIntrospection` is designed for **single-threaded asyncio usage** and does NOT provide internal thread synchronization. It provides **coroutine safety** (protection against concurrent asyncio coroutines) but NOT **thread safety** (protection against multiple OS threads). Cache operations require understanding the concurrency model for safe usage.
 
 **Instance-Level Cache** (`_introspection_cache`, `_introspection_cached_at`):
 - Cache operations are **synchronous** (no async locking)
@@ -1300,7 +856,7 @@ class ThreadSafeNode(MixinNodeIntrospection):
 
 **Related**:
 - Implementation: `src/omnibase_infra/mixins/mixin_node_introspection.py`
-- Thread Safety Pattern: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md` (similar pattern)
+- Concurrency Safety Pattern: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md` (similar pattern)
 - Ticket: OMN-893
 - See `MixinNodeIntrospection.get_capabilities()` for filtering logic details
 
@@ -1312,91 +868,56 @@ class ThreadSafeNode(MixinNodeIntrospection):
 - **Secret Management** - Vault integration for secure credential handling
 
 ### Infrastructure 4-Node Pattern
-Infrastructure tools follow ONEX 4-node architecture:
-- **EFFECT** - External service interactions (Consul, Kafka, Vault adapters)
+- **EFFECT** - External service interactions (adapters)
 - **COMPUTE** - Message processing and transformation
 - **REDUCER** - State consolidation and decision making
 - **ORCHESTRATOR** - Workflow coordination
 
-### Service Adapters
-| Adapter | Purpose |
-|---------|---------|
-| `consul_adapter` | Service discovery |
-| `kafka_adapter` | Event streaming |
-| `vault_handler` | Secret management |
-| `postgres_adapter` | Database operations |
+## 🚀 Node Structure
+
+**Canonical Structure:**
+```
+nodes/<adapter>/
+├── contract.yaml     # ONEX contract (handlers, routing, version)
+├── node.py          # Declarative node extending base class
+├── models/          # Node-specific models
+└── registry/        # registry_infra_<name>.py
+```
+
+**Contract Requirements:**
+- Semantic versioning (`contract_version`, `node_version`)
+- Node type (EFFECT/COMPUTE/REDUCER/ORCHESTRATOR)
+- Strongly typed I/O (`input_model`, `output_model`)
+- Handler routing (for orchestrators)
+- Zero `Any` types
 
 ## 🤖 Agent Architecture
 
-### Orchestration Agents
-
-| Agent | Purpose |
-|-------|---------|
-| `agent-onex-coordinator` | Primary routing and workflow orchestration |
-| `agent-workflow-coordinator` | Multi-step execution, sub-agent fleet coordination |
-| `agent-ticket-manager` | Ticket lifecycle, dependency analysis |
-
-### Specialist Agents
-
 | Category | Agents |
 |----------|--------|
-| Development | `agent-contract-validator`, `agent-contract-driven-generator`, `agent-ast-generator`, `agent-commit` |
-| DevOps | `agent-devops-infrastructure`, `agent-security-audit`, `agent-performance`, `agent-production-monitor` |
-| Quality | `agent-pr-review`, `agent-pr-create`, `agent-address-pr-comments`, `agent-testing` |
-| Intelligence | `agent-research`, `agent-debug-intelligence`, `agent-rag-query`, `agent-rag-update` |
+| Orchestration | `agent-onex-coordinator`, `agent-workflow-coordinator` |
+| Development | `agent-contract-validator`, `agent-commit`, `agent-testing` |
+| DevOps | `agent-devops-infrastructure`, `agent-security-audit` |
+| Quality | `agent-pr-review`, `agent-pr-create` |
 
-## 🔒 Zero Tolerance Policies
+## 🔒 Zero Tolerance
 
 - `Any` types forbidden
-- Direct coding without agent delegation prohibited
+- Direct coding without agent delegation
 - Hand-written Pydantic models (must be contract-generated)
 - Hardcoded service configurations
-
-## 🔧 DevOps Quick Reference
-
-**Container Troubleshooting**: `docker logs <container>` first, then `docker inspect` for exit codes
-- **Exit 0 OK**: Init containers (topic creation, migrations, SSL cert gen)
-- **Should run**: Services (web, brokers, databases, load balancers)
-
+- Imperative nodes with custom routing logic
 
 ## 📦 Service Ports
 
 | Service | Port |
 |---------|------|
 | Event Bus | 8083 |
-| Infrastructure Hub | 8085 |
-| Consul | 8500 (HTTP), 8600 (DNS) |
-| Kafka | 9092 (plaintext), 9093 (SSL) |
+| Consul | 8500 |
+| Kafka | 9092 |
 | Vault | 8200 |
 | PostgreSQL | 5432 |
-| Debug Dashboard | 8096 |
-
-## 🚀 Node Structure Pattern
-
-**Canonical Structure** (all components):
-```
-nodes/<adapter>/
-├── contract.yaml          # ONEX contract definition (includes version)
-├── node.py               # Node<Name><Type> implementation
-├── models/               # Node-specific models
-└── registry/             # registry_infra_<name>.py
-```
-
-**Prohibited Structure** (versioned directories):
-```
-nodes/<adapter>/v1_0_0/   # PROHIBITED - never create versioned directories
-nodes/<adapter>/v2/       # PROHIBITED - version goes in contract.yaml, not path
-```
-
-See "CRITICAL POLICY: NO VERSIONED DIRECTORIES" above and `docs/architecture/LEGACY_V1_MIGRATION.md` for details.
-
-**Contract Requirements**:
-- Semantic versioning in contract (`contract_version`, `node_version` fields)
-- Node type (EFFECT/COMPUTE/REDUCER/ORCHESTRATOR)
-- Strongly typed I/O (`input_model`, `output_model`)
-- Protocol-based dependencies
-- Zero `Any` types, use `omnibase_core.*` imports
 
 ---
 
-**Bottom Line**: Agent-driven development. Route through orchestrators, delegate to specialists. Strong typing, contract-driven configuration, no backwards compatibility.
+**Bottom Line**: Declarative nodes, container injection, agent-driven development. No backwards compatibility, no custom node logic.

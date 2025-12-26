@@ -25,6 +25,8 @@ All errors:
     - Accept ModelInfraErrorContext for bundled context parameters
 """
 
+from uuid import uuid4
+
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
@@ -90,6 +92,10 @@ class RuntimeHostError(ModelOnexError):
             if context.namespace is not None:
                 structured_context["namespace"] = context.namespace
             correlation_id = context.correlation_id
+
+        # Auto-generate correlation_id if not provided (per CLAUDE.md guidelines)
+        if correlation_id is None:
+            correlation_id = uuid4()
 
         # Initialize base error with default error code
         super().__init__(

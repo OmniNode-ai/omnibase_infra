@@ -41,6 +41,7 @@ from omnibase_infra.models.registration import (
     ModelNodeMetadata,
     ModelNodeRegistration,
 )
+from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 from omnibase_infra.models.validation import (
     ModelCoverageMetrics,
     ModelExecutionShapeRule,
@@ -70,6 +71,8 @@ __all__ = [
     "ModelRegistrationSnapshot",
     "ModelSequenceInfo",
     "ModelSnapshotTopicConfig",
+    # Resilience models
+    "ModelCircuitBreakerConfig",
     # Registration models
     "ModelIntrospectionMetrics",
     "ModelNodeCapabilities",

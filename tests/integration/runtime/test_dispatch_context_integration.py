@@ -152,6 +152,7 @@ class ContextCapturingDispatcher:
             topic="test.events.v1",
             dispatcher_id=self._dispatcher_id,
             message_type=type(envelope).__name__ if envelope else None,
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
     def reset(self) -> None:
@@ -198,6 +199,7 @@ class DeterministicResultDispatcher(ContextCapturingDispatcher):
             topic="test.events.v1",
             dispatcher_id=self._dispatcher_id,
             output_count=len(self.processed_user_ids),
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
     def reset(self) -> None:
@@ -213,7 +215,7 @@ class DeterministicResultDispatcher(ContextCapturingDispatcher):
 @pytest.fixture
 def deterministic_clock() -> DeterministicClock:
     """Create a deterministic clock for predictable time testing."""
-    return DeterministicClock(start=datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC))
+    return DeterministicClock(start=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC))
 
 
 @pytest.fixture

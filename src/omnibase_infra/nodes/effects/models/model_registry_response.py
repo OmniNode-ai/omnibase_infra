@@ -35,7 +35,7 @@ Related:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -136,9 +136,10 @@ class ModelRegistryResponse(BaseModel):
         description="Total time for the dual-registration operation in milliseconds",
         ge=0.0,
     )
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="When this response was created",
+        ...,
+        description="When this response was created (must be explicitly provided)",
     )
     error_summary: str | None = Field(
         default=None,
@@ -152,6 +153,7 @@ class ModelRegistryResponse(BaseModel):
         correlation_id: UUID,
         consul_result: ModelBackendResult,
         postgres_result: ModelBackendResult,
+        timestamp: datetime,
     ) -> ModelRegistryResponse:
         """Create a response from individual backend results.
 
@@ -167,6 +169,7 @@ class ModelRegistryResponse(BaseModel):
             correlation_id: Correlation ID for tracing.
             consul_result: Result from Consul registration.
             postgres_result: Result from PostgreSQL upsert.
+            timestamp: When this response was created (must be explicitly provided).
 
         Returns:
             ModelRegistryResponse with computed status, processing_time, and error_summary.
@@ -197,6 +200,7 @@ class ModelRegistryResponse(BaseModel):
             consul_result=consul_result,
             postgres_result=postgres_result,
             processing_time_ms=processing_time_ms,
+            timestamp=timestamp,
             error_summary=error_summary,
         )
 

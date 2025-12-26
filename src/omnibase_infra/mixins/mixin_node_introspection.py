@@ -170,6 +170,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
@@ -177,6 +178,7 @@ from omnibase_core.enums import EnumNodeKind
 
 from omnibase_infra.models.discovery import (
     ModelIntrospectionConfig,
+    ModelIntrospectionTaskConfig,
     ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
@@ -1053,7 +1055,7 @@ class MixinNodeIntrospection:
 
         # Check for get_state method
         if hasattr(self, "get_state"):
-            method = self.get_state  # type: ignore[attr-defined]
+            method = self.get_state
             if callable(method):
                 try:
                     result = method()
@@ -1099,7 +1101,6 @@ class MixinNodeIntrospection:
 
         # Collect metrics values in local variables (model is frozen)
         get_capabilities_ms = 0.0
-        discover_capabilities_ms = 0.0
         get_endpoints_ms = 0.0
         get_current_state_ms = 0.0
         method_count = 0
@@ -1112,7 +1113,7 @@ class MixinNodeIntrospection:
             and current_time - self._introspection_cached_at
             < self._introspection_cache_ttl
         ):
-            # Return cached data with updated timestamp
+            # Return cached data (timestamp reflects when cache was populated, not current time)
             cached_event = ModelNodeIntrospectionEvent(**self._introspection_cache)
 
             # Record cache hit metrics
@@ -1132,6 +1133,12 @@ class MixinNodeIntrospection:
             return cached_event
 
         # Build fresh introspection data with timing for each component
+        # First, measure the class method signature discovery time separately.
+        # This is cached at the class level, so subsequent calls are instant.
+        discover_start = time.perf_counter()
+        self._get_class_method_signatures()  # Force cache population if not already done
+        discover_capabilities_ms = (time.perf_counter() - discover_start) * 1000
+
         cap_start = time.perf_counter()
         capabilities = await self.get_capabilities()
         get_capabilities_ms = (time.perf_counter() - cap_start) * 1000
@@ -1223,6 +1230,7 @@ class MixinNodeIntrospection:
             version=self._introspection_version,
             reason="cache_refresh",
             correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
             performance_metrics=metrics,
         )
 
@@ -1317,9 +1325,12 @@ class MixinNodeIntrospection:
             )
 
             # Publish to event bus using configured topic
+            # Type narrowing: we've already checked _introspection_event_bus is not None above
+            event_bus = self._introspection_event_bus
+            assert event_bus is not None  # Redundant but helps mypy
             topic = self._introspection_topic
-            if hasattr(self._introspection_event_bus, "publish_envelope"):
-                await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
+            if hasattr(event_bus, "publish_envelope"):
+                await event_bus.publish_envelope(
                     envelope=publish_event,
                     topic=topic,
                 )
@@ -1327,7 +1338,7 @@ class MixinNodeIntrospection:
                 # Fallback to publish method with raw bytes
                 event_data = publish_event.model_dump(mode="json")
                 value = json.dumps(event_data).encode("utf-8")
-                await self._introspection_event_bus.publish(
+                await event_bus.publish(
                     topic=topic,
                     key=str(self._introspection_node_id).encode("utf-8")
                     if self._introspection_node_id is not None
@@ -1402,6 +1413,7 @@ class MixinNodeIntrospection:
                 node_type = EnumNodeKind.EFFECT
 
             # Create heartbeat event
+            now = datetime.now(UTC)
             heartbeat = ModelNodeHeartbeatEvent(
                 node_id=node_id,
                 node_type=node_type,
@@ -1416,18 +1428,22 @@ class MixinNodeIntrospection:
                 # is implemented. See MixinNodeIntrospection docstring note.
                 active_operations_count=0,
                 correlation_id=uuid4(),
+                timestamp=now,  # Required: time injection pattern
             )
 
             # Publish to event bus using configured topic
+            # Type narrowing: we've already checked _introspection_event_bus is not None above
+            event_bus = self._introspection_event_bus
+            assert event_bus is not None  # Redundant but helps mypy
             topic = self._heartbeat_topic
-            if hasattr(self._introspection_event_bus, "publish_envelope"):
-                await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
+            if hasattr(event_bus, "publish_envelope"):
+                await event_bus.publish_envelope(
                     envelope=heartbeat,
                     topic=topic,
                 )
             else:
                 value = json.dumps(heartbeat.model_dump(mode="json")).encode("utf-8")
-                await self._introspection_event_bus.publish(
+                await event_bus.publish(
                     topic=topic,
                     key=str(self._introspection_node_id).encode("utf-8")
                     if self._introspection_node_id is not None
@@ -1638,7 +1654,7 @@ class MixinNodeIntrospection:
                 if not hasattr(message, "value") or not message.value:
                     await self.publish_introspection(
                         reason="request",
-                        correlation_id=None,
+                        correlation_id=uuid4(),
                     )
                     self._registry_callback_consecutive_failures = 0
                     return
@@ -1896,6 +1912,53 @@ class MixinNodeIntrospection:
                 f"Started registry listener task for {self._introspection_node_id}",
                 extra={"node_id": self._introspection_node_id},
             )
+
+    async def start_introspection_tasks_from_config(
+        self,
+        config: ModelIntrospectionTaskConfig,
+    ) -> None:
+        """Start background introspection tasks from a configuration model.
+
+        This method provides an alternative to ``start_introspection_tasks()``
+        using a configuration model instead of individual parameters. This
+        reduces union types in calling code and follows ONEX patterns.
+
+        Args:
+            config: Configuration model containing task settings.
+                See ModelIntrospectionTaskConfig for available options.
+
+        Raises:
+            RuntimeError: If initialize_introspection() was not called.
+
+        Example:
+            ```python
+            from omnibase_infra.models.discovery import ModelIntrospectionTaskConfig
+
+            class MyNode(MixinNodeIntrospection):
+                async def startup(self):
+                    config = ModelIntrospectionTaskConfig(
+                        enable_heartbeat=True,
+                        heartbeat_interval_seconds=15.0,
+                        enable_registry_listener=True,
+                    )
+                    await self.start_introspection_tasks_from_config(config)
+
+            # Using defaults
+            class SimpleNode(MixinNodeIntrospection):
+                async def startup(self):
+                    config = ModelIntrospectionTaskConfig()
+                    await self.start_introspection_tasks_from_config(config)
+            ```
+
+        See Also:
+            start_introspection_tasks: Original method with parameters.
+            ModelIntrospectionTaskConfig: Configuration model with all options.
+        """
+        await self.start_introspection_tasks(
+            enable_heartbeat=config.enable_heartbeat,
+            heartbeat_interval_seconds=config.heartbeat_interval_seconds,
+            enable_registry_listener=config.enable_registry_listener,
+        )
 
     async def stop_introspection_tasks(self) -> None:
         """Stop all background introspection tasks.

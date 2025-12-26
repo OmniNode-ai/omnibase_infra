@@ -12,8 +12,9 @@ Related:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
+from omnibase_core.types import JsonValue
 from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.http.enum_http_operation_type import (
@@ -23,9 +24,6 @@ from omnibase_infra.handlers.models.http.model_payload_http import (
     ModelPayloadHttp,
     RegistryPayloadHttp,
 )
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
 
 
 @RegistryPayloadHttp.register("post")

@@ -30,6 +30,7 @@ Running Tests:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -37,6 +38,9 @@ from uuid import UUID, uuid4
 
 import pytest
 import yaml
+
+# Fixed timestamp for deterministic tests
+TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
@@ -256,7 +260,7 @@ class TestWorkflowGraphIntegration:
         """Test that execution graph has all 8 required nodes.
 
         The registration orchestrator workflow requires these nodes in order:
-        1. receive_introspection - Receive introspection or tick event
+        1. receive_introspection - Receive introspection, tick, or ack events
         2. read_projection - Read current registration state from projection (OMN-930)
         3. evaluate_timeout - Evaluate timeout using injected time (OMN-973)
         4. compute_intents - Compute registration intents via reducer
@@ -441,11 +445,11 @@ class TestWorkflowGraphIntegration:
         # Expected properties for all 8 nodes
         # Format: node_id -> (node_type, depends_on)
         expected_node_properties = {
-            # Node 1: Entry point - receives introspection or tick event
+            # Node 1: Entry point - receives introspection, tick, or ack events
             "receive_introspection": {
                 "node_type": "effect",
                 "depends_on": [],
-                "description": "Receive introspection or tick event",
+                "description": "Receive introspection, tick, or ack events",
             },
             # Node 2: Read projection state (OMN-930)
             "read_projection": {
@@ -1119,6 +1123,7 @@ class TestWorkflowExecutionWithMocks:
             capabilities={},
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
     @pytest.fixture

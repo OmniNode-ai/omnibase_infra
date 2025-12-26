@@ -664,7 +664,7 @@ class TestHttpPostEmptyBody:
         """
         # Arrange - Configure mock server
         httpserver.expect_request("/api/trigger", method="POST").respond_with_json(
-            {"triggered": True, "timestamp": "2024-01-01T00:00:00Z"}, status=200
+            {"triggered": True, "timestamp": "2025-01-01T00:00:00Z"}, status=200
         )
 
         # Initialize handler

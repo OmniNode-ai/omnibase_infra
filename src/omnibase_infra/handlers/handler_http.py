@@ -718,19 +718,6 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             },
         )
 
-    async def health_check(self) -> dict[str, JsonValue]:
-        """Return handler health status."""
-        correlation_id = uuid4()
-        return {
-            "healthy": self._initialized and self._client is not None,
-            "initialized": self._initialized,
-            "handler_type": self.handler_type.value,
-            "timeout_seconds": self._timeout,
-            "max_request_size": self._max_request_size,
-            "max_response_size": self._max_response_size,
-            "correlation_id": str(correlation_id),
-        }
-
     def describe(self) -> dict[str, JsonValue]:
         """Return handler metadata and capabilities."""
         return {

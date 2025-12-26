@@ -20,8 +20,9 @@ Related:
 .. versionadded:: 0.5.0
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 
+from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -154,14 +155,15 @@ class ModelMessageTypeEntry(BaseModel):
         description="Whether this entry is active. Disabled entries are skipped.",
     )
 
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     registered_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="Timestamp when this entry was registered (UTC).",
+        ...,
+        description="Timestamp when this entry was registered (UTC, must be explicitly provided).",
     )
 
-    metadata: dict[str, str] | None = Field(
+    metadata: JsonValue = Field(
         default=None,
-        description="Optional additional metadata.",
+        description="Optional additional metadata. Accepts any JSON-serializable value.",
     )
 
     def supports_category(self, category: EnumMessageCategory) -> bool:

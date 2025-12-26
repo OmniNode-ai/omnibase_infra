@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from datetime import UTC
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -1765,6 +1765,7 @@ class TestDispatchResultRetryScenarios:
             status=EnumDispatchStatus.TIMEOUT,
             topic="dev.user.events.v1",
             error_message="Handler execution timed out after 30s",
+            started_at=datetime.now(UTC),
         )
 
         assert result.requires_retry() is True
@@ -1777,6 +1778,7 @@ class TestDispatchResultRetryScenarios:
             status=EnumDispatchStatus.PUBLISH_FAILED,
             topic="dev.user.events.v1",
             error_message="Failed to publish to output topic",
+            started_at=datetime.now(UTC),
         )
 
         assert result.requires_retry() is True
@@ -1789,6 +1791,7 @@ class TestDispatchResultRetryScenarios:
             status=EnumDispatchStatus.SUCCESS,
             topic="dev.user.events.v1",
             outputs=ModelDispatchOutputs(topics=["dev.notification.events.v1"]),
+            started_at=datetime.now(UTC),
         )
 
         assert result.requires_retry() is False
@@ -1801,6 +1804,7 @@ class TestDispatchResultRetryScenarios:
             status=EnumDispatchStatus.HANDLER_ERROR,
             topic="dev.user.events.v1",
             error_message="ValueError: Invalid user data",
+            started_at=datetime.now(UTC),
         )
 
         assert result.requires_retry() is False
@@ -1813,6 +1817,7 @@ class TestDispatchResultRetryScenarios:
             status=EnumDispatchStatus.NO_DISPATCHER,
             topic="dev.unknown.events.v1",
             error_message="No dispatcher registered for topic",
+            started_at=datetime.now(UTC),
         )
 
         assert result.requires_retry() is False
@@ -1824,6 +1829,7 @@ class TestDispatchResultRetryScenarios:
             status=EnumDispatchStatus.INVALID_MESSAGE,
             topic="dev.user.events.v1",
             error_message="Message failed schema validation",
+            started_at=datetime.now(UTC),
         )
 
         assert result.requires_retry() is False
@@ -1834,6 +1840,7 @@ class TestDispatchResultRetryScenarios:
         result = ModelDispatchResult(
             status=EnumDispatchStatus.SKIPPED,
             topic="dev.user.events.v1",
+            started_at=datetime.now(UTC),
         )
 
         assert result.requires_retry() is False
@@ -1846,6 +1853,7 @@ class TestDispatchResultRetryScenarios:
             status=EnumDispatchStatus.ROUTED,
             topic="dev.user.events.v1",
             route_id="user-events-route",
+            started_at=datetime.now(UTC),
         )
 
         assert result.requires_retry() is False

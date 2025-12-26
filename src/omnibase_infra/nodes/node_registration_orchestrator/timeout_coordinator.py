@@ -17,9 +17,9 @@ Design Decisions:
     - Uses tick_id as causation_id for emitted events
     - Delegates to TimeoutEmitter for actual emission logic
 
-Thread Safety:
-    This coordinator is stateless and thread-safe for concurrent calls.
-    Each call coordinates independently, delegating thread safety to
+Coroutine Safety:
+    This coordinator is stateless and coroutine-safe for concurrent calls.
+    Each call coordinates independently, delegating coroutine safety to
     the underlying services (TimeoutScanner, TimeoutEmitter).
 
 Related Tickets:
@@ -32,14 +32,12 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.services import (
-    ModelTimeoutEmissionResult,
-    ModelTimeoutQueryResult,
     TimeoutEmitter,
     TimeoutScanner,
 )

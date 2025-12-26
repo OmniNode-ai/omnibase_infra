@@ -3,7 +3,7 @@
 """ONEX Infrastructure Mixins.
 
 Reusable mixin classes providing:
-- Thread-safe async operations
+- Coroutine-safe async operations (using asyncio.Lock)
 - Infrastructure error integration
 - Correlation ID propagation
 - Configurable behavior
@@ -13,18 +13,31 @@ Note:
     ModelIntrospectionPerformanceMetrics) should be imported from their
     canonical locations in omnibase_infra.models.discovery, not from this
     module.
+
+    Configuration models for mixins:
+    - ModelCircuitBreakerConfig: from omnibase_infra.models.resilience
+    - ModelIntrospectionConfig: from omnibase_infra.models.discovery
+    - ModelIntrospectionTaskConfig: from omnibase_infra.models.discovery
 """
 
 from omnibase_infra.mixins.mixin_async_circuit_breaker import (
     CircuitState,
     MixinAsyncCircuitBreaker,
+    ModelCircuitBreakerConfig,
 )
 from omnibase_infra.mixins.mixin_envelope_extraction import MixinEnvelopeExtraction
-from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
+from omnibase_infra.mixins.mixin_node_introspection import (
+    MixinNodeIntrospection,
+    PerformanceMetricsCacheDict,
+)
+from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
 
 __all__ = [
     "CircuitState",
     "MixinAsyncCircuitBreaker",
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
+    "ModelCircuitBreakerConfig",
+    "PerformanceMetricsCacheDict",
+    "ProtocolEventBusLike",
 ]

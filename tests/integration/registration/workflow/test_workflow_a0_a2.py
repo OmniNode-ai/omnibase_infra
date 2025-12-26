@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -170,6 +171,7 @@ class TestA0PurityGate:
             endpoints={"health": "http://localhost:8080/health"},
             tags=["onex", EnumNodeKind.EFFECT.value, "test"],
             metadata={"environment": "test"},
+            timestamp=datetime.now(UTC),
         )
 
         # Assert precondition: no calls before effect execution
@@ -242,6 +244,7 @@ class TestA0PurityGate:
             endpoints=dict(event.endpoints) if event.endpoints else {},
             tags=["onex", event.node_type],
             metadata={},
+            timestamp=datetime.now(UTC),
         )
         await tracked_effect.register_node(request)
 
@@ -713,6 +716,7 @@ class TestWorkflowIntegration:
             node_version=introspection_data.get("node_version", "1.0.0"),
             correlation_id=correlation_id,
             endpoints=introspection_data.get("endpoints", {}),
+            timestamp=datetime.now(UTC),
         )
 
         # Step 2: Reducer processes event (A0 - purity)
@@ -738,6 +742,7 @@ class TestWorkflowIntegration:
             endpoints=dict(introspection_event.endpoints)
             if introspection_event.endpoints
             else {},
+            timestamp=datetime.now(UTC),
         )
         response = await tracked_effect.register_node(request)
 

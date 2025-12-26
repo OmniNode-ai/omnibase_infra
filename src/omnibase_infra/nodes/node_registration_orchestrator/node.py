@@ -2,8 +2,15 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Registration Orchestrator - Declarative workflow coordinator.
 
-This orchestrator uses the declarative pattern where workflow behavior
-is 100% driven by contract.yaml, not Python code.
+This orchestrator follows the ONEX declarative pattern:
+    - DECLARATIVE orchestrator driven by contract.yaml
+    - Zero custom routing logic - all behavior from workflow_definition
+    - Lightweight shell that delegates to TimeoutCoordinator and HeartbeatHandler
+    - Used for ONEX-compliant runtime execution via RuntimeHostProcess
+    - Pattern: "Contract-driven, handlers wired externally"
+
+Extends NodeOrchestrator from omnibase_core for workflow-driven coordination.
+All workflow logic is 100% driven by contract.yaml, not Python code.
 
 Workflow Pattern:
     1. Receive introspection event (consumed_events in contract)
@@ -55,7 +62,7 @@ Heartbeat Handling (OMN-1006):
 
     To wire heartbeat handling:
     ```python
-    from omnibase_infra.orchestrators.registration.handlers import HandlerNodeHeartbeat
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import HandlerNodeHeartbeat
 
     # Wire heartbeat handler with projection dependencies
     heartbeat_handler = HandlerNodeHeartbeat(
@@ -78,8 +85,8 @@ Design Decisions:
     - Declarative Execution: Workflow steps defined in execution_graph
     - Retry at Base Class: NodeOrchestrator owns retry policy
 
-Thread Safety:
-    This orchestrator is NOT thread-safe. Each instance should handle one
+Coroutine Safety:
+    This orchestrator is NOT coroutine-safe. Each instance should handle one
     workflow at a time. For concurrent workflows, create multiple instances.
 
 Implemented Features:
@@ -110,13 +117,13 @@ if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
     from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeHeartbeat,
+        ModelHeartbeatHandlerResult,
+    )
     from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
         ModelTimeoutCoordinationResult,
         TimeoutCoordinator,
-    )
-    from omnibase_infra.orchestrators.registration.handlers import (
-        HandlerNodeHeartbeat,
-        ModelHeartbeatHandlerResult,
     )
     from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 

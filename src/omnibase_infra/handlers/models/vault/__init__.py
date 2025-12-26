@@ -14,8 +14,7 @@ Exports:
     ModelVaultDeletePayload: Payload for vault.delete_secret result
     ModelVaultListPayload: Payload for vault.list_secrets result
     ModelVaultRenewTokenPayload: Payload for vault.renew_token result
-    ModelVaultHealthCheckPayload: Payload for vault.health_check result
-    VaultPayload: Discriminated union of all Vault payload types (deprecated)
+    VaultPayload: Discriminated union of all Vault payload types
     ModelVaultHandlerPayload: Wrapper containing discriminated union payload
 """
 
@@ -32,9 +31,6 @@ from omnibase_infra.handlers.models.vault.model_vault_delete_payload import (
 from omnibase_infra.handlers.models.vault.model_vault_handler_payload import (
     ModelVaultHandlerPayload,
     VaultPayload,
-)
-from omnibase_infra.handlers.models.vault.model_vault_health_check_payload import (
-    ModelVaultHealthCheckPayload,
 )
 from omnibase_infra.handlers.models.vault.model_vault_list_payload import (
     ModelVaultListPayload,
@@ -58,7 +54,6 @@ __all__: list[str] = [
     "ModelVaultDeletePayload",
     "ModelVaultListPayload",
     "ModelVaultRenewTokenPayload",
-    "ModelVaultHealthCheckPayload",
     "VaultPayload",
     "ModelVaultHandlerPayload",
 ]

@@ -160,9 +160,10 @@ class ModelDispatchResult(BaseModel):
         description="Time taken for the dispatch operation in milliseconds.",
         ge=0,
     )
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     started_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="Timestamp when the dispatch started (UTC).",
+        ...,
+        description="Timestamp when the dispatch started (UTC, must be explicitly provided).",
     )
     completed_at: datetime | None = Field(
         default=None,
@@ -202,9 +203,9 @@ class ModelDispatchResult(BaseModel):
     )
 
     # ---- Tracing Context ----
-    correlation_id: UUID | None = Field(
-        default=None,
-        description="Correlation ID from the original message.",
+    correlation_id: UUID = Field(
+        default_factory=uuid4,
+        description="Correlation ID from the original message (auto-generated if not provided).",
     )
     trace_id: UUID | None = Field(
         default=None,
@@ -229,10 +230,12 @@ class ModelDispatchResult(BaseModel):
             True if status is SUCCESS, False otherwise
 
         Example:
+            >>> from datetime import datetime, UTC
             >>> result = ModelDispatchResult(
             ...     dispatch_id=uuid4(),
             ...     status=EnumDispatchStatus.SUCCESS,
             ...     topic="test.events",
+            ...     started_at=datetime.now(UTC),
             ... )
             >>> result.is_successful()
             True
@@ -247,10 +250,12 @@ class ModelDispatchResult(BaseModel):
             True if the status represents an error condition, False otherwise
 
         Example:
+            >>> from datetime import datetime, UTC
             >>> result = ModelDispatchResult(
             ...     dispatch_id=uuid4(),
             ...     status=EnumDispatchStatus.HANDLER_ERROR,
             ...     topic="test.events",
+            ...     started_at=datetime.now(UTC),
             ...     error_message="Dispatcher failed",
             ... )
             >>> result.is_error()
@@ -266,10 +271,12 @@ class ModelDispatchResult(BaseModel):
             True if the status indicates a retriable failure, False otherwise
 
         Example:
+            >>> from datetime import datetime, UTC
             >>> result = ModelDispatchResult(
             ...     dispatch_id=uuid4(),
             ...     status=EnumDispatchStatus.TIMEOUT,
             ...     topic="test.events",
+            ...     started_at=datetime.now(UTC),
             ... )
             >>> result.requires_retry()
             True
@@ -305,10 +312,12 @@ class ModelDispatchResult(BaseModel):
             New ModelDispatchResult with error information
 
         Example:
+            >>> from datetime import datetime, UTC
             >>> result = ModelDispatchResult(
             ...     dispatch_id=uuid4(),
             ...     status=EnumDispatchStatus.ROUTED,
             ...     topic="test.events",
+            ...     started_at=datetime.now(UTC),
             ... )
             >>> error_result = result.with_error(
             ...     EnumDispatchStatus.HANDLER_ERROR,
@@ -342,10 +351,12 @@ class ModelDispatchResult(BaseModel):
             New ModelDispatchResult marked as SUCCESS
 
         Example:
+            >>> from datetime import datetime, UTC
             >>> result = ModelDispatchResult(
             ...     dispatch_id=uuid4(),
             ...     status=EnumDispatchStatus.ROUTED,
             ...     topic="test.events",
+            ...     started_at=datetime.now(UTC),
             ... )
             >>> success_result = result.with_success(
             ...     outputs=ModelDispatchOutputs(topics=["output.topic.v1"]),
