@@ -1,18 +1,22 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registration Orchestrator Node (C1).
+"""Registration Orchestrator Handlers.
 
-This module exports the NodeRegistrationOrchestrator which coordinates the
-node registration workflow following ONEX architectural constraints.
+This module exports the registration workflow handlers following ONEX
+architectural constraints. The handlers are used by the declarative
+NodeRegistrationOrchestrator located at:
+    nodes/node_registration_orchestrator/node.py
 
-The orchestrator:
-    - Consumes NodeIntrospected events (canonical trigger)
-    - Consumes NodeRegistrationAcked commands (gated flows)
-    - Consumes RuntimeTick for timeout evaluation
-    - Consumes NodeHeartbeat events for liveness tracking
-    - Emits decision events (NodeRegistrationInitiated, NodeRegistrationAccepted, etc.)
-    - Uses ProjectionReaderRegistration for state queries
-    - Uses injected `now` for deadline calculations
+Handler Responsibilities:
+    - HandlerNodeIntrospected: Process NodeIntrospected events (canonical trigger)
+    - HandlerNodeRegistrationAcked: Process NodeRegistrationAcked commands (gated flows)
+    - HandlerRuntimeTick: Process RuntimeTick for timeout evaluation
+    - HandlerNodeHeartbeat: Process NodeHeartbeat events for liveness tracking
+
+All handlers:
+    - Use ProjectionReaderRegistration for state queries
+    - Use injected `now` for deadline calculations
+    - Emit EVENTS only (no intents, no projections)
 
 Related Tickets:
     - OMN-888 (C1): Registration Orchestrator (Event-Driven)
@@ -22,7 +26,6 @@ Related Tickets:
     - OMN-1006: Node Heartbeat for Liveness Tracking
 
 Exports:
-    NodeRegistrationOrchestrator: The registration workflow orchestrator node
     HandlerNodeIntrospected: Handler for NodeIntrospectionEvent
     HandlerNodeRegistrationAcked: Handler for NodeRegistrationAcked command
     HandlerRuntimeTick: Handler for RuntimeTick timeout detection
@@ -31,9 +34,8 @@ Exports:
     ModelHeartbeatHandlerResult: Result model for heartbeat processing
 
 Note:
-    For orchestrator context, use the canonical ModelOrchestratorContext from
-    omnibase_core.models.orchestrator, which provides time injection and
-    correlation tracking for orchestrator handler execution.
+    For the declarative orchestrator, import from:
+        omnibase_infra.nodes.node_registration_orchestrator
 """
 
 from omnibase_infra.orchestrators.registration.handlers import (
@@ -44,9 +46,6 @@ from omnibase_infra.orchestrators.registration.handlers import (
     HandlerRuntimeTick,
     ModelHeartbeatHandlerResult,
 )
-from omnibase_infra.orchestrators.registration.node_registration_orchestrator import (
-    NodeRegistrationOrchestrator,
-)
 
 __all__: list[str] = [
     "DEFAULT_LIVENESS_WINDOW_SECONDS",
@@ -55,5 +54,4 @@ __all__: list[str] = [
     "HandlerNodeRegistrationAcked",
     "HandlerRuntimeTick",
     "ModelHeartbeatHandlerResult",
-    "NodeRegistrationOrchestrator",
 ]

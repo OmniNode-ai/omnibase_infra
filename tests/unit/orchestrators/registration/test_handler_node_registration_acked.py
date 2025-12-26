@@ -37,7 +37,10 @@ from omnibase_infra.models.registration.events import (
     ModelNodeRegistrationAckReceived,
 )
 from omnibase_infra.orchestrators.registration.handlers.handler_node_registration_acked import (
+    DEFAULT_LIVENESS_INTERVAL_SECONDS,
+    ENV_LIVENESS_INTERVAL_SECONDS,
     HandlerNodeRegistrationAcked,
+    get_liveness_interval_seconds,
 )
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
@@ -46,8 +49,8 @@ from omnibase_infra.projectors.projection_reader_registration import (
 # Fixed test time for deterministic testing
 TEST_NOW = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
-# Default liveness interval (same as handler default)
-DEFAULT_LIVENESS_INTERVAL_SECONDS = 60
+# Alias for test readability (uses the constant from the handler module)
+TEST_DEFAULT_LIVENESS_INTERVAL = DEFAULT_LIVENESS_INTERVAL_SECONDS
 
 
 def create_mock_projection_reader() -> AsyncMock:
@@ -518,3 +521,74 @@ class TestHandlerAckedProjectionQueries:
             domain="registration",
             correlation_id=correlation_id,
         )
+
+
+class TestGetLivenessIntervalSeconds:
+    """Tests for get_liveness_interval_seconds configuration resolution."""
+
+    def test_returns_default_when_no_config(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test returns default constant when no explicit value or env var."""
+        # Ensure env var is not set
+        monkeypatch.delenv(ENV_LIVENESS_INTERVAL_SECONDS, raising=False)
+
+        result = get_liveness_interval_seconds()
+
+        assert result == DEFAULT_LIVENESS_INTERVAL_SECONDS
+        assert result == 60  # Verify actual default value
+
+    def test_returns_explicit_value_when_provided(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test explicit value takes priority over env var and default."""
+        # Set env var to a different value
+        monkeypatch.setenv(ENV_LIVENESS_INTERVAL_SECONDS, "90")
+
+        result = get_liveness_interval_seconds(explicit_value=120)
+
+        # Explicit value should win
+        assert result == 120
+
+    def test_returns_env_var_when_no_explicit_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test env var is used when no explicit value provided."""
+        monkeypatch.setenv(ENV_LIVENESS_INTERVAL_SECONDS, "180")
+
+        result = get_liveness_interval_seconds()
+
+        assert result == 180
+
+    def test_explicit_none_uses_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that passing None explicitly uses env var."""
+        monkeypatch.setenv(ENV_LIVENESS_INTERVAL_SECONDS, "45")
+
+        result = get_liveness_interval_seconds(explicit_value=None)
+
+        assert result == 45
+
+    def test_raises_value_error_for_invalid_env_var(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test ValueError raised when env var is not a valid integer."""
+        monkeypatch.setenv(ENV_LIVENESS_INTERVAL_SECONDS, "not_a_number")
+
+        with pytest.raises(ValueError) as exc_info:
+            get_liveness_interval_seconds()
+
+        assert ENV_LIVENESS_INTERVAL_SECONDS in str(exc_info.value)
+        assert "not_a_number" in str(exc_info.value)
+
+    def test_handler_uses_get_liveness_interval_internally(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that handler respects env var when no explicit value provided."""
+        monkeypatch.setenv(ENV_LIVENESS_INTERVAL_SECONDS, "300")
+        mock_reader = create_mock_projection_reader()
+
+        # Create handler without explicit liveness_interval_seconds
+        handler = HandlerNodeRegistrationAcked(mock_reader)
+
+        # Handler should use the value from env var (resolved via get_liveness_interval_seconds)
+        assert handler._liveness_interval_seconds == 300

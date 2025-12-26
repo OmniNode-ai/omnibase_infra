@@ -33,8 +33,9 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 from uuid import UUID
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -60,10 +61,57 @@ from omnibase_infra.projectors.projection_reader_registration import (
 logger = logging.getLogger(__name__)
 
 
-# Liveness interval default. The handler accepts liveness_interval_seconds as a
-# constructor parameter, allowing container wiring to inject environment-specific
-# values. The default of 60 seconds is suitable for most deployments.
-_DEFAULT_LIVENESS_INTERVAL_SECONDS: int = 60
+# Environment variable name for liveness interval configuration
+ENV_LIVENESS_INTERVAL_SECONDS: Final[str] = "ONEX_LIVENESS_INTERVAL_SECONDS"
+
+# Default liveness interval (60 seconds). This value is used when:
+# 1. No explicit value is passed to the handler constructor
+# 2. No environment variable ONEX_LIVENESS_INTERVAL_SECONDS is set
+# 3. Container config does not specify liveness_interval_seconds
+DEFAULT_LIVENESS_INTERVAL_SECONDS: Final[int] = 60
+
+
+def get_liveness_interval_seconds(explicit_value: int | None = None) -> int:
+    """Get liveness interval from explicit value, environment, or default.
+
+    Resolution order (first non-None wins):
+        1. Explicit value passed as parameter
+        2. Environment variable ONEX_LIVENESS_INTERVAL_SECONDS
+        3. Default constant (60 seconds)
+
+    Args:
+        explicit_value: Explicitly provided value (highest priority).
+            Pass None to use environment or default.
+
+    Returns:
+        Liveness interval in seconds.
+
+    Raises:
+        ValueError: If environment variable is set but not a valid integer.
+
+    Example:
+        >>> # Use default or env var
+        >>> interval = get_liveness_interval_seconds()
+        >>> # Force explicit value
+        >>> interval = get_liveness_interval_seconds(120)
+    """
+    # 1. Explicit value takes priority
+    if explicit_value is not None:
+        return explicit_value
+
+    # 2. Try environment variable
+    env_value = os.getenv(ENV_LIVENESS_INTERVAL_SECONDS)
+    if env_value is not None:
+        try:
+            return int(env_value)
+        except ValueError as e:
+            raise ValueError(
+                f"Invalid value for {ENV_LIVENESS_INTERVAL_SECONDS}: "
+                f"'{env_value}' is not a valid integer"
+            ) from e
+
+    # 3. Fall back to default
+    return DEFAULT_LIVENESS_INTERVAL_SECONDS
 
 
 class HandlerNodeRegistrationAcked:
@@ -107,17 +155,20 @@ class HandlerNodeRegistrationAcked:
     def __init__(
         self,
         projection_reader: ProjectionReaderRegistration,
-        liveness_interval_seconds: int = _DEFAULT_LIVENESS_INTERVAL_SECONDS,
+        liveness_interval_seconds: int | None = None,
     ) -> None:
         """Initialize the handler with a projection reader.
 
         Args:
             projection_reader: Reader for querying registration projection state.
             liveness_interval_seconds: Interval for liveness deadline calculation.
-                                       Defaults to 60 seconds.
+                Pass None to use environment variable ONEX_LIVENESS_INTERVAL_SECONDS
+                or default (60 seconds).
         """
         self._projection_reader = projection_reader
-        self._liveness_interval_seconds = liveness_interval_seconds
+        self._liveness_interval_seconds = get_liveness_interval_seconds(
+            liveness_interval_seconds
+        )
 
     async def handle(
         self,
@@ -298,4 +349,9 @@ class HandlerNodeRegistrationAcked:
         return [ack_received, became_active]
 
 
-__all__: list[str] = ["HandlerNodeRegistrationAcked"]
+__all__: list[str] = [
+    "DEFAULT_LIVENESS_INTERVAL_SECONDS",
+    "ENV_LIVENESS_INTERVAL_SECONDS",
+    "HandlerNodeRegistrationAcked",
+    "get_liveness_interval_seconds",
+]

@@ -667,14 +667,10 @@ async def get_or_create_compute_registry(
             ) from e
 
 
-# Default liveness interval for registration (60 seconds)
-_DEFAULT_LIVENESS_INTERVAL_SECONDS: int = 60
-
-
 async def wire_registration_handlers(
     container: ModelONEXContainer,
     pool: asyncpg.Pool,
-    liveness_interval_seconds: int = _DEFAULT_LIVENESS_INTERVAL_SECONDS,
+    liveness_interval_seconds: int | None = None,
 ) -> dict[str, list[str]]:
     """Register registration orchestrator handlers with the container.
 
@@ -691,7 +687,7 @@ async def wire_registration_handlers(
         container: ONEX container instance to register services in.
         pool: asyncpg connection pool for database access.
         liveness_interval_seconds: Liveness deadline interval for ack handler.
-            Defaults to 60 seconds.
+            If None, uses ONEX_LIVENESS_INTERVAL_SECONDS env var or default (60s).
 
     Returns:
         Summary dict with:
@@ -716,7 +712,15 @@ async def wire_registration_handlers(
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
     )
+    from omnibase_infra.orchestrators.registration.handlers.handler_node_registration_acked import (
+        get_liveness_interval_seconds,
+    )
     from omnibase_infra.projectors import ProjectionReaderRegistration
+
+    # Resolve the actual liveness interval (from param, env var, or default)
+    resolved_liveness_interval = get_liveness_interval_seconds(
+        liveness_interval_seconds
+    )
 
     services_registered: list[str] = []
 
@@ -774,7 +778,7 @@ async def wire_registration_handlers(
         # 4. Register HandlerNodeRegistrationAcked
         handler_acked = HandlerNodeRegistrationAcked(
             projection_reader,
-            liveness_interval_seconds=liveness_interval_seconds,
+            liveness_interval_seconds=resolved_liveness_interval,
         )
 
         await container.service_registry.register_instance(
@@ -784,7 +788,7 @@ async def wire_registration_handlers(
             metadata={
                 "description": "Handler for NodeRegistrationAcked command - ack processing",
                 "version": str(SEMVER_DEFAULT),
-                "liveness_interval_seconds": liveness_interval_seconds,
+                "liveness_interval_seconds": resolved_liveness_interval,
             },
         )
 
