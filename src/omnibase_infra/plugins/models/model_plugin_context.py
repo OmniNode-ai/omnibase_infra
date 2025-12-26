@@ -14,12 +14,8 @@ Design Notes:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
+from omnibase_core.types import JsonValue  # noqa: TC002 - Pydantic needs runtime access
 from pydantic import BaseModel, ConfigDict, Field
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
 
 
 class ModelPluginContext(BaseModel):

@@ -7,12 +7,10 @@ This module provides the Pydantic model for http.post operation results.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
+from omnibase_core.types import JsonValue  # noqa: TC002 - Pydantic needs runtime access
 from pydantic import BaseModel, ConfigDict, Field
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
 
 from omnibase_infra.handlers.models.http.enum_http_operation_type import (
     EnumHttpOperationType,

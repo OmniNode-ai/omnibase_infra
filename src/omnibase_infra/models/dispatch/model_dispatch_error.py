@@ -58,13 +58,11 @@ See Also:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
+from omnibase_core.enums.enum_core_error_code import (
+    EnumCoreErrorCode,  # noqa: TC002 - Pydantic needs runtime access
+)
+from omnibase_core.types import JsonValue  # noqa: TC002 - Pydantic needs runtime access
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-if TYPE_CHECKING:
-    from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-    from omnibase_core.types import JsonValue
 
 # Sentinel values for "not set" state
 _SENTINEL_STR: str = ""
