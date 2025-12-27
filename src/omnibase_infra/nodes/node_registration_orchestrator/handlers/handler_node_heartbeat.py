@@ -322,7 +322,7 @@ class HandlerNodeHeartbeat:
 
 
 __all__ = [
+    "DEFAULT_LIVENESS_WINDOW_SECONDS",
     "HandlerNodeHeartbeat",
     "ModelHeartbeatHandlerResult",
-    "DEFAULT_LIVENESS_WINDOW_SECONDS",
 ]

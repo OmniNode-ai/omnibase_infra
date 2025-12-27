@@ -387,4 +387,4 @@ class TimeoutCoordinator:
             )
 
 
-__all__: list[str] = ["TimeoutCoordinator", "ModelTimeoutCoordinationResult"]
+__all__: list[str] = ["ModelTimeoutCoordinationResult", "TimeoutCoordinator"]

@@ -110,24 +110,24 @@ from omnibase_infra.models.errors.model_infra_error_context import (
 )
 
 __all__: list[str] = [
-    # Configuration model
-    "ModelInfraErrorContext",
-    # Error classes
-    "RuntimeHostError",
-    "ProtocolConfigurationError",
-    "SecretResolutionError",
-    "InfraConnectionError",
-    "InfraTimeoutError",
-    "InfraAuthenticationError",
-    "InfraUnavailableError",
-    "EnvelopeValidationError",
-    "UnknownHandlerTypeError",
-    "PolicyRegistryError",
-    "ComputeRegistryError",
     "ChainPropagationError",
+    "ComputeRegistryError",
+    "ContainerValidationError",
     # Container wiring errors
     "ContainerWiringError",
+    "EnvelopeValidationError",
+    "InfraAuthenticationError",
+    "InfraConnectionError",
+    "InfraTimeoutError",
+    "InfraUnavailableError",
+    # Configuration model
+    "ModelInfraErrorContext",
+    "PolicyRegistryError",
+    "ProtocolConfigurationError",
+    # Error classes
+    "RuntimeHostError",
+    "SecretResolutionError",
     "ServiceRegistrationError",
     "ServiceResolutionError",
-    "ContainerValidationError",
+    "UnknownHandlerTypeError",
 ]

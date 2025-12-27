@@ -211,9 +211,9 @@ def clear_normalize_version_cache() -> None:
 
 __all__: list[str] = [
     "SEMVER_PATTERN",
-    "validate_semver",
-    "validate_version_lenient",
+    "clear_normalize_version_cache",
     "normalize_version",
     "normalize_version_cached",
-    "clear_normalize_version_cache",
+    "validate_semver",
+    "validate_version_lenient",
 ]

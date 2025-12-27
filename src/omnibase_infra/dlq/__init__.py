@@ -89,12 +89,12 @@ __all__: list[str] = [
     # Constants
     "PATTERN_TABLE_NAME",  # Regex pattern string for table name validation
     "REGEX_TABLE_NAME",  # Pre-compiled regex for runtime validation
+    # Tracker (multiple names for flexibility)
+    "DLQReplayTracker",  # Primary class name
+    "DLQTrackingService",  # Backwards compatibility alias
     # Models
     "EnumReplayStatus",
     "ModelDlqReplayRecord",
     "ModelDlqTrackingConfig",
-    # Tracker (multiple names for flexibility)
-    "DLQReplayTracker",  # Primary class name
     "ServiceDlqTracking",  # ONEX naming convention (service_<name>.py → Service<Name>)
-    "DLQTrackingService",  # Backwards compatibility alias
 ]

@@ -1013,16 +1013,16 @@ async def get_handler_node_registration_acked_from_container(
 
 
 __all__: list[str] = [
-    "wire_infrastructure_services",
-    "get_policy_registry_from_container",
-    "get_handler_registry_from_container",
-    "get_or_create_policy_registry",
     "get_compute_registry_from_container",
+    "get_handler_node_introspected_from_container",
+    "get_handler_node_registration_acked_from_container",
+    "get_handler_registry_from_container",
+    "get_handler_runtime_tick_from_container",
     "get_or_create_compute_registry",
+    "get_or_create_policy_registry",
+    "get_policy_registry_from_container",
+    "get_projection_reader_from_container",
+    "wire_infrastructure_services",
     # Registration handlers (OMN-888)
     "wire_registration_handlers",
-    "get_projection_reader_from_container",
-    "get_handler_node_introspected_from_container",
-    "get_handler_runtime_tick_from_container",
-    "get_handler_node_registration_acked_from_container",
 ]

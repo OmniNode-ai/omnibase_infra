@@ -511,13 +511,13 @@ def wire_custom_event_bus(
 
 
 __all__: list[str] = [
+    "get_known_event_bus_kinds",
+    # Introspection functions
+    "get_known_handler_types",
+    "wire_custom_event_bus",
+    # Custom registration functions
+    "wire_custom_handler",
     # Primary wiring functions
     "wire_default_handlers",
     "wire_handlers_from_contract",
-    # Introspection functions
-    "get_known_handler_types",
-    "get_known_event_bus_kinds",
-    # Custom registration functions
-    "wire_custom_handler",
-    "wire_custom_event_bus",
 ]

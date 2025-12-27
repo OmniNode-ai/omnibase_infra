@@ -789,4 +789,4 @@ if __name__ == "__main__":
     main()
 
 
-__all__: list[str] = ["bootstrap", "main", "load_runtime_config"]
+__all__: list[str] = ["bootstrap", "load_runtime_config", "main"]

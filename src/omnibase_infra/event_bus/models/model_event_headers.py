@@ -6,7 +6,7 @@ ProtocolEventHeaders from omnibase_spi for use with event bus implementations.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
