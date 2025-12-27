@@ -93,8 +93,7 @@ from omnibase_infra.errors.error_container_wiring import (
     ServiceRegistrationError,
     ServiceResolutionError,
 )
-from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
-from omnibase_infra.errors.infra_errors import (
+from omnibase_infra.errors.error_infra import (
     EnvelopeValidationError,
     InfraAuthenticationError,
     InfraConnectionError,
@@ -105,27 +104,30 @@ from omnibase_infra.errors.infra_errors import (
     SecretResolutionError,
     UnknownHandlerTypeError,
 )
-from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
+from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 
 __all__: list[str] = [
-    # Configuration model
-    "ModelInfraErrorContext",
-    # Error classes
-    "RuntimeHostError",
-    "ProtocolConfigurationError",
-    "SecretResolutionError",
-    "InfraConnectionError",
-    "InfraTimeoutError",
-    "InfraAuthenticationError",
-    "InfraUnavailableError",
-    "EnvelopeValidationError",
-    "UnknownHandlerTypeError",
-    "PolicyRegistryError",
-    "ComputeRegistryError",
     "ChainPropagationError",
+    "ComputeRegistryError",
+    "ContainerValidationError",
     # Container wiring errors
     "ContainerWiringError",
+    "EnvelopeValidationError",
+    "InfraAuthenticationError",
+    "InfraConnectionError",
+    "InfraTimeoutError",
+    "InfraUnavailableError",
+    # Configuration model
+    "ModelInfraErrorContext",
+    "PolicyRegistryError",
+    "ProtocolConfigurationError",
+    # Error classes
+    "RuntimeHostError",
+    "SecretResolutionError",
     "ServiceRegistrationError",
     "ServiceResolutionError",
-    "ContainerValidationError",
+    "UnknownHandlerTypeError",
 ]

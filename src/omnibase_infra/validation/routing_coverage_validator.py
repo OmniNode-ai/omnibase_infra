@@ -1009,12 +1009,12 @@ def check_routing_coverage_ci(
 __all__: list[str] = [
     # Exception
     "RoutingCoverageError",
+    # Validator class
+    "RoutingCoverageValidator",
+    "check_routing_coverage_ci",
     # Discovery functions
     "discover_message_types",
     "discover_registered_routes",
-    # Validator class
-    "RoutingCoverageValidator",
     # Integration functions
     "validate_routing_coverage_on_startup",
-    "check_routing_coverage_ci",
 ]

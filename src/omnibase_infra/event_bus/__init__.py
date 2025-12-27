@@ -47,21 +47,21 @@ from omnibase_infra.event_bus.topic_constants import (
 )
 
 __all__: list[str] = [
+    "DLQ_CATEGORY_SUFFIXES",
+    "DLQ_COMMAND_TOPIC_SUFFIX",
+    "DLQ_DOMAIN",
+    "DLQ_EVENT_TOPIC_SUFFIX",
+    "DLQ_INTENT_TOPIC_SUFFIX",
+    "DLQ_TOPIC_PATTERN",
+    # Topic Constants
+    "DLQ_TOPIC_VERSION",
     # Event Bus
     "InMemoryEventBus",
     "ModelEventHeaders",
     "ModelEventMessage",
-    # Topic Constants
-    "DLQ_TOPIC_VERSION",
-    "DLQ_DOMAIN",
-    "DLQ_INTENT_TOPIC_SUFFIX",
-    "DLQ_EVENT_TOPIC_SUFFIX",
-    "DLQ_COMMAND_TOPIC_SUFFIX",
-    "DLQ_CATEGORY_SUFFIXES",
-    "DLQ_TOPIC_PATTERN",
     # Topic Functions
     "build_dlq_topic",
-    "parse_dlq_topic",
-    "is_dlq_topic",
     "get_dlq_topic_for_original",
+    "is_dlq_topic",
+    "parse_dlq_topic",
 ]

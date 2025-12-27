@@ -11,8 +11,10 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
-from omnibase_infra.handlers.model_consul_retry_config import ModelConsulRetryConfig
+from omnibase_infra.handlers.models.consul import (
+    ModelConsulHandlerConfig,
+    ModelConsulRetryConfig,
+)
 
 
 class TestModelConsulRetryConfig:

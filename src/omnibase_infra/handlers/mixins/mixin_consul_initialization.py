@@ -28,7 +28,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
+from omnibase_infra.handlers.models.consul import ModelConsulHandlerConfig
 
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor

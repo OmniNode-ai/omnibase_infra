@@ -74,7 +74,9 @@ from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 
 
 class RuntimeHostError(ModelOnexError):
@@ -540,13 +542,13 @@ class UnknownHandlerTypeError(RuntimeHostError):
 
 
 __all__: list[str] = [
-    "RuntimeHostError",
-    "ProtocolConfigurationError",
-    "SecretResolutionError",
+    "EnvelopeValidationError",
+    "InfraAuthenticationError",
     "InfraConnectionError",
     "InfraTimeoutError",
-    "InfraAuthenticationError",
     "InfraUnavailableError",
-    "EnvelopeValidationError",
+    "ProtocolConfigurationError",
+    "RuntimeHostError",
+    "SecretResolutionError",
     "UnknownHandlerTypeError",
 ]

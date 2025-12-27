@@ -40,7 +40,7 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.projectors.projector_registration import ProjectorRegistration
-from omnibase_infra.services.timeout_scanner import TimeoutScanner
+from omnibase_infra.services.service_timeout_scanner import ServiceTimeoutScanner
 
 if TYPE_CHECKING:
     # Import protocols inside TYPE_CHECKING to avoid circular imports.
@@ -193,7 +193,7 @@ class ModelTimeoutEmissionConfig(BaseModel):
     )
 
 
-class TimeoutEmitter:
+class ServiceTimeoutEmitter:
     """Emitter for timeout events with emission marker updates.
 
     Ensures restart-safe, exactly-once timeout event emission by:
@@ -213,7 +213,7 @@ class TimeoutEmitter:
         breaker implementations.
 
     Usage:
-        >>> emitter = TimeoutEmitter(
+        >>> emitter = ServiceTimeoutEmitter(
         ...     timeout_query=timeout_scanner,
         ...     event_bus=event_bus,
         ...     projector=projector,
@@ -259,7 +259,7 @@ class TimeoutEmitter:
 
     def __init__(
         self,
-        timeout_query: TimeoutScanner,
+        timeout_query: ServiceTimeoutScanner,
         event_bus: ProtocolEventBus,
         projector: ProjectorRegistration,
         config: ModelTimeoutEmissionConfig | None = None,
@@ -278,10 +278,10 @@ class TimeoutEmitter:
 
         Example:
             >>> reader = ProjectionReaderRegistration(pool)
-            >>> timeout_query = TimeoutScanner(reader)
+            >>> timeout_query = ServiceTimeoutScanner(reader)
             >>> bus = KafkaEventBus.default()
             >>> projector = ProjectorRegistration(pool)
-            >>> emitter = TimeoutEmitter(
+            >>> emitter = ServiceTimeoutEmitter(
             ...     timeout_query=timeout_query,
             ...     event_bus=bus,
             ...     projector=projector,
@@ -668,19 +668,8 @@ class TimeoutEmitter:
         )
 
 
-# Backwards compatibility aliases
-TimeoutEmissionProcessor = TimeoutEmitter
-"""Backwards compatibility alias for TimeoutEmitter."""
-
-ServiceTimeoutEmission = TimeoutEmitter
-"""Backwards compatibility alias for TimeoutEmitter."""
-
-
 __all__: list[str] = [
     "ModelTimeoutEmissionConfig",
     "ModelTimeoutEmissionResult",
-    "TimeoutEmitter",
-    # Backwards compatibility
-    "TimeoutEmissionProcessor",
-    "ServiceTimeoutEmission",
+    "ServiceTimeoutEmitter",
 ]

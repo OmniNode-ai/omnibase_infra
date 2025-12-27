@@ -138,7 +138,7 @@ def create_mock_emission_result(
 
 @pytest.fixture
 def mock_timeout_query() -> AsyncMock:
-    """Create a mock TimeoutScanner."""
+    """Create a mock ServiceTimeoutScanner."""
     query = AsyncMock()
     query.find_overdue_entities = AsyncMock(
         return_value=create_mock_query_result(),
@@ -148,7 +148,7 @@ def mock_timeout_query() -> AsyncMock:
 
 @pytest.fixture
 def mock_timeout_emission() -> AsyncMock:
-    """Create a mock TimeoutEmitter."""
+    """Create a mock ServiceTimeoutEmitter."""
     emission = AsyncMock()
     emission.process_timeouts = AsyncMock(
         return_value=create_mock_emission_result(),

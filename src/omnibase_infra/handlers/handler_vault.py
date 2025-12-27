@@ -42,7 +42,8 @@ from omnibase_infra.handlers.mixins import (
     MixinVaultSecrets,
     MixinVaultToken,
 )
-from omnibase_infra.handlers.model_vault_handler_config import ModelVaultHandlerConfig
+from omnibase_infra.handlers.models import ModelOperationContext, ModelRetryState
+from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 if TYPE_CHECKING:

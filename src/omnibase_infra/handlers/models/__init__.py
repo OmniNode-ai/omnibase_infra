@@ -103,46 +103,48 @@ from omnibase_infra.handlers.models.vault import (
 )
 
 __all__: list[str] = [
-    # Common models for retry and operation tracking
-    "ModelRetryState",
-    "ModelOperationContext",
-    # Generic response model
-    "ModelHandlerResponse",
+    "ConsulPayload",
     # Consul payload types (discriminated union)
     "EnumConsulOperationType",
-    "ModelConsulKVItem",
-    "ModelConsulKVGetFoundPayload",
-    "ModelConsulKVGetNotFoundPayload",
-    "ModelConsulKVGetRecursePayload",
-    "ModelConsulKVPutPayload",
-    "ModelConsulRegisterPayload",
+    # HTTP payload types (discriminated union)
+    "EnumHttpOperationType",
+    # Vault payload types (discriminated union)
+    "EnumVaultOperationType",
+    "HttpPayload",
     "ModelConsulDeregisterPayload",
-    "ConsulPayload",
     # Consul wrapper models
     "ModelConsulHandlerPayload",
     "ModelConsulHandlerResponse",
+    "ModelConsulKVGetFoundPayload",
+    "ModelConsulKVGetNotFoundPayload",
+    "ModelConsulKVGetRecursePayload",
+    "ModelConsulKVItem",
+    "ModelConsulKVPutPayload",
+    "ModelConsulRegisterPayload",
     # Database models
     "ModelDbQueryPayload",
     "ModelDbQueryResponse",
     "ModelDbDescribeResponse",
-    # Vault payload types (discriminated union)
-    "EnumVaultOperationType",
-    "ModelVaultSecretPayload",
-    "ModelVaultWritePayload",
-    "ModelVaultDeletePayload",
-    "ModelVaultListPayload",
-    "ModelVaultRenewTokenPayload",
-    "VaultPayload",
-    # Vault wrapper models
-    "ModelVaultHandlerPayload",
-    "ModelVaultHandlerResponse",
-    # HTTP payload types (discriminated union)
-    "EnumHttpOperationType",
+    # Generic response model
+    "ModelHandlerResponse",
+    # HTTP models
     "ModelHttpBodyContent",
     "ModelHttpGetPayload",
-    "ModelHttpPostPayload",
-    "HttpPayload",
     # HTTP wrapper models
     "ModelHttpHandlerPayload",
     "ModelHttpHandlerResponse",
+    "ModelHttpPostPayload",
+    # Common models for retry and operation tracking
+    "ModelOperationContext",
+    "ModelRetryState",
+    # Vault models
+    "ModelVaultDeletePayload",
+    # Vault wrapper models
+    "ModelVaultHandlerPayload",
+    "ModelVaultHandlerResponse",
+    "ModelVaultListPayload",
+    "ModelVaultRenewTokenPayload",
+    "ModelVaultSecretPayload",
+    "ModelVaultWritePayload",
+    "VaultPayload",
 ]

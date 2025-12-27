@@ -130,24 +130,26 @@ from omnibase_core.models.events.model_event_envelope import (
 
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
-from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.models.validation.model_chain_violation import ModelChainViolation
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "ChainPropagationValidator",
-    "ChainPropagationError",
-    "validate_message_chain",
-    "validate_linear_message_chain",
-    "enforce_chain_propagation",
+    "CAUSATION_ID_HEADER_KEYS",
     # Causation ID lookup key constants
     "CAUSATION_ID_TAG_KEYS",
-    "CAUSATION_ID_HEADER_KEYS",
+    "ChainPropagationError",
+    "ChainPropagationValidator",
+    "enforce_chain_propagation",
+    "get_causation_id",
+    "get_correlation_id",
     # Helper functions for envelope field access
     "get_message_id",
-    "get_correlation_id",
-    "get_causation_id",
+    "validate_linear_message_chain",
+    "validate_message_chain",
 ]
 
 # ==============================================================================

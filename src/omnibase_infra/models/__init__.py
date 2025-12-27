@@ -53,6 +53,12 @@ __all__: list[str] = [
     # Dispatch models
     "EnumDispatchStatus",
     "EnumTopicStandard",
+    # Resilience models
+    "ModelCircuitBreakerConfig",
+    # SemVer models - REMOVED: Use omnibase_core.models.primitives.model_semver instead
+    # (model_semver.py now raises ImportError on import)
+    # Validation models
+    "ModelCoverageMetrics",
     "ModelDispatchLogContext",
     "ModelDispatchMetrics",
     "ModelDispatchOutcome",
@@ -60,31 +66,25 @@ __all__: list[str] = [
     "ModelDispatchRoute",
     "ModelDispatcherMetrics",
     "ModelDispatcherRegistration",
-    "ModelParsedTopic",
-    "ModelTopicParser",
+    "ModelExecutionShapeRule",
+    "ModelExecutionShapeViolationResult",
     # Health models
     "ModelHealthCheckResult",
-    # Logging models
-    "ModelLogContext",
-    # Projection models
-    "ModelRegistrationProjection",
-    "ModelRegistrationSnapshot",
-    "ModelSequenceInfo",
-    "ModelSnapshotTopicConfig",
-    # Resilience models
-    "ModelCircuitBreakerConfig",
     # Registration models
     "ModelIntrospectionMetrics",
+    # Logging models
+    "ModelLogContext",
     "ModelNodeCapabilities",
     "ModelNodeHeartbeatEvent",
     "ModelNodeIntrospectionEvent",
     "ModelNodeMetadata",
     "ModelNodeRegistration",
-    # SemVer models - REMOVED: Use omnibase_core.models.primitives.model_semver instead
-    # (model_semver.py now raises ImportError on import)
-    # Validation models
-    "ModelCoverageMetrics",
-    "ModelExecutionShapeRule",
-    "ModelExecutionShapeViolationResult",
+    "ModelParsedTopic",
+    # Projection models
+    "ModelRegistrationProjection",
+    "ModelRegistrationSnapshot",
+    "ModelSequenceInfo",
+    "ModelSnapshotTopicConfig",
+    "ModelTopicParser",
     "ModelValidationOutcome",
 ]

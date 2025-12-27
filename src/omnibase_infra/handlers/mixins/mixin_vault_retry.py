@@ -26,8 +26,8 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     SecretResolutionError,
 )
-from omnibase_infra.handlers.model_vault_handler_config import ModelVaultHandlerConfig
 from omnibase_infra.handlers.models import ModelOperationContext, ModelRetryState
+from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
 T = TypeVar("T")
 

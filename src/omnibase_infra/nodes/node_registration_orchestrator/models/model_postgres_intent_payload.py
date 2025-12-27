@@ -30,6 +30,7 @@ Edge Case Behavior:
     - Invalid types (int, str, list, etc.): Raises ValueError
     - Tuple: Passed through as-is
     - Non-empty Mapping: Converted to tuple of (key, value) pairs
+    - Non-string keys/values: Raises ValueError (strict mode)
 
     Empty Mapping coercion is logged as a warning to help detect cases where
     endpoints were expected but not populated. If this is intentional, the

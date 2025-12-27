@@ -123,26 +123,26 @@ from omnibase_infra.models.dispatch.model_topic_parser import (
 from omnibase_infra.models.dispatch.model_tracing_context import ModelTracingContext
 
 __all__ = [
+    # Cache utilities
+    "CacheInfo",
     # Enums
     "EnumDispatchStatus",
     "EnumTopicStandard",
     # Models
     "ModelDispatchContext",
     "ModelDispatchError",
+    "ModelDispatchLogContext",
     "ModelDispatchMetadata",
     "ModelDispatchMetrics",
+    "ModelDispatchOutcome",
     "ModelDispatchOutputs",
     "ModelDispatchResult",
     "ModelDispatchRoute",
     "ModelDispatcherMetrics",
     "ModelDispatcherRegistration",
-    "ModelDispatchLogContext",
-    "ModelDispatchOutcome",
     "ModelParsedTopic",
     "ModelTopicParser",
     "ModelTracingContext",
-    # Cache utilities
-    "CacheInfo",
-    "get_topic_parse_cache_info",
     "clear_topic_parse_cache",
+    "get_topic_parse_cache_info",
 ]

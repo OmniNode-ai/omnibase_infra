@@ -38,7 +38,7 @@ from omnibase_infra.mixins.mixin_retry_execution import (
 from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
     ProtocolCircuitBreakerAware,
 )
-from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
+from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 __all__: list[str] = [
     "CircuitState",

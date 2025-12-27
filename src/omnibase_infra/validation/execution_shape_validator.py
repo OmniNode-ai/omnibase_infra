@@ -1221,11 +1221,11 @@ _validator = ExecutionShapeValidator()
 
 
 __all__ = [
+    "EXECUTION_SHAPE_RULES",
     "ExecutionShapeValidator",
     "HandlerInfo",
     "ModelExecutionShapeValidationResult",
+    "get_execution_shape_rules",
     "validate_execution_shapes",
     "validate_execution_shapes_ci",
-    "get_execution_shape_rules",
-    "EXECUTION_SHAPE_RULES",
 ]

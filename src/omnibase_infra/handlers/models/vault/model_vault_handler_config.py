@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
-from omnibase_infra.handlers.model_vault_retry_config import ModelVaultRetryConfig
+from omnibase_infra.handlers.models.vault.model_vault_retry_config import (
+    ModelVaultRetryConfig,
+)
 
 
 class ModelVaultHandlerConfig(BaseModel):

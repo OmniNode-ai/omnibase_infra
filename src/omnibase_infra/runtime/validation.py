@@ -307,10 +307,10 @@ def load_and_validate_config(
 
 
 __all__: list[str] = [
-    "validate_runtime_config",
-    "load_and_validate_config",
+    "MAX_GRACE_PERIOD_SECONDS",
+    "MIN_GRACE_PERIOD_SECONDS",
     "TOPIC_NAME_PATTERN",
     "VALID_EVENT_BUS_TYPES",
-    "MIN_GRACE_PERIOD_SECONDS",
-    "MAX_GRACE_PERIOD_SECONDS",
+    "load_and_validate_config",
+    "validate_runtime_config",
 ]

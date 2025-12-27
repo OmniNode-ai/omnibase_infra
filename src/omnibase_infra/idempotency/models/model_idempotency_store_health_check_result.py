@@ -84,6 +84,6 @@ class ModelIdempotencyStoreHealthCheckResult(BaseModel):
 ModelHealthCheckResult = ModelIdempotencyStoreHealthCheckResult
 
 __all__: list[str] = [
-    "ModelIdempotencyStoreHealthCheckResult",
     "ModelHealthCheckResult",  # Backward compatibility
+    "ModelIdempotencyStoreHealthCheckResult",
 ]

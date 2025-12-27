@@ -428,8 +428,8 @@ class ProtocolLifecycleExecutor:
 
 
 __all__: list[str] = [
-    "ProtocolLifecycleExecutor",
     "DEFAULT_HEALTH_CHECK_TIMEOUT",
-    "MIN_HEALTH_CHECK_TIMEOUT",
     "MAX_HEALTH_CHECK_TIMEOUT",
+    "MIN_HEALTH_CHECK_TIMEOUT",
+    "ProtocolLifecycleExecutor",
 ]

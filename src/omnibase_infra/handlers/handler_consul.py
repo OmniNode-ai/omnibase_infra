@@ -41,13 +41,14 @@ from omnibase_infra.handlers.mixins import (
     MixinConsulKV,
     MixinConsulService,
 )
-from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
 from omnibase_infra.handlers.models import (
     ModelOperationContext,
     ModelRetryState,
 )
 from omnibase_infra.handlers.models.consul import (
     ConsulPayload,
+    ModelConsulDeregisterPayload,
+    ModelConsulHandlerConfig,
     ModelConsulHandlerPayload,
 )
 from omnibase_infra.handlers.models.model_consul_handler_response import (

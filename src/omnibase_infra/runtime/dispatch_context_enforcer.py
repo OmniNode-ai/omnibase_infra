@@ -59,7 +59,7 @@ from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
-from omnibase_infra.runtime.dispatcher_registry import ProtocolMessageDispatcher
+from omnibase_infra.runtime.registry_dispatcher import ProtocolMessageDispatcher
 
 if TYPE_CHECKING:
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope

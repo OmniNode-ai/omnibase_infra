@@ -27,8 +27,8 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.handlers.model_consul_retry_config import ModelConsulRetryConfig
-from omnibase_infra.handlers.model_vault_retry_config import ModelVaultRetryConfig
+from omnibase_infra.handlers.models.consul import ModelConsulRetryConfig
+from omnibase_infra.handlers.models.vault import ModelVaultRetryConfig
 
 T = TypeVar("T")
 
