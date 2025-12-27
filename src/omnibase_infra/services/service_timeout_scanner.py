@@ -126,7 +126,7 @@ class ServiceTimeoutScanner:
 
     Usage:
         >>> reader = ProjectionReaderRegistration(pool)
-        >>> scanner = TimeoutScanner(reader)
+        >>> scanner = ServiceTimeoutScanner(reader)
         >>> result = await scanner.find_overdue_entities(now=tick.now)
         >>>
         >>> for projection in result.ack_timeouts:
@@ -166,7 +166,7 @@ class ServiceTimeoutScanner:
         Example:
             >>> pool = await asyncpg.create_pool(dsn)
             >>> reader = ProjectionReaderRegistration(pool)
-            >>> scanner = TimeoutScanner(reader)
+            >>> scanner = ServiceTimeoutScanner(reader)
         """
         self._reader = projection_reader
         self._batch_size = batch_size or self.DEFAULT_BATCH_SIZE

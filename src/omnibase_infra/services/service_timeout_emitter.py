@@ -213,7 +213,7 @@ class ServiceTimeoutEmitter:
         breaker implementations.
 
     Usage:
-        >>> emitter = TimeoutEmitter(
+        >>> emitter = ServiceTimeoutEmitter(
         ...     timeout_query=timeout_scanner,
         ...     event_bus=event_bus,
         ...     projector=projector,
@@ -278,10 +278,10 @@ class ServiceTimeoutEmitter:
 
         Example:
             >>> reader = ProjectionReaderRegistration(pool)
-            >>> timeout_query = TimeoutScanner(reader)
+            >>> timeout_query = ServiceTimeoutScanner(reader)
             >>> bus = KafkaEventBus.default()
             >>> projector = ProjectorRegistration(pool)
-            >>> emitter = TimeoutEmitter(
+            >>> emitter = ServiceTimeoutEmitter(
             ...     timeout_query=timeout_query,
             ...     event_bus=bus,
             ...     projector=projector,

@@ -142,7 +142,7 @@ class ProtocolMessageDispatcher(Protocol):
         ``raise NotImplementedError()``. This is the standard Python convention
         for ``typing.Protocol`` classes per PEP 544.
 
-    .. versionadded:: 0.4.0
+    .. versionadded:: 0.5.0
     """
 
     @property

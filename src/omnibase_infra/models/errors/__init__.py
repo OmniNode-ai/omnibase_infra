@@ -10,7 +10,7 @@ Models:
       transport type, operation, and correlation ID
 
 Related:
-    - errors.infra_errors: Error classes that use these models
+    - errors.error_infra: Error classes that use these models
     - OMN-927: Infrastructure error patterns
 
 .. versionadded:: 0.5.0

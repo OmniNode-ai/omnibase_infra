@@ -12,7 +12,7 @@ Tests the dispatcher registry functionality including:
 
 Related:
     - OMN-934: Dispatcher registry for message dispatch engine
-    - src/omnibase_infra/runtime/dispatcher_registry.py
+    - src/omnibase_infra/runtime/registry_dispatcher.py
 """
 
 from __future__ import annotations
