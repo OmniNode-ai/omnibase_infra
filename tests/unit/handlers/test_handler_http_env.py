@@ -3,7 +3,7 @@
 """Unit tests for HTTP handler environment variable parsing.
 
 This test suite validates environment variable handling for the HTTP handler:
-- ONEX_HTTP_TIMEOUT (float, default: 30.0, range: 0.1-3600.0)
+- ONEX_HTTP_TIMEOUT (float, default: 30.0, range: 1.0-300.0)
 - ONEX_HTTP_MAX_REQUEST_SIZE (int, default: 10MB, range: 1KB-100MB)
 - ONEX_HTTP_MAX_RESPONSE_SIZE (int, default: 50MB, range: 1KB-100MB)
 
@@ -39,8 +39,8 @@ from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
 
 # HTTP handler configuration constants (matching handler_http.py)
 _HTTP_TIMEOUT_DEFAULT: float = 30.0
-_HTTP_TIMEOUT_MIN: float = 0.1
-_HTTP_TIMEOUT_MAX: float = 3600.0
+_HTTP_TIMEOUT_MIN: float = 1.0
+_HTTP_TIMEOUT_MAX: float = 300.0
 
 _HTTP_MAX_REQUEST_SIZE_DEFAULT: int = 10 * 1024 * 1024  # 10 MB
 _HTTP_MAX_RESPONSE_SIZE_DEFAULT: int = 50 * 1024 * 1024  # 50 MB
@@ -123,8 +123,8 @@ class TestHttpHandlerTimeoutEnvParsing:
     def test_timeout_below_minimum_uses_default(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test timeout below minimum (0.1s) uses default with warning logged."""
-        with patch.dict(os.environ, {"ONEX_HTTP_TIMEOUT": "0.05"}, clear=True):
+        """Test timeout below minimum (1.0s) uses default with warning logged."""
+        with patch.dict(os.environ, {"ONEX_HTTP_TIMEOUT": "0.5"}, clear=True):
             with caplog.at_level(logging.WARNING):
                 result = parse_env_float(
                     "ONEX_HTTP_TIMEOUT",
@@ -142,8 +142,8 @@ class TestHttpHandlerTimeoutEnvParsing:
     def test_timeout_above_maximum_uses_default(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test timeout above maximum (3600.0s) uses default with warning logged."""
-        with patch.dict(os.environ, {"ONEX_HTTP_TIMEOUT": "4000.0"}, clear=True):
+        """Test timeout above maximum (300.0s) uses default with warning logged."""
+        with patch.dict(os.environ, {"ONEX_HTTP_TIMEOUT": "400.0"}, clear=True):
             with caplog.at_level(logging.WARNING):
                 result = parse_env_float(
                     "ONEX_HTTP_TIMEOUT",
@@ -159,8 +159,8 @@ class TestHttpHandlerTimeoutEnvParsing:
             assert "above maximum" in caplog.text
 
     def test_timeout_at_minimum_boundary_is_valid(self) -> None:
-        """Test timeout at exact minimum boundary (0.1s) is accepted."""
-        with patch.dict(os.environ, {"ONEX_HTTP_TIMEOUT": "0.1"}, clear=True):
+        """Test timeout at exact minimum boundary (1.0s) is accepted."""
+        with patch.dict(os.environ, {"ONEX_HTTP_TIMEOUT": "1.0"}, clear=True):
             result = parse_env_float(
                 "ONEX_HTTP_TIMEOUT",
                 _HTTP_TIMEOUT_DEFAULT,
@@ -170,11 +170,11 @@ class TestHttpHandlerTimeoutEnvParsing:
                 service_name="http_handler",
             )
 
-            assert result == 0.1
+            assert result == 1.0
 
     def test_timeout_at_maximum_boundary_is_valid(self) -> None:
-        """Test timeout at exact maximum boundary (3600.0s) is accepted."""
-        with patch.dict(os.environ, {"ONEX_HTTP_TIMEOUT": "3600.0"}, clear=True):
+        """Test timeout at exact maximum boundary (300.0s) is accepted."""
+        with patch.dict(os.environ, {"ONEX_HTTP_TIMEOUT": "300.0"}, clear=True):
             result = parse_env_float(
                 "ONEX_HTTP_TIMEOUT",
                 _HTTP_TIMEOUT_DEFAULT,
@@ -184,7 +184,7 @@ class TestHttpHandlerTimeoutEnvParsing:
                 service_name="http_handler",
             )
 
-            assert result == 3600.0
+            assert result == 300.0
 
 
 @pytest.mark.unit
@@ -710,7 +710,7 @@ class TestHttpHandlerEnvEdgeCases:
     def test_very_large_timeout_exceeds_max(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test very large ONEX_HTTP_TIMEOUT (>3600s) uses default with warning."""
+        """Test very large ONEX_HTTP_TIMEOUT (>300s) uses default with warning."""
         with patch.dict(os.environ, {"ONEX_HTTP_TIMEOUT": "999999.0"}, clear=True):
             with caplog.at_level(logging.WARNING):
                 result = parse_env_float(
