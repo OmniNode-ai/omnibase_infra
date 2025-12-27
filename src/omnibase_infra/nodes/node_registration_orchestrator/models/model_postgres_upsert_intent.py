@@ -45,6 +45,7 @@ class ModelPostgresUpsertIntent(ModelRegistryIntent):
         frozen=True,
         extra="forbid",
         strict=True,
+        from_attributes=True,
     )
 
     kind: Literal["postgres"] = Field(
