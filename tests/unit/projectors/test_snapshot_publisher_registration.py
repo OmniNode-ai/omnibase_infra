@@ -855,14 +855,21 @@ class TestCircuitBreakerIntegration:
 class TestGetLatestSnapshot:
     """Test get_latest_snapshot behavior."""
 
-    async def test_returns_none_not_implemented(
+    async def test_raises_connection_error_without_bootstrap_servers(
         self,
         publisher: SnapshotPublisherRegistration,
     ) -> None:
-        """Test get_latest_snapshot returns None (not fully implemented)."""
-        result = await publisher.get_latest_snapshot("entity-123", "registration")
+        """Test get_latest_snapshot raises InfraConnectionError when bootstrap_servers not configured.
 
-        assert result is None
+        The publisher needs bootstrap_servers to create a consumer for reading snapshots.
+        When not configured, it should raise InfraConnectionError with a helpful message.
+        """
+        from omnibase_infra.errors import InfraConnectionError
+
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await publisher.get_latest_snapshot("entity-123", "registration")
+
+        assert "bootstrap_servers not configured" in str(exc_info.value)
 
 
 @pytest.mark.unit

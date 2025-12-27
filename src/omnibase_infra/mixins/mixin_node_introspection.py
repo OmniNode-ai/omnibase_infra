@@ -17,8 +17,9 @@ Features:
     - Graceful degradation when event bus is unavailable
 
 Note:
-    - active_operations_count in heartbeats is currently hardcoded to 0.
-      Full implementation deferred - see TODO in _publish_heartbeat().
+    - active_operations_count in heartbeats is tracked via ``track_operation()``
+      context manager. Nodes should wrap their operations with this context
+      manager to accurately report concurrent operation counts.
 
 Security Considerations:
     This mixin uses Python reflection (via the ``inspect`` module) to automatically
@@ -169,7 +170,8 @@ import inspect
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
@@ -423,6 +425,12 @@ class MixinNodeIntrospection:
     # Stores the most recent performance metrics from introspection operations
     _introspection_last_metrics: IntrospectionPerformanceMetrics | None
 
+    # Active operations tracking (instance-level)
+    # Thread-safe counter for tracking concurrent operations
+    # Used by heartbeat to report active_operations_count
+    _active_operations: int
+    _operations_lock: asyncio.Lock
+
     # Default operation keywords for capability discovery
     DEFAULT_OPERATION_KEYWORDS: ClassVar[frozenset[str]] = frozenset(
         {
@@ -605,6 +613,11 @@ class MixinNodeIntrospection:
 
         # Performance metrics tracking
         self._introspection_last_metrics = None
+
+        # Active operations tracking
+        # Thread-safe counter for tracking concurrent operations
+        self._active_operations = 0
+        self._operations_lock = asyncio.Lock()
 
         if config.event_bus is None:
             logger.warning(
@@ -1412,21 +1425,17 @@ class MixinNodeIntrospection:
                 )
                 node_type = EnumNodeKind.EFFECT
 
+            # Get current active operations count (coroutine-safe)
+            async with self._operations_lock:
+                active_ops_count = self._active_operations
+
             # Create heartbeat event
             now = datetime.now(UTC)
             heartbeat = ModelNodeHeartbeatEvent(
                 node_id=node_id,
                 node_type=node_type,
                 uptime_seconds=uptime_seconds,
-                # TODO(ACTIVE-OP-TRACKING): Implement active operation tracking
-                # Ticket: Create Linear ticket for active operation tracking implementation
-                # Currently hardcoded to 0. Full implementation requires:
-                # - Operation counter increment/decrement around async operations
-                # - Thread-safe counter for concurrent operations
-                # - Integration with node's actual execution context
-                # This is intentionally left as 0 until the tracking infrastructure
-                # is implemented. See MixinNodeIntrospection docstring note.
-                active_operations_count=0,
+                active_operations_count=active_ops_count,
                 correlation_id=uuid4(),
                 timestamp=now,  # Required: time injection pattern
             )
@@ -1456,6 +1465,7 @@ class MixinNodeIntrospection:
                 extra={
                     "node_id": self._introspection_node_id,
                     "uptime_seconds": uptime_seconds,
+                    "active_operations": active_ops_count,
                     "topic": topic,
                 },
             )
@@ -2057,6 +2067,146 @@ class MixinNodeIntrospection:
             ```
         """
         return self._introspection_last_metrics
+
+    @asynccontextmanager
+    async def track_operation(
+        self,
+        operation_name: str | None = None,
+    ) -> AsyncIterator[None]:
+        """Context manager for tracking active operations.
+
+        Provides coroutine-safe tracking of concurrent operations for
+        heartbeat reporting. Increments the active operations counter
+        on entry and decrements it on exit (whether successful or not).
+
+        Concurrency Safety:
+            Uses asyncio.Lock for coroutine-safe counter updates.
+            The lock is held only during counter updates, not during
+            the operation itself.
+
+        Error Handling:
+            Counter updates are protected with try/except to ensure
+            operation tracking failures don't affect the main operation.
+            The counter will never go negative due to atomic operations.
+
+        Args:
+            operation_name: Optional name for logging/debugging.
+                Not used for counter logic but useful for diagnostics.
+
+        Yields:
+            None. The context manager is used purely for side effects.
+
+        Example:
+            ```python
+            class MyNode(MixinNodeIntrospection):
+                async def execute_query(self, query: str) -> Result:
+                    async with self.track_operation("execute_query"):
+                        # This operation is now tracked in heartbeats
+                        return await self._database.execute(query)
+
+                async def process_batch(self, items: list[Item]) -> None:
+                    # Track multiple concurrent operations
+                    async with asyncio.TaskGroup() as tg:
+                        for item in items:
+                            tg.create_task(self._process_with_tracking(item))
+
+                async def _process_with_tracking(self, item: Item) -> None:
+                    async with self.track_operation("process_item"):
+                        await self._process_single(item)
+            ```
+
+        Note:
+            The counter is read by ``_publish_heartbeat()`` to report
+            the current number of active operations. This provides
+            visibility into node load for monitoring and scaling.
+        """
+        # Increment counter on entry
+        try:
+            async with self._operations_lock:
+                self._active_operations += 1
+                if operation_name:
+                    logger.debug(
+                        f"Operation started: {operation_name}",
+                        extra={
+                            "node_id": self._introspection_node_id,
+                            "operation": operation_name,
+                            "active_operations": self._active_operations,
+                        },
+                    )
+        except Exception as e:
+            # Log but don't fail the operation
+            logger.warning(
+                f"Failed to increment operation counter: {e}",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "operation": operation_name,
+                    "error_type": type(e).__name__,
+                },
+            )
+
+        try:
+            yield
+        finally:
+            # Decrement counter on exit (success or failure)
+            try:
+                async with self._operations_lock:
+                    # Prevent negative counter (defensive check)
+                    if self._active_operations > 0:
+                        self._active_operations -= 1
+                    else:
+                        # This should never happen, but log if it does
+                        logger.warning(
+                            "Active operations counter already at zero during decrement",
+                            extra={
+                                "node_id": self._introspection_node_id,
+                                "operation": operation_name,
+                            },
+                        )
+
+                    if operation_name:
+                        logger.debug(
+                            f"Operation completed: {operation_name}",
+                            extra={
+                                "node_id": self._introspection_node_id,
+                                "operation": operation_name,
+                                "active_operations": self._active_operations,
+                            },
+                        )
+            except Exception as e:
+                # Log but don't fail the operation
+                logger.warning(
+                    f"Failed to decrement operation counter: {e}",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "operation": operation_name,
+                        "error_type": type(e).__name__,
+                    },
+                )
+
+    async def get_active_operations_count(self) -> int:
+        """Get the current count of active operations.
+
+        Returns the number of operations currently being tracked via
+        ``track_operation()``. This is the same value reported in
+        heartbeat events.
+
+        Concurrency Safety:
+            Uses asyncio.Lock for coroutine-safe counter access.
+            The returned value is a snapshot; concurrent operations
+            may change the count immediately after reading.
+
+        Returns:
+            Current number of active operations (>= 0).
+
+        Example:
+            ```python
+            count = await node.get_active_operations_count()
+            if count > threshold:
+                logger.warning(f"High operation load: {count} active")
+            ```
+        """
+        async with self._operations_lock:
+            return self._active_operations
 
 
 __all__ = [

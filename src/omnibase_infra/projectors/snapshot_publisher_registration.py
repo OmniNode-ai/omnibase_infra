@@ -27,6 +27,7 @@ Design Principles:
     - **Tombstone Support**: Null values delete snapshots during compaction
     - **Version Tracking**: Monotonic versions for conflict resolution
     - **Circuit Breaker**: Resilience against Kafka failures
+    - **Lazy Consumer**: Consumer for reads is created on-demand
 
 Concurrency Safety:
     This implementation is coroutine-safe for concurrent async publishing.
@@ -67,6 +68,11 @@ Example Usage:
         count = await publisher.publish_batch(snapshots)
         print(f"Published {count} snapshots")
 
+        # Read snapshot (uses lazy consumer and in-memory cache)
+        snapshot = await publisher.get_latest_snapshot("entity-123", "registration")
+        if snapshot:
+            print(f"Entity state: {snapshot.current_state}")
+
         # Delete snapshot (tombstone)
         await publisher.delete_snapshot("entity-123", "registration")
     finally:
@@ -78,11 +84,14 @@ Performance Considerations:
     - Consider publish_from_projection for single updates (handles versioning)
     - Tombstones are cheap - use delete_snapshot for permanent removals
     - Monitor circuit breaker state for Kafka health
+    - First read triggers cache loading (may take a few seconds for large topics)
+    - Subsequent reads are O(1) from in-memory cache
 
 Related Tickets:
     - OMN-947 (F2): Snapshot Publishing
     - OMN-944 (F1): Implement Registration Projection Schema
     - OMN-940 (F0): Define Projector Execution Model
+    - OMN-1059: Implement snapshot read functionality
 
 See Also:
     - ProtocolSnapshotPublisher: Protocol definition for snapshot publishers
@@ -94,10 +103,11 @@ See Also:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -114,7 +124,7 @@ from omnibase_infra.models.projection import (
 )
 
 if TYPE_CHECKING:
-    from aiokafka import AIOKafkaProducer
+    from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +197,8 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         config: ModelSnapshotTopicConfig,
         *,
         snapshot_version_tracker: dict[str, int] | None = None,
+        bootstrap_servers: str | None = None,
+        consumer_timeout_ms: int = 5000,
     ) -> None:
         """Initialize snapshot publisher.
 
@@ -199,6 +211,11 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             snapshot_version_tracker: Optional dict to track versions per entity.
                 If not provided, a new dict is created internally. Useful for
                 sharing version state across multiple publishers or for testing.
+            bootstrap_servers: Kafka bootstrap servers for the consumer (for reads).
+                Required if you intend to use get_latest_snapshot(). If not provided,
+                reads will attempt to extract from the producer configuration.
+            consumer_timeout_ms: Timeout in milliseconds for consumer poll operations.
+                Default is 5000ms (5 seconds). Used when loading the snapshot cache.
 
         Example:
             >>> producer = AIOKafkaProducer(
@@ -206,13 +223,29 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             ...     value_serializer=lambda v: v,  # Publisher handles serialization
             ... )
             >>> config = ModelSnapshotTopicConfig.default()
-            >>> publisher = SnapshotPublisherRegistration(producer, config)
+            >>> publisher = SnapshotPublisherRegistration(
+            ...     producer,
+            ...     config,
+            ...     bootstrap_servers="localhost:9092",
+            ... )
         """
         self._producer = producer
         self._config = config
         self._version_tracker = snapshot_version_tracker or {}
         self._version_tracker_lock = asyncio.Lock()
         self._started = False
+
+        # Consumer configuration for read operations
+        self._bootstrap_servers = bootstrap_servers
+        self._consumer_timeout_ms = consumer_timeout_ms
+        self._consumer: AIOKafkaConsumer | None = None
+        self._consumer_started = False
+
+        # In-memory cache for O(1) snapshot lookups
+        # Key: "{domain}:{entity_id}", Value: ModelRegistrationSnapshot
+        self._snapshot_cache: dict[str, ModelRegistrationSnapshot] = {}
+        self._cache_lock = asyncio.Lock()
+        self._cache_loaded = False
 
         # Initialize circuit breaker with Kafka-appropriate settings
         self._init_circuit_breaker(
@@ -275,13 +308,32 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
     async def stop(self) -> None:
         """Stop the snapshot publisher.
 
-        Stops the underlying Kafka producer and cleans up resources.
-        Safe to call multiple times.
+        Stops the underlying Kafka producer, consumer (if started), and
+        cleans up resources. Safe to call multiple times.
 
         Example:
             >>> await publisher.stop()
             >>> # Publisher is now stopped
         """
+        # Stop consumer if it was started
+        if self._consumer_started and self._consumer is not None:
+            try:
+                await self._consumer.stop()
+                self._consumer_started = False
+                self._consumer = None
+                logger.debug(
+                    "Snapshot consumer stopped for topic %s", self._config.topic
+                )
+            except Exception as e:
+                # Log but don't raise - stop should be best-effort
+                logger.warning(
+                    "Error stopping Kafka consumer: %s",
+                    str(e),
+                    extra={"topic": self._config.topic},
+                )
+                self._consumer_started = False
+                self._consumer = None
+
         if not self._started:
             logger.debug("Snapshot publisher already stopped")
             return
@@ -298,6 +350,11 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 extra={"topic": self._config.topic},
             )
             self._started = False
+
+        # Clear the cache on stop
+        async with self._cache_lock:
+            self._snapshot_cache.clear()
+            self._cache_loaded = False
 
     async def _get_next_version(self, entity_id: str, domain: str) -> int:
         """Get the next snapshot version for an entity.
@@ -404,6 +461,12 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             # Record success
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
+
+            # Update cache if loaded (for read-after-write consistency)
+            if self._cache_loaded:
+                cache_key = snapshot.to_kafka_key()
+                async with self._cache_lock:
+                    self._snapshot_cache[cache_key] = snapshot
 
             logger.debug(
                 "Published snapshot for %s version %d",
@@ -528,17 +591,12 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
     ) -> ModelRegistrationSnapshot | None:
         """Retrieve the latest snapshot for an entity.
 
-        NOTE: This is a consumer operation. For production use, consider
-        using a dedicated Kafka consumer or cache layer for reading snapshots.
-        This publisher is optimized for writes, not reads.
+        Reads the snapshot from an in-memory cache that is built from the
+        compacted Kafka topic. The cache is loaded lazily on first read.
 
         IMPORTANT: Snapshot may be slightly stale. For guaranteed freshness,
-        combine with event log events since snapshot.updated_at.
-
-        Note:
-            This is a stub implementation. Reading from compacted topics
-            requires a Kafka consumer, which is beyond this publisher's scope.
-            For production snapshot reads, use a dedicated consumer service.
+        combine with event log events since snapshot.updated_at. Call
+        refresh_cache() to reload the cache from Kafka.
 
         Args:
             entity_id: The entity identifier (UUID as string)
@@ -546,27 +604,293 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
         Returns:
             The latest snapshot if found, None otherwise.
-            Returns None because reading requires a consumer, which
-            is beyond this publisher's scope.
+
+        Raises:
+            InfraConnectionError: If Kafka connection fails during cache load
+            InfraTimeoutError: If cache loading times out
+            InfraUnavailableError: If circuit breaker is open
 
         Example:
             >>> snapshot = await publisher.get_latest_snapshot("uuid", "registration")
-            >>> if snapshot is None:
-            ...     print("Entity not found or use dedicated consumer")
+            >>> if snapshot is not None:
+            ...     print(f"Entity state: {snapshot.current_state}")
+            ... else:
+            ...     print("Entity not found")
         """
-        # Reading from compacted topics requires a consumer with seek-to-end
-        # or a key-value store built from consumer. This is beyond the scope
-        # of a producer-focused publisher.
-        logger.debug(
-            "get_latest_snapshot not fully implemented - requires dedicated consumer. "
-            "Consider using a Kafka consumer or cache layer for snapshot reads.",
+        correlation_id = uuid4()
+
+        # Check circuit breaker before operation
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("get_latest_snapshot", correlation_id)
+
+        # Load cache if not already loaded
+        if not self._cache_loaded:
+            await self._load_cache_from_topic(correlation_id)
+
+        # Lookup in cache (O(1))
+        key = f"{domain}:{entity_id}"
+        async with self._cache_lock:
+            snapshot = self._snapshot_cache.get(key)
+
+        if snapshot is None:
+            logger.debug(
+                "Snapshot not found in cache for %s:%s",
+                domain,
+                entity_id,
+                extra={
+                    "entity_id": entity_id,
+                    "domain": domain,
+                    "topic": self._config.topic,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+        else:
+            logger.debug(
+                "Snapshot retrieved from cache for %s:%s version %d",
+                domain,
+                entity_id,
+                snapshot.snapshot_version,
+                extra={
+                    "entity_id": entity_id,
+                    "domain": domain,
+                    "snapshot_version": snapshot.snapshot_version,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        return snapshot
+
+    async def _load_cache_from_topic(self, correlation_id: UUID) -> None:
+        """Load the snapshot cache from the compacted Kafka topic.
+
+        Reads all snapshots from the topic and populates the in-memory cache.
+        Uses getmany() with timeout to avoid blocking indefinitely.
+
+        This method is called lazily on the first read operation.
+
+        Args:
+            correlation_id: Correlation ID for tracing
+
+        Raises:
+            InfraConnectionError: If Kafka connection fails
+            InfraTimeoutError: If consumer startup times out
+        """
+        async with self._cache_lock:
+            # Double-check after acquiring lock
+            if self._cache_loaded:
+                return
+
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="load_cache",
+                target_name=self._config.topic,
+                correlation_id=correlation_id,
+            )
+
+            # Get bootstrap servers - must be explicitly configured
+            # We don't try to extract from producer because:
+            # 1. The producer may use internal/private attributes that vary by version
+            # 2. Mock producers don't have real bootstrap_servers
+            # 3. It's cleaner to require explicit configuration for reads
+            bootstrap_servers = self._bootstrap_servers
+
+            if not bootstrap_servers:
+                raise InfraConnectionError(
+                    "bootstrap_servers not configured. Provide bootstrap_servers "
+                    "in constructor to enable snapshot reads.",
+                    context=ctx,
+                )
+
+            # Import consumer here to avoid circular imports
+            from aiokafka import AIOKafkaConsumer
+
+            # Create consumer with unique group ID for this publisher instance
+            # Using a unique group ensures we get our own offset tracking
+            consumer_group = f"snapshot-reader-{self._config.topic}-{uuid4()!s}"
+            consumer = AIOKafkaConsumer(
+                self._config.topic,
+                bootstrap_servers=bootstrap_servers,
+                group_id=consumer_group,
+                auto_offset_reset="earliest",
+                enable_auto_commit=False,
+            )
+
+            try:
+                await consumer.start()
+                self._consumer = consumer
+                self._consumer_started = True
+
+                # Seek to beginning to read all snapshots
+                await consumer.seek_to_beginning()
+
+                # Read all messages from the topic until no more messages
+                messages_read = 0
+                tombstones_applied = 0
+
+                while True:
+                    # Poll with timeout - returns empty dict when no more messages
+                    messages = await consumer.getmany(
+                        timeout_ms=self._consumer_timeout_ms
+                    )
+                    if not messages:
+                        break  # No more messages within timeout
+
+                    for tp, msgs in messages.items():
+                        for message in msgs:
+                            key = message.key.decode("utf-8") if message.key else None
+
+                            if key is None:
+                                # Skip messages without keys
+                                continue
+
+                            if message.value is None:
+                                # Tombstone - remove from cache
+                                self._snapshot_cache.pop(key, None)
+                                tombstones_applied += 1
+                            else:
+                                # Parse snapshot and update cache
+                                try:
+                                    data = json.loads(message.value.decode("utf-8"))
+                                    snapshot = ModelRegistrationSnapshot(**data)
+                                    self._snapshot_cache[key] = snapshot
+                                    messages_read += 1
+                                except (json.JSONDecodeError, ValueError) as e:
+                                    logger.warning(
+                                        "Failed to parse snapshot for key %s: %s",
+                                        key,
+                                        str(e),
+                                        extra={
+                                            "key": key,
+                                            "correlation_id": str(correlation_id),
+                                        },
+                                    )
+
+                self._cache_loaded = True
+
+                # Reset circuit breaker on success
+                async with self._circuit_breaker_lock:
+                    await self._reset_circuit_breaker()
+
+                logger.info(
+                    "Snapshot cache loaded: %d snapshots, %d tombstones applied",
+                    messages_read,
+                    tombstones_applied,
+                    extra={
+                        "topic": self._config.topic,
+                        "snapshots_loaded": messages_read,
+                        "tombstones_applied": tombstones_applied,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+            except TimeoutError as e:
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure("load_cache", correlation_id)
+                # Clean up consumer on failure
+                if self._consumer_started:
+                    try:
+                        await consumer.stop()
+                    except Exception:
+                        pass
+                    self._consumer_started = False
+                    self._consumer = None
+                raise InfraTimeoutError(
+                    f"Timeout loading snapshot cache from topic {self._config.topic}",
+                    context=ctx,
+                ) from e
+
+            except Exception as e:
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure("load_cache", correlation_id)
+                # Clean up consumer on failure
+                if self._consumer_started:
+                    try:
+                        await consumer.stop()
+                    except Exception:
+                        pass
+                    self._consumer_started = False
+                    self._consumer = None
+                raise InfraConnectionError(
+                    f"Failed to load snapshot cache from topic {self._config.topic}: {e}",
+                    context=ctx,
+                ) from e
+
+    async def refresh_cache(self) -> int:
+        """Refresh the snapshot cache by reloading from the Kafka topic.
+
+        Clears the current cache and reloads all snapshots from the compacted
+        topic. Use this to ensure the cache reflects the latest published state.
+
+        Returns:
+            Number of snapshots loaded into the cache.
+
+        Raises:
+            InfraConnectionError: If Kafka connection fails
+            InfraTimeoutError: If cache loading times out
+            InfraUnavailableError: If circuit breaker is open
+
+        Example:
+            >>> count = await publisher.refresh_cache()
+            >>> print(f"Loaded {count} snapshots")
+        """
+        correlation_id = uuid4()
+
+        # Check circuit breaker before operation
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("refresh_cache", correlation_id)
+
+        # Stop existing consumer if running
+        if self._consumer_started and self._consumer is not None:
+            try:
+                await self._consumer.stop()
+            except Exception:
+                pass
+            self._consumer_started = False
+            self._consumer = None
+
+        # Clear cache and reload
+        async with self._cache_lock:
+            self._snapshot_cache.clear()
+            self._cache_loaded = False
+
+        await self._load_cache_from_topic(correlation_id)
+
+        async with self._cache_lock:
+            count = len(self._snapshot_cache)
+
+        logger.info(
+            "Snapshot cache refreshed with %d snapshots",
+            count,
             extra={
-                "entity_id": entity_id,
-                "domain": domain,
                 "topic": self._config.topic,
+                "snapshot_count": count,
+                "correlation_id": str(correlation_id),
             },
         )
-        return None
+
+        return count
+
+    @property
+    def cache_size(self) -> int:
+        """Get the number of snapshots in the cache.
+
+        Returns:
+            Number of snapshots currently in the cache.
+
+        Note:
+            This is a synchronous property that does not trigger cache loading.
+            Call get_latest_snapshot() or refresh_cache() to load the cache first.
+        """
+        return len(self._snapshot_cache)
+
+    @property
+    def is_cache_loaded(self) -> bool:
+        """Check if the cache has been loaded.
+
+        Returns:
+            True if the cache has been loaded from Kafka, False otherwise.
+        """
+        return self._cache_loaded
 
     async def delete_snapshot(
         self,
@@ -631,6 +955,11 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             tracker_key = f"{domain}:{entity_id}"
             async with self._version_tracker_lock:
                 self._version_tracker.pop(tracker_key, None)
+
+            # Also remove from cache if loaded (for consistency)
+            if self._cache_loaded:
+                async with self._cache_lock:
+                    self._snapshot_cache.pop(tracker_key, None)
 
             logger.info(
                 "Published tombstone for %s:%s",
