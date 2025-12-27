@@ -8,10 +8,10 @@ import pytest
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.runtime.registry.model_domain_constraint import (
+from omnibase_infra.models.registry.model_domain_constraint import (
     ModelDomainConstraint,
 )
-from omnibase_infra.runtime.registry.model_message_type_entry import (
+from omnibase_infra.models.registry.model_message_type_entry import (
     ModelMessageTypeEntry,
 )
 from omnibase_infra.runtime.registry.registry_message_type import (

@@ -39,7 +39,6 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
 from omnibase_infra.handlers.models import (
     ModelOperationContext,
     ModelRetryState,
@@ -47,6 +46,7 @@ from omnibase_infra.handlers.models import (
 from omnibase_infra.handlers.models.consul import (
     ConsulPayload,
     ModelConsulDeregisterPayload,
+    ModelConsulHandlerConfig,
     ModelConsulHandlerPayload,
     ModelConsulKVGetFoundPayload,
     ModelConsulKVGetNotFoundPayload,

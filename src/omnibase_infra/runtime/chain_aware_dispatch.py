@@ -63,8 +63,10 @@ from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID, uuid4
 
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
-from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.validation.chain_propagation_validator import (
     ChainPropagationValidator,

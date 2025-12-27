@@ -12,7 +12,7 @@ Tests the dispatcher registry functionality including:
 
 Related:
     - OMN-934: Dispatcher registry for message dispatch engine
-    - src/omnibase_infra/runtime/dispatcher_registry.py
+    - src/omnibase_infra/runtime/registry_dispatcher.py
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
-from omnibase_infra.runtime.dispatcher_registry import (
+from omnibase_infra.runtime.registry_dispatcher import (
     DispatcherRegistry,
 )
 

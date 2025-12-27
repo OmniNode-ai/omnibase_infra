@@ -51,14 +51,36 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
-from omnibase_infra.errors.infra_errors import ProtocolConfigurationError
-from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
+
+if TYPE_CHECKING:
+    from omnibase_infra.errors.error_infra import ProtocolConfigurationError
+    from omnibase_infra.models.errors.model_infra_error_context import (
+        ModelInfraErrorContext,
+    )
+
+
+def _get_error_classes() -> tuple[
+    type[ProtocolConfigurationError], type[ModelInfraErrorContext]
+]:
+    """Lazy import of error classes to avoid circular import.
+
+    Returns:
+        Tuple of (ProtocolConfigurationError, ModelInfraErrorContext)
+    """
+    from omnibase_infra.errors.error_infra import ProtocolConfigurationError
+    from omnibase_infra.models.errors.model_infra_error_context import (
+        ModelInfraErrorContext,
+    )
+
+    return ProtocolConfigurationError, ModelInfraErrorContext
+
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +232,7 @@ class ModelSnapshotTopicConfig(BaseModel):
         Raises:
             ProtocolConfigurationError: If cleanup_policy is not 'compact'
         """
+        ProtocolConfigurationError, ModelInfraErrorContext = _get_error_classes()
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.KAFKA,
             operation="validate_snapshot_topic_config",
@@ -259,6 +282,7 @@ class ModelSnapshotTopicConfig(BaseModel):
         Raises:
             ProtocolConfigurationError: If topic is invalid
         """
+        ProtocolConfigurationError, ModelInfraErrorContext = _get_error_classes()
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.KAFKA,
             operation="validate_snapshot_topic_config",
@@ -330,6 +354,7 @@ class ModelSnapshotTopicConfig(BaseModel):
             ProtocolConfigurationError: If min_compaction_lag_ms > max_compaction_lag_ms
         """
         if self.min_compaction_lag_ms > self.max_compaction_lag_ms:
+            ProtocolConfigurationError, ModelInfraErrorContext = _get_error_classes()
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="validate_snapshot_topic_config",
@@ -472,6 +497,7 @@ class ModelSnapshotTopicConfig(BaseModel):
             min_insync_replicas: 2
             ```
         """
+        ProtocolConfigurationError, ModelInfraErrorContext = _get_error_classes()
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.KAFKA,
             operation="load_yaml_config",

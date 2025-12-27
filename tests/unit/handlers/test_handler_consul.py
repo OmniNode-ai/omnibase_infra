@@ -23,7 +23,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_consul import ConsulHandler
-from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
+from omnibase_infra.handlers.models.consul import ModelConsulHandlerConfig
 
 
 @pytest.fixture

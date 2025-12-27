@@ -963,7 +963,7 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
     1. Heartbeat event contains timestamp (event.timestamp)
     2. Handler sets projection.last_heartbeat_at = event.timestamp
     3. Handler sets projection.liveness_deadline = event.timestamp + window
-    4. TimeoutEmitter uses projection.last_heartbeat_at in ModelNodeLivenessExpired
+    4. ServiceTimeoutEmitter uses projection.last_heartbeat_at in ModelNodeLivenessExpired
 
     These tests verify steps 1-3 with precise timestamp assertions.
     """
@@ -1130,7 +1130,7 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
 
         1. Node sends heartbeat at T1
         2. Handler stores last_heartbeat_at = T1, liveness_deadline = T1 + window
-        3. At T2 (after deadline), TimeoutEmitter would query this projection
+        3. At T2 (after deadline), ServiceTimeoutEmitter would query this projection
         4. Emitter creates ModelNodeLivenessExpired with:
            - last_heartbeat_at = T1 (from projection)
            - liveness_deadline = T1 + window (from projection)
@@ -1149,7 +1149,7 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
 
         assert result.success is True
 
-        # Query the projection directly (as TimeoutEmitter would)
+        # Query the projection directly (as ServiceTimeoutEmitter would)
         async with pg_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """

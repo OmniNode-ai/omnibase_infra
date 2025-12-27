@@ -24,7 +24,7 @@ from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext
-from omnibase_infra.errors.infra_errors import (
+from omnibase_infra.errors.error_infra import (
     InfraAuthenticationError,
     InfraConnectionError,
     InfraTimeoutError,

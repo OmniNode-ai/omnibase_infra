@@ -34,11 +34,11 @@ Timeout Coordination (OMN-932):
         NodeRegistrationOrchestrator,
         TimeoutCoordinator,
     )
-    from omnibase_infra.services import TimeoutScanner, TimeoutEmitter
+    from omnibase_infra.services import ServiceTimeoutScanner, ServiceTimeoutEmitter
 
     # Wire dependencies
-    timeout_query = TimeoutScanner(projection_reader)
-    timeout_emission = TimeoutEmitter(
+    timeout_query = ServiceTimeoutScanner(projection_reader)
+    timeout_emission = ServiceTimeoutEmitter(
         timeout_query=timeout_query,
         event_bus=event_bus,
         projector=projector,

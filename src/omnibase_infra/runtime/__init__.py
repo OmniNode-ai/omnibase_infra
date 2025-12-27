@@ -68,7 +68,7 @@ from __future__ import annotations
 # DispatchContextEnforcer, we warm the sys.modules cache before chain_aware_dispatch.
 
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
-from omnibase_infra.runtime.dispatcher_registry import (
+from omnibase_infra.runtime.registry_dispatcher import (
     DispatcherRegistry,
     ProtocolMessageDispatcher,
 )

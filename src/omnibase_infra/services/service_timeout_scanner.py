@@ -102,7 +102,7 @@ class ModelTimeoutQueryResult(BaseModel):
         return self.total_overdue_count > 0
 
 
-class TimeoutScanner:
+class ServiceTimeoutScanner:
     """Scanner for querying registration projections for timeout candidates.
 
     This scanner provides a high-level interface for the orchestrator to
@@ -126,7 +126,7 @@ class TimeoutScanner:
 
     Usage:
         >>> reader = ProjectionReaderRegistration(pool)
-        >>> scanner = TimeoutScanner(reader)
+        >>> scanner = ServiceTimeoutScanner(reader)
         >>> result = await scanner.find_overdue_entities(now=tick.now)
         >>>
         >>> for projection in result.ack_timeouts:
@@ -166,7 +166,7 @@ class TimeoutScanner:
         Example:
             >>> pool = await asyncpg.create_pool(dsn)
             >>> reader = ProjectionReaderRegistration(pool)
-            >>> scanner = TimeoutScanner(reader)
+            >>> scanner = ServiceTimeoutScanner(reader)
         """
         self._reader = projection_reader
         self._batch_size = batch_size or self.DEFAULT_BATCH_SIZE
@@ -387,4 +387,4 @@ class TimeoutScanner:
         )
 
 
-__all__: list[str] = ["ModelTimeoutQueryResult", "TimeoutScanner"]
+__all__: list[str] = ["ModelTimeoutQueryResult", "ServiceTimeoutScanner"]
