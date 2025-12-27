@@ -2241,6 +2241,258 @@ class TestHttpRestHandlerEnvVarParsing:
             os.environ.pop("TEST_INT_VAR", None)
 
 
+@pytest.mark.unit
+class TestHttpRestHandlerEnvVarRangeValidation:
+    """Test suite for environment variable range validation.
+
+    These tests verify that _parse_env_float and _parse_env_int correctly
+    handle min_value and max_value constraints, returning defaults and
+    logging warnings when values are outside the valid range.
+    """
+
+    def test_parse_env_float_below_min_uses_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_env_float returns default when value is below minimum."""
+        import logging
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "0.05"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = _parse_env_float(
+                    "TEST_RANGE_FLOAT", 1.0, min_value=0.1, max_value=100.0
+                )
+            assert result == 1.0  # Default
+            assert "below minimum" in caplog.text
+            assert "TEST_RANGE_FLOAT" in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_float_above_max_uses_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_env_float returns default when value is above maximum."""
+        import logging
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "150.0"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = _parse_env_float(
+                    "TEST_RANGE_FLOAT", 1.0, min_value=0.1, max_value=100.0
+                )
+            assert result == 1.0  # Default
+            assert "above maximum" in caplog.text
+            assert "TEST_RANGE_FLOAT" in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_float_within_range_returns_value(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_env_float returns parsed value when within range."""
+        import logging
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "50.5"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = _parse_env_float(
+                    "TEST_RANGE_FLOAT", 1.0, min_value=0.1, max_value=100.0
+                )
+            assert result == 50.5  # Parsed value
+            # No warnings should be logged
+            assert "below minimum" not in caplog.text
+            assert "above maximum" not in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_int_below_min_uses_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_env_int returns default when value is below minimum."""
+        import logging
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "-5"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = _parse_env_int(
+                    "TEST_RANGE_INT", 100, min_value=1, max_value=1000
+                )
+            assert result == 100  # Default
+            assert "below minimum" in caplog.text
+            assert "TEST_RANGE_INT" in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_int_above_max_uses_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_env_int returns default when value is above maximum."""
+        import logging
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "5000"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = _parse_env_int(
+                    "TEST_RANGE_INT", 100, min_value=1, max_value=1000
+                )
+            assert result == 100  # Default
+            assert "above maximum" in caplog.text
+            assert "TEST_RANGE_INT" in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_int_within_range_returns_value(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_env_int returns parsed value when within range."""
+        import logging
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "500"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = _parse_env_int(
+                    "TEST_RANGE_INT", 100, min_value=1, max_value=1000
+                )
+            assert result == 500  # Parsed value
+            # No warnings should be logged
+            assert "below minimum" not in caplog.text
+            assert "above maximum" not in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_float_with_none_min_allows_any_low_value(self) -> None:
+        """Test _parse_env_float with None min_value allows any low value."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "-1000000.0"
+        try:
+            result = _parse_env_float(
+                "TEST_RANGE_FLOAT", 1.0, min_value=None, max_value=100.0
+            )
+            assert result == -1000000.0  # Very low value allowed
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_float_with_none_max_allows_any_high_value(self) -> None:
+        """Test _parse_env_float with None max_value allows any high value."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "1000000.0"
+        try:
+            result = _parse_env_float(
+                "TEST_RANGE_FLOAT", 1.0, min_value=0.1, max_value=None
+            )
+            assert result == 1000000.0  # Very high value allowed
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_int_with_none_min_allows_any_low_value(self) -> None:
+        """Test _parse_env_int with None min_value allows any low value."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "-999999"
+        try:
+            result = _parse_env_int(
+                "TEST_RANGE_INT", 100, min_value=None, max_value=1000
+            )
+            assert result == -999999  # Very low value allowed
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_int_with_none_max_allows_any_high_value(self) -> None:
+        """Test _parse_env_int with None max_value allows any high value."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "999999999"
+        try:
+            result = _parse_env_int("TEST_RANGE_INT", 100, min_value=1, max_value=None)
+            assert result == 999999999  # Very high value allowed
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_float_at_exact_min_boundary(self) -> None:
+        """Test _parse_env_float at exact minimum boundary returns value."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "0.1"
+        try:
+            result = _parse_env_float(
+                "TEST_RANGE_FLOAT", 1.0, min_value=0.1, max_value=100.0
+            )
+            assert result == 0.1  # Exact boundary is valid
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_float_at_exact_max_boundary(self) -> None:
+        """Test _parse_env_float at exact maximum boundary returns value."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "100.0"
+        try:
+            result = _parse_env_float(
+                "TEST_RANGE_FLOAT", 1.0, min_value=0.1, max_value=100.0
+            )
+            assert result == 100.0  # Exact boundary is valid
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_int_at_exact_min_boundary(self) -> None:
+        """Test _parse_env_int at exact minimum boundary returns value."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "1"
+        try:
+            result = _parse_env_int("TEST_RANGE_INT", 100, min_value=1, max_value=1000)
+            assert result == 1  # Exact boundary is valid
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_int_at_exact_max_boundary(self) -> None:
+        """Test _parse_env_int at exact maximum boundary returns value."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "1000"
+        try:
+            result = _parse_env_int("TEST_RANGE_INT", 100, min_value=1, max_value=1000)
+            assert result == 1000  # Exact boundary is valid
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+
 __all__: list[str] = [
     "TestHttpRestHandlerInitialization",
     "TestHttpRestHandlerGetOperations",
@@ -2254,4 +2506,5 @@ __all__: list[str] = [
     "TestHttpRestHandlerLogWarnings",
     "TestHttpRestHandlerDeterministicIntegration",
     "TestHttpRestHandlerEnvVarParsing",
+    "TestHttpRestHandlerEnvVarRangeValidation",
 ]

@@ -150,10 +150,41 @@ _SEMVER_SORT_SENTINEL = chr(127)
 
 # Environment variable for configuring the semver LRU cache size
 # Set ONEX_COMPUTE_REGISTRY_CACHE_SIZE to tune cache size for large deployments
+# Falls back to legacy COMPUTE_REGISTRY_CACHE_SIZE for backward compatibility
 ENV_COMPUTE_REGISTRY_CACHE_SIZE = "ONEX_COMPUTE_REGISTRY_CACHE_SIZE"
+ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY = "COMPUTE_REGISTRY_CACHE_SIZE"
 
 # Default cache size when environment variable is not set
 _DEFAULT_SEMVER_CACHE_SIZE = 128
+
+
+def _get_compute_registry_cache_size() -> int:
+    """Get compute registry cache size from environment with legacy fallback.
+
+    Checks for the ONEX_COMPUTE_REGISTRY_CACHE_SIZE environment variable first.
+    If not set, falls back to the legacy COMPUTE_REGISTRY_CACHE_SIZE for
+    backward compatibility. Logs an info message when legacy variable is used.
+
+    Returns:
+        Cache size as an integer.
+    """
+    # Prefer ONEX_ prefix
+    onex_value = os.environ.get(ENV_COMPUTE_REGISTRY_CACHE_SIZE)
+    if onex_value:
+        return int(onex_value)
+
+    # Fall back to legacy name for backward compatibility
+    legacy_value = os.environ.get(ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY)
+    if legacy_value:
+        logger.info(
+            "Using legacy %s; consider migrating to %s",
+            ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY,
+            ENV_COMPUTE_REGISTRY_CACHE_SIZE,
+        )
+        return int(legacy_value)
+
+    # Default
+    return _DEFAULT_SEMVER_CACHE_SIZE
 
 
 class RegistryCompute:
@@ -237,21 +268,22 @@ class RegistryCompute:
                 - 500 registrations: ~110 KB
 
             Cache Overhead:
-                - Semver LRU cache: Configurable via COMPUTE_REGISTRY_CACHE_SIZE env var
+                - Semver LRU cache: Configurable via ONEX_COMPUTE_REGISTRY_CACHE_SIZE env var
                   (default: 128 entries x ~100 bytes = ~12.8 KB)
                 - Total with cache: Registry memory + cache overhead
 
     Environment Variables:
-        COMPUTE_REGISTRY_CACHE_SIZE: Configure the semver LRU cache size for large
+        ONEX_COMPUTE_REGISTRY_CACHE_SIZE: Configure the semver LRU cache size for large
             deployments. Set to a higher value (e.g., 256, 512) if you have many
             unique version strings. Default: 128.
+            Falls back to legacy COMPUTE_REGISTRY_CACHE_SIZE if not set.
 
     Attributes:
         _registry: Internal dictionary mapping ModelComputeKey instances to plugin classes
         _lock: Threading lock for thread-safe registration operations
         _plugin_id_index: Secondary index for O(1) plugin_id lookup
         SEMVER_CACHE_SIZE: Class variable for LRU cache size, read from
-            COMPUTE_REGISTRY_CACHE_SIZE environment variable (default: 128)
+            ONEX_COMPUTE_REGISTRY_CACHE_SIZE environment variable (default: 128)
 
     Example:
         >>> from omnibase_infra.runtime.models import ModelComputeRegistration
@@ -271,11 +303,10 @@ class RegistryCompute:
     # Class-level semver cache configuration
     # ==========================================================================
 
-    # Semver cache size - configurable via COMPUTE_REGISTRY_CACHE_SIZE env var
+    # Semver cache size - configurable via ONEX_COMPUTE_REGISTRY_CACHE_SIZE env var
+    # Falls back to legacy COMPUTE_REGISTRY_CACHE_SIZE for backward compatibility
     # Read at class definition time; can be overridden via class attribute before first parse
-    SEMVER_CACHE_SIZE: int = int(
-        os.environ.get(ENV_COMPUTE_REGISTRY_CACHE_SIZE, str(_DEFAULT_SEMVER_CACHE_SIZE))
-    )
+    SEMVER_CACHE_SIZE: int = _get_compute_registry_cache_size()
 
     # Cached semver parser function (lazily initialized)
     _semver_cache: Callable[[str], tuple[int, int, int, str]] | None = None
@@ -1039,6 +1070,7 @@ __all__: list[str] = [
     "RegistryCompute",
     # Environment variable constants
     "ENV_COMPUTE_REGISTRY_CACHE_SIZE",
+    "ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY",
     # Re-export models for convenience
     "ModelComputeKey",
     "ModelComputeRegistration",

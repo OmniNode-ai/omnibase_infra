@@ -26,6 +26,7 @@ Usage:
 
 Environment Variables:
     ONEX_CONTRACTS_DIR: Path to contracts directory (default: ./contracts)
+        Falls back to legacy CONTRACTS_DIR if ONEX_CONTRACTS_DIR is not set.
     ONEX_HTTP_PORT: Port for health check HTTP server (default: 8085)
     ONEX_LOG_LEVEL: Logging level (default: INFO)
     ONEX_ENVIRONMENT: Runtime environment name (default: local)
@@ -83,6 +84,11 @@ except Exception:
 # Default configuration
 DEFAULT_CONTRACTS_DIR = "./contracts"
 DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
+
+# Environment variable names for contracts directory
+# Prefer ONEX_ prefix, fall back to legacy name for backward compatibility
+ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
+ENV_CONTRACTS_DIR_LEGACY = "CONTRACTS_DIR"
 DEFAULT_INPUT_TOPIC = "requests"
 DEFAULT_OUTPUT_TOPIC = "responses"
 DEFAULT_GROUP_ID = "onex-runtime"
@@ -90,6 +96,35 @@ DEFAULT_GROUP_ID = "onex-runtime"
 # Port validation constants
 MIN_PORT = 1
 MAX_PORT = 65535
+
+
+def _get_contracts_dir() -> Path:
+    """Get contracts directory from environment with legacy fallback.
+
+    Checks for the ONEX_CONTRACTS_DIR environment variable first. If not set,
+    falls back to the legacy CONTRACTS_DIR for backward compatibility.
+    Logs an info message when legacy variable is used.
+
+    Returns:
+        Path to the contracts directory.
+    """
+    # Prefer ONEX_ prefix
+    onex_value = os.environ.get(ENV_CONTRACTS_DIR)
+    if onex_value:
+        return Path(onex_value)
+
+    # Fall back to legacy name for backward compatibility
+    legacy_value = os.environ.get(ENV_CONTRACTS_DIR_LEGACY)
+    if legacy_value:
+        logger.info(
+            "Using legacy %s; consider migrating to %s",
+            ENV_CONTRACTS_DIR_LEGACY,
+            ENV_CONTRACTS_DIR,
+        )
+        return Path(legacy_value)
+
+    # Default
+    return Path(DEFAULT_CONTRACTS_DIR)
 
 
 def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
@@ -263,7 +298,8 @@ async def bootstrap() -> int:
     structured sequence to ensure proper resource initialization and cleanup.
 
     Bootstrap Sequence:
-        1. Determine contracts directory from CONTRACTS_DIR environment variable
+        1. Determine contracts directory from ONEX_CONTRACTS_DIR environment variable
+           (falls back to legacy CONTRACTS_DIR if ONEX_CONTRACTS_DIR is not set)
         2. Load and validate runtime configuration from contracts or environment
         3. Create and initialize InMemoryEventBus for event-driven architecture
         4. Create ModelONEXContainer and wire infrastructure services (async)
@@ -293,7 +329,8 @@ async def bootstrap() -> int:
             - 1: Configuration error, runtime error, or unexpected failure
 
     Environment Variables:
-        CONTRACTS_DIR: Path to contracts directory (default: ./contracts)
+        ONEX_CONTRACTS_DIR: Path to contracts directory (default: ./contracts)
+            Falls back to legacy CONTRACTS_DIR if ONEX_CONTRACTS_DIR is not set.
         ONEX_HTTP_PORT: Port for health check server (default: 8085)
         ONEX_LOG_LEVEL: Logging level (default: INFO)
         ONEX_ENVIRONMENT: Environment name (default: local)
@@ -326,8 +363,8 @@ async def bootstrap() -> int:
     bootstrap_start_time = time.time()
 
     try:
-        # 1. Determine contracts directory
-        contracts_dir = Path(os.getenv("ONEX_CONTRACTS_DIR", DEFAULT_CONTRACTS_DIR))
+        # 1. Determine contracts directory (with legacy fallback)
+        contracts_dir = _get_contracts_dir()
         logger.info(
             "ONEX Kernel starting with contracts_dir=%s (correlation_id=%s)",
             contracts_dir,
@@ -789,4 +826,11 @@ if __name__ == "__main__":
     main()
 
 
-__all__: list[str] = ["bootstrap", "main", "load_runtime_config"]
+__all__: list[str] = [
+    "bootstrap",
+    "main",
+    "load_runtime_config",
+    # Environment variable constants
+    "ENV_CONTRACTS_DIR",
+    "ENV_CONTRACTS_DIR_LEGACY",
+]
