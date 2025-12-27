@@ -6,10 +6,17 @@ This module provides protocol definitions (duck-typed interfaces) for infrastruc
 components in the ONEX ecosystem.
 
 Protocols:
+    - ProtocolEventBusLike: Interface for event bus abstraction (used by introspection)
     - ProtocolIdempotencyStore: Interface for idempotency checking and deduplication
+    - ProtocolMessageDispatcher: Interface for message dispatchers
+    - ProtocolMessageTypeRegistry: Interface for message type registries
     - ProtocolPluginCompute: Interface for deterministic compute plugins
     - ProtocolRegistryMetrics: Interface for registry metrics collection (optional)
     - ProtocolSnapshotPublisher: Interface for snapshot publishing services (F2)
+
+Note:
+    ProtocolCircuitBreakerAware is defined in omnibase_infra.mixins (tightly coupled
+    to MixinAsyncCircuitBreaker). Import it from there, not from this package.
 
 Architecture:
     Protocols enable duck typing and dependency injection without requiring
@@ -19,6 +26,7 @@ Architecture:
 Usage:
     ```python
     from omnibase_infra.protocols import (
+        ProtocolEventBusLike,
         ProtocolIdempotencyStore,
         ProtocolPluginCompute,
         ProtocolRegistryMetrics,
@@ -40,6 +48,7 @@ Usage:
 See Also:
     - omnibase_infra.plugins for base class implementations
     - omnibase_infra.models.projection for projection models
+    - omnibase_infra.mixins for ProtocolCircuitBreakerAware
     - ONEX 4-node architecture documentation
     - OMN-947 (F2) for snapshot publishing design
 """

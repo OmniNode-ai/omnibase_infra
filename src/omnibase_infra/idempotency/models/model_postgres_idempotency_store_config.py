@@ -110,7 +110,17 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
     @field_validator("dsn", mode="before")
     @classmethod
     def validate_dsn(cls, v: object) -> str:
-        """Validate PostgreSQL DSN format.
+        """Validate PostgreSQL DSN format using robust parser.
+
+        This validator uses urllib.parse for comprehensive DSN validation,
+        handling edge cases like IPv6 addresses, URL-encoded passwords,
+        and query parameters.
+
+        Edge cases validated:
+            - IPv6 addresses: postgresql://user:pass@[::1]:5432/db
+            - URL-encoded passwords: user:p%40ssword@host (p@ssword)
+            - Query parameters: postgresql://host/db?sslmode=require
+            - Missing components: postgresql://localhost/db (no user/pass/port)
 
         Args:
             v: DSN value (any type before Pydantic conversion)
@@ -121,51 +131,14 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
         Raises:
             ProtocolConfigurationError: If DSN format is invalid
         """
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="validate_config",
-            target_name="postgres_idempotency_store",
-            correlation_id=uuid4(),
-        )
+        from omnibase_infra.utils.util_dsn_validation import parse_and_validate_dsn
 
-        if v is None:
-            raise ProtocolConfigurationError(
-                "dsn cannot be None",
-                context=context,
-                parameter="dsn",
-                value=None,
-            )
-        if not isinstance(v, str):
-            raise ProtocolConfigurationError(
-                f"dsn must be a string, got {type(v).__name__}",
-                context=context,
-                parameter="dsn",
-                value=type(v).__name__,
-            )
-        if not v.strip():
-            raise ProtocolConfigurationError(
-                "dsn cannot be empty",
-                context=context,
-                parameter="dsn",
-                value="",
-            )
+        # parse_and_validate_dsn handles all validation and error context
+        # It will raise ProtocolConfigurationError with proper context if invalid
+        parse_and_validate_dsn(v)
 
-        dsn = v.strip()
-
-        # Basic PostgreSQL DSN validation
-        # Note: Only standard PostgreSQL prefixes are allowed. The "postgresql+asyncpg://"
-        # prefix is a SQLAlchemy convention, not an asyncpg convention. asyncpg uses
-        # standard "postgresql://" or "postgres://" prefixes directly.
-        valid_prefixes = ("postgresql://", "postgres://")
-        if not dsn.startswith(valid_prefixes):
-            raise ProtocolConfigurationError(
-                f"dsn must start with one of {valid_prefixes}",
-                context=context,
-                parameter="dsn",
-                value="[REDACTED]",  # Never log DSN contents
-            )
-
-        return dsn
+        # If validation passes, return the stripped string
+        return v.strip() if isinstance(v, str) else str(v)
 
     table_name: str = Field(
         default="idempotency_records",
