@@ -18,6 +18,9 @@ Exports:
 from omnibase_infra.handlers.models.http.enum_http_operation_type import (
     EnumHttpOperationType,
 )
+from omnibase_infra.handlers.models.http.model_http_body_content import (
+    ModelHttpBodyContent,
+)
 from omnibase_infra.handlers.models.http.model_http_get_payload import (
     ModelHttpGetPayload,
 )
@@ -35,6 +38,7 @@ from omnibase_infra.handlers.models.http.model_payload_http import (
 
 __all__: list[str] = [
     "EnumHttpOperationType",
+    "ModelHttpBodyContent",
     "ModelPayloadHttp",
     "RegistryPayloadHttp",
     "ModelHttpGetPayload",

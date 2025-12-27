@@ -23,6 +23,49 @@ All errors:
     - Include structured context for debugging
     - Support correlation IDs for request tracking
     - Accept ModelInfraErrorContext for bundled context parameters
+
+NOT_FOUND Classification Patterns:
+    The ONEX infrastructure uses two distinct patterns for "not found" scenarios:
+
+    1. **Error-based NOT_FOUND** (for exceptional conditions):
+       When a resource SHOULD exist but doesn't, raise an error with
+       ``EnumCoreErrorCode.RESOURCE_NOT_FOUND``. This is used by:
+       - ``SecretResolutionError``: When a required secret is missing from Vault
+       - Handler errors: When a required resource lookup fails
+
+       Callers receive these as exceptions and should handle them via try/except:
+
+       .. code-block:: python
+
+           try:
+               secret = await vault_handler.get_secret("db/password")
+           except SecretResolutionError as e:
+               if e.model.error_code == EnumCoreErrorCode.RESOURCE_NOT_FOUND:
+                   logger.error(f"Secret not found: {e.model.message}")
+                   # Handle missing secret (fail, use default, etc.)
+
+    2. **Response-based NOT_FOUND** (for valid "empty" responses):
+       When absence is a valid outcome (not an error), return a discriminated
+       union variant. This is used by:
+       - ``EnumConsulOperationType.KV_GET_NOT_FOUND``: When a Consul key doesn't exist
+       - Handler responses with optional data fields
+
+       Callers check the response type to determine if data was found:
+
+       .. code-block:: python
+
+           result = await consul_handler.kv_get("my/key")
+           if result.operation_type == EnumConsulOperationType.KV_GET_NOT_FOUND:
+               # Key doesn't exist - valid "empty" response
+               return default_value
+           else:
+               return result.value
+
+    **Choosing the Right Pattern**:
+    - Use errors when absence indicates a configuration or operational problem
+    - Use response variants when absence is an expected, valid state
+    - Secrets, required configs: Use ``RESOURCE_NOT_FOUND`` error
+    - Optional keys, cache lookups: Use discriminated union responses
 """
 
 from uuid import uuid4

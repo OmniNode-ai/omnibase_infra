@@ -65,6 +65,7 @@ from omnibase_infra.handlers.models.consul import (
 from omnibase_infra.handlers.models.http import (
     EnumHttpOperationType,
     HttpPayload,
+    ModelHttpBodyContent,
     ModelHttpGetPayload,
     ModelHttpHandlerPayload,
     ModelHttpPostPayload,
@@ -137,6 +138,7 @@ __all__: list[str] = [
     "ModelVaultHandlerResponse",
     # HTTP payload types (discriminated union)
     "EnumHttpOperationType",
+    "ModelHttpBodyContent",
     "ModelHttpGetPayload",
     "ModelHttpPostPayload",
     "HttpPayload",

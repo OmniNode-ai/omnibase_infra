@@ -6,6 +6,7 @@ This module provides protocol definitions (duck-typed interfaces) for infrastruc
 components in the ONEX ecosystem.
 
 Protocols:
+    - ProtocolCircuitBreakerAware: Interface for circuit breaker capability (mixins)
     - ProtocolIdempotencyStore: Interface for idempotency checking and deduplication
     - ProtocolPluginCompute: Interface for deterministic compute plugins
     - ProtocolRegistryMetrics: Interface for registry metrics collection (optional)
@@ -44,6 +45,9 @@ See Also:
     - OMN-947 (F2) for snapshot publishing design
 """
 
+from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
+    ProtocolCircuitBreakerAware,
+)
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.protocols.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
@@ -55,6 +59,7 @@ from omnibase_infra.protocols.protocol_snapshot_publisher import (
 )
 
 __all__: list[str] = [
+    "ProtocolCircuitBreakerAware",
     "ProtocolEventBusLike",
     "ProtocolIdempotencyStore",
     "ProtocolPluginCompute",

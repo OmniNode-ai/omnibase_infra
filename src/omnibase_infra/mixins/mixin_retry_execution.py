@@ -48,7 +48,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar, cast
 from uuid import UUID
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -57,6 +57,9 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+)
+from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
+    ProtocolCircuitBreakerAware,
 )
 
 if TYPE_CHECKING:
@@ -222,6 +225,21 @@ class MixinRetryExecution(ABC):
             namespace=self._get_namespace(),
         )
 
+    def _as_circuit_breaker(self) -> ProtocolCircuitBreakerAware:
+        """Cast self to ProtocolCircuitBreakerAware for type-safe circuit breaker access.
+
+        This helper enables type-safe access to circuit breaker methods when
+        the implementing class also inherits from MixinAsyncCircuitBreaker.
+
+        Returns:
+            Self cast as ProtocolCircuitBreakerAware for type checker satisfaction.
+
+        Note:
+            This should only be called when _circuit_breaker_initialized is True,
+            which guarantees the circuit breaker methods are available.
+        """
+        return cast(ProtocolCircuitBreakerAware, self)
+
     async def _record_circuit_failure_if_enabled(
         self, operation: str, correlation_id: UUID
     ) -> None:
@@ -232,14 +250,16 @@ class MixinRetryExecution(ABC):
             correlation_id: Correlation ID for tracing.
         """
         if self._circuit_breaker_initialized:
-            async with self._circuit_breaker_lock:  # type: ignore[attr-defined]
-                await self._record_circuit_failure(operation, correlation_id)  # type: ignore[attr-defined]
+            cb = self._as_circuit_breaker()
+            async with cb._circuit_breaker_lock:
+                await cb._record_circuit_failure(operation, correlation_id)
 
     async def _reset_circuit_if_enabled(self) -> None:
         """Reset circuit breaker to closed state if enabled."""
         if self._circuit_breaker_initialized:
-            async with self._circuit_breaker_lock:  # type: ignore[attr-defined]
-                await self._reset_circuit_breaker()  # type: ignore[attr-defined]
+            cb = self._as_circuit_breaker()
+            async with cb._circuit_breaker_lock:
+                await cb._reset_circuit_breaker()
 
     async def _check_circuit_if_enabled(
         self, operation: str, correlation_id: UUID
@@ -254,8 +274,9 @@ class MixinRetryExecution(ABC):
             InfraUnavailableError: If circuit breaker is open.
         """
         if self._circuit_breaker_initialized:
-            async with self._circuit_breaker_lock:  # type: ignore[attr-defined]
-                await self._check_circuit_breaker(operation, correlation_id)  # type: ignore[attr-defined]
+            cb = self._as_circuit_breaker()
+            async with cb._circuit_breaker_lock:
+                await cb._check_circuit_breaker(operation, correlation_id)
 
     async def _handle_retriable_error(
         self,

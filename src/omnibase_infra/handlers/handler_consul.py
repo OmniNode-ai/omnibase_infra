@@ -23,21 +23,23 @@ import asyncio
 import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, NamedTuple, TypeVar
 from uuid import UUID, uuid4
 
 import consul
 from omnibase_core.models.dispatch import ModelHandlerOutput
-from pydantic import SecretStr, ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
-    InfraTimeoutError,
     ModelInfraErrorContext,
-    ProtocolConfigurationError,
     RuntimeHostError,
+)
+from omnibase_infra.handlers.mixins import (
+    MixinConsulInitialization,
+    MixinConsulKV,
+    MixinConsulService,
 )
 from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
 from omnibase_infra.handlers.models import (
@@ -46,14 +48,7 @@ from omnibase_infra.handlers.models import (
 )
 from omnibase_infra.handlers.models.consul import (
     ConsulPayload,
-    ModelConsulDeregisterPayload,
     ModelConsulHandlerPayload,
-    ModelConsulKVGetFoundPayload,
-    ModelConsulKVGetNotFoundPayload,
-    ModelConsulKVGetRecursePayload,
-    ModelConsulKVItem,
-    ModelConsulKVPutPayload,
-    ModelConsulRegisterPayload,
 )
 from omnibase_infra.handlers.models.model_consul_handler_response import (
     ModelConsulHandlerResponse,
@@ -90,8 +85,28 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
+class RetryContext(NamedTuple):
+    """Context for retry operations containing state and operation metadata.
+
+    This named tuple provides clear field access for retry initialization,
+    improving code clarity over plain tuples.
+
+    Attributes:
+        retry_state: Current retry state including attempt count and delays.
+        operation_context: Operation context with correlation ID and timeout.
+    """
+
+    retry_state: ModelRetryState
+    operation_context: ModelOperationContext
+
+
 class ConsulHandler(
-    MixinAsyncCircuitBreaker, MixinRetryExecution, MixinEnvelopeExtraction
+    MixinAsyncCircuitBreaker,
+    MixinRetryExecution,
+    MixinEnvelopeExtraction,
+    MixinConsulInitialization,
+    MixinConsulKV,
+    MixinConsulService,
 ):
     """HashiCorp Consul handler using python-consul client (MVP: KV, service registration).
 
@@ -186,8 +201,6 @@ class ConsulHandler(
         self._max_queue_size: int = 0
         # Circuit breaker initialized flag - set after _init_circuit_breaker called
         self._circuit_breaker_initialized: bool = False
-        # Retry state tracking for inter-method communication
-        self._last_retry_state: ModelRetryState = ModelRetryState()
 
     @property
     def handler_type(self) -> str:
@@ -274,146 +287,6 @@ class ConsulHandler(
             error_message=f"Unexpected error: {type(error).__name__}",
         )
 
-    # Initialization helper methods
-
-    def _validate_consul_config(
-        self, config: dict[str, JsonValue], correlation_id: UUID
-    ) -> ModelConsulHandlerConfig:
-        """Validate and parse Consul configuration.
-
-        Args:
-            config: Raw configuration dictionary.
-            correlation_id: Correlation ID for error context.
-
-        Returns:
-            Validated ModelConsulHandlerConfig.
-
-        Raises:
-            ProtocolConfigurationError: If validation fails.
-            RuntimeHostError: If parsing fails unexpectedly.
-        """
-        try:
-            # Handle SecretStr token conversion
-            token_raw = config.get("token")
-            if isinstance(token_raw, str):
-                config = dict(config)  # Make mutable copy
-                config["token"] = SecretStr(token_raw)
-
-            return ModelConsulHandlerConfig.model_validate(config)
-        except ValidationError as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="initialize",
-                target_name="consul_handler",
-                correlation_id=correlation_id,
-            )
-            sanitized_fields = [err.get("loc", ("unknown",))[-1] for err in e.errors()]
-            raise ProtocolConfigurationError(
-                f"Invalid Consul configuration - validation failed for fields: {sanitized_fields}",
-                context=ctx,
-            ) from e
-        except Exception as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="initialize",
-                target_name="consul_handler",
-                correlation_id=correlation_id,
-            )
-            raise RuntimeHostError(
-                f"Configuration parsing failed: {type(e).__name__}",
-                context=ctx,
-            ) from e
-
-    def _setup_consul_client(
-        self, consul_config: ModelConsulHandlerConfig
-    ) -> consul.Consul:
-        """Create and configure the Consul client.
-
-        Args:
-            consul_config: Validated Consul configuration.
-
-        Returns:
-            Configured consul.Consul client instance.
-        """
-        token_value: str | None = None
-        if consul_config.token is not None:
-            token_value = consul_config.token.get_secret_value()
-
-        return consul.Consul(
-            host=consul_config.host,
-            port=consul_config.port,
-            scheme=consul_config.scheme,
-            token=token_value,
-            dc=consul_config.datacenter,
-        )
-
-    def _verify_consul_connection(
-        self, client: consul.Consul, correlation_id: UUID
-    ) -> None:
-        """Verify connectivity to Consul by checking leader status.
-
-        Args:
-            client: The Consul client to verify.
-            correlation_id: Correlation ID for error context.
-
-        Raises:
-            InfraConnectionError: If verification fails.
-        """
-        try:
-            leader = client.status.leader()
-            if not leader:
-                ctx = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.CONSUL,
-                    operation="initialize",
-                    target_name="consul_handler",
-                    correlation_id=correlation_id,
-                )
-                raise InfraConnectionError(
-                    "Consul cluster has no leader - cluster may be unavailable",
-                    context=ctx,
-                )
-        except consul.ConsulException as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="initialize",
-                target_name="consul_handler",
-                correlation_id=correlation_id,
-            )
-            raise InfraConnectionError(
-                "Consul connectivity verification failed",
-                context=ctx,
-            ) from e
-
-    def _setup_thread_pool(self, consul_config: ModelConsulHandlerConfig) -> None:
-        """Set up the thread pool executor for async operations.
-
-        Args:
-            consul_config: Validated Consul configuration.
-        """
-        self._max_workers = consul_config.max_concurrent_operations
-        self._executor = ThreadPoolExecutor(
-            max_workers=self._max_workers,
-            thread_name_prefix="consul_handler_",
-        )
-        self._max_queue_size = (
-            self._max_workers * consul_config.max_queue_size_multiplier
-        )
-
-    def _setup_circuit_breaker(self, consul_config: ModelConsulHandlerConfig) -> None:
-        """Initialize circuit breaker if enabled.
-
-        Args:
-            consul_config: Validated Consul configuration.
-        """
-        if consul_config.circuit_breaker_enabled:
-            self._init_circuit_breaker(
-                threshold=consul_config.circuit_breaker_failure_threshold,
-                reset_timeout=consul_config.circuit_breaker_reset_timeout_seconds,
-                service_name=f"consul.{consul_config.datacenter or 'default'}",
-                transport_type=EnumInfraTransportType.CONSUL,
-            )
-            self._circuit_breaker_initialized = True
-
     async def initialize(self, config: dict[str, JsonValue]) -> None:
         """Initialize Consul client with configuration.
 
@@ -458,7 +331,7 @@ class ConsulHandler(
             self._setup_circuit_breaker(self._config)
 
             self._initialized = True
-            self._log_initialization_success(init_correlation_id)
+            self._log_initialization_success(self._config, init_correlation_id)
 
         except (InfraConnectionError, InfraAuthenticationError):
             raise
@@ -468,72 +341,6 @@ class ConsulHandler(
             self._raise_connection_error(init_correlation_id, e)
         except Exception as e:
             self._raise_runtime_error(init_correlation_id, e)
-
-    def _log_initialization_success(self, correlation_id: UUID) -> None:
-        """Log successful initialization with handler details."""
-        if self._config is None:
-            return
-        logger.info(
-            "%s initialized successfully",
-            self.__class__.__name__,
-            extra={
-                "handler": self.__class__.__name__,
-                "host": self._config.host,
-                "port": self._config.port,
-                "scheme": self._config.scheme,
-                "datacenter": self._config.datacenter,
-                "timeout_seconds": self._config.timeout_seconds,
-                "thread_pool_max_workers": self._max_workers,
-                "thread_pool_max_queue_size": self._max_queue_size,
-                "circuit_breaker_enabled": self._circuit_breaker_initialized,
-                "correlation_id": str(correlation_id),
-            },
-        )
-
-    def _raise_auth_error(
-        self, correlation_id: UUID, original_error: Exception
-    ) -> None:
-        """Raise InfraAuthenticationError with context."""
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.CONSUL,
-            operation="initialize",
-            target_name="consul_handler",
-            correlation_id=correlation_id,
-        )
-        raise InfraAuthenticationError(
-            "Consul ACL permission denied - check token validity and permissions",
-            context=ctx,
-        ) from original_error
-
-    def _raise_connection_error(
-        self, correlation_id: UUID, original_error: Exception
-    ) -> None:
-        """Raise InfraConnectionError with context."""
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.CONSUL,
-            operation="initialize",
-            target_name="consul_handler",
-            correlation_id=correlation_id,
-        )
-        raise InfraConnectionError(
-            f"Consul connection failed: {type(original_error).__name__}",
-            context=ctx,
-        ) from original_error
-
-    def _raise_runtime_error(
-        self, correlation_id: UUID, original_error: Exception
-    ) -> None:
-        """Raise RuntimeHostError with context."""
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.CONSUL,
-            operation="initialize",
-            target_name="consul_handler",
-            correlation_id=correlation_id,
-        )
-        raise RuntimeHostError(
-            f"Consul client initialization failed: {type(original_error).__name__}",
-            context=ctx,
-        ) from original_error
 
     async def shutdown(self) -> None:
         """Close Consul client and release resources.
@@ -697,6 +504,12 @@ class ConsulHandler(
     ) -> T:
         """Execute operation with exponential backoff retry logic and circuit breaker.
 
+        Thread-Safety:
+            This method is concurrency-safe. Each call maintains its own retry
+            state stack, with no shared mutable state between concurrent operations.
+            This allows multiple operations to execute in parallel without
+            interfering with each other's retry logic.
+
         Thread Pool Integration:
             All consul operations (which are synchronous) are executed in a dedicated
             thread pool via loop.run_in_executor(). This prevents blocking the async
@@ -726,17 +539,16 @@ class ConsulHandler(
 
         await self._check_circuit_if_enabled(operation, correlation_id)
 
-        retry_state, op_context = self._init_retry_context(operation, correlation_id)
+        ctx = self._init_retry_context(operation, correlation_id)
+        retry_state = ctx.retry_state
+        op_context = ctx.operation_context
 
         while retry_state.is_retriable():
-            result = await self._try_execute_operation(
+            result_tuple, retry_state = await self._try_execute_operation(
                 func, retry_state, op_context, operation, correlation_id
             )
-            if result is not None:
-                return result[0]  # Unpack the result tuple
-
-            # Get updated retry state after error handling
-            retry_state = self._last_retry_state
+            if result_tuple is not None:
+                return result_tuple[0]  # Unpack the result tuple
 
             await self._log_retry_attempt(operation, retry_state, correlation_id)
             await asyncio.sleep(retry_state.delay_seconds)
@@ -746,9 +558,7 @@ class ConsulHandler(
             raise RuntimeError(f"Retry exhausted: {retry_state.last_error}")
         raise RuntimeError("Retry loop completed without result")
 
-    def _init_retry_context(
-        self, operation: str, correlation_id: UUID
-    ) -> tuple[ModelRetryState, ModelOperationContext]:
+    def _init_retry_context(self, operation: str, correlation_id: UUID) -> RetryContext:
         """Initialize retry state and operation context.
 
         Args:
@@ -756,7 +566,7 @@ class ConsulHandler(
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            Tuple of (ModelRetryState, ModelOperationContext).
+            RetryContext with initialized retry_state and operation_context.
         """
         if self._config is None:
             raise RuntimeError("Config not initialized")
@@ -775,7 +585,10 @@ class ConsulHandler(
             timeout_seconds=self._config.timeout_seconds,
         )
 
-        return retry_state, op_context
+        return RetryContext(
+            retry_state=retry_state,
+            operation_context=op_context,
+        )
 
     async def _try_execute_operation(
         self,
@@ -784,8 +597,13 @@ class ConsulHandler(
         op_context: ModelOperationContext,
         operation: str,
         correlation_id: UUID,
-    ) -> tuple[T] | None:
+    ) -> tuple[tuple[T], ModelRetryState] | tuple[None, ModelRetryState]:
         """Try to execute an operation once with error handling.
+
+        Thread-Safety:
+            This method is concurrency-safe. All retry state is passed explicitly
+            as parameters and returned as values. No shared mutable state is used.
+            This allows multiple concurrent operations to execute independently.
 
         Args:
             func: Callable to execute.
@@ -795,7 +613,8 @@ class ConsulHandler(
             correlation_id: Correlation ID.
 
         Returns:
-            Tuple containing result if successful, None if should retry.
+            Tuple of ((result,), retry_state) if successful.
+            Tuple of (None, updated_retry_state) if should retry.
 
         Raises:
             InfraTimeoutError, InfraConnectionError, InfraAuthenticationError:
@@ -813,7 +632,7 @@ class ConsulHandler(
             )
 
             await self._reset_circuit_if_enabled()
-            return (result,)
+            return (result,), retry_state
 
         except Exception as e:
             classification = self._classify_error(e, operation)
@@ -834,329 +653,10 @@ class ConsulHandler(
                 e,
             )
 
-            self._last_retry_state = new_state
-
             if error_to_raise is not None:
                 raise error_to_raise from e
 
-            return None
-
-    async def _kv_get(
-        self,
-        payload: dict[str, JsonValue],
-        correlation_id: UUID,
-        input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
-        """Get value from Consul KV store.
-
-        Args:
-            payload: dict containing:
-                - key: KV key path (required)
-                - recurse: Optional bool to get all keys under prefix (default: False)
-            correlation_id: Correlation ID for tracing
-            input_envelope_id: Input envelope ID for causality tracking
-
-        Returns:
-            ModelHandlerOutput wrapping the KV data with correlation tracking
-        """
-        key = payload.get("key")
-        if not isinstance(key, str) or not key:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="consul.kv_get",
-                target_name="consul_handler",
-                correlation_id=correlation_id,
-            )
-            raise RuntimeHostError(
-                "Missing or invalid 'key' in payload",
-                context=ctx,
-            )
-
-        recurse = payload.get("recurse", False)
-        recurse_bool = recurse is True or recurse == "true"
-
-        if self._client is None:
-            raise RuntimeError("Client not initialized")
-
-        def get_func() -> tuple[
-            int, list[dict[str, JsonValue]] | dict[str, JsonValue] | None
-        ]:
-            if self._client is None:
-                raise RuntimeError("Client not initialized")
-            index, data = self._client.kv.get(key, recurse=recurse_bool)
-            return index, data
-
-        index, data = await self._execute_with_retry(
-            "consul.kv_get",
-            get_func,
-            correlation_id,
-        )
-
-        # Handle response - data can be None if key doesn't exist
-        if data is None:
-            typed_payload = ModelConsulKVGetNotFoundPayload(
-                key=key,
-                index=index,
-            )
-            return self._build_response(
-                typed_payload, correlation_id, input_envelope_id
-            )
-
-        # Handle single key or recurse results
-        if isinstance(data, list):
-            # Recurse mode - multiple keys
-            items: list[ModelConsulKVItem] = []
-            for item in data:
-                value = item.get("Value")
-                decoded_value = (
-                    value.decode("utf-8") if isinstance(value, bytes) else value
-                )
-                item_key = item.get("Key")
-                items.append(
-                    ModelConsulKVItem(
-                        key=item_key if isinstance(item_key, str) else "",
-                        value=decoded_value if isinstance(decoded_value, str) else None,
-                        flags=item.get("Flags")
-                        if isinstance(item.get("Flags"), int)
-                        else None,
-                        modify_index=item.get("ModifyIndex")
-                        if isinstance(item.get("ModifyIndex"), int)
-                        else None,
-                    )
-                )
-            typed_payload_recurse = ModelConsulKVGetRecursePayload(
-                found=len(items) > 0,
-                items=items,
-                count=len(items),
-                index=index,
-            )
-            return self._build_response(
-                typed_payload_recurse, correlation_id, input_envelope_id
-            )
-        else:
-            # Single key mode
-            value = data.get("Value")
-            decoded_value = value.decode("utf-8") if isinstance(value, bytes) else value
-            data_key = data.get("Key")
-            typed_payload_found = ModelConsulKVGetFoundPayload(
-                key=data_key if isinstance(data_key, str) else key,
-                value=decoded_value if isinstance(decoded_value, str) else None,
-                flags=data.get("Flags") if isinstance(data.get("Flags"), int) else None,
-                modify_index=data.get("ModifyIndex")
-                if isinstance(data.get("ModifyIndex"), int)
-                else None,
-                index=index,
-            )
-            return self._build_response(
-                typed_payload_found, correlation_id, input_envelope_id
-            )
-
-    async def _kv_put(
-        self,
-        payload: dict[str, JsonValue],
-        correlation_id: UUID,
-        input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
-        """Put value to Consul KV store.
-
-        Args:
-            payload: dict containing:
-                - key: KV key path (required)
-                - value: Value to store (required, string)
-                - flags: Optional integer flags
-                - cas: Optional check-and-set index for optimistic locking
-            correlation_id: Correlation ID for tracing
-            input_envelope_id: Input envelope ID for causality tracking
-
-        Returns:
-            ModelHandlerOutput wrapping the operation result with correlation tracking
-        """
-        key = payload.get("key")
-        if not isinstance(key, str) or not key:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="consul.kv_put",
-                target_name="consul_handler",
-                correlation_id=correlation_id,
-            )
-            raise RuntimeHostError(
-                "Missing or invalid 'key' in payload",
-                context=ctx,
-            )
-
-        value = payload.get("value")
-        if not isinstance(value, str):
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="consul.kv_put",
-                target_name="consul_handler",
-                correlation_id=correlation_id,
-            )
-            raise RuntimeHostError(
-                "Missing or invalid 'value' in payload - must be a string",
-                context=ctx,
-            )
-
-        flags = payload.get("flags")
-        flags_int: int | None = flags if isinstance(flags, int) else None
-
-        cas = payload.get("cas")
-        cas_int: int | None = cas if isinstance(cas, int) else None
-
-        if self._client is None:
-            raise RuntimeError("Client not initialized")
-
-        def put_func() -> bool:
-            if self._client is None:
-                raise RuntimeError("Client not initialized")
-            result: bool = self._client.kv.put(key, value, flags=flags_int, cas=cas_int)
-            return result
-
-        success = await self._execute_with_retry(
-            "consul.kv_put",
-            put_func,
-            correlation_id,
-        )
-
-        typed_payload = ModelConsulKVPutPayload(
-            success=success,
-            key=key,
-        )
-        return self._build_response(typed_payload, correlation_id, input_envelope_id)
-
-    async def _register_service(
-        self,
-        payload: dict[str, JsonValue],
-        correlation_id: UUID,
-        input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
-        """Register service with Consul agent.
-
-        Args:
-            payload: dict containing:
-                - name: Service name (required)
-                - service_id: Optional unique service ID (defaults to name)
-                - address: Optional service address
-                - port: Optional service port
-                - tags: Optional list of tags
-                - check: Optional health check configuration dict
-            correlation_id: Correlation ID for tracing
-            input_envelope_id: Input envelope ID for causality tracking
-
-        Returns:
-            ModelHandlerOutput wrapping the registration result with correlation tracking
-        """
-        name = payload.get("name")
-        if not isinstance(name, str) or not name:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="consul.register",
-                target_name="consul_handler",
-                correlation_id=correlation_id,
-            )
-            raise RuntimeHostError(
-                "Missing or invalid 'name' in payload",
-                context=ctx,
-            )
-
-        service_id = payload.get("service_id")
-        service_id_str: str | None = service_id if isinstance(service_id, str) else None
-
-        address = payload.get("address")
-        address_str: str | None = address if isinstance(address, str) else None
-
-        port = payload.get("port")
-        port_int: int | None = port if isinstance(port, int) else None
-
-        tags = payload.get("tags")
-        tags_list: list[str] | None = None
-        if isinstance(tags, list):
-            tags_list = [str(t) for t in tags]
-
-        check = payload.get("check")
-        check_dict: dict[str, JsonValue] | None = (
-            check if isinstance(check, dict) else None
-        )
-
-        if self._client is None:
-            raise RuntimeError("Client not initialized")
-
-        def register_func() -> bool:
-            if self._client is None:
-                raise RuntimeError("Client not initialized")
-            self._client.agent.service.register(
-                name=name,
-                service_id=service_id_str,
-                address=address_str,
-                port=port_int,
-                tags=tags_list,
-                check=check_dict,
-            )
-            return True
-
-        await self._execute_with_retry(
-            "consul.register",
-            register_func,
-            correlation_id,
-        )
-
-        typed_payload = ModelConsulRegisterPayload(
-            registered=True,
-            name=name,
-            consul_service_id=service_id_str or name,
-        )
-        return self._build_response(typed_payload, correlation_id, input_envelope_id)
-
-    async def _deregister_service(
-        self,
-        payload: dict[str, JsonValue],
-        correlation_id: UUID,
-        input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
-        """Deregister service from Consul agent.
-
-        Args:
-            payload: dict containing:
-                - service_id: Service ID to deregister (required)
-            correlation_id: Correlation ID for tracing
-            input_envelope_id: Input envelope ID for causality tracking
-
-        Returns:
-            ModelHandlerOutput wrapping the deregistration result with correlation tracking
-        """
-        service_id = payload.get("service_id")
-        if not isinstance(service_id, str) or not service_id:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="consul.deregister",
-                target_name="consul_handler",
-                correlation_id=correlation_id,
-            )
-            raise RuntimeHostError(
-                "Missing or invalid 'service_id' in payload",
-                context=ctx,
-            )
-
-        if self._client is None:
-            raise RuntimeError("Client not initialized")
-
-        def deregister_func() -> bool:
-            if self._client is None:
-                raise RuntimeError("Client not initialized")
-            self._client.agent.service.deregister(service_id)
-            return True
-
-        await self._execute_with_retry(
-            "consul.deregister",
-            deregister_func,
-            correlation_id,
-        )
-
-        typed_payload = ModelConsulDeregisterPayload(
-            deregistered=True,
-            consul_service_id=service_id,
-        )
-        return self._build_response(typed_payload, correlation_id, input_envelope_id)
+            return None, new_state
 
     def describe(self) -> dict[str, JsonValue]:
         """Return handler metadata and capabilities.
@@ -1173,4 +673,4 @@ class ConsulHandler(
         }
 
 
-__all__: list[str] = ["ConsulHandler"]
+__all__: list[str] = ["ConsulHandler", "RetryContext"]

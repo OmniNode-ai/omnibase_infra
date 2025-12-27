@@ -26,6 +26,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.handlers.models.http import ModelHttpBodyContent
 from omnibase_infra.mixins import MixinEnvelopeExtraction
 
 if TYPE_CHECKING:
@@ -532,8 +533,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         self,
         method: str,
         headers: dict[str, str],
-        body: object,
-        pre_serialized: bytes | None,
+        body_content: ModelHttpBodyContent,
         ctx: ModelInfraErrorContext,
     ) -> tuple[bytes | str | None, dict[str, JsonValue] | None, dict[str, str]]:
         """Prepare request content for HTTP request.
@@ -544,8 +544,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         Args:
             method: HTTP method (GET, POST)
             headers: Request headers (will be copied, not mutated)
-            body: Request body (used only if pre_serialized is None)
-            pre_serialized: Pre-serialized JSON bytes for dict bodies
+            body_content: Model containing body and optional pre-serialized bytes
             ctx: Error context for exceptions
 
         Returns:
@@ -560,6 +559,9 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         request_content: bytes | str | None = None
         request_json: dict[str, JsonValue] | None = None
         request_headers = dict(headers)  # Copy to avoid mutating caller's headers
+
+        body = body_content.body
+        pre_serialized = body_content.pre_serialized
 
         if method != "POST" or body is None:
             return request_content, request_json, request_headers
@@ -636,8 +638,9 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         )
 
         # Prepare request content for POST
+        body_content = ModelHttpBodyContent(body=body, pre_serialized=pre_serialized)
         request_content, request_json, request_headers = self._prepare_request_content(
-            method, headers, body, pre_serialized, ctx
+            method, headers, body_content, ctx
         )
 
         try:

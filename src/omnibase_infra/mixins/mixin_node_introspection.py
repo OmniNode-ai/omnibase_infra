@@ -774,6 +774,20 @@ class MixinNodeIntrospection:
 
         Uses the configured exclude_prefixes set for efficient prefix matching.
 
+        Order-Dependent Matching:
+            This method uses ``any()`` with a generator expression, which
+            short-circuits on the first matching prefix. This means:
+
+            - **Performance**: Prefixes earlier in the set that match common
+              patterns will provide faster filtering. However, since frozenset
+              has no guaranteed iteration order, this is not controllable.
+            - **Correctness**: The result is deterministic regardless of order.
+              A method is skipped if ANY prefix matches, so iteration order
+              does not affect the outcome.
+
+            The default exclude prefixes are: ``_``, ``get_``, ``set_``,
+            ``initialize``, ``start_``, ``stop_``.
+
         Args:
             method_name: Name of the method to check
 
@@ -790,6 +804,25 @@ class MixinNodeIntrospection:
 
         Uses the configured operation_keywords set to identify methods
         that represent node operations.
+
+        Order-Dependent Matching:
+            This method uses ``any()`` with a generator expression, which
+            short-circuits on the first matching keyword. This means:
+
+            - **Performance**: Keywords earlier in the set that appear more
+              frequently in method names will provide faster matching. However,
+              since frozenset has no guaranteed iteration order, this is not
+              directly controllable.
+            - **Correctness**: The result is deterministic regardless of order.
+              A method is classified as an operation if ANY keyword is found
+              in its lowercase name, so iteration order does not affect the
+              classification outcome.
+
+            The default operation keywords are: ``execute``, ``handle``,
+            ``process``, ``run``, ``invoke``, ``call``.
+
+            Node-type-specific keywords are available via
+            ``NODE_TYPE_OPERATION_KEYWORDS`` for specialized filtering.
 
         Args:
             method_name: Name of the method to check
@@ -1680,8 +1713,10 @@ class MixinNodeIntrospection:
         request_data = json.loads(message.value.decode("utf-8"))
 
         # Check if request targets a specific node (early exit if not us)
+        # Note: Compare as strings since target_node_id from JSON is a string
+        # while _introspection_node_id is a UUID object
         target_node_id = request_data.get("target_node_id")
-        if target_node_id and target_node_id != self._introspection_node_id:
+        if target_node_id and str(target_node_id) != str(self._introspection_node_id):
             return
 
         # Parse correlation ID with graceful fallback
