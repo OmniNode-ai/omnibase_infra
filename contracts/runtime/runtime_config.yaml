@@ -35,9 +35,11 @@ contract_version: "1.0.0"
 name: "runtime_config"
 description: "Configuration for ONEX runtime kernel"
 # Topic configuration [ACTIVE - used by RuntimeHostProcess]
-input_topic: "requests"
-output_topic: "responses"
-group_id: "onex-runtime"
+# IMPORTANT: These values are overridden by ONEX_INPUT_TOPIC, ONEX_OUTPUT_TOPIC,
+# ONEX_GROUP_ID environment variables in E2E testing (docker-compose.e2e.yml)
+input_topic: "dev.onex.evt.node-introspection.v1"
+output_topic: "dev.onex.evt.registration-completed.v1"
+group_id: "onex-runtime-e2e"
 # Event bus configuration
 event_bus:
   # [RESERVED] type is not currently used - kernel always creates InMemoryEventBus

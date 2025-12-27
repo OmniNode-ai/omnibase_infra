@@ -53,6 +53,7 @@ See Also:
 """
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -63,6 +64,9 @@ from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
+
+if TYPE_CHECKING:
+    pass  # Future type imports if needed
 
 
 class ModelDispatchResult(BaseModel):
@@ -179,6 +183,14 @@ class ModelDispatchResult(BaseModel):
         default=0,
         description="Number of outputs produced by the dispatcher.",
         ge=0,
+    )
+    output_events: list[BaseModel] = Field(
+        default_factory=list,
+        description=(
+            "List of output events produced by the dispatcher that need to be "
+            "published to output_topic. These are raw Pydantic models that will "
+            "be wrapped in ModelEventEnvelope by the kernel before publishing."
+        ),
     )
 
     # ---- Error Information ----

@@ -57,12 +57,23 @@ import pytest
 from dotenv import load_dotenv
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
-# Load .env file from project root automatically
-# This allows tests to run without manually setting environment variables
-_project_root = Path(__file__).parent.parent.parent.parent.parent
-_env_file = _project_root / ".env"
-if _env_file.exists():
-    load_dotenv(_env_file)
+# Load environment configuration with priority:
+# 1. .env.docker in this directory (for Docker compose infrastructure)
+# 2. .env in project root (for remote infrastructure)
+# This allows easy switching between Docker and remote infrastructure
+_e2e_dir = Path(__file__).parent
+_project_root = _e2e_dir.parent.parent.parent.parent
+
+# Check for Docker-specific env file first (for docker-compose.e2e.yml)
+_docker_env_file = _e2e_dir / ".env.docker"
+_project_env_file = _project_root / ".env"
+
+if _docker_env_file.exists():
+    # Docker infrastructure mode - use localhost ports
+    load_dotenv(_docker_env_file, override=True)
+elif _project_env_file.exists():
+    # Remote infrastructure mode - use project .env
+    load_dotenv(_project_env_file)
 
 # Import infrastructure configuration
 from tests.infrastructure_config import (
@@ -71,6 +82,10 @@ from tests.infrastructure_config import (
     DEFAULT_POSTGRES_PORT,
     REMOTE_INFRA_HOST,
 )
+
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 
 if TYPE_CHECKING:
     import asyncpg
@@ -81,11 +96,45 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
     )
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeIntrospected,
+    )
     from omnibase_infra.projectors import (
         ProjectionReaderRegistration,
         ProjectorRegistration,
     )
     from omnibase_infra.services import TimeoutEmitter, TimeoutScanner
+
+
+# =============================================================================
+# Envelope Helper
+# =============================================================================
+
+
+def wrap_event_in_envelope(
+    event: ModelNodeIntrospectionEvent,
+) -> ModelEventEnvelope[ModelNodeIntrospectionEvent]:
+    """Wrap an event in a ModelEventEnvelope for Kafka publishing.
+
+    Events MUST be wrapped in envelopes on the wire. The envelope provides:
+    - correlation_id for tracing
+    - timestamp for ordering
+    - metadata for extensibility
+
+    This helper is shared across all E2E tests to ensure consistent
+    envelope formatting.
+
+    Args:
+        event: The introspection event to wrap
+
+    Returns:
+        ModelEventEnvelope containing the event as payload
+    """
+    return ModelEventEnvelope(
+        payload=event,
+        correlation_id=event.correlation_id,
+        envelope_timestamp=datetime.now(UTC),
+    )
 
 
 # =============================================================================
@@ -284,6 +333,25 @@ async def projection_reader(
     )
 
     return await get_projection_reader_from_container(wired_container)
+
+
+@pytest.fixture
+async def handler_node_introspected(
+    wired_container: ModelONEXContainer,
+) -> HandlerNodeIntrospected:
+    """Get HandlerNodeIntrospected from wired container.
+
+    Args:
+        wired_container: Container with handlers wired.
+
+    Returns:
+        HandlerNodeIntrospected for processing introspection events.
+    """
+    from omnibase_infra.runtime.container_wiring import (
+        get_handler_node_introspected_from_container,
+    )
+
+    return await get_handler_node_introspected_from_container(wired_container)
 
 
 # =============================================================================
@@ -584,12 +652,18 @@ async def introspectable_test_node(
             self.health_url = f"http://localhost:8080/{node_id}/health"
             self.api_url = f"http://localhost:8080/{node_id}/api"
 
+            # Get topic from environment or use docker-compose default
+            # The runtime expects: dev.onex.evt.node-introspection.v1 (from ONEX_INPUT_TOPIC)
+            introspection_topic = os.getenv(
+                "ONEX_INPUT_TOPIC", "dev.onex.evt.node-introspection.v1"
+            )
             config = ModelIntrospectionConfig(
                 node_id=node_id,
                 node_type=node_type,
                 event_bus=event_bus,
                 version=version,
                 cache_ttl=60.0,
+                introspection_topic=introspection_topic,
             )
             self.initialize_introspection(config)
 
@@ -828,6 +902,7 @@ __all__ = [
     # Container fixtures
     "wired_container",
     "projection_reader",
+    "handler_node_introspected",
     # Kafka fixtures
     "real_kafka_event_bus",
     # Consul fixtures

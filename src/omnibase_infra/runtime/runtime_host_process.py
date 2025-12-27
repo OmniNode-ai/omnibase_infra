@@ -207,7 +207,12 @@ class RuntimeHostProcess:
         # Topic configuration (config overrides constructor args)
         self._input_topic: str = str(config.get("input_topic", input_topic))
         self._output_topic: str = str(config.get("output_topic", output_topic))
-        self._group_id: str = str(config.get("group_id", DEFAULT_GROUP_ID))
+        # Note: ModelRuntimeConfig uses field name "consumer_group" with alias "group_id".
+        # When config.model_dump() is called, it outputs "consumer_group" by default.
+        # We check both keys for backwards compatibility with existing configs.
+        self._group_id: str = str(
+            config.get("consumer_group") or config.get("group_id") or DEFAULT_GROUP_ID
+        )
 
         # Health check configuration (from lifecycle subcontract pattern)
         # Default: 5.0 seconds, valid range: 1-60 seconds per ModelLifecycleSubcontract

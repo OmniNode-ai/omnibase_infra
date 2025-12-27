@@ -62,12 +62,17 @@ if TYPE_CHECKING:
     import asyncpg
     from omnibase_core.container import ModelONEXContainer
 
+    from omnibase_infra.handlers import ConsulHandler
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
     )
-    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.projectors import (
+        ProjectionReaderRegistration,
+        ProjectorRegistration,
+    )
+    from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
 logger = logging.getLogger(__name__)
 
@@ -671,6 +676,8 @@ async def wire_registration_handlers(
     container: ModelONEXContainer,
     pool: asyncpg.Pool,
     liveness_interval_seconds: int | None = None,
+    projector: "ProjectorRegistration | None" = None,
+    consul_handler: "ConsulHandler | None" = None,
 ) -> dict[str, list[str]]:
     """Register registration orchestrator handlers with the container.
 
@@ -688,6 +695,13 @@ async def wire_registration_handlers(
         pool: asyncpg connection pool for database access.
         liveness_interval_seconds: Liveness deadline interval for ack handler.
             If None, uses ONEX_LIVENESS_INTERVAL_SECONDS env var or default (60s).
+        projector: Optional ProjectorRegistration for persisting state transitions.
+            If provided, HandlerNodeIntrospected will persist projections to the
+            database. If None, the handler operates in read-only mode (useful for
+            testing or when projection persistence is handled elsewhere).
+        consul_handler: Optional ConsulHandler for dual registration with Consul.
+            If provided, HandlerNodeIntrospected will register nodes with Consul
+            for service discovery. If None, only PostgreSQL registration occurs.
 
     Returns:
         Summary dict with:
@@ -701,7 +715,9 @@ async def wire_registration_handlers(
         >>> import asyncpg
         >>> container = ModelONEXContainer()
         >>> pool = await asyncpg.create_pool(dsn)
-        >>> summary = await wire_registration_handlers(container, pool)
+        >>> projector = ProjectorRegistration(pool)
+        >>> await projector.initialize_schema()
+        >>> summary = await wire_registration_handlers(container, pool, projector=projector)
         >>> print(summary)
         {'services': ['ProjectionReaderRegistration', 'HandlerNodeIntrospected', ...]}
         >>> # Resolve handlers from container
@@ -715,7 +731,7 @@ async def wire_registration_handlers(
     from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_registration_acked import (
         get_liveness_interval_seconds,
     )
-    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.projectors import ProjectionReaderRegistration, ProjectorRegistration
 
     # Resolve the actual liveness interval (from param, env var, or default)
     resolved_liveness_interval = get_liveness_interval_seconds(
@@ -743,8 +759,28 @@ async def wire_registration_handlers(
             "Registered ProjectionReaderRegistration in container (global scope)"
         )
 
-        # 2. Register HandlerNodeIntrospected
-        handler_introspected = HandlerNodeIntrospected(projection_reader)
+        # 1.5. Register ProjectorRegistration if provided
+        if projector is not None:
+            await container.service_registry.register_instance(
+                interface=ProjectorRegistration,
+                instance=projector,
+                scope="global",
+                metadata={
+                    "description": "Registration projector for persisting state transitions",
+                    "version": str(SEMVER_DEFAULT),
+                },
+            )
+            services_registered.append("ProjectorRegistration")
+            logger.debug(
+                "Registered ProjectorRegistration in container (global scope)"
+            )
+
+        # 2. Register HandlerNodeIntrospected (with projector and consul_handler if available)
+        handler_introspected = HandlerNodeIntrospected(
+            projection_reader,
+            projector=projector,
+            consul_handler=consul_handler,
+        )
 
         await container.service_registry.register_instance(
             interface=HandlerNodeIntrospected,
@@ -753,6 +789,8 @@ async def wire_registration_handlers(
             metadata={
                 "description": "Handler for NodeIntrospectionEvent - registration trigger",
                 "version": str(SEMVER_DEFAULT),
+                "has_projector": projector is not None,
+                "has_consul_handler": consul_handler is not None,
             },
         )
 
@@ -1008,6 +1046,178 @@ async def get_handler_node_registration_acked_from_container(
         ) from e
 
 
+async def wire_registration_dispatchers(
+    container: ModelONEXContainer,
+    engine: MessageDispatchEngine,
+) -> dict[str, list[str]]:
+    """Wire registration dispatchers into MessageDispatchEngine.
+
+    Creates dispatcher adapters for the registration handlers and registers
+    them with the MessageDispatchEngine. This enables the engine to route
+    introspection events to the appropriate handlers.
+
+    Prerequisites:
+        - wire_registration_handlers() must be called first to register
+          the underlying handlers in the container.
+        - MessageDispatchEngine must not be frozen yet.
+
+    Args:
+        container: ONEX container with registered handlers.
+        engine: MessageDispatchEngine instance to register dispatchers with.
+
+    Returns:
+        Summary dict with:
+            - dispatchers: List of registered dispatcher IDs
+            - routes: List of registered route IDs
+
+    Raises:
+        RuntimeError: If handlers not registered or engine is frozen.
+
+    Example:
+        >>> from omnibase_core.container import ModelONEXContainer
+        >>> from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+        >>> import asyncpg
+        >>>
+        >>> container = ModelONEXContainer()
+        >>> pool = await asyncpg.create_pool(dsn)
+        >>> await wire_registration_handlers(container, pool)
+        >>>
+        >>> engine = MessageDispatchEngine()
+        >>> summary = await wire_registration_dispatchers(container, engine)
+        >>> print(summary)
+        {'dispatchers': [...], 'routes': [...]}
+        >>> engine.freeze()  # Must freeze after wiring
+    """
+    from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+    from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeIntrospected,
+        HandlerNodeRegistrationAcked,
+        HandlerRuntimeTick,
+    )
+    from omnibase_infra.runtime.dispatchers import (
+        DispatcherNodeIntrospected,
+        DispatcherNodeRegistrationAcked,
+        DispatcherRuntimeTick,
+    )
+
+    dispatchers_registered: list[str] = []
+    routes_registered: list[str] = []
+
+    try:
+        # 1. Resolve handlers from container
+        handler_introspected: HandlerNodeIntrospected = (
+            await container.service_registry.resolve_service(HandlerNodeIntrospected)
+        )
+        handler_runtime_tick: HandlerRuntimeTick = (
+            await container.service_registry.resolve_service(HandlerRuntimeTick)
+        )
+        handler_acked: HandlerNodeRegistrationAcked = (
+            await container.service_registry.resolve_service(
+                HandlerNodeRegistrationAcked
+            )
+        )
+
+        # 2. Create dispatcher adapters
+        dispatcher_introspected = DispatcherNodeIntrospected(handler_introspected)
+        dispatcher_runtime_tick = DispatcherRuntimeTick(handler_runtime_tick)
+        dispatcher_acked = DispatcherNodeRegistrationAcked(handler_acked)
+
+        # 3. Register dispatchers with engine
+        # Note: Using the function-based API rather than protocol-based API
+        # because MessageDispatchEngine.register_dispatcher() takes a callable
+
+        # 3a. Register DispatcherNodeIntrospected
+        engine.register_dispatcher(
+            dispatcher_id=dispatcher_introspected.dispatcher_id,
+            dispatcher=dispatcher_introspected.handle,
+            category=dispatcher_introspected.category,
+            message_types=dispatcher_introspected.message_types,
+            node_kind=dispatcher_introspected.node_kind,
+        )
+        dispatchers_registered.append(dispatcher_introspected.dispatcher_id)
+
+        # 3b. Register DispatcherRuntimeTick
+        engine.register_dispatcher(
+            dispatcher_id=dispatcher_runtime_tick.dispatcher_id,
+            dispatcher=dispatcher_runtime_tick.handle,
+            category=dispatcher_runtime_tick.category,
+            message_types=dispatcher_runtime_tick.message_types,
+            node_kind=dispatcher_runtime_tick.node_kind,
+        )
+        dispatchers_registered.append(dispatcher_runtime_tick.dispatcher_id)
+
+        # 3c. Register DispatcherNodeRegistrationAcked
+        engine.register_dispatcher(
+            dispatcher_id=dispatcher_acked.dispatcher_id,
+            dispatcher=dispatcher_acked.handle,
+            category=dispatcher_acked.category,
+            message_types=dispatcher_acked.message_types,
+            node_kind=dispatcher_acked.node_kind,
+        )
+        dispatchers_registered.append(dispatcher_acked.dispatcher_id)
+
+        # 4. Register routes for topic-based routing
+        # 4a. Route for introspection events
+        route_introspection = ModelDispatchRoute(
+            route_id="route.registration.node-introspection",
+            topic_pattern="*.node.introspection.events.*",
+            message_category=EnumMessageCategory.EVENT,
+            dispatcher_id=dispatcher_introspected.dispatcher_id,
+            message_type="ModelNodeIntrospectionEvent",
+        )
+        engine.register_route(route_introspection)
+        routes_registered.append(route_introspection.route_id)
+
+        # 4b. Route for runtime tick events
+        route_runtime_tick = ModelDispatchRoute(
+            route_id="route.registration.runtime-tick",
+            topic_pattern="*.runtime.tick.events.*",
+            message_category=EnumMessageCategory.EVENT,
+            dispatcher_id=dispatcher_runtime_tick.dispatcher_id,
+            message_type="ModelRuntimeTick",
+        )
+        engine.register_route(route_runtime_tick)
+        routes_registered.append(route_runtime_tick.route_id)
+
+        # 4c. Route for registration ack commands
+        route_acked = ModelDispatchRoute(
+            route_id="route.registration.node-registration-acked",
+            topic_pattern="*.node.registration.commands.*",
+            message_category=EnumMessageCategory.COMMAND,
+            dispatcher_id=dispatcher_acked.dispatcher_id,
+            message_type="ModelNodeRegistrationAcked",
+        )
+        engine.register_route(route_acked)
+        routes_registered.append(route_acked.route_id)
+
+        logger.info(
+            "Registration dispatchers wired successfully",
+            extra={
+                "dispatcher_count": len(dispatchers_registered),
+                "dispatchers": dispatchers_registered,
+                "route_count": len(routes_registered),
+                "routes": routes_registered,
+            },
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to wire registration dispatchers",
+            extra={"error": str(e), "error_type": type(e).__name__},
+        )
+        raise RuntimeError(
+            f"Failed to wire registration dispatchers: {e}\n"
+            f"Fix: Ensure wire_registration_handlers(container, pool) "
+            f"was called first."
+        ) from e
+
+    return {
+        "dispatchers": dispatchers_registered,
+        "routes": routes_registered,
+    }
+
+
 __all__: list[str] = [
     "wire_infrastructure_services",
     "get_policy_registry_from_container",
@@ -1021,4 +1231,6 @@ __all__: list[str] = [
     "get_handler_node_introspected_from_container",
     "get_handler_runtime_tick_from_container",
     "get_handler_node_registration_acked_from_container",
+    # Registration dispatchers (OMN-892)
+    "wire_registration_dispatchers",
 ]

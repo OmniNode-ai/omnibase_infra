@@ -40,20 +40,26 @@ Note:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
 import sys
 import time
+from datetime import UTC, datetime
 from importlib.metadata import version as get_package_version
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, cast
+from uuid import uuid4
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
 
+import asyncpg
 import yaml
 from omnibase_core.container import ModelONEXContainer
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -63,7 +69,17 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
-from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.models.registration.model_node_introspection_event import (
+    ModelNodeIntrospectionEvent,
+)
+from omnibase_infra.projectors import ProjectorRegistration
+from omnibase_infra.runtime.container_wiring import (
+    wire_infrastructure_services,
+    wire_registration_handlers,
+)
+from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
 from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT, HealthServer
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
@@ -319,9 +335,11 @@ async def bootstrap() -> int:
         Health endpoint: http://0.0.0.0:8085/health
         ============================================================
     """
-    # Initialize runtime and health server to None for cleanup guard
+    # Initialize resources to None for cleanup guard in finally block
     runtime: RuntimeHostProcess | None = None
     health_server: HealthServer | None = None
+    postgres_pool: asyncpg.Pool | None = None
+    introspection_unsubscribe: Callable[[], Awaitable[None]] | None = None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
@@ -349,17 +367,67 @@ async def bootstrap() -> int:
         )
 
         # 3. Create event bus
-        # MVP limitation: Always creates InMemoryEventBus regardless of config.event_bus.type.
-        # The config model supports "kafka" as a type value for future compatibility,
-        # but Kafka event bus implementation is not yet available. When Kafka support
-        # is added, this section should dispatch based on config.event_bus.type.
+        # Dispatch based on configuration or environment variable:
+        # - If KAFKA_BOOTSTRAP_SERVERS env var is set, use KafkaEventBus
+        # - If config.event_bus.type == "kafka", use KafkaEventBus
+        # - Otherwise, use InMemoryEventBus for local development/testing
         # Environment override takes precedence over config for environment field.
         environment = os.getenv("ONEX_ENVIRONMENT") or config.event_bus.environment
+        kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+        use_kafka = kafka_bootstrap_servers or config.event_bus.type == "kafka"
+
         event_bus_start_time = time.time()
-        event_bus = InMemoryEventBus(
-            environment=environment,
-            group=config.consumer_group,
-        )
+        event_bus: InMemoryEventBus | KafkaEventBus
+        event_bus_type: str
+
+        if use_kafka:
+            # Use KafkaEventBus for production/integration testing
+            # KafkaEventBus.default() picks up KAFKA_BOOTSTRAP_SERVERS from environment
+            event_bus = KafkaEventBus(
+                bootstrap_servers=kafka_bootstrap_servers or "localhost:9092",
+                environment=environment,
+                group=config.consumer_group,
+                circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
+            )
+            event_bus_type = "kafka"
+
+            # Start KafkaEventBus to connect to Kafka/Redpanda and enable consumers
+            # Without this, the event bus cannot publish or consume messages
+            try:
+                await event_bus.start()
+                logger.debug(
+                    "KafkaEventBus started successfully (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception as e:
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="start_event_bus",
+                    correlation_id=correlation_id,
+                    target_name=kafka_bootstrap_servers or "localhost:9092",
+                )
+                raise RuntimeHostError(
+                    f"Failed to start KafkaEventBus: {e}",
+                    context=context,
+                ) from e
+
+            logger.info(
+                "Using KafkaEventBus (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "bootstrap_servers": kafka_bootstrap_servers or "localhost:9092",
+                    "environment": environment,
+                    "consumer_group": config.consumer_group,
+                },
+            )
+        else:
+            # Use InMemoryEventBus for local development/testing
+            event_bus = InMemoryEventBus(
+                environment=environment,
+                group=config.consumer_group,
+            )
+            event_bus_type = "inmemory"
+
         event_bus_duration = time.time() - event_bus_start_time
         logger.debug(
             "Event bus created in %.3fs (correlation_id=%s)",
@@ -367,6 +435,7 @@ async def bootstrap() -> int:
             correlation_id,
             extra={
                 "duration_seconds": event_bus_duration,
+                "event_bus_type": event_bus_type,
                 "environment": environment,
                 "consumer_group": config.consumer_group,
             },
@@ -386,6 +455,159 @@ async def bootstrap() -> int:
                 "services": wire_summary["services"],
             },
         )
+
+        # 4.5. Create PostgreSQL pool for projections
+        # Only create if POSTGRES_HOST is set (indicates registration should be enabled)
+        projector: ProjectorRegistration | None = None
+        introspection_dispatcher: DispatcherNodeIntrospected | None = None
+        consul_handler = None  # Will be initialized if Consul is configured
+
+        postgres_host = os.getenv("POSTGRES_HOST")
+        if postgres_host:
+            postgres_pool_start_time = time.time()
+            try:
+                postgres_dsn = (
+                    f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:"
+                    f"{os.getenv('POSTGRES_PASSWORD', '')}@"
+                    f"{postgres_host}:"
+                    f"{os.getenv('POSTGRES_PORT', '5432')}/"
+                    f"{os.getenv('POSTGRES_DATABASE', 'omninode_bridge')}"
+                )
+                postgres_pool = await asyncpg.create_pool(
+                    postgres_dsn,
+                    min_size=2,
+                    max_size=10,
+                )
+                postgres_pool_duration = time.time() - postgres_pool_start_time
+                logger.info(
+                    "PostgreSQL pool created in %.3fs (correlation_id=%s)",
+                    postgres_pool_duration,
+                    correlation_id,
+                    extra={
+                        "host": postgres_host,
+                        "port": os.getenv("POSTGRES_PORT", "5432"),
+                        "database": os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
+                    },
+                )
+
+                # 4.6. Create ProjectorRegistration and initialize schema
+                projector = ProjectorRegistration(postgres_pool)
+                await projector.initialize_schema(correlation_id=correlation_id)
+                logger.info(
+                    "ProjectorRegistration schema initialized (correlation_id=%s)",
+                    correlation_id,
+                )
+
+                # 4.6.5. Initialize ConsulHandler if Consul is configured
+                # CONSUL_HOST determines whether to enable Consul registration
+                consul_host = os.getenv("CONSUL_HOST")
+                if consul_host:
+                    consul_port = int(os.getenv("CONSUL_PORT", "8500"))
+                    try:
+                        from omnibase_infra.handlers import ConsulHandler
+
+                        consul_handler = ConsulHandler(
+                            host=consul_host,
+                            port=consul_port,
+                        )
+                        await consul_handler.initialize()
+                        logger.info(
+                            "ConsulHandler initialized for dual registration (correlation_id=%s)",
+                            correlation_id,
+                            extra={
+                                "consul_host": consul_host,
+                                "consul_port": consul_port,
+                            },
+                        )
+                    except Exception as consul_error:
+                        # Log warning but continue without Consul (PostgreSQL is source of truth)
+                        logger.warning(
+                            "Failed to initialize ConsulHandler, proceeding without Consul: %s (correlation_id=%s)",
+                            consul_error,
+                            correlation_id,
+                            extra={
+                                "error_type": type(consul_error).__name__,
+                            },
+                        )
+                        consul_handler = None
+                else:
+                    logger.debug(
+                        "CONSUL_HOST not set, Consul registration disabled (correlation_id=%s)",
+                        correlation_id,
+                    )
+
+                # 4.7. Wire registration handlers with projector and consul_handler
+                registration_summary = await wire_registration_handlers(
+                    container,
+                    postgres_pool,
+                    projector=projector,
+                    consul_handler=consul_handler,
+                )
+                logger.info(
+                    "Registration handlers wired (correlation_id=%s)",
+                    correlation_id,
+                    extra={
+                        "services": registration_summary["services"],
+                    },
+                )
+
+                # 4.8. Create introspection dispatcher for routing events
+                from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+                    HandlerNodeIntrospected,
+                )
+
+                logger.debug(
+                    "Resolving HandlerNodeIntrospected from container (correlation_id=%s)",
+                    correlation_id,
+                )
+                handler_introspected: HandlerNodeIntrospected = (
+                    await container.service_registry.resolve_service(
+                        HandlerNodeIntrospected
+                    )
+                )
+                logger.debug(
+                    "HandlerNodeIntrospected resolved successfully (correlation_id=%s)",
+                    correlation_id,
+                    extra={
+                        "handler_class": handler_introspected.__class__.__name__,
+                    },
+                )
+
+                introspection_dispatcher = DispatcherNodeIntrospected(
+                    handler_introspected
+                )
+                logger.info(
+                    "Introspection dispatcher created and wired (correlation_id=%s)",
+                    correlation_id,
+                    extra={
+                        "dispatcher_class": introspection_dispatcher.__class__.__name__,
+                        "handler_class": handler_introspected.__class__.__name__,
+                    },
+                )
+
+            except Exception as pool_error:
+                # Log warning but continue without registration support
+                logger.warning(
+                    "Failed to initialize PostgreSQL pool for registration: %s (correlation_id=%s)",
+                    pool_error,
+                    correlation_id,
+                    extra={
+                        "error_type": type(pool_error).__name__,
+                    },
+                )
+                if postgres_pool is not None:
+                    try:
+                        await postgres_pool.close()
+                    except Exception:
+                        pass
+                    postgres_pool = None
+                projector = None
+                introspection_dispatcher = None
+        else:
+            logger.debug(
+                "POSTGRES_HOST not set, skipping registration handler wiring (correlation_id=%s)",
+                correlation_id,
+            )
 
         # 5. Resolve ProtocolBindingRegistry from container
         from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
@@ -521,17 +743,312 @@ async def bootstrap() -> int:
             },
         )
 
+        # 9.5. Start introspection event consumer if dispatcher is available
+        # This consumer subscribes to the input topic and routes introspection
+        # events to the HandlerNodeIntrospected via DispatcherNodeIntrospected.
+        # Unlike RuntimeHostProcess which routes based on handler_type field,
+        # this consumer directly parses introspection events from JSON.
+        if introspection_dispatcher is not None and isinstance(event_bus, KafkaEventBus):
+            # Capture dispatcher in closure for type safety
+            captured_dispatcher = introspection_dispatcher
+
+            async def handle_introspection_message(msg: ModelEventMessage) -> None:
+                """Handle incoming introspection event message.
+
+                This callback is invoked for each message received on the input topic.
+                It parses the raw JSON payload as ModelNodeIntrospectionEvent and routes
+                it to the introspection dispatcher.
+
+                Args:
+                    msg: The event message containing raw bytes in .value field.
+                """
+                # Generate callback correlation_id for this message
+                callback_correlation_id = uuid4()
+                callback_start_time = time.time()
+
+                logger.debug(
+                    "Introspection message callback invoked (correlation_id=%s)",
+                    callback_correlation_id,
+                    extra={
+                        "message_offset": getattr(msg, "offset", None),
+                        "message_partition": getattr(msg, "partition", None),
+                        "message_topic": getattr(msg, "topic", None),
+                    },
+                )
+
+                try:
+                    # ModelEventMessage has .value as bytes
+                    if msg.value is None:
+                        logger.debug(
+                            "Message value is None, skipping (correlation_id=%s)",
+                            callback_correlation_id,
+                        )
+                        return
+
+                    # Parse raw bytes as JSON
+                    if isinstance(msg.value, bytes):
+                        logger.debug(
+                            "Parsing message value as bytes (correlation_id=%s)",
+                            callback_correlation_id,
+                            extra={"value_length": len(msg.value)},
+                        )
+                        payload_dict = json.loads(msg.value.decode("utf-8"))
+                    elif isinstance(msg.value, str):
+                        logger.debug(
+                            "Parsing message value as string (correlation_id=%s)",
+                            callback_correlation_id,
+                            extra={"value_length": len(msg.value)},
+                        )
+                        payload_dict = json.loads(msg.value)
+                    elif isinstance(msg.value, dict):
+                        logger.debug(
+                            "Message value already dict (correlation_id=%s)",
+                            callback_correlation_id,
+                        )
+                        payload_dict = msg.value
+                    else:
+                        logger.debug(
+                            "Unexpected message value type: %s (correlation_id=%s)",
+                            type(msg.value).__name__,
+                            callback_correlation_id,
+                        )
+                        return
+
+                    # Parse as ModelEventEnvelope containing ModelNodeIntrospectionEvent
+                    # Events MUST be wrapped in envelopes on the wire
+                    logger.debug(
+                        "Validating payload as ModelEventEnvelope (correlation_id=%s)",
+                        callback_correlation_id,
+                    )
+
+                    # First, parse as envelope to extract payload and metadata
+                    try:
+                        raw_envelope = ModelEventEnvelope[dict].model_validate(
+                            payload_dict
+                        )
+                    except Exception as envelope_error:
+                        # For backwards compatibility, try parsing as raw event
+                        logger.warning(
+                            "Failed to parse as envelope, trying raw event format "
+                            "(correlation_id=%s): %s",
+                            callback_correlation_id,
+                            str(envelope_error),
+                        )
+                        # Wrap raw event in envelope for processing
+                        introspection_event = ModelNodeIntrospectionEvent.model_validate(
+                            payload_dict
+                        )
+                        event_envelope = ModelEventEnvelope(
+                            payload=introspection_event,
+                            correlation_id=introspection_event.correlation_id or uuid4(),
+                            envelope_timestamp=datetime.now(UTC),
+                        )
+                        logger.info(
+                            "Raw event wrapped in envelope (correlation_id=%s)",
+                            callback_correlation_id,
+                            extra={
+                                "node_id": str(introspection_event.node_id),
+                                "node_type": introspection_event.node_type,
+                            },
+                        )
+                    else:
+                        # Validate payload as ModelNodeIntrospectionEvent
+                        introspection_event = ModelNodeIntrospectionEvent.model_validate(
+                            raw_envelope.payload
+                        )
+                        # Create typed envelope with validated payload
+                        event_envelope = ModelEventEnvelope[ModelNodeIntrospectionEvent](
+                            payload=introspection_event,
+                            envelope_id=raw_envelope.envelope_id,
+                            envelope_timestamp=raw_envelope.envelope_timestamp,
+                            correlation_id=raw_envelope.correlation_id
+                            or introspection_event.correlation_id
+                            or uuid4(),
+                            source_tool=raw_envelope.source_tool,
+                            target_tool=raw_envelope.target_tool,
+                            metadata=raw_envelope.metadata,
+                            priority=raw_envelope.priority,
+                            timeout_seconds=raw_envelope.timeout_seconds,
+                            trace_id=raw_envelope.trace_id,
+                            span_id=raw_envelope.span_id,
+                        )
+                        logger.info(
+                            "Envelope parsed successfully (correlation_id=%s)",
+                            callback_correlation_id,
+                            extra={
+                                "envelope_id": str(event_envelope.envelope_id),
+                                "node_id": str(introspection_event.node_id),
+                                "node_type": introspection_event.node_type,
+                                "event_version": introspection_event.node_version,
+                            },
+                        )
+
+                    # Route to dispatcher
+                    logger.info(
+                        "Routing to introspection dispatcher (correlation_id=%s)",
+                        callback_correlation_id,
+                        extra={
+                            "envelope_correlation_id": str(event_envelope.correlation_id),
+                            "node_id": introspection_event.node_id,
+                        },
+                    )
+                    dispatcher_start_time = time.time()
+                    result = await captured_dispatcher.handle(event_envelope)
+                    dispatcher_duration = time.time() - dispatcher_start_time
+
+                    if result.is_successful():
+                        logger.info(
+                            "Introspection event processed successfully: node_id=%s in %.3fs (correlation_id=%s)",
+                            introspection_event.node_id,
+                            dispatcher_duration,
+                            callback_correlation_id,
+                            extra={
+                                "envelope_correlation_id": str(event_envelope.correlation_id),
+                                "dispatcher_duration_seconds": dispatcher_duration,
+                                "node_id": introspection_event.node_id,
+                                "node_type": introspection_event.node_type,
+                            },
+                        )
+
+                        # Publish output events to output_topic
+                        if result.output_events:
+                            for output_event in result.output_events:
+                                # Wrap output event in envelope
+                                output_envelope = ModelEventEnvelope(
+                                    payload=output_event,
+                                    correlation_id=event_envelope.correlation_id,
+                                    envelope_timestamp=datetime.now(UTC),
+                                )
+
+                                # Publish to output topic
+                                await event_bus.publish_envelope(
+                                    envelope=output_envelope,
+                                    topic=config.output_topic,
+                                )
+
+                                logger.info(
+                                    "Published output event to %s (correlation_id=%s)",
+                                    config.output_topic,
+                                    callback_correlation_id,
+                                    extra={
+                                        "output_event_type": type(output_event).__name__,
+                                        "envelope_id": str(output_envelope.envelope_id),
+                                        "node_id": str(introspection_event.node_id),
+                                    },
+                                )
+
+                            logger.debug(
+                                "Published %d output events to %s (correlation_id=%s)",
+                                len(result.output_events),
+                                config.output_topic,
+                                callback_correlation_id,
+                            )
+                    else:
+                        logger.warning(
+                            "Introspection event processing failed: %s (correlation_id=%s)",
+                            result.error_message,
+                            callback_correlation_id,
+                            extra={
+                                "envelope_correlation_id": str(event_envelope.correlation_id),
+                                "error_message": result.error_message,
+                                "node_id": introspection_event.node_id,
+                                "dispatcher_duration_seconds": dispatcher_duration,
+                            },
+                        )
+
+                except ValidationError as validation_error:
+                    # Not an introspection event - skip silently
+                    # (other message types on the topic are handled by RuntimeHostProcess)
+                    logger.debug(
+                        "Message is not a valid introspection event, skipping (correlation_id=%s)",
+                        callback_correlation_id,
+                        extra={
+                            "validation_error_count": validation_error.error_count(),
+                        },
+                    )
+
+                except json.JSONDecodeError as json_error:
+                    logger.warning(
+                        "Failed to decode JSON from message: %s (correlation_id=%s)",
+                        json_error,
+                        callback_correlation_id,
+                        extra={
+                            "error_type": type(json_error).__name__,
+                            "error_position": getattr(json_error, "pos", None),
+                        },
+                    )
+
+                except Exception as msg_error:
+                    logger.error(
+                        "Failed to process introspection message: %s (correlation_id=%s)",
+                        msg_error,
+                        callback_correlation_id,
+                        extra={
+                            "error_type": type(msg_error).__name__,
+                        },
+                        exc_info=True,
+                    )
+
+                finally:
+                    callback_duration = time.time() - callback_start_time
+                    logger.debug(
+                        "Introspection message callback completed in %.3fs (correlation_id=%s)",
+                        callback_duration,
+                        callback_correlation_id,
+                        extra={
+                            "callback_duration_seconds": callback_duration,
+                        },
+                    )
+
+            # Subscribe with callback - returns unsubscribe function
+            subscribe_start_time = time.time()
+            logger.info(
+                "Subscribing to introspection events on Kafka (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "topic": config.input_topic,
+                    "consumer_group": f"{config.consumer_group}-introspection",
+                    "event_bus_type": "kafka",
+                },
+            )
+
+            introspection_unsubscribe = await event_bus.subscribe(
+                topic=config.input_topic,
+                group_id=f"{config.consumer_group}-introspection",
+                on_message=handle_introspection_message,
+            )
+            subscribe_duration = time.time() - subscribe_start_time
+
+            logger.info(
+                "Introspection event consumer started successfully in %.3fs (correlation_id=%s)",
+                subscribe_duration,
+                correlation_id,
+                extra={
+                    "topic": config.input_topic,
+                    "consumer_group": f"{config.consumer_group}-introspection",
+                    "subscribe_duration_seconds": subscribe_duration,
+                },
+            )
+
         # Calculate total bootstrap time
         bootstrap_duration = time.time() - bootstrap_start_time
 
         # Display startup banner with key configuration
+        if introspection_dispatcher is not None:
+            if consul_handler is not None:
+                registration_status = "enabled (PostgreSQL + Consul)"
+            else:
+                registration_status = "enabled (PostgreSQL only)"
+        else:
+            registration_status = "disabled"
         banner_lines = [
             "=" * 60,
             f"ONEX Runtime Kernel v{KERNEL_VERSION}",
             f"Environment: {environment}",
             f"Contracts: {contracts_dir}",
-            f"Event Bus: {config.event_bus.type} (group: {config.consumer_group})",
+            f"Event Bus: {event_bus_type} (group: {config.consumer_group})",
             f"Topics: {config.input_topic} → {config.output_topic}",
+            f"Registration: {registration_status}",
             f"Health endpoint: http://0.0.0.0:{http_port}/health",
             f"Bootstrap time: {bootstrap_duration:.3f}s",
             f"Correlation ID: {correlation_id}",
@@ -566,7 +1083,23 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
-        # Stop health server first (fast, non-blocking)
+        # Stop introspection consumer first (fast)
+        if introspection_unsubscribe is not None:
+            try:
+                await introspection_unsubscribe()
+                logger.debug(
+                    "Introspection consumer stopped (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception as consumer_stop_error:
+                logger.warning(
+                    "Failed to stop introspection consumer: %s (correlation_id=%s)",
+                    consumer_stop_error,
+                    correlation_id,
+                )
+            introspection_unsubscribe = None
+
+        # Stop health server (fast, non-blocking)
         if health_server is not None:
             try:
                 health_stop_start_time = time.time()
@@ -611,6 +1144,25 @@ async def bootstrap() -> int:
                 correlation_id,
             )
         runtime = None  # Mark as stopped to prevent double-stop in finally
+
+        # Close PostgreSQL pool
+        if postgres_pool is not None:
+            try:
+                pool_close_start_time = time.time()
+                await postgres_pool.close()
+                pool_close_duration = time.time() - pool_close_start_time
+                logger.debug(
+                    "PostgreSQL pool closed in %.3fs (correlation_id=%s)",
+                    pool_close_duration,
+                    correlation_id,
+                )
+            except Exception as pool_close_error:
+                logger.warning(
+                    "Failed to close PostgreSQL pool: %s (correlation_id=%s)",
+                    pool_close_error,
+                    correlation_id,
+                )
+            postgres_pool = None
 
         shutdown_duration = time.time() - shutdown_start_time
         logger.info(
@@ -661,7 +1213,19 @@ async def bootstrap() -> int:
         return 1
 
     finally:
-        # Guard cleanup - stop health server and runtime if not already stopped
+        # Guard cleanup - stop all resources if not already stopped
+        # Order: introspection consumer -> health server -> runtime -> pool
+
+        if introspection_unsubscribe is not None:
+            try:
+                await introspection_unsubscribe()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Failed to stop introspection consumer during cleanup: %s (correlation_id=%s)",
+                    cleanup_error,
+                    correlation_id,
+                )
+
         if health_server is not None:
             try:
                 await health_server.stop()
@@ -679,6 +1243,16 @@ async def bootstrap() -> int:
                 # Log cleanup failures with context instead of suppressing them
                 logger.warning(
                     "Failed to stop runtime during cleanup: %s (correlation_id=%s)",
+                    cleanup_error,
+                    correlation_id,
+                )
+
+        if postgres_pool is not None:
+            try:
+                await postgres_pool.close()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Failed to close PostgreSQL pool during cleanup: %s (correlation_id=%s)",
                     cleanup_error,
                     correlation_id,
                 )

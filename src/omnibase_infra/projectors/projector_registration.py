@@ -843,5 +843,183 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                 context=ctx,
             ) from e
 
+    async def persist_state_transition(
+        self,
+        entity_id: UUID,
+        domain: str,
+        new_state: "EnumRegistrationState",
+        node_type: str,
+        node_version: str,
+        capabilities: "ModelNodeCapabilities",
+        event_id: UUID,
+        now: datetime,
+        ack_deadline: datetime | None = None,
+        liveness_deadline: datetime | None = None,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Persist a state transition for a registration entity.
+
+        This is a simplified method for state transitions that creates or updates
+        a projection without the complex sequence checking of persist(). It is
+        intended for use by handlers when they emit state-changing events.
+
+        The method uses INSERT ON CONFLICT DO UPDATE to atomically create or
+        update the projection. Unlike persist(), it does not check sequence
+        ordering - it simply overwrites with the new state.
+
+        Use Cases:
+            - Initial registration (PENDING_REGISTRATION) when a new node introspects
+            - State transitions triggered by handler processing
+            - Re-registration from terminal states (LIVENESS_EXPIRED, REJECTED)
+
+        For full projection persistence with ordering guarantees (e.g., during
+        event replay), use persist() instead.
+
+        Args:
+            entity_id: Node UUID (partition key)
+            domain: Domain namespace (default: "registration")
+            new_state: Target FSM state for the transition
+            node_type: ONEX node type (effect, compute, reducer, orchestrator)
+            node_version: Semantic version of the node
+            capabilities: Node capabilities snapshot
+            event_id: ID of the event triggering this transition
+            now: Current timestamp (injected for consistency)
+            ack_deadline: Optional deadline for acknowledgment
+            liveness_deadline: Optional deadline for heartbeat
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            True if the transition was persisted successfully
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If operation times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> await projector.persist_state_transition(
+            ...     entity_id=node_id,
+            ...     domain="registration",
+            ...     new_state=EnumRegistrationState.PENDING_REGISTRATION,
+            ...     node_type="effect",
+            ...     node_version="1.0.0",
+            ...     capabilities=ModelNodeCapabilities(),
+            ...     event_id=correlation_id,
+            ...     now=datetime.now(UTC),
+            ... )
+        """
+        from omnibase_infra.enums import EnumRegistrationState
+        from omnibase_infra.models.registration.model_node_capabilities import (
+            ModelNodeCapabilities,
+        )
+
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="persist_state_transition",
+            target_name="projector.registration",
+            correlation_id=corr_id,
+        )
+
+        # Check circuit breaker
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("persist_state_transition", corr_id)
+
+        # Upsert query for state transition
+        # Uses INSERT ON CONFLICT DO UPDATE to atomically create or update
+        upsert_sql = """
+            INSERT INTO registration_projections (
+                entity_id, domain, current_state, node_type, node_version,
+                capabilities, ack_deadline, liveness_deadline,
+                last_applied_event_id, last_applied_offset,
+                registered_at, updated_at, correlation_id
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, 0, $10, $10, $11
+            )
+            ON CONFLICT (entity_id, domain) DO UPDATE SET
+                current_state = EXCLUDED.current_state,
+                node_type = EXCLUDED.node_type,
+                node_version = EXCLUDED.node_version,
+                capabilities = EXCLUDED.capabilities,
+                ack_deadline = EXCLUDED.ack_deadline,
+                liveness_deadline = EXCLUDED.liveness_deadline,
+                last_applied_event_id = EXCLUDED.last_applied_event_id,
+                updated_at = EXCLUDED.updated_at,
+                correlation_id = EXCLUDED.correlation_id
+            RETURNING entity_id
+        """
+
+        # Serialize capabilities to JSON for JSONB column
+        capabilities_json = capabilities.model_dump_json()
+
+        params = (
+            entity_id,
+            domain,
+            new_state.value,  # Convert enum to string
+            node_type,
+            node_version,
+            capabilities_json,
+            ack_deadline,
+            liveness_deadline,
+            event_id,
+            now,
+            corr_id,
+        )
+
+        try:
+            async with self._pool.acquire() as conn:
+                result = await conn.fetchrow(upsert_sql, *params)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            if result:
+                logger.debug(
+                    "State transition persisted",
+                    extra={
+                        "entity_id": str(entity_id),
+                        "domain": domain,
+                        "new_state": new_state.value,
+                        "event_id": str(event_id),
+                        "correlation_id": str(corr_id),
+                    },
+                )
+                return True
+
+            # Should not reach here since we always RETURNING, but handle it
+            logger.warning(
+                "State transition upsert returned no result",
+                extra={
+                    "entity_id": str(entity_id),
+                    "domain": domain,
+                    "correlation_id": str(corr_id),
+                },
+            )
+            return False
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("persist_state_transition", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for state transition",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("persist_state_transition", corr_id)
+            raise InfraTimeoutError(
+                "State transition timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("persist_state_transition", corr_id)
+            raise RuntimeHostError(
+                f"Failed to persist state transition: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
 
 __all__: list[str] = ["ProjectorRegistration"]

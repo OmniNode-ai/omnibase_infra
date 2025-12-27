@@ -344,6 +344,8 @@ class TestBootstrap:
     ) -> None:
         """Test that bootstrap creates event bus with correct environment."""
         monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
+        # Ensure InMemoryEventBus is used by unsetting KAFKA_BOOTSTRAP_SERVERS
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
         with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
@@ -354,6 +356,39 @@ class TestBootstrap:
         # Verify event bus was created with environment
         mock_event_bus.assert_called_once()
         call_kwargs = mock_event_bus.call_args[1]
+        assert call_kwargs["environment"] == "test-env"
+
+    async def test_bootstrap_creates_kafka_event_bus_when_configured(
+        self,
+        mock_runtime_host: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that bootstrap creates KafkaEventBus when KAFKA_BOOTSTRAP_SERVERS is set."""
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+
+        with (
+            patch("omnibase_infra.runtime.kernel.KafkaEventBus") as mock_kafka_bus,
+            patch("omnibase_infra.runtime.kernel.InMemoryEventBus") as mock_inmemory_bus,
+            patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event,
+        ):
+            mock_kafka_instance = MagicMock()
+            mock_kafka_bus.return_value = mock_kafka_instance
+
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            await bootstrap()
+
+        # Verify KafkaEventBus was created, not InMemoryEventBus
+        mock_kafka_bus.assert_called_once()
+        mock_inmemory_bus.assert_not_called()
+
+        # Verify correct parameters were passed
+        call_kwargs = mock_kafka_bus.call_args[1]
+        assert call_kwargs["bootstrap_servers"] == "kafka:9092"
         assert call_kwargs["environment"] == "test-env"
 
     async def test_bootstrap_uses_contracts_dir_from_env(

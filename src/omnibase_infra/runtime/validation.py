@@ -43,9 +43,10 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
 
-# Topic name pattern: alphanumeric, underscores, and hyphens only
-# This matches Kafka/Redpanda topic naming conventions
-TOPIC_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+# Topic name pattern: alphanumeric, underscores, hyphens, and periods
+# This matches Kafka/Redpanda topic naming conventions and ONEX naming
+# (e.g., "dev.onex.evt.node-introspection.v1")
+TOPIC_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 # Valid event bus types (matches ModelEventBusConfig.type Literal)
 VALID_EVENT_BUS_TYPES = frozenset({"inmemory", "kafka"})
@@ -65,9 +66,9 @@ def validate_runtime_config(
     This is a pre-validation step before Pydantic model validation.
 
     Validation Rules:
-        - input_topic: Must be string matching ^[a-zA-Z0-9_-]+$
-        - output_topic: Must be string matching ^[a-zA-Z0-9_-]+$
-        - consumer_group/group_id: Must be string matching ^[a-zA-Z0-9_-]+$
+        - input_topic: Must be string matching ^[a-zA-Z0-9._-]+$
+        - output_topic: Must be string matching ^[a-zA-Z0-9._-]+$
+        - consumer_group/group_id: Must be string matching ^[a-zA-Z0-9._-]+$
         - event_bus.type: Must be "inmemory" or "kafka"
         - shutdown.grace_period_seconds: Must be integer 0-300
 
@@ -105,7 +106,7 @@ def validate_runtime_config(
                 errors.append(f"{field} must be a string, got {type(value).__name__}")
             elif not TOPIC_NAME_PATTERN.match(value):
                 errors.append(
-                    f"{field} must match pattern ^[a-zA-Z0-9_-]+$, got: '{value}'"
+                    f"{field} must match pattern ^[a-zA-Z0-9._-]+$, got: '{value}'"
                 )
 
     # Validate consumer_group or group_id (alias)
@@ -122,7 +123,7 @@ def validate_runtime_config(
             errors.append(f"{group_field} must be a string, got {type(value).__name__}")
         elif not TOPIC_NAME_PATTERN.match(value):
             errors.append(
-                f"{group_field} must match pattern ^[a-zA-Z0-9_-]+$, got: '{value}'"
+                f"{group_field} must match pattern ^[a-zA-Z0-9._-]+$, got: '{value}'"
             )
 
     # Validate event_bus if present

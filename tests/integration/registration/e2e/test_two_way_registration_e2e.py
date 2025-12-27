@@ -84,7 +84,13 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
     )
-    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeIntrospected,
+    )
+    from omnibase_infra.projectors import (
+        ProjectionReaderRegistration,
+        ProjectorRegistration,
+    )
 
     from .conftest import IntrospectableTestNode
 
@@ -989,6 +995,10 @@ class TestSuite3ReIntrospection:
             enable_registry_listener=True,
         )
 
+        # Allow time for the registry listener to establish Kafka subscription
+        # This is necessary because the listener subscribes asynchronously
+        await asyncio.sleep(2.0)
+
         try:
             # Collect introspection events for our node
             event_received = asyncio.Event()
@@ -1081,6 +1091,9 @@ class TestSuite3ReIntrospection:
             enable_heartbeat=False,
             enable_registry_listener=True,
         )
+
+        # Allow time for the registry listener to establish Kafka subscription
+        await asyncio.sleep(2.0)
 
         try:
             # Track responses with matching correlation_id
@@ -1361,10 +1374,9 @@ class TestSuite4HeartbeatPublishing:
         self,
         registration_orchestrator: NodeRegistrationOrchestrator,
         projection_reader: ProjectionReaderRegistration,
+        real_projector: ProjectorRegistration,
         introspectable_test_node: IntrospectableTestNode,
         unique_node_id: UUID,
-        real_kafka_event_bus: KafkaEventBus,
-        introspection_event_factory: object,
     ) -> None:
         """Test heartbeat updates liveness_deadline in projection.
 
@@ -1372,44 +1384,54 @@ class TestSuite4HeartbeatPublishing:
         projection's liveness deadline is updated correctly.
 
         Steps:
-            1. Register the node first (to create projection record)
+            1. Create a projection record (simulating completed registration)
             2. Record the initial heartbeat time
             3. Send a heartbeat event
             4. Verify projection's last_heartbeat_at was updated
         """
-        # First, register the node to create a projection record
-        # Use the introspection_event_factory to create a valid introspection event
-        introspection_event = introspection_event_factory(
-            node_id=unique_node_id,
+        from omnibase_infra.models.projection import ModelRegistrationProjection
+
+        correlation_id = uuid4()
+        now = datetime.now(UTC)
+
+        # Create an initial projection in active state (simulating completed registration)
+        event_id = uuid4()
+        initial_projection = ModelRegistrationProjection(
+            entity_id=unique_node_id,
+            domain="registration",
+            current_state=EnumRegistrationState.ACTIVE,
+            node_type=introspectable_test_node.node_type,
+            node_version="1.0.0",
+            capabilities={"test": True},
+            ack_deadline=None,
+            liveness_deadline=now,  # Will be updated by heartbeat
+            last_heartbeat_at=None,  # Not yet received any heartbeat
+            ack_timeout_emitted_at=None,
+            liveness_timeout_emitted_at=None,
+            registered_at=now,
+            updated_at=now,
+            correlation_id=correlation_id,
+            # Idempotency fields (required by the model)
+            last_applied_event_id=event_id,
+            last_applied_offset=1,
+            last_applied_sequence=None,
+            last_applied_partition=None,
         )
 
-        # Process the introspection through the orchestrator to register the node
-        try:
-            from omnibase_core.models.events.model_event_envelope import (
-                ModelEventEnvelope,
-            )
-
-            from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-
-            # Create envelope for the introspection event
-            envelope = ModelEventEnvelope[ModelNodeIntrospectionEvent](
-                event_type="NodeIntrospection",
-                event_version="1.0.0",
-                correlation_id=uuid4(),
-                payload=introspection_event,
-            )
-
-            # Process through orchestrator
-            await registration_orchestrator.handle_introspection(envelope)
-
-        except Exception as e:
-            pytest.skip(f"Could not register node for test: {e}")
+        # Persist the projection using ModelSequenceInfo (for ordering)
+        sequence_info = ModelSequenceInfo.from_sequence(1)
+        await real_projector.persist(
+            projection=initial_projection,
+            entity_id=unique_node_id,
+            domain="registration",
+            sequence_info=sequence_info,
+            correlation_id=correlation_id,
+        )
 
         # Record time before sending heartbeat
         min_heartbeat_time = datetime.now(UTC)
 
-        # Now send a heartbeat and verify projection is updated
-        heartbeat_topic = DEFAULT_HEARTBEAT_TOPIC
+        # Create heartbeat event
         heartbeat_event = ModelNodeHeartbeatEvent(
             node_id=unique_node_id,
             node_type=introspectable_test_node.node_type,
@@ -1419,31 +1441,20 @@ class TestSuite4HeartbeatPublishing:
             timestamp=datetime.now(UTC),
         )
 
-        # Publish heartbeat to Kafka
-        await real_kafka_event_bus.publish(
-            topic=heartbeat_topic,
-            key=str(unique_node_id).encode("utf-8"),
-            value=json.dumps(heartbeat_event.model_dump(mode="json")).encode("utf-8"),
+        # Process heartbeat through the orchestrator's heartbeat handler directly
+        # (In full E2E with runtime, this would come from Kafka consumer)
+        await registration_orchestrator.handle_heartbeat(heartbeat_event)
+
+        # Query the projection to verify heartbeat was processed
+        projection = await projection_reader.get_entity_state(
+            entity_id=unique_node_id,
+            domain="registration",
+            correlation_id=correlation_id,
         )
+        assert projection is not None, "Projection should exist"
 
-        # Wait for heartbeat to be processed and update projection
-        try:
-            projection = await wait_for_heartbeat_update(
-                projection_reader=projection_reader,
-                node_id=unique_node_id,
-                min_heartbeat_time=min_heartbeat_time,
-                timeout_seconds=35.0,
-            )
-
-            # Verify heartbeat was updated
-            assert_heartbeat_updated(projection, min_heartbeat_time)
-
-        except TimeoutError:
-            # In E2E tests, the heartbeat handler may not be fully wired
-            pytest.skip(
-                "Heartbeat processing not available in E2E environment; "
-                "handler may not be subscribed to heartbeat topic"
-            )
+        # Verify heartbeat was updated
+        assert_heartbeat_updated(projection, min_heartbeat_time)
 
 
 # =============================================================================
