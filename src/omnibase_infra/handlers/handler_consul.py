@@ -15,7 +15,6 @@ Supported Operations:
     - consul.kv_put: Store value in KV store
     - consul.register: Register service with Consul agent
     - consul.deregister: Deregister service from Consul agent
-    - consul.health_check: Check Consul agent connectivity
 """
 
 from __future__ import annotations
@@ -41,11 +40,14 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
+from omnibase_infra.handlers.models import (
+    ModelOperationContext,
+    ModelRetryState,
+)
 from omnibase_infra.handlers.models.consul import (
     ConsulPayload,
     ModelConsulDeregisterPayload,
     ModelConsulHandlerPayload,
-    ModelConsulHealthCheckPayload,
     ModelConsulKVGetFoundPayload,
     ModelConsulKVGetNotFoundPayload,
     ModelConsulKVGetRecursePayload,
@@ -78,7 +80,6 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
         "consul.kv_put",
         "consul.register",
         "consul.deregister",
-        "consul.health_check",
     }
 )
 
@@ -92,8 +93,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
         1. Token is stored as SecretStr in config (never logged or exposed)
         2. All error messages use generic descriptions without exposing token
-        3. Health check responses exclude token information
-        4. The describe() method returns capabilities without credentials
+        3. The describe() method returns capabilities without credentials
 
         See CLAUDE.md "Error Sanitization Guidelines" for the full security policy
         on what information is safe vs unsafe to include in errors and logs.
@@ -106,11 +106,11 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
         Queue Size Management (MVP Behavior):
             ThreadPoolExecutor uses an unbounded queue by default. The max_queue_size
-            parameter is calculated (max_workers * multiplier) and exposed via
-            health_check() for monitoring purposes, but is NOT enforced by the executor.
+            parameter is calculated (max_workers * multiplier) for monitoring purposes,
+            but is NOT enforced by the executor.
 
             Why unbounded is acceptable for MVP:
-                - Consul operations are typically short-lived (KV get/put, health checks)
+                - Consul operations are typically short-lived (KV get/put)
                 - Circuit breaker provides backpressure when Consul is unavailable
                 - Thread pool size limits concurrent execution (default: 10 workers)
                 - Memory exhaustion from queue growth is unlikely in normal operation
@@ -128,17 +128,6 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                             self._work_queue = Queue(maxsize=max_queue_size)
 
                 This would reject tasks when queue is full, enabling explicit backpressure.
-
-            Operational Monitoring:
-                The health_check() endpoint exposes thread_pool_max_queue_size for
-                monitoring dashboards. Operators should track this alongside:
-                - thread_pool_active_workers: Current threads in use
-                - thread_pool_max_workers: Configured thread pool limit
-                - circuit_breaker_state: "open" indicates Consul unavailability
-
-                Alert thresholds should consider that max_queue_size is informational
-                only in MVP. High queue depth would manifest as increased latency
-                rather than rejected requests.
 
     Circuit Breaker Pattern (Production-Grade):
         - Uses MixinAsyncCircuitBreaker for consistent circuit breaker implementation
@@ -553,12 +542,10 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             return await self._register_service(
                 payload, correlation_id, input_envelope_id
             )
-        elif operation == "consul.deregister":
+        else:  # consul.deregister - validated above, guaranteed to be deregister
             return await self._deregister_service(
                 payload, correlation_id, input_envelope_id
             )
-        else:  # consul.health_check
-            return await self._health_check_operation(correlation_id, input_envelope_id)
 
     async def _execute_with_retry(
         self,
@@ -600,17 +587,30 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             async with self._circuit_breaker_lock:
                 await self._check_circuit_breaker(operation, correlation_id)
 
+        # Initialize retry state with config values
         retry_config = self._config.retry
-        last_exception: Exception | None = None
+        retry_state = ModelRetryState(
+            attempt=0,
+            max_attempts=retry_config.max_attempts,
+            delay_seconds=retry_config.initial_delay_seconds,
+            backoff_multiplier=retry_config.exponential_base,
+        )
 
-        for attempt in range(retry_config.max_attempts):
+        # Create operation context for tracking
+        op_context = ModelOperationContext.create(
+            operation_name=operation,
+            correlation_id=correlation_id,
+            timeout_seconds=self._config.timeout_seconds,
+        )
+
+        while retry_state.is_retriable():
             try:
                 # consul is synchronous, wrap in custom thread executor
                 loop = asyncio.get_running_loop()
 
                 result = await asyncio.wait_for(
                     loop.run_in_executor(self._executor, func),
-                    timeout=self._config.timeout_seconds,
+                    timeout=op_context.timeout_seconds,
                 )
 
                 # Record success for circuit breaker (async mixin pattern)
@@ -621,13 +621,17 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 return result
 
             except TimeoutError as e:
-                last_exception = e
+                error_msg = f"Timeout after {op_context.timeout_seconds}s"
+                retry_state = retry_state.next_attempt(
+                    error_message=error_msg,
+                    max_delay_seconds=retry_config.max_delay_seconds,
+                )
                 # NOTE: Circuit breaker failures are recorded only on final retry attempt.
                 # Rationale: Transient failures during retry shouldn't count toward threshold.
                 # Only persistent failures (after all retries exhausted) indicate true service
                 # degradation. This prevents circuit breaker from opening due to temporary
                 # network blips. Pattern consistent with VaultHandler implementation.
-                if attempt == retry_config.max_attempts - 1:
+                if not retry_state.is_retriable():
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
                             await self._record_circuit_failure(
@@ -640,9 +644,9 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                         correlation_id=correlation_id,
                     )
                     raise InfraTimeoutError(
-                        f"Consul operation timed out after {self._config.timeout_seconds}s",
+                        f"Consul operation timed out after {op_context.timeout_seconds}s",
                         context=ctx,
-                        timeout_seconds=self._config.timeout_seconds,
+                        timeout_seconds=op_context.timeout_seconds,
                     ) from e
 
             except consul.ACLPermissionDenied as e:
@@ -664,8 +668,12 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             except consul.Timeout as e:
                 # Handle consul.Timeout (subclass of ConsulException) specifically
                 # to raise InfraTimeoutError instead of InfraConnectionError
-                last_exception = e
-                if attempt == retry_config.max_attempts - 1:
+                error_msg = f"Consul timeout: {type(e).__name__}"
+                retry_state = retry_state.next_attempt(
+                    error_message=error_msg,
+                    max_delay_seconds=retry_config.max_delay_seconds,
+                )
+                if not retry_state.is_retriable():
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
                             await self._record_circuit_failure(
@@ -680,17 +688,21 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                     raise InfraTimeoutError(
                         f"Consul operation timed out: {e}",
                         context=ctx,
-                        timeout_seconds=self._config.timeout_seconds,
+                        timeout_seconds=op_context.timeout_seconds,
                     ) from e
 
             except consul.ConsulException as e:
-                last_exception = e
+                error_msg = f"Consul error: {type(e).__name__}"
+                retry_state = retry_state.next_attempt(
+                    error_message=error_msg,
+                    max_delay_seconds=retry_config.max_delay_seconds,
+                )
                 # NOTE: Circuit breaker failures are recorded only on final retry attempt.
                 # Rationale: Transient failures during retry shouldn't count toward threshold.
                 # Only persistent failures (after all retries exhausted) indicate true service
                 # degradation. This prevents circuit breaker from opening due to temporary
                 # network blips. Pattern consistent with VaultHandler implementation.
-                if attempt == retry_config.max_attempts - 1:
+                if not retry_state.is_retriable():
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
                             await self._record_circuit_failure(
@@ -708,13 +720,17 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                     ) from e
 
             except Exception as e:
-                last_exception = e
+                error_msg = f"Unexpected error: {type(e).__name__}"
+                retry_state = retry_state.next_attempt(
+                    error_message=error_msg,
+                    max_delay_seconds=retry_config.max_delay_seconds,
+                )
                 # NOTE: Circuit breaker failures are recorded only on final retry attempt.
                 # Rationale: Transient failures during retry shouldn't count toward threshold.
                 # Only persistent failures (after all retries exhausted) indicate true service
                 # degradation. This prevents circuit breaker from opening due to temporary
                 # network blips. Pattern consistent with VaultHandler implementation.
-                if attempt == retry_config.max_attempts - 1:
+                if not retry_state.is_retriable():
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
                             await self._record_circuit_failure(
@@ -731,29 +747,24 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                         context=ctx,
                     ) from e
 
-            # Calculate exponential backoff
-            backoff = min(
-                retry_config.initial_delay_seconds
-                * (retry_config.exponential_base**attempt),
-                retry_config.max_delay_seconds,
-            )
-
+            # Use delay from retry state (already calculated with backoff)
             logger.debug(
                 "Retrying Consul operation",
                 extra={
                     "operation": operation,
-                    "attempt": attempt + 1,
-                    "max_attempts": retry_config.max_attempts,
-                    "backoff_seconds": backoff,
+                    "attempt": retry_state.attempt,
+                    "max_attempts": retry_state.max_attempts,
+                    "backoff_seconds": retry_state.delay_seconds,
+                    "last_error": retry_state.last_error,
                     "correlation_id": str(correlation_id),
                 },
             )
 
-            await asyncio.sleep(backoff)
+            await asyncio.sleep(retry_state.delay_seconds)
 
         # Should never reach here, but satisfy type checker
-        if last_exception is not None:
-            raise last_exception
+        if retry_state.last_error is not None:
+            raise RuntimeError(f"Retry exhausted: {retry_state.last_error}")
         raise RuntimeError("Retry loop completed without result")
 
     async def _kv_get(
@@ -1070,172 +1081,6 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         typed_payload = ModelConsulDeregisterPayload(
             deregistered=True,
             consul_service_id=service_id,
-        )
-        return self._build_response(typed_payload, correlation_id, input_envelope_id)
-
-    async def health_check(
-        self, correlation_id: UUID | None = None
-    ) -> dict[str, JsonValue]:
-        """Return handler health status with operational metrics.
-
-        Uses thread pool executor and retry logic for consistency with other operations.
-        Includes circuit breaker protection and exponential backoff on transient failures.
-
-        This is the standalone health check method intended for direct invocation by
-        monitoring systems, health check endpoints, or diagnostic tools.
-
-        Envelope-Based vs Direct Invocation:
-            - Direct: Call health_check() for monitoring/diagnostics. If no correlation_id
-              is provided, a new one is generated internally for tracing.
-            - Envelope: Use execute() with operation="consul.health_check" for dispatch.
-              The envelope's correlation_id is propagated to this method via
-              _health_check_operation() for consistent tracing.
-
-        Note:
-            This method does not accept envelope_id because it's designed for direct
-            invocation outside the envelope dispatch context. For envelope-based health
-            checks that preserve causality tracking, use _health_check_operation() via
-            the execute() method.
-
-        Args:
-            correlation_id: Optional correlation ID for tracing. When called via
-                envelope dispatch (through _health_check_operation), this preserves
-                the request's correlation_id for consistent distributed tracing.
-                When called directly (e.g., by monitoring systems), a new ID is
-                generated if not provided.
-
-        Returns:
-            Health status dict with handler state information including:
-            - Basic health status (healthy, initialized, handler_type, timeout_seconds)
-            - Circuit breaker state and failure count
-            - Thread pool utilization metrics
-
-        Raises:
-            RuntimeHostError: If health check fails (errors are propagated, not swallowed)
-        """
-        healthy = False
-        if correlation_id is None:
-            correlation_id = uuid4()
-
-        # Calculate operational metrics (safe even if not initialized)
-        circuit_state: str | None = None
-        circuit_failure_count: int = 0
-        thread_pool_active: int = 0
-        thread_pool_max: int = 0
-
-        if self._initialized and self._config is not None:
-            # Circuit breaker state (thread-safe access via mixin)
-            if self._circuit_breaker_initialized:
-                async with self._circuit_breaker_lock:
-                    circuit_state = "open" if self._circuit_breaker_open else "closed"
-                    circuit_failure_count = self._circuit_breaker_failures
-
-            # Thread pool metrics
-            # Note: ThreadPoolExecutor doesn't expose active thread count via public API.
-            # Using internal _threads attribute for monitoring purposes. This is a
-            # Python-version-dependent implementation detail and may change in future
-            # Python versions. Alternative: remove this metric or use a custom executor
-            # wrapper that tracks thread count explicitly.
-            thread_pool_max = self._max_workers
-            if self._executor is not None:
-                threads_set = getattr(self._executor, "_threads", None)
-                if threads_set is not None:
-                    thread_pool_active = len(threads_set)
-
-        if self._initialized and self._client is not None:
-
-            def health_check_func() -> str:
-                if self._client is None:
-                    raise RuntimeError("Client not initialized")
-                leader = self._client.status.leader()
-                return leader if leader else ""
-
-            # Use thread pool executor with retry logic for consistency
-            leader = await self._execute_with_retry(
-                "consul.health_check",
-                health_check_func,
-                correlation_id,
-            )
-            healthy = bool(leader)
-
-        return {
-            "healthy": healthy,
-            "initialized": self._initialized,
-            "handler_type": self.handler_type,
-            "timeout_seconds": self._config.timeout_seconds if self._config else 30.0,
-            # Operational metrics for visibility
-            "circuit_breaker_state": circuit_state,
-            "circuit_breaker_failure_count": circuit_failure_count,
-            "thread_pool_active_workers": thread_pool_active,
-            "thread_pool_max_workers": thread_pool_max,
-            # Queue size metric (configured max, not enforced - see docstring)
-            "thread_pool_max_queue_size": self._max_queue_size,
-        }
-
-    async def _health_check_operation(
-        self,
-        correlation_id: UUID,
-        input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
-        """Execute health check operation from envelope.
-
-        This method wraps the core health_check() functionality in a ModelHandlerOutput
-        for envelope-based operation dispatch. It differs from health_check() in that:
-
-        1. It accepts pre-extracted IDs from the request envelope
-        2. It returns ModelHandlerOutput (suitable for envelope dispatch)
-        3. It preserves causality tracking via input_envelope_id
-        4. It propagates correlation_id to health_check() for consistent tracing
-
-        ID Semantics:
-            correlation_id: Groups related operations across distributed services.
-                Used for filtering logs, tracing request flows, and debugging.
-                Propagated from the request envelope to health_check() for consistent
-                distributed tracing across the entire request lifecycle.
-
-            input_envelope_id: Links this response to the originating request envelope.
-                Enables request/response correlation in observability systems.
-                When called via execute(), extracted from the request envelope.
-                Auto-generated if not provided, ensuring all responses have valid
-                causality tracking IDs.
-
-        When health_check() is called directly (not via envelope dispatch), it generates
-        its own correlation_id for monitoring purposes. This method ensures envelope-based
-        calls use the request's correlation_id for end-to-end tracing consistency.
-
-        Args:
-            correlation_id: Correlation ID for distributed tracing across services.
-                Propagated to health_check() to ensure consistent tracing.
-            input_envelope_id: Envelope ID for causality tracking. Links this health
-                check response to the original request envelope, enabling end-to-end
-                request/response correlation in observability systems.
-
-        Returns:
-            ModelHandlerOutput wrapping the health check information with correlation tracking
-        """
-        health_status = await self.health_check(correlation_id=correlation_id)
-
-        # Convert dict to typed payload model
-        typed_payload = ModelConsulHealthCheckPayload(
-            healthy=bool(health_status.get("healthy", False)),
-            initialized=bool(health_status.get("initialized", False)),
-            handler_type=str(health_status.get("handler_type", "consul")),
-            timeout_seconds=float(health_status.get("timeout_seconds", 30.0)),
-            circuit_breaker_state=health_status.get("circuit_breaker_state")
-            if isinstance(health_status.get("circuit_breaker_state"), str)
-            else None,
-            circuit_breaker_failure_count=int(
-                health_status.get("circuit_breaker_failure_count", 0)
-            ),
-            thread_pool_active_workers=int(
-                health_status.get("thread_pool_active_workers", 0)
-            ),
-            thread_pool_max_workers=int(
-                health_status.get("thread_pool_max_workers", 0)
-            ),
-            thread_pool_max_queue_size=int(
-                health_status.get("thread_pool_max_queue_size", 0)
-            ),
         )
         return self._build_response(typed_payload, correlation_id, input_envelope_id)
 

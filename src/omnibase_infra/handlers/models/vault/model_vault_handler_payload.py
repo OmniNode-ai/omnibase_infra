@@ -15,9 +15,6 @@ from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag
 from omnibase_infra.handlers.models.vault.model_vault_delete_payload import (
     ModelVaultDeletePayload,
 )
-from omnibase_infra.handlers.models.vault.model_vault_health_check_payload import (
-    ModelVaultHealthCheckPayload,
-)
 from omnibase_infra.handlers.models.vault.model_vault_list_payload import (
     ModelVaultListPayload,
 )
@@ -60,8 +57,7 @@ VaultPayload = Annotated[
     | Annotated[ModelVaultWritePayload, Tag("write_secret")]
     | Annotated[ModelVaultDeletePayload, Tag("delete_secret")]
     | Annotated[ModelVaultListPayload, Tag("list_secrets")]
-    | Annotated[ModelVaultRenewTokenPayload, Tag("renew_token")]
-    | Annotated[ModelVaultHealthCheckPayload, Tag("health_check")],
+    | Annotated[ModelVaultRenewTokenPayload, Tag("renew_token")],
     Discriminator(_vault_payload_discriminator),
 ]
 

@@ -15,9 +15,6 @@ from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag
 from omnibase_infra.handlers.models.http.model_http_get_payload import (
     ModelHttpGetPayload,
 )
-from omnibase_infra.handlers.models.http.model_http_health_check_payload import (
-    ModelHttpHealthCheckPayload,
-)
 from omnibase_infra.handlers.models.http.model_http_post_payload import (
     ModelHttpPostPayload,
 )
@@ -48,8 +45,7 @@ def _http_payload_discriminator(value: object) -> str:
 # Discriminated union of all HTTP payload types
 HttpPayload = Annotated[
     Annotated[ModelHttpGetPayload, Tag("get")]
-    | Annotated[ModelHttpPostPayload, Tag("post")]
-    | Annotated[ModelHttpHealthCheckPayload, Tag("health_check")],
+    | Annotated[ModelHttpPostPayload, Tag("post")],
     Discriminator(_http_payload_discriminator),
 ]
 

@@ -23,13 +23,13 @@ Skip Conditions (Two-Phase):
 Example CI/CD Output::
 
     $ pytest tests/integration/handlers/test_vault_handler_integration.py -v
-    test_vault_health_check SKIPPED (Vault not available - VAULT_TOKEN not set)
+    test_vault_describe SKIPPED (Vault not available - VAULT_TOKEN not set)
     test_vault_write_and_read_secret SKIPPED (Vault not available - VAULT_TOKEN not set)
 
 Test Categories
 ===============
 
-- Connection Tests: Validate basic connectivity and health checks
+- Connection Tests: Validate basic connectivity and handler metadata
 - Secret CRUD Tests: Verify read/write/delete/list operations
 - Error Handling Tests: Test error handling for missing secrets
 
@@ -159,68 +159,7 @@ async def cleanup_secret(
 
 
 class TestVaultHandlerConnection:
-    """Tests for VaultHandler connection and health check functionality."""
-
-    @pytest.mark.asyncio
-    async def test_vault_health_check(
-        self,
-        vault_handler: VaultHandler,
-    ) -> None:
-        """Test Vault handler health check reports healthy status.
-
-        Verifies that health_check() returns accurate status when connected
-        to a real Vault server.
-        """
-        result = await vault_handler.health_check()
-
-        # Verify health check response structure
-        assert "healthy" in result
-        assert "initialized" in result
-        assert "handler_type" in result
-        assert "token_ttl_remaining_seconds" in result
-        assert "circuit_breaker_state" in result
-
-        # Verify handler is healthy
-        assert result["healthy"] is True
-        assert result["initialized"] is True
-        assert result["handler_type"] == "vault"
-
-        # Token TTL should be positive
-        token_ttl = result["token_ttl_remaining_seconds"]
-        assert token_ttl is None or (isinstance(token_ttl, int) and token_ttl >= 0)
-
-        # Circuit breaker should be closed (healthy)
-        assert result["circuit_breaker_state"] == "closed"
-
-    @pytest.mark.asyncio
-    async def test_vault_health_check_via_envelope(
-        self,
-        vault_handler: VaultHandler,
-    ) -> None:
-        """Test health check via envelope-based execute method.
-
-        Verifies that vault.health_check operation works through the
-        standard envelope dispatch pattern.
-        """
-        correlation_id = str(uuid.uuid4())
-        envelope: dict[str, JsonValue] = {
-            "operation": "vault.health_check",
-            "payload": {},
-            "correlation_id": correlation_id,
-        }
-
-        result = await vault_handler.execute(envelope)
-
-        # Verify ModelHandlerOutput structure
-        assert result is not None
-        assert result.handler_id == "vault-handler"
-        assert str(result.correlation_id) == correlation_id
-
-        # Verify result payload
-        output_result = result.result
-        assert output_result["status"] == "success"
-        assert "payload" in output_result
-        assert output_result["payload"]["healthy"] is True
+    """Tests for VaultHandler connection functionality."""
 
     @pytest.mark.asyncio
     async def test_vault_describe(

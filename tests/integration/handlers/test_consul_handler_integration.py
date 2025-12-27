@@ -21,13 +21,13 @@ Skip Conditions:
 Example CI/CD Output::
 
     $ pytest tests/integration/handlers/test_consul_handler_integration.py -v
-    test_consul_health_check SKIPPED (Consul not available - cannot connect to remote infrastructure)
     test_consul_kv_put_and_get SKIPPED (Consul not available - cannot connect to remote infrastructure)
+    test_consul_service_register_and_deregister SKIPPED (Consul not available - cannot connect to remote infrastructure)
 
 Test Categories
 ===============
 
-- Health Check Tests: Validate connectivity and health reporting
+- Handler Metadata Tests: Validate describe functionality and capabilities
 - KV Store Tests: Verify key-value store operations (put, get)
 - Service Registration Tests: Test service register/deregister
 
@@ -63,10 +63,6 @@ if TYPE_CHECKING:
 # Test Configuration and Skip Conditions
 # =============================================================================
 
-# Handler default configuration values
-# These match the defaults in ConsulHandler and are tested to ensure consistency
-CONSUL_HANDLER_DEFAULT_TIMEOUT_SECONDS = 30.0
-
 # Module-level markers - skip all tests if Consul is not available
 pytestmark = [
     pytest.mark.integration,
@@ -78,66 +74,12 @@ pytestmark = [
 
 
 # =============================================================================
-# Health Check Tests - Validate basic connectivity
+# Handler Metadata Tests - Describe and capabilities
 # =============================================================================
 
 
-class TestConsulHandlerHealthCheck:
-    """Tests for ConsulHandler health check and connectivity."""
-
-    @pytest.mark.asyncio
-    async def test_consul_health_check(
-        self, consul_config: dict[str, JsonValue]
-    ) -> None:
-        """Test Consul handler connectivity via health check.
-
-        Verifies that:
-        - Handler can connect to remote Consul
-        - Health check reports healthy status
-        - Handler reports correct operational state
-        """
-        from omnibase_infra.handlers import ConsulHandler
-
-        handler = ConsulHandler()
-        await handler.initialize(consul_config)
-
-        try:
-            result = await handler.health_check()
-
-            assert result["healthy"] is True
-            assert result["initialized"] is True
-            assert result["handler_type"] == "consul"
-            assert result["timeout_seconds"] == CONSUL_HANDLER_DEFAULT_TIMEOUT_SECONDS
-            # Circuit breaker should be closed (healthy) with no failures after fresh init
-            assert result["circuit_breaker_state"] == "closed"
-            assert result["circuit_breaker_failure_count"] == 0
-        finally:
-            await handler.shutdown()
-
-    @pytest.mark.asyncio
-    async def test_consul_health_check_via_execute(
-        self, initialized_consul_handler: ConsulHandler
-    ) -> None:
-        """Test health check operation via execute method.
-
-        Verifies that:
-        - Health check works through envelope-based dispatch
-        - Response includes correlation tracking
-        - All health metrics are present
-        """
-        envelope = {
-            "operation": "consul.health_check",
-            "payload": {},
-            "correlation_id": str(uuid4()),
-        }
-
-        result = await initialized_consul_handler.execute(envelope)
-
-        assert result.result.status == "success"
-        payload = result.result.payload.data
-        assert payload.healthy is True
-        assert payload.initialized is True
-        assert payload.handler_type == "consul"
+class TestConsulHandlerMetadata:
+    """Tests for ConsulHandler metadata and describe functionality."""
 
     @pytest.mark.asyncio
     async def test_handler_describe(
@@ -157,7 +99,6 @@ class TestConsulHandlerHealthCheck:
         assert "consul.kv_put" in description["supported_operations"]
         assert "consul.register" in description["supported_operations"]
         assert "consul.deregister" in description["supported_operations"]
-        assert "consul.health_check" in description["supported_operations"]
 
 
 # =============================================================================
@@ -528,8 +469,8 @@ class TestConsulHandlerErrorHandling:
         # Don't initialize
 
         envelope = {
-            "operation": "consul.health_check",
-            "payload": {},
+            "operation": "consul.kv_get",
+            "payload": {"key": "test/key"},
         }
 
         with pytest.raises(RuntimeHostError, match="not initialized"):
@@ -658,7 +599,7 @@ class TestConsulHandlerLifecycle:
         Verifies that:
         - Handler can be properly shutdown
         - Handler can be reinitialized after shutdown
-        - Health check works after reinitialization
+        - Handler reports initialized after reinitialization
         """
         from omnibase_infra.handlers import ConsulHandler
 
@@ -666,16 +607,16 @@ class TestConsulHandlerLifecycle:
 
         # First initialization
         await handler.initialize(consul_config)
-        health1 = await handler.health_check()
-        assert health1["healthy"] is True
+        description1 = handler.describe()
+        assert description1["initialized"] is True
 
         # Shutdown
         await handler.shutdown()
 
         # Reinitialize
         await handler.initialize(consul_config)
-        health2 = await handler.health_check()
-        assert health2["healthy"] is True
+        description2 = handler.describe()
+        assert description2["initialized"] is True
 
         # Final cleanup
         await handler.shutdown()

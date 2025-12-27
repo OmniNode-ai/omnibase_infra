@@ -7,8 +7,9 @@ This module provides the Pydantic model for vault.read_secret operation results.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
+from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (

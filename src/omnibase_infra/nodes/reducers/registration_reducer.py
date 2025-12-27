@@ -353,7 +353,7 @@ from omnibase_core.models.intents import (
 )
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
@@ -417,6 +417,9 @@ ValidationErrorCode = Literal[
     "invalid_node_type",
 ]
 
+# Sentinel value for "not set" state
+_SENTINEL_STR: str = ""
+
 
 class ModelValidationResult(BaseModel):
     """Result of event validation with detailed error information.
@@ -424,19 +427,55 @@ class ModelValidationResult(BaseModel):
     This Pydantic model replaces the previous dataclass implementation
     to comply with ONEX requirements for Pydantic-based data structures.
 
+    This model uses sentinel values (empty string) instead of nullable unions
+    to minimize union count in the codebase (OMN-1004).
+
+    Sentinel Values:
+        - Empty string ("") for field_name and error_message means "not set"
+        - None for error_code (unavoidable for Literal type safety)
+        - Use ``has_field_name``, ``has_error_message`` to check
+
+    Backwards Compatibility:
+        Constructors accept ``None`` for string fields and convert to sentinel.
+
     Attributes:
         is_valid: Whether the event passed validation.
         error_code: Distinct code identifying the validation failure (if any).
-        field_name: Name of the field that failed validation (if any).
-        error_message: Human-readable error message for logging (if any).
+        field_name: Name of the field that failed validation. Empty string if not set.
+        error_message: Human-readable error message for logging. Empty string if not set.
+
+    .. versionchanged:: 0.7.0
+        Refactored to use sentinel values for string fields (OMN-1004).
     """
 
     model_config = ConfigDict(frozen=True)
 
     is_valid: bool
     error_code: ValidationErrorCode | None = None
-    field_name: str | None = None
-    error_message: str | None = None
+    field_name: str = _SENTINEL_STR
+    error_message: str = _SENTINEL_STR
+
+    # ---- Validators for None-to-Sentinel Conversion ----
+    @field_validator("field_name", "error_message", mode="before")
+    @classmethod
+    def _convert_none_to_str_sentinel(cls, v: object) -> str:
+        """Convert None to empty string sentinel for backwards compatibility."""
+        if v is None:
+            return _SENTINEL_STR
+        if isinstance(v, str):
+            return v
+        return str(v)
+
+    # ---- Sentinel Check Properties ----
+    @property
+    def has_field_name(self) -> bool:
+        """Check if field_name is set (not empty string)."""
+        return self.field_name != _SENTINEL_STR
+
+    @property
+    def has_error_message(self) -> bool:
+        """Check if error_message is set (not empty string)."""
+        return self.error_message != _SENTINEL_STR
 
     @classmethod
     def success(cls) -> ModelValidationResult:

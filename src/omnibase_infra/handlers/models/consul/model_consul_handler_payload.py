@@ -18,9 +18,6 @@ from pydantic import BaseModel, ConfigDict, Discriminator, Field
 from omnibase_infra.handlers.models.consul.model_consul_deregister_payload import (
     ModelConsulDeregisterPayload,
 )
-from omnibase_infra.handlers.models.consul.model_consul_health_check_payload import (
-    ModelConsulHealthCheckPayload,
-)
 from omnibase_infra.handlers.models.consul.model_consul_kv_get_found_payload import (
     ModelConsulKVGetFoundPayload,
 )
@@ -46,7 +43,6 @@ ConsulPayload = Annotated[
         ModelConsulKVPutPayload,
         ModelConsulRegisterPayload,
         ModelConsulDeregisterPayload,
-        ModelConsulHealthCheckPayload,
     ],
     Discriminator("operation_type"),
 ]

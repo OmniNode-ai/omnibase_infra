@@ -13,7 +13,6 @@ Payload Types:
     - ModelConsulKVPutPayload: KV put operation result
     - ModelConsulRegisterPayload: Service registration result
     - ModelConsulDeregisterPayload: Service deregistration result
-    - ModelConsulHealthCheckPayload: Health check operation result
 
 Union Type:
     ConsulPayload: Discriminated union of all payload types using operation_type field
@@ -28,9 +27,6 @@ from omnibase_infra.handlers.models.consul.model_consul_deregister_payload impor
 from omnibase_infra.handlers.models.consul.model_consul_handler_payload import (
     ConsulPayload,
     ModelConsulHandlerPayload,
-)
-from omnibase_infra.handlers.models.consul.model_consul_health_check_payload import (
-    ModelConsulHealthCheckPayload,
 )
 from omnibase_infra.handlers.models.consul.model_consul_kv_get_found_payload import (
     ModelConsulKVGetFoundPayload,
@@ -60,7 +56,6 @@ __all__: list[str] = [
     "ModelConsulKVPutPayload",
     "ModelConsulRegisterPayload",
     "ModelConsulDeregisterPayload",
-    "ModelConsulHealthCheckPayload",
     "ConsulPayload",
     "ModelConsulHandlerPayload",
 ]
