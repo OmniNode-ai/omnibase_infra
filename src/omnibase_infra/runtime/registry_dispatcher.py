@@ -35,14 +35,13 @@ Related:
 from __future__ import annotations
 
 __all__ = [
-    "ProtocolMessageDispatcher",
     "DispatcherRegistry",
+    "ProtocolMessageDispatcher",
 ]
 
 import logging
 import threading
 from collections import defaultdict
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -56,9 +55,6 @@ from omnibase_infra.models.validation.model_execution_shape_validation import (
 from omnibase_infra.protocols.protocol_message_dispatcher import (
     ProtocolMessageDispatcher,
 )
-
-if TYPE_CHECKING:
-    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 logger = logging.getLogger(__name__)
 

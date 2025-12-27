@@ -26,14 +26,14 @@ from omnibase_infra.utils.util_semver import (
 )
 
 __all__: list[str] = [
+    "SEMVER_PATTERN",
+    "SENSITIVE_PATTERNS",
+    "CorrelationContext",
+    "clear_correlation_id",
     "generate_correlation_id",
     "get_correlation_id",
-    "set_correlation_id",
-    "clear_correlation_id",
-    "CorrelationContext",
-    "SENSITIVE_PATTERNS",
     "sanitize_error_message",
-    "SEMVER_PATTERN",
+    "set_correlation_id",
     "validate_semver",
     "validate_version_lenient",
 ]

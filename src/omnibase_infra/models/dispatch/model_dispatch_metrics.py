@@ -494,4 +494,4 @@ class ModelDispatchMetrics(BaseModel):
         return cls()
 
 
-__all__ = ["ModelDispatchMetrics", "LATENCY_HISTOGRAM_BUCKETS"]
+__all__ = ["LATENCY_HISTOGRAM_BUCKETS", "ModelDispatchMetrics"]

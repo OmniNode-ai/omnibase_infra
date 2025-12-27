@@ -8,7 +8,7 @@ in the ONEX 2-way registration pattern.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID
 
 from omnibase_core.enums import EnumNodeKind

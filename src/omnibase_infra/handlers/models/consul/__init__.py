@@ -62,17 +62,17 @@ from omnibase_infra.handlers.models.consul.model_payload_consul import (
 )
 
 __all__: list[str] = [
+    "ConsulPayload",
     "EnumConsulOperationType",
-    "ModelConsulKVItem",
+    "ModelConsulDeregisterPayload",
+    "ModelConsulHandlerConfig",
+    "ModelConsulHandlerPayload",
     "ModelConsulKVGetFoundPayload",
     "ModelConsulKVGetNotFoundPayload",
     "ModelConsulKVGetRecursePayload",
+    "ModelConsulKVItem",
     "ModelConsulKVPutPayload",
     "ModelConsulRegisterPayload",
-    "ModelConsulDeregisterPayload",
-    "ConsulPayload",
-    "ModelConsulHandlerPayload",
-    "ModelConsulHandlerConfig",
     "ModelConsulRetryConfig",
     "ModelPayloadConsul",
     "RegistryPayloadConsul",

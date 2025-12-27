@@ -1528,9 +1528,9 @@ class PolicyRegistry:
 # =============================================================================
 
 __all__: list[str] = [
-    # Registry class
-    "PolicyRegistry",
+    "ModelPolicyKey",
     # Models
     "ModelPolicyRegistration",
-    "ModelPolicyKey",
+    # Registry class
+    "PolicyRegistry",
 ]

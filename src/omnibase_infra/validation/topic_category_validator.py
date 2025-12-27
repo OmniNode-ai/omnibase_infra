@@ -1082,15 +1082,15 @@ _default_validator = TopicCategoryValidator()
 
 
 __all__ = [
+    "HANDLER_EXPECTED_CATEGORIES",
     # Constants
     "TOPIC_CATEGORY_PATTERNS",
     "TOPIC_SUFFIXES",
-    "HANDLER_EXPECTED_CATEGORIES",
+    "TopicCategoryASTVisitor",
     # Classes
     "TopicCategoryValidator",
-    "TopicCategoryASTVisitor",
+    "validate_message_on_topic",
+    "validate_topic_categories_in_directory",
     # Functions
     "validate_topic_categories_in_file",
-    "validate_topic_categories_in_directory",
-    "validate_message_on_topic",
 ]

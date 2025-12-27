@@ -682,27 +682,27 @@ def register_handlers_from_config(
 # =============================================================================
 
 __all__: list[str] = [
-    # Handler type constants
-    "HANDLER_TYPE_HTTP",
-    "HANDLER_TYPE_DATABASE",
-    "HANDLER_TYPE_KAFKA",
-    "HANDLER_TYPE_VAULT",
-    "HANDLER_TYPE_CONSUL",
-    "HANDLER_TYPE_VALKEY",
-    "HANDLER_TYPE_GRPC",
     # Event bus kind constants
     "EVENT_BUS_INMEMORY",
     "EVENT_BUS_KAFKA",
-    # Error class
-    "RegistryError",
+    "HANDLER_TYPE_CONSUL",
+    "HANDLER_TYPE_DATABASE",
+    "HANDLER_TYPE_GRPC",
+    # Handler type constants
+    "HANDLER_TYPE_HTTP",
+    "HANDLER_TYPE_KAFKA",
+    "HANDLER_TYPE_VALKEY",
+    "HANDLER_TYPE_VAULT",
+    "EventBusBindingRegistry",
     # Registry classes
     "ProtocolBindingRegistry",
-    "EventBusBindingRegistry",
-    # Singleton accessors
-    "get_handler_registry",
+    # Error class
+    "RegistryError",
+    "get_event_bus_class",
     "get_event_bus_registry",
     # Convenience functions
     "get_handler_class",
-    "get_event_bus_class",
+    # Singleton accessors
+    "get_handler_registry",
     "register_handlers_from_config",
 ]

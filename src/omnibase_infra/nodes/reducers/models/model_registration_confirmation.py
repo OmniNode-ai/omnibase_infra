@@ -163,4 +163,4 @@ class ModelRegistrationConfirmation(BaseModel):
     )
 
 
-__all__ = ["ModelRegistrationConfirmation", "ConfirmationEventType"]
+__all__ = ["ConfirmationEventType", "ModelRegistrationConfirmation"]

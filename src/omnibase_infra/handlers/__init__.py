@@ -39,10 +39,10 @@ __all__: list[str] = [
     "ConsulHandler",
     "DbHandler",
     "HttpRestHandler",
-    "VaultHandler",
     "ModelConsulHandlerPayload",
     "ModelConsulHandlerResponse",
+    "ModelDbDescribeResponse",
     "ModelDbQueryPayload",
     "ModelDbQueryResponse",
-    "ModelDbDescribeResponse",
+    "VaultHandler",
 ]
