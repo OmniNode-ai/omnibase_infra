@@ -16,9 +16,6 @@ from omnibase_infra.handlers.models.http.enum_http_operation_type import (
     EnumHttpOperationType,
 )
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
 
 class ModelHttpPostPayload(BaseModel):
     """Payload for http.post operation result.
