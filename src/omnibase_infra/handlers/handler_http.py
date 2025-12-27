@@ -39,27 +39,27 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
     "ONEX_HTTP_TIMEOUT",
     30.0,
-    min_value=0.1,
-    max_value=3600.0,
+    min_value=1.0,
+    max_value=300.0,
     transport_type=EnumInfraTransportType.HTTP,
     service_name="http_handler",
 )
 _DEFAULT_MAX_REQUEST_SIZE: int = parse_env_int(
     "ONEX_HTTP_MAX_REQUEST_SIZE",
     10 * 1024 * 1024,
-    min_value=1,
-    max_value=1073741824,
+    min_value=1024,
+    max_value=104857600,
     transport_type=EnumInfraTransportType.HTTP,
     service_name="http_handler",
-)  # 10 MB default, max 1 GB
+)  # 10 MB default, min 1 KB, max 100 MB
 _DEFAULT_MAX_RESPONSE_SIZE: int = parse_env_int(
     "ONEX_HTTP_MAX_RESPONSE_SIZE",
     50 * 1024 * 1024,
-    min_value=1,
-    max_value=1073741824,
+    min_value=1024,
+    max_value=104857600,
     transport_type=EnumInfraTransportType.HTTP,
     service_name="http_handler",
-)  # 50 MB default, max 1 GB
+)  # 50 MB default, min 1 KB, max 100 MB
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 # Streaming chunk size for responses without Content-Length header
 _STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks

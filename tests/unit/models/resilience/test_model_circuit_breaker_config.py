@@ -251,7 +251,7 @@ class TestModelCircuitBreakerConfigFromEnvErrors:
 
             error = exc_info.value
             assert "ONEX_CB_RESET_TIMEOUT" in error.message
-            assert "expected float" in error.message
+            assert "expected numeric value" in error.message
 
     def test_from_env_empty_threshold_raises_protocol_error(self) -> None:
         """Test from_env raises ProtocolConfigurationError for empty threshold string."""
@@ -317,7 +317,7 @@ class TestModelCircuitBreakerConfigFromEnvErrors:
 
             error = exc_info.value
             assert "ONEX_CB_RESET_TIMEOUT" in error.message
-            assert "expected float" in error.message
+            assert "expected numeric value" in error.message
 
     def test_from_env_invalid_with_custom_prefix(self) -> None:
         """Test from_env raises error with custom prefix in error message."""
@@ -422,7 +422,13 @@ class TestModelCircuitBreakerConfigFromEnvErrorContext:
             assert "secret_value" not in str(error.model.context)
 
     def test_error_chains_from_value_error(self) -> None:
-        """Test error is properly chained from the original ValueError."""
+        """Test error is explicitly NOT chained (security: don't expose ValueError).
+
+        The implementation uses `raise ... from None` to intentionally break the
+        exception chain. This prevents exposing the original ValueError which could
+        contain the raw invalid value in its message, following ONEX security
+        guidelines for value redaction.
+        """
         with patch.dict(os.environ, {"ONEX_CB_THRESHOLD": "invalid"}, clear=True):
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 ModelCircuitBreakerConfig.from_env(
@@ -431,9 +437,9 @@ class TestModelCircuitBreakerConfigFromEnvErrorContext:
                 )
 
             error = exc_info.value
-            # Verify error chaining (from e)
-            assert error.__cause__ is not None
-            assert isinstance(error.__cause__, ValueError)
+            # Verify error is NOT chained (intentional for security)
+            # Uses `from None` to avoid exposing raw invalid values in ValueError
+            assert error.__cause__ is None
 
     def test_threshold_error_context_differs_from_timeout_error_context(self) -> None:
         """Test threshold and timeout errors have different parameter fields."""
@@ -493,31 +499,56 @@ class TestModelCircuitBreakerConfigFromEnvErrorContext:
 class TestModelCircuitBreakerConfigEdgeCases:
     """Test edge cases for from_env() method."""
 
-    def test_from_env_negative_threshold_string_parses_then_fails_validation(
+    def test_from_env_negative_threshold_string_uses_warning_and_default(
         self,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Test negative threshold string parses as int but model validation fails.
+        """Test negative threshold logs warning and uses default value.
 
-        Note: The from_env() method doesn't validate ranges - only parsing.
-        The Pydantic model validates threshold >= 1.
+        The parse_env_int utility validates ranges and falls back to default
+        with a warning rather than raising an exception.
         """
-        with patch.dict(os.environ, {"ONEX_CB_THRESHOLD": "-5"}, clear=True):
-            # -5 parses as valid int, but model validation fails
-            with pytest.raises(Exception):  # Pydantic ValidationError
-                ModelCircuitBreakerConfig.from_env(
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            with patch.dict(os.environ, {"ONEX_CB_THRESHOLD": "-5"}, clear=True):
+                config = ModelCircuitBreakerConfig.from_env(
                     service_name="test_service",
                     transport_type=EnumInfraTransportType.HTTP,
                 )
 
-    def test_from_env_zero_threshold_parses_then_fails_validation(self) -> None:
-        """Test zero threshold string parses as int but model validation fails."""
-        with patch.dict(os.environ, {"ONEX_CB_THRESHOLD": "0"}, clear=True):
-            # 0 parses as valid int, but model validation fails (threshold >= 1)
-            with pytest.raises(Exception):  # Pydantic ValidationError
-                ModelCircuitBreakerConfig.from_env(
+                # Verify default is used
+                assert config.threshold == 5  # default value
+
+                # Verify warning was logged
+                assert "ONEX_CB_THRESHOLD" in caplog.text
+                assert "below minimum" in caplog.text
+                assert "-5" in caplog.text
+
+    def test_from_env_zero_threshold_uses_warning_and_default(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test zero threshold logs warning and uses default value.
+
+        The parse_env_int utility validates ranges and falls back to default
+        with a warning. min_value=1 is enforced, so 0 triggers fallback.
+        """
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            with patch.dict(os.environ, {"ONEX_CB_THRESHOLD": "0"}, clear=True):
+                config = ModelCircuitBreakerConfig.from_env(
                     service_name="test_service",
                     transport_type=EnumInfraTransportType.HTTP,
                 )
+
+                # Verify default is used
+                assert config.threshold == 5  # default value
+
+                # Verify warning was logged
+                assert "ONEX_CB_THRESHOLD" in caplog.text
+                assert "below minimum" in caplog.text
 
     def test_from_env_very_large_threshold(self) -> None:
         """Test from_env handles very large threshold values."""
@@ -582,19 +613,30 @@ class TestModelCircuitBreakerConfigEdgeCases:
             assert config.threshold == 8
             assert config.reset_timeout_seconds == 80.0
 
-    def test_from_env_negative_timeout_parses_then_fails_validation(self) -> None:
-        """Test negative timeout string parses as float but model validation fails.
+    def test_from_env_negative_timeout_uses_warning_and_default(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test negative timeout logs warning and uses default value.
 
-        Note: The from_env() method doesn't validate ranges - only parsing.
-        The Pydantic model validates reset_timeout_seconds >= 0.
+        The parse_env_float utility validates ranges and falls back to default
+        with a warning. min_value=0.0 is enforced, so negative triggers fallback.
         """
-        with patch.dict(os.environ, {"ONEX_CB_RESET_TIMEOUT": "-10.0"}, clear=True):
-            # -10.0 parses as valid float, but model validation fails
-            with pytest.raises(Exception):  # Pydantic ValidationError
-                ModelCircuitBreakerConfig.from_env(
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            with patch.dict(os.environ, {"ONEX_CB_RESET_TIMEOUT": "-10.0"}, clear=True):
+                config = ModelCircuitBreakerConfig.from_env(
                     service_name="test_service",
                     transport_type=EnumInfraTransportType.HTTP,
                 )
+
+                # Verify default is used
+                assert config.reset_timeout_seconds == 60.0  # default value
+
+                # Verify warning was logged
+                assert "ONEX_CB_RESET_TIMEOUT" in caplog.text
+                assert "below minimum" in caplog.text
 
     def test_from_env_very_large_timeout(self) -> None:
         """Test from_env handles very large timeout values."""

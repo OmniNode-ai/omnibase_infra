@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import TYPE_CHECKING
 
 from aiohttp import web
@@ -41,23 +40,51 @@ from aiohttp import web
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.utils.correlation import generate_correlation_id
-from omnibase_infra.utils.util_env_parsing import parse_env_int
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 logger = logging.getLogger(__name__)
 
-# Default configuration
-DEFAULT_HTTP_PORT: int = parse_env_int(
-    "ONEX_HTTP_PORT",
-    8085,
-    min_value=1,
-    max_value=65535,
-    transport_type=EnumInfraTransportType.HTTP,
-    service_name="health_server",
-)
+# Default configuration - hardcoded to avoid import-time crashes from invalid env vars
+# Environment variable override is handled safely in HealthServer.__init__
+DEFAULT_HTTP_PORT: int = 8085
 DEFAULT_HTTP_HOST = "0.0.0.0"  # noqa: S104 - Required for container networking
+
+
+def _get_port_from_env(default: int) -> int:
+    """Safely parse ONEX_HTTP_PORT from environment with fallback to default.
+
+    This function handles invalid environment variable values gracefully by
+    logging a warning and returning the default value, rather than raising
+    an exception. This prevents import-time crashes and allows the application
+    to start even with misconfigured environment variables.
+
+    Args:
+        default: The fallback port value if env var is unset or invalid.
+
+    Returns:
+        Parsed port value if valid and within range (1-65535), otherwise default.
+    """
+    from omnibase_infra.errors import ProtocolConfigurationError
+    from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+    try:
+        return parse_env_int(
+            "ONEX_HTTP_PORT",
+            default,
+            min_value=1,
+            max_value=65535,
+            transport_type=EnumInfraTransportType.HTTP,
+            service_name="health_server",
+        )
+    except ProtocolConfigurationError as e:
+        logger.warning(
+            "Invalid ONEX_HTTP_PORT environment variable, using default %d: %s",
+            default,
+            e,
+        )
+        return default
 
 
 class HealthServer:
@@ -82,7 +109,7 @@ class HealthServer:
     def __init__(
         self,
         runtime: RuntimeHostProcess,
-        port: int = DEFAULT_HTTP_PORT,
+        port: int | None = None,
         host: str = DEFAULT_HTTP_HOST,
         version: str = "unknown",
     ) -> None:
@@ -90,12 +117,15 @@ class HealthServer:
 
         Args:
             runtime: RuntimeHostProcess instance to delegate health checks to.
-            port: Port to listen on (default: 8085).
+            port: Port to listen on. If None, uses ONEX_HTTP_PORT env var or 8085.
             host: Host to bind to (default: 0.0.0.0 for container networking).
             version: Runtime version string for health response.
         """
         self._runtime: RuntimeHostProcess = runtime
-        self._port: int = port
+        # If port is explicitly provided, use it; otherwise parse from env var safely
+        self._port: int = (
+            port if port is not None else _get_port_from_env(DEFAULT_HTTP_PORT)
+        )
         self._host: str = host
         self._version: str = version
 
