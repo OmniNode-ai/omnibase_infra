@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -33,9 +34,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TIMEOUT_SECONDS: float = 30.0
-_DEFAULT_MAX_REQUEST_SIZE: int = 10 * 1024 * 1024  # 10 MB
-_DEFAULT_MAX_RESPONSE_SIZE: int = 50 * 1024 * 1024  # 50 MB
+_DEFAULT_TIMEOUT_SECONDS: float = float(os.environ.get("ONEX_HTTP_TIMEOUT", "30.0"))
+_DEFAULT_MAX_REQUEST_SIZE: int = int(
+    os.environ.get("ONEX_HTTP_MAX_REQUEST_SIZE", str(10 * 1024 * 1024))
+)  # 10 MB default
+_DEFAULT_MAX_RESPONSE_SIZE: int = int(
+    os.environ.get("ONEX_HTTP_MAX_RESPONSE_SIZE", str(50 * 1024 * 1024))
+)  # 50 MB default
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 # Streaming chunk size for responses without Content-Length header
 _STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks

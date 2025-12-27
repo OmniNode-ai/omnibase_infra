@@ -38,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -85,13 +86,17 @@ DEFAULT_GROUP_ID = "runtime-host"
 # Health check timeout bounds (per ModelLifecycleSubcontract)
 MIN_HEALTH_CHECK_TIMEOUT = 1.0
 MAX_HEALTH_CHECK_TIMEOUT = 60.0
-DEFAULT_HEALTH_CHECK_TIMEOUT = 5.0
+DEFAULT_HEALTH_CHECK_TIMEOUT: float = float(
+    os.environ.get("ONEX_HEALTH_CHECK_TIMEOUT", "5.0")
+)
 
 # Drain timeout bounds for graceful shutdown (OMN-756)
 # Controls how long to wait for in-flight messages to complete before shutdown
 MIN_DRAIN_TIMEOUT_SECONDS = 1.0
 MAX_DRAIN_TIMEOUT_SECONDS = 300.0
-DEFAULT_DRAIN_TIMEOUT_SECONDS = 30.0
+DEFAULT_DRAIN_TIMEOUT_SECONDS: float = float(
+    os.environ.get("ONEX_DRAIN_TIMEOUT", "30.0")
+)
 
 
 class RuntimeHostProcess:

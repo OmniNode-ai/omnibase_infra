@@ -8,16 +8,30 @@ idempotency store, including connection pooling, TTL, and cleanup settings.
 Security Note:
     The dsn field may contain credentials. Use environment variables for
     sensitive values and ensure connection strings are not logged.
+
+Environment Variables:
+    ONEX_IDEMPOTENCY_TTL_SECONDS: TTL for idempotency records (default: 86400)
+    ONEX_IDEMPOTENCY_CLEANUP_INTERVAL: Cleanup interval in seconds (default: 3600)
+    ONEX_IDEMPOTENCY_BATCH_SIZE: Records per cleanup batch (default: 10000)
 """
 
 from __future__ import annotations
 
+import os
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
+# Module-level defaults from environment variables
+# These allow runtime configuration without code changes
+_DEFAULT_TTL_SECONDS = int(os.environ.get("ONEX_IDEMPOTENCY_TTL_SECONDS", "86400"))
+_DEFAULT_CLEANUP_INTERVAL = int(
+    os.environ.get("ONEX_IDEMPOTENCY_CLEANUP_INTERVAL", "3600")
+)
+_DEFAULT_BATCH_SIZE = int(os.environ.get("ONEX_IDEMPOTENCY_BATCH_SIZE", "10000"))
 
 
 class ModelPostgresIdempotencyStoreConfig(BaseModel):
@@ -165,8 +179,8 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
         le=300.0,
     )
     ttl_seconds: int = Field(
-        default=86400,  # 24 hours
-        description="Time-to-live for idempotency records in seconds",
+        default=_DEFAULT_TTL_SECONDS,
+        description="Time-to-live for idempotency records in seconds (env: ONEX_IDEMPOTENCY_TTL_SECONDS)",
         ge=60,  # Minimum 1 minute
         le=2592000,  # Maximum 30 days
     )
@@ -175,8 +189,8 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
         description="Whether to automatically clean up expired records",
     )
     cleanup_interval_seconds: int = Field(
-        default=3600,  # 1 hour
-        description="Interval between cleanup runs in seconds",
+        default=_DEFAULT_CLEANUP_INTERVAL,
+        description="Interval between cleanup runs in seconds (env: ONEX_IDEMPOTENCY_CLEANUP_INTERVAL)",
         ge=60,  # Minimum 1 minute
         le=86400,  # Maximum 24 hours
     )
@@ -194,9 +208,9 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
         le=3600,  # Maximum 1 hour tolerance
     )
     cleanup_batch_size: int = Field(
-        default=10000,
+        default=_DEFAULT_BATCH_SIZE,
         description=(
-            "Number of records to delete per batch during cleanup. "
+            "Number of records to delete per batch during cleanup (env: ONEX_IDEMPOTENCY_BATCH_SIZE). "
             "Batched deletion reduces lock contention on high-volume tables by "
             "breaking large deletes into smaller transactions, allowing other "
             "operations to interleave and preventing long-running locks."

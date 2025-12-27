@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from aiohttp import web
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Default configuration
-DEFAULT_HTTP_PORT = 8085
+DEFAULT_HTTP_PORT: int = int(os.environ.get("ONEX_HTTP_PORT", "8085"))
 DEFAULT_HTTP_HOST = "0.0.0.0"  # noqa: S104 - Required for container networking
 
 

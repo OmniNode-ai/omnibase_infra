@@ -57,6 +57,7 @@ operation (planned for Beta release).
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -88,11 +89,11 @@ logger = logging.getLogger(__name__)
 # MVP pool size fixed at 5 connections.
 # Note: Recommended range is 10-20 for production workloads.
 # Configurable pool size deferred to Beta release.
-_DEFAULT_POOL_SIZE: int = 5
+_DEFAULT_POOL_SIZE: int = int(os.environ.get("ONEX_DB_POOL_SIZE", "5"))
 
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_DB: str = "db-handler"
-_DEFAULT_TIMEOUT_SECONDS: float = 30.0
+_DEFAULT_TIMEOUT_SECONDS: float = float(os.environ.get("ONEX_DB_TIMEOUT", "30.0"))
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
 
 
