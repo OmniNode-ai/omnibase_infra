@@ -34,35 +34,10 @@ See Also:
 
 from __future__ import annotations
 
-import os
-from typing import TYPE_CHECKING
-from uuid import uuid4
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumInfraTransportType
-
-if TYPE_CHECKING:
-    from omnibase_infra.errors.error_infra import ProtocolConfigurationError
-    from omnibase_infra.models.errors.model_infra_error_context import (
-        ModelInfraErrorContext,
-    )
-
-
-def _get_error_classes() -> tuple[
-    type[ProtocolConfigurationError], type[ModelInfraErrorContext]
-]:
-    """Lazy import of error classes to avoid circular import.
-
-    Returns:
-        Tuple of (ProtocolConfigurationError, ModelInfraErrorContext)
-    """
-    from omnibase_infra.errors.error_infra import ProtocolConfigurationError
-    from omnibase_infra.models.errors.model_infra_error_context import (
-        ModelInfraErrorContext,
-    )
-
-    return ProtocolConfigurationError, ModelInfraErrorContext
+from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
 
 
 class ModelCircuitBreakerConfig(BaseModel):
@@ -224,41 +199,20 @@ class ModelCircuitBreakerConfig(BaseModel):
         threshold_var = f"{prefix}_THRESHOLD"
         reset_timeout_var = f"{prefix}_RESET_TIMEOUT"
 
-        ProtocolConfigurationError, ModelInfraErrorContext = _get_error_classes()
-
-        try:
-            threshold = int(os.environ.get(threshold_var, "5"))
-        except ValueError as e:
-            context = ModelInfraErrorContext(
-                transport_type=transport_type,
-                operation="parse_env_config",
-                target_name=service_name,
-                correlation_id=uuid4(),
-            )
-            raise ProtocolConfigurationError(
-                f"Invalid value for {threshold_var} environment variable: "
-                "expected integer",
-                context=context,
-                parameter=threshold_var,
-                value="[REDACTED]",
-            ) from e
-
-        try:
-            reset_timeout = float(os.environ.get(reset_timeout_var, "60.0"))
-        except ValueError as e:
-            context = ModelInfraErrorContext(
-                transport_type=transport_type,
-                operation="parse_env_config",
-                target_name=service_name,
-                correlation_id=uuid4(),
-            )
-            raise ProtocolConfigurationError(
-                f"Invalid value for {reset_timeout_var} environment variable: "
-                "expected float",
-                context=context,
-                parameter=reset_timeout_var,
-                value="[REDACTED]",
-            ) from e
+        threshold = parse_env_int(
+            threshold_var,
+            5,
+            min_value=1,
+            transport_type=transport_type,
+            service_name=service_name,
+        )
+        reset_timeout = parse_env_float(
+            reset_timeout_var,
+            60.0,
+            min_value=0.0,
+            transport_type=transport_type,
+            service_name=service_name,
+        )
 
         return cls(
             threshold=threshold,

@@ -41,6 +41,7 @@ from aiohttp import web
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.utils.correlation import generate_correlation_id
+from omnibase_infra.utils.util_env_parsing import parse_env_int
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
@@ -48,7 +49,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Default configuration
-DEFAULT_HTTP_PORT: int = int(os.environ.get("ONEX_HTTP_PORT", "8085"))
+DEFAULT_HTTP_PORT: int = parse_env_int(
+    "ONEX_HTTP_PORT",
+    8085,
+    min_value=1,
+    max_value=65535,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="health_server",
+)
 DEFAULT_HTTP_HOST = "0.0.0.0"  # noqa: S104 - Required for container networking
 
 

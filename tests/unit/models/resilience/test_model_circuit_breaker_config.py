@@ -8,18 +8,24 @@ This test suite validates:
 - Error handling for invalid environment values
 - Custom prefix support
 - Error context validation
+- Pydantic range validation behavior
+- Edge cases (whitespace, large values, scientific notation)
 
 Test Organization:
-    - TestModelCircuitBreakerConfigBasics: Basic model functionality
-    - TestModelCircuitBreakerConfigFromEnv: Environment variable loading
-    - TestModelCircuitBreakerConfigFromEnvErrors: Error cases for from_env()
-    - TestModelCircuitBreakerConfigFromEnvErrorContext: Error context validation
+    - TestModelCircuitBreakerConfigBasics: Basic model functionality (6 tests)
+    - TestModelCircuitBreakerConfigFromEnv: Environment variable loading (11 tests)
+    - TestModelCircuitBreakerConfigFromEnvErrors: Error cases for from_env() (9 tests)
+    - TestModelCircuitBreakerConfigFromEnvErrorContext: Error context validation (11 tests)
+    - TestModelCircuitBreakerConfigEdgeCases: Edge cases and boundary conditions (14 tests)
 
 Coverage Goals:
     - >90% code coverage for model
-    - All from_env() paths tested
-    - All error scenarios tested
-    - Error context fields validated
+    - All from_env() paths tested (threshold/timeout parsing, defaults, custom prefix)
+    - All error scenarios tested (invalid values, empty strings, whitespace)
+    - Error context fields validated (transport_type, operation, target_name, correlation_id)
+    - Value redaction verified for security
+    - Error chaining from ValueError verified
+    - Pydantic validation after parsing tested (negative values, zero threshold)
 """
 
 import os
@@ -575,3 +581,60 @@ class TestModelCircuitBreakerConfigEdgeCases:
             )
             assert config.threshold == 8
             assert config.reset_timeout_seconds == 80.0
+
+    def test_from_env_negative_timeout_parses_then_fails_validation(self) -> None:
+        """Test negative timeout string parses as float but model validation fails.
+
+        Note: The from_env() method doesn't validate ranges - only parsing.
+        The Pydantic model validates reset_timeout_seconds >= 0.
+        """
+        with patch.dict(os.environ, {"ONEX_CB_RESET_TIMEOUT": "-10.0"}, clear=True):
+            # -10.0 parses as valid float, but model validation fails
+            with pytest.raises(Exception):  # Pydantic ValidationError
+                ModelCircuitBreakerConfig.from_env(
+                    service_name="test_service",
+                    transport_type=EnumInfraTransportType.HTTP,
+                )
+
+    def test_from_env_very_large_timeout(self) -> None:
+        """Test from_env handles very large timeout values."""
+        with patch.dict(os.environ, {"ONEX_CB_RESET_TIMEOUT": "86400.0"}, clear=True):
+            config = ModelCircuitBreakerConfig.from_env(
+                service_name="test_service",
+                transport_type=EnumInfraTransportType.HTTP,
+            )
+            assert config.reset_timeout_seconds == 86400.0  # 24 hours
+
+    def test_from_env_whitespace_around_valid_threshold(self) -> None:
+        """Test from_env handles whitespace around valid threshold values.
+
+        Python's int() function trims leading/trailing whitespace.
+        """
+        with patch.dict(os.environ, {"ONEX_CB_THRESHOLD": "  7  "}, clear=True):
+            config = ModelCircuitBreakerConfig.from_env(
+                service_name="test_service",
+                transport_type=EnumInfraTransportType.HTTP,
+            )
+            assert config.threshold == 7
+
+    def test_from_env_whitespace_around_valid_timeout(self) -> None:
+        """Test from_env handles whitespace around valid timeout values.
+
+        Python's float() function trims leading/trailing whitespace.
+        """
+        with patch.dict(os.environ, {"ONEX_CB_RESET_TIMEOUT": "  90.5  "}, clear=True):
+            config = ModelCircuitBreakerConfig.from_env(
+                service_name="test_service",
+                transport_type=EnumInfraTransportType.HTTP,
+            )
+            assert config.reset_timeout_seconds == 90.5
+
+    def test_from_env_integer_string_for_timeout(self) -> None:
+        """Test from_env correctly converts integer string to float for timeout."""
+        with patch.dict(os.environ, {"ONEX_CB_RESET_TIMEOUT": "120"}, clear=True):
+            config = ModelCircuitBreakerConfig.from_env(
+                service_name="test_service",
+                transport_type=EnumInfraTransportType.HTTP,
+            )
+            assert config.reset_timeout_seconds == 120.0
+            assert isinstance(config.reset_timeout_seconds, float)

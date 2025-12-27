@@ -33,18 +33,24 @@ _DEFAULT_TTL_SECONDS = parse_env_int(
     86400,
     transport_type=EnumInfraTransportType.DATABASE,
     service_name="postgres_idempotency_store",
+    min_value=60,  # Minimum 1 minute
+    max_value=2592000,  # Maximum 30 days
 )
 _DEFAULT_CLEANUP_INTERVAL = parse_env_int(
     "ONEX_IDEMPOTENCY_CLEANUP_INTERVAL",
     3600,
     transport_type=EnumInfraTransportType.DATABASE,
     service_name="postgres_idempotency_store",
+    min_value=60,  # Minimum 1 minute
+    max_value=86400,  # Maximum 24 hours
 )
 _DEFAULT_BATCH_SIZE = parse_env_int(
     "ONEX_IDEMPOTENCY_BATCH_SIZE",
     10000,
     transport_type=EnumInfraTransportType.DATABASE,
     service_name="postgres_idempotency_store",
+    min_value=100,  # Minimum batch size
+    max_value=100000,  # Maximum batch size
 )
 
 
