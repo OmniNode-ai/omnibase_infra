@@ -76,6 +76,71 @@ SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 logger = logging.getLogger(__name__)
 
 
+def _analyze_attribute_error(error_str: str) -> tuple[str, str]:
+    """Analyze AttributeError and return (missing_attribute, hint).
+
+    Extracts the missing attribute name from the error string and provides
+    a user-friendly hint for common container API issues.
+
+    Args:
+        error_str: The string representation of the AttributeError.
+
+    Returns:
+        Tuple of (missing_attribute, hint) for error context.
+    """
+    missing_attr = error_str.split("'")[-2] if "'" in error_str else "unknown"
+
+    if "service_registry" in error_str:
+        hint = (
+            "Container missing 'service_registry' attribute. "
+            "Expected ModelONEXContainer from omnibase_core."
+        )
+    elif "register_instance" in error_str:
+        hint = (
+            "Container.service_registry missing 'register_instance' method. "
+            "Check omnibase_core version compatibility (requires v0.5.6 or later)."
+        )
+    else:
+        hint = f"Missing attribute: '{missing_attr}'"
+
+    return missing_attr, hint
+
+
+def _analyze_type_error(error_str: str) -> tuple[str, str]:
+    """Analyze TypeError and return (invalid_argument, hint).
+
+    Extracts which argument caused the type error and provides
+    a user-friendly hint for fixing registration issues.
+
+    Args:
+        error_str: The string representation of the TypeError.
+
+    Returns:
+        Tuple of (invalid_argument, hint) for error context.
+    """
+    if "interface" in error_str:
+        return "interface", (
+            "Invalid 'interface' argument. "
+            "Expected a type class (e.g., PolicyRegistry), not an instance."
+        )
+    if "instance" in error_str:
+        return "instance", (
+            "Invalid 'instance' argument. Expected an instance of the interface type."
+        )
+    if "scope" in error_str:
+        return "scope", (
+            "Invalid 'scope' argument. Expected 'global', 'request', or 'transient'."
+        )
+    if "metadata" in error_str:
+        return "metadata", "Invalid 'metadata' argument. Expected dict[str, object]."
+    if "positional" in error_str or "argument" in error_str:
+        return "signature", (
+            "Argument count mismatch. "
+            "Check register_instance() signature compatibility with omnibase_core version."
+        )
+    return "unknown", "Check register_instance() signature compatibility."
+
+
 async def wire_infrastructure_services(
     container: ModelONEXContainer,
 ) -> dict[str, list[str]]:
@@ -172,20 +237,7 @@ async def wire_infrastructure_services(
     except AttributeError as e:
         # Container missing service_registry or registration method
         error_str = str(e)
-        missing_attr = error_str.split("'")[-2] if "'" in error_str else "unknown"
-
-        if "service_registry" in error_str:
-            hint = (
-                "Container missing 'service_registry' attribute. "
-                "Expected ModelONEXContainer from omnibase_core."
-            )
-        elif "register_instance" in error_str:
-            hint = (
-                "Container.service_registry missing 'register_instance' method. "
-                "Check omnibase_core version compatibility (requires v0.5.6 or later)."
-            )
-        else:
-            hint = f"Missing attribute: '{missing_attr}'"
+        missing_attr, hint = _analyze_attribute_error(error_str)
 
         logger.exception(
             "Container missing required service_registry API",
@@ -205,38 +257,7 @@ async def wire_infrastructure_services(
     except TypeError as e:
         # Invalid arguments to register_instance
         error_str = str(e)
-
-        # Identify which argument caused the issue
-        if "interface" in error_str:
-            invalid_arg = "interface"
-            hint = (
-                "Invalid 'interface' argument. "
-                "Expected a type class (e.g., PolicyRegistry), not an instance."
-            )
-        elif "instance" in error_str:
-            invalid_arg = "instance"
-            hint = (
-                "Invalid 'instance' argument. "
-                "Expected an instance of the interface type."
-            )
-        elif "scope" in error_str:
-            invalid_arg = "scope"
-            hint = (
-                "Invalid 'scope' argument. "
-                "Expected 'global', 'request', or 'transient'."
-            )
-        elif "metadata" in error_str:
-            invalid_arg = "metadata"
-            hint = "Invalid 'metadata' argument. Expected dict[str, object]."
-        elif "positional" in error_str or "argument" in error_str:
-            invalid_arg = "signature"
-            hint = (
-                "Argument count mismatch. "
-                "Check register_instance() signature compatibility with omnibase_core version."
-            )
-        else:
-            invalid_arg = "unknown"
-            hint = "Check register_instance() signature compatibility."
+        invalid_arg, hint = _analyze_type_error(error_str)
 
         logger.exception(
             "Invalid arguments during service registration",

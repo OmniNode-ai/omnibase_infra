@@ -528,6 +528,66 @@ class HttpRestHandler(MixinEnvelopeExtraction):
 
         return b"".join(chunks)
 
+    def _prepare_request_content(
+        self,
+        method: str,
+        headers: dict[str, str],
+        body: object,
+        pre_serialized: bytes | None,
+        ctx: ModelInfraErrorContext,
+    ) -> tuple[bytes | str | None, dict[str, JsonValue] | None, dict[str, str]]:
+        """Prepare request content for HTTP request.
+
+        Handles body serialization for POST requests, managing pre-serialized bytes
+        from size validation and various body types (dict, str, other JSON-serializable).
+
+        Args:
+            method: HTTP method (GET, POST)
+            headers: Request headers (will be copied, not mutated)
+            body: Request body (used only if pre_serialized is None)
+            pre_serialized: Pre-serialized JSON bytes for dict bodies
+            ctx: Error context for exceptions
+
+        Returns:
+            Tuple of (request_content, request_json, request_headers):
+                - request_content: bytes or str content for the request
+                - request_json: dict for httpx json= parameter (mutually exclusive with content)
+                - request_headers: Headers dict (possibly with Content-Type added)
+
+        Raises:
+            ProtocolConfigurationError: If body is not JSON-serializable.
+        """
+        request_content: bytes | str | None = None
+        request_json: dict[str, JsonValue] | None = None
+        request_headers = dict(headers)  # Copy to avoid mutating caller's headers
+
+        if method != "POST" or body is None:
+            return request_content, request_json, request_headers
+
+        if pre_serialized is not None:
+            # Use pre-serialized bytes from _validate_request_size to avoid
+            # double serialization. Set Content-Type header since we're using
+            # content= instead of json= parameter.
+            request_content = pre_serialized
+            if "content-type" not in {k.lower() for k in request_headers}:
+                request_headers["Content-Type"] = "application/json"
+        elif isinstance(body, dict):
+            # Fallback for dict bodies without pre-serialized content
+            # (shouldn't happen in normal flow, but handles edge cases)
+            request_json = body
+        elif isinstance(body, str):
+            request_content = body
+        else:
+            try:
+                request_content = json.dumps(body)
+            except TypeError as e:
+                raise ProtocolConfigurationError(
+                    f"Body is not JSON-serializable: {type(body).__name__}",
+                    context=ctx,
+                ) from e
+
+        return request_content, request_json, request_headers
+
     async def _execute_request(
         self,
         method: str,
@@ -576,32 +636,9 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         )
 
         # Prepare request content for POST
-        request_content: bytes | str | None = None
-        request_json: dict[str, JsonValue] | None = None
-        request_headers = dict(headers)  # Copy to avoid mutating caller's headers
-
-        if method == "POST" and body is not None:
-            if pre_serialized is not None:
-                # Use pre-serialized bytes from _validate_request_size to avoid
-                # double serialization. Set Content-Type header since we're using
-                # content= instead of json= parameter.
-                request_content = pre_serialized
-                if "content-type" not in {k.lower() for k in request_headers}:
-                    request_headers["Content-Type"] = "application/json"
-            elif isinstance(body, dict):
-                # Fallback for dict bodies without pre-serialized content
-                # (shouldn't happen in normal flow, but handles edge cases)
-                request_json = body
-            elif isinstance(body, str):
-                request_content = body
-            else:
-                try:
-                    request_content = json.dumps(body)
-                except TypeError as e:
-                    raise ProtocolConfigurationError(
-                        f"Body is not JSON-serializable: {type(body).__name__}",
-                        context=ctx,
-                    ) from e
+        request_content, request_json, request_headers = self._prepare_request_content(
+            method, headers, body, pre_serialized, ctx
+        )
 
         try:
             # Use streaming request to get response headers before reading body

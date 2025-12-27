@@ -30,14 +30,22 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     MixinNodeIntrospection,
     PerformanceMetricsCacheDict,
 )
+from omnibase_infra.mixins.mixin_retry_execution import (
+    EnumRetryErrorCategory,
+    MixinRetryExecution,
+    RetryErrorClassification,
+)
 from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
 
 __all__: list[str] = [
     "CircuitState",
+    "EnumRetryErrorCategory",
     "MixinAsyncCircuitBreaker",
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
+    "MixinRetryExecution",
     "ModelCircuitBreakerConfig",
     "PerformanceMetricsCacheDict",
     "ProtocolEventBusLike",
+    "RetryErrorClassification",
 ]

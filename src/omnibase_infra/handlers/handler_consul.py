@@ -58,7 +58,13 @@ from omnibase_infra.handlers.models.consul import (
 from omnibase_infra.handlers.models.model_consul_handler_response import (
     ModelConsulHandlerResponse,
 )
-from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
+from omnibase_infra.mixins import (
+    EnumRetryErrorCategory,
+    MixinAsyncCircuitBreaker,
+    MixinEnvelopeExtraction,
+    MixinRetryExecution,
+    RetryErrorClassification,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
@@ -84,7 +90,9 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
-class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
+class ConsulHandler(
+    MixinAsyncCircuitBreaker, MixinRetryExecution, MixinEnvelopeExtraction
+):
     """HashiCorp Consul handler using python-consul client (MVP: KV, service registration).
 
     Security Policy - Token Handling:
@@ -178,6 +186,8 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         self._max_queue_size: int = 0
         # Circuit breaker initialized flag - set after _init_circuit_breaker called
         self._circuit_breaker_initialized: bool = False
+        # Retry state tracking for inter-method communication
+        self._last_retry_state: ModelRetryState = ModelRetryState()
 
     @property
     def handler_type(self) -> str:
@@ -201,6 +211,208 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
     def max_queue_size(self) -> int:
         """Return maximum queue size (public API for tests)."""
         return self._max_queue_size
+
+    # MixinRetryExecution abstract method implementations
+
+    def _get_transport_type(self) -> EnumInfraTransportType:
+        """Return transport type for error context."""
+        return EnumInfraTransportType.CONSUL
+
+    def _get_target_name(self) -> str:
+        """Return target name for error context."""
+        return "consul_handler"
+
+    def _classify_error(
+        self, error: Exception, operation: str
+    ) -> RetryErrorClassification:
+        """Classify Consul-specific exceptions for retry handling.
+
+        Args:
+            error: The exception to classify.
+            operation: The operation name for context.
+
+        Returns:
+            RetryErrorClassification with retry decision and error details.
+        """
+        if isinstance(error, TimeoutError):
+            return RetryErrorClassification(
+                category=EnumRetryErrorCategory.TIMEOUT,
+                should_retry=True,
+                record_circuit_failure=True,
+                error_message=f"Timeout: {type(error).__name__}",
+            )
+
+        if isinstance(error, consul.ACLPermissionDenied):
+            return RetryErrorClassification(
+                category=EnumRetryErrorCategory.AUTHENTICATION,
+                should_retry=False,
+                record_circuit_failure=True,
+                error_message="Consul ACL permission denied - check token permissions",
+            )
+
+        if isinstance(error, consul.Timeout):
+            return RetryErrorClassification(
+                category=EnumRetryErrorCategory.TIMEOUT,
+                should_retry=True,
+                record_circuit_failure=True,
+                error_message=f"Consul timeout: {type(error).__name__}",
+            )
+
+        if isinstance(error, consul.ConsulException):
+            return RetryErrorClassification(
+                category=EnumRetryErrorCategory.CONNECTION,
+                should_retry=True,
+                record_circuit_failure=True,
+                error_message=f"Consul error: {type(error).__name__}",
+            )
+
+        # Unknown error - retry eligible
+        return RetryErrorClassification(
+            category=EnumRetryErrorCategory.UNKNOWN,
+            should_retry=True,
+            record_circuit_failure=True,
+            error_message=f"Unexpected error: {type(error).__name__}",
+        )
+
+    # Initialization helper methods
+
+    def _validate_consul_config(
+        self, config: dict[str, JsonValue], correlation_id: UUID
+    ) -> ModelConsulHandlerConfig:
+        """Validate and parse Consul configuration.
+
+        Args:
+            config: Raw configuration dictionary.
+            correlation_id: Correlation ID for error context.
+
+        Returns:
+            Validated ModelConsulHandlerConfig.
+
+        Raises:
+            ProtocolConfigurationError: If validation fails.
+            RuntimeHostError: If parsing fails unexpectedly.
+        """
+        try:
+            # Handle SecretStr token conversion
+            token_raw = config.get("token")
+            if isinstance(token_raw, str):
+                config = dict(config)  # Make mutable copy
+                config["token"] = SecretStr(token_raw)
+
+            return ModelConsulHandlerConfig.model_validate(config)
+        except ValidationError as e:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="initialize",
+                target_name="consul_handler",
+                correlation_id=correlation_id,
+            )
+            sanitized_fields = [err.get("loc", ("unknown",))[-1] for err in e.errors()]
+            raise ProtocolConfigurationError(
+                f"Invalid Consul configuration - validation failed for fields: {sanitized_fields}",
+                context=ctx,
+            ) from e
+        except Exception as e:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="initialize",
+                target_name="consul_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                f"Configuration parsing failed: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    def _setup_consul_client(
+        self, consul_config: ModelConsulHandlerConfig
+    ) -> consul.Consul:
+        """Create and configure the Consul client.
+
+        Args:
+            consul_config: Validated Consul configuration.
+
+        Returns:
+            Configured consul.Consul client instance.
+        """
+        token_value: str | None = None
+        if consul_config.token is not None:
+            token_value = consul_config.token.get_secret_value()
+
+        return consul.Consul(
+            host=consul_config.host,
+            port=consul_config.port,
+            scheme=consul_config.scheme,
+            token=token_value,
+            dc=consul_config.datacenter,
+        )
+
+    def _verify_consul_connection(
+        self, client: consul.Consul, correlation_id: UUID
+    ) -> None:
+        """Verify connectivity to Consul by checking leader status.
+
+        Args:
+            client: The Consul client to verify.
+            correlation_id: Correlation ID for error context.
+
+        Raises:
+            InfraConnectionError: If verification fails.
+        """
+        try:
+            leader = client.status.leader()
+            if not leader:
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="initialize",
+                    target_name="consul_handler",
+                    correlation_id=correlation_id,
+                )
+                raise InfraConnectionError(
+                    "Consul cluster has no leader - cluster may be unavailable",
+                    context=ctx,
+                )
+        except consul.ConsulException as e:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="initialize",
+                target_name="consul_handler",
+                correlation_id=correlation_id,
+            )
+            raise InfraConnectionError(
+                "Consul connectivity verification failed",
+                context=ctx,
+            ) from e
+
+    def _setup_thread_pool(self, consul_config: ModelConsulHandlerConfig) -> None:
+        """Set up the thread pool executor for async operations.
+
+        Args:
+            consul_config: Validated Consul configuration.
+        """
+        self._max_workers = consul_config.max_concurrent_operations
+        self._executor = ThreadPoolExecutor(
+            max_workers=self._max_workers,
+            thread_name_prefix="consul_handler_",
+        )
+        self._max_queue_size = (
+            self._max_workers * consul_config.max_queue_size_multiplier
+        )
+
+    def _setup_circuit_breaker(self, consul_config: ModelConsulHandlerConfig) -> None:
+        """Initialize circuit breaker if enabled.
+
+        Args:
+            consul_config: Validated Consul configuration.
+        """
+        if consul_config.circuit_breaker_enabled:
+            self._init_circuit_breaker(
+                threshold=consul_config.circuit_breaker_failure_threshold,
+                reset_timeout=consul_config.circuit_breaker_reset_timeout_seconds,
+                service_name=f"consul.{consul_config.datacenter or 'default'}",
+                transport_type=EnumInfraTransportType.CONSUL,
+            )
+            self._circuit_breaker_initialized = True
 
     async def initialize(self, config: dict[str, JsonValue]) -> None:
         """Initialize Consul client with configuration.
@@ -235,163 +447,93 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             },
         )
 
-        # Parse configuration using Pydantic model
+        # Validate configuration
+        self._config = self._validate_consul_config(config, init_correlation_id)
+
+        # Set up client and infrastructure
         try:
-            # Handle SecretStr token conversion
-            token_raw = config.get("token")
-            if isinstance(token_raw, str):
-                config = dict(config)  # Make mutable copy
-                config["token"] = SecretStr(token_raw)
-
-            # Use model_validate for type-safe dict parsing (Pydantic v2 pattern)
-            self._config = ModelConsulHandlerConfig.model_validate(config)
-        except ValidationError as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="initialize",
-                target_name="consul_handler",
-                correlation_id=init_correlation_id,
-            )
-            # Security: Sanitize validation error to prevent token exposure.
-            # Pydantic ValidationError can contain actual field values in error details,
-            # which could expose sensitive token values. Only expose field names and
-            # error types, never the actual values.
-            sanitized_fields = [err.get("loc", ("unknown",))[-1] for err in e.errors()]
-            raise ProtocolConfigurationError(
-                f"Invalid Consul configuration - validation failed for fields: {sanitized_fields}",
-                context=ctx,
-            ) from e
-        except Exception as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="initialize",
-                target_name="consul_handler",
-                correlation_id=init_correlation_id,
-            )
-            raise RuntimeHostError(
-                f"Configuration parsing failed: {type(e).__name__}",
-                context=ctx,
-            ) from e
-
-        try:
-            # Extract token value if present
-            token_value: str | None = None
-            if self._config.token is not None:
-                token_value = self._config.token.get_secret_value()
-
-            # Initialize python-consul client (synchronous)
-            self._client = consul.Consul(
-                host=self._config.host,
-                port=self._config.port,
-                scheme=self._config.scheme,
-                token=token_value,
-                dc=self._config.datacenter,
-            )
-
-            # Verify connectivity by checking leader status
-            try:
-                leader = self._client.status.leader()
-                if not leader:
-                    ctx = ModelInfraErrorContext(
-                        transport_type=EnumInfraTransportType.CONSUL,
-                        operation="initialize",
-                        target_name="consul_handler",
-                        correlation_id=init_correlation_id,
-                    )
-                    raise InfraConnectionError(
-                        "Consul cluster has no leader - cluster may be unavailable",
-                        context=ctx,
-                    )
-            except consul.ConsulException as e:
-                ctx = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.CONSUL,
-                    operation="initialize",
-                    target_name="consul_handler",
-                    correlation_id=init_correlation_id,
-                )
-                raise InfraConnectionError(
-                    "Consul connectivity verification failed",
-                    context=ctx,
-                ) from e
-
-            # Create bounded thread pool executor for production safety
-            # Use validated config values (Pydantic ensures type correctness)
-            self._max_workers = self._config.max_concurrent_operations
-
-            self._executor = ThreadPoolExecutor(
-                max_workers=self._max_workers,
-                thread_name_prefix="consul_handler_",
-            )
-
-            # Calculate max queue size using validated config values
-            self._max_queue_size = (
-                self._max_workers * self._config.max_queue_size_multiplier
-            )
-
-            # Initialize circuit breaker using mixin (if enabled via config)
-            if self._config.circuit_breaker_enabled:
-                self._init_circuit_breaker(
-                    threshold=self._config.circuit_breaker_failure_threshold,
-                    reset_timeout=self._config.circuit_breaker_reset_timeout_seconds,
-                    service_name=f"consul.{self._config.datacenter or 'default'}",
-                    transport_type=EnumInfraTransportType.CONSUL,
-                )
-                self._circuit_breaker_initialized = True
+            self._client = self._setup_consul_client(self._config)
+            self._verify_consul_connection(self._client, init_correlation_id)
+            self._setup_thread_pool(self._config)
+            self._setup_circuit_breaker(self._config)
 
             self._initialized = True
-            logger.info(
-                "%s initialized successfully",
-                self.__class__.__name__,
-                extra={
-                    "handler": self.__class__.__name__,
-                    "host": self._config.host,
-                    "port": self._config.port,
-                    "scheme": self._config.scheme,
-                    "datacenter": self._config.datacenter,
-                    "timeout_seconds": self._config.timeout_seconds,
-                    "thread_pool_max_workers": self._max_workers,
-                    "thread_pool_max_queue_size": self._max_queue_size,
-                    "circuit_breaker_enabled": self._circuit_breaker_initialized,
-                    "correlation_id": str(init_correlation_id),
-                },
-            )
+            self._log_initialization_success(init_correlation_id)
 
         except (InfraConnectionError, InfraAuthenticationError):
-            # Re-raise our own infrastructure errors without wrapping
             raise
         except consul.ACLPermissionDenied as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="initialize",
-                target_name="consul_handler",
-                correlation_id=init_correlation_id,
-            )
-            raise InfraAuthenticationError(
-                "Consul ACL permission denied - check token validity and permissions",
-                context=ctx,
-            ) from e
+            self._raise_auth_error(init_correlation_id, e)
         except consul.ConsulException as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="initialize",
-                target_name="consul_handler",
-                correlation_id=init_correlation_id,
-            )
-            raise InfraConnectionError(
-                f"Consul connection failed: {type(e).__name__}",
-                context=ctx,
-            ) from e
+            self._raise_connection_error(init_correlation_id, e)
         except Exception as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="initialize",
-                target_name="consul_handler",
-                correlation_id=init_correlation_id,
-            )
-            raise RuntimeHostError(
-                f"Consul client initialization failed: {type(e).__name__}",
-                context=ctx,
-            ) from e
+            self._raise_runtime_error(init_correlation_id, e)
+
+    def _log_initialization_success(self, correlation_id: UUID) -> None:
+        """Log successful initialization with handler details."""
+        if self._config is None:
+            return
+        logger.info(
+            "%s initialized successfully",
+            self.__class__.__name__,
+            extra={
+                "handler": self.__class__.__name__,
+                "host": self._config.host,
+                "port": self._config.port,
+                "scheme": self._config.scheme,
+                "datacenter": self._config.datacenter,
+                "timeout_seconds": self._config.timeout_seconds,
+                "thread_pool_max_workers": self._max_workers,
+                "thread_pool_max_queue_size": self._max_queue_size,
+                "circuit_breaker_enabled": self._circuit_breaker_initialized,
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+    def _raise_auth_error(
+        self, correlation_id: UUID, original_error: Exception
+    ) -> None:
+        """Raise InfraAuthenticationError with context."""
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.CONSUL,
+            operation="initialize",
+            target_name="consul_handler",
+            correlation_id=correlation_id,
+        )
+        raise InfraAuthenticationError(
+            "Consul ACL permission denied - check token validity and permissions",
+            context=ctx,
+        ) from original_error
+
+    def _raise_connection_error(
+        self, correlation_id: UUID, original_error: Exception
+    ) -> None:
+        """Raise InfraConnectionError with context."""
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.CONSUL,
+            operation="initialize",
+            target_name="consul_handler",
+            correlation_id=correlation_id,
+        )
+        raise InfraConnectionError(
+            f"Consul connection failed: {type(original_error).__name__}",
+            context=ctx,
+        ) from original_error
+
+    def _raise_runtime_error(
+        self, correlation_id: UUID, original_error: Exception
+    ) -> None:
+        """Raise RuntimeHostError with context."""
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.CONSUL,
+            operation="initialize",
+            target_name="consul_handler",
+            correlation_id=correlation_id,
+        )
+        raise RuntimeHostError(
+            f"Consul client initialization failed: {type(original_error).__name__}",
+            context=ctx,
+        ) from original_error
 
     async def shutdown(self) -> None:
         """Close Consul client and release resources.
@@ -582,12 +724,43 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         if self._config is None:
             raise RuntimeError("Config not initialized")
 
-        # Check circuit breaker before execution (async mixin pattern)
-        if self._circuit_breaker_initialized:
-            async with self._circuit_breaker_lock:
-                await self._check_circuit_breaker(operation, correlation_id)
+        await self._check_circuit_if_enabled(operation, correlation_id)
 
-        # Initialize retry state with config values
+        retry_state, op_context = self._init_retry_context(operation, correlation_id)
+
+        while retry_state.is_retriable():
+            result = await self._try_execute_operation(
+                func, retry_state, op_context, operation, correlation_id
+            )
+            if result is not None:
+                return result[0]  # Unpack the result tuple
+
+            # Get updated retry state after error handling
+            retry_state = self._last_retry_state
+
+            await self._log_retry_attempt(operation, retry_state, correlation_id)
+            await asyncio.sleep(retry_state.delay_seconds)
+
+        # Should never reach here, but satisfy type checker
+        if retry_state.last_error is not None:
+            raise RuntimeError(f"Retry exhausted: {retry_state.last_error}")
+        raise RuntimeError("Retry loop completed without result")
+
+    def _init_retry_context(
+        self, operation: str, correlation_id: UUID
+    ) -> tuple[ModelRetryState, ModelOperationContext]:
+        """Initialize retry state and operation context.
+
+        Args:
+            operation: Operation name for context.
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            Tuple of (ModelRetryState, ModelOperationContext).
+        """
+        if self._config is None:
+            raise RuntimeError("Config not initialized")
+
         retry_config = self._config.retry
         retry_state = ModelRetryState(
             attempt=0,
@@ -596,176 +769,77 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             backoff_multiplier=retry_config.exponential_base,
         )
 
-        # Create operation context for tracking
         op_context = ModelOperationContext.create(
             operation_name=operation,
             correlation_id=correlation_id,
             timeout_seconds=self._config.timeout_seconds,
         )
 
-        while retry_state.is_retriable():
-            try:
-                # consul is synchronous, wrap in custom thread executor
-                loop = asyncio.get_running_loop()
+        return retry_state, op_context
 
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(self._executor, func),
-                    timeout=op_context.timeout_seconds,
-                )
+    async def _try_execute_operation(
+        self,
+        func: Callable[[], T],
+        retry_state: ModelRetryState,
+        op_context: ModelOperationContext,
+        operation: str,
+        correlation_id: UUID,
+    ) -> tuple[T] | None:
+        """Try to execute an operation once with error handling.
 
-                # Record success for circuit breaker (async mixin pattern)
-                if self._circuit_breaker_initialized:
-                    async with self._circuit_breaker_lock:
-                        await self._reset_circuit_breaker()
+        Args:
+            func: Callable to execute.
+            retry_state: Current retry state.
+            op_context: Operation context.
+            operation: Operation name.
+            correlation_id: Correlation ID.
 
-                return result
+        Returns:
+            Tuple containing result if successful, None if should retry.
 
-            except TimeoutError as e:
-                error_msg = f"Timeout after {op_context.timeout_seconds}s"
-                retry_state = retry_state.next_attempt(
-                    error_message=error_msg,
-                    max_delay_seconds=retry_config.max_delay_seconds,
-                )
-                # NOTE: Circuit breaker failures are recorded only on final retry attempt.
-                # Rationale: Transient failures during retry shouldn't count toward threshold.
-                # Only persistent failures (after all retries exhausted) indicate true service
-                # degradation. This prevents circuit breaker from opening due to temporary
-                # network blips. Pattern consistent with VaultHandler implementation.
-                if not retry_state.is_retriable():
-                    if self._circuit_breaker_initialized:
-                        async with self._circuit_breaker_lock:
-                            await self._record_circuit_failure(
-                                operation, correlation_id
-                            )
-                    ctx = ModelInfraErrorContext(
-                        transport_type=EnumInfraTransportType.CONSUL,
-                        operation=operation,
-                        target_name="consul_handler",
-                        correlation_id=correlation_id,
-                    )
-                    raise InfraTimeoutError(
-                        f"Consul operation timed out after {op_context.timeout_seconds}s",
-                        context=ctx,
-                        timeout_seconds=op_context.timeout_seconds,
-                    ) from e
+        Raises:
+            InfraTimeoutError, InfraConnectionError, InfraAuthenticationError:
+                If error is not retriable or retries are exhausted.
+        """
+        if self._config is None:
+            raise RuntimeError("Config not initialized")
 
-            except consul.ACLPermissionDenied as e:
-                # Don't retry authentication failures, record for circuit breaker
-                if self._circuit_breaker_initialized:
-                    async with self._circuit_breaker_lock:
-                        await self._record_circuit_failure(operation, correlation_id)
-                ctx = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.CONSUL,
-                    operation=operation,
-                    target_name="consul_handler",
-                    correlation_id=correlation_id,
-                )
-                raise InfraAuthenticationError(
-                    "Consul ACL permission denied - check token permissions",
-                    context=ctx,
-                ) from e
-
-            except consul.Timeout as e:
-                # Handle consul.Timeout (subclass of ConsulException) specifically
-                # to raise InfraTimeoutError instead of InfraConnectionError
-                error_msg = f"Consul timeout: {type(e).__name__}"
-                retry_state = retry_state.next_attempt(
-                    error_message=error_msg,
-                    max_delay_seconds=retry_config.max_delay_seconds,
-                )
-                if not retry_state.is_retriable():
-                    if self._circuit_breaker_initialized:
-                        async with self._circuit_breaker_lock:
-                            await self._record_circuit_failure(
-                                operation, correlation_id
-                            )
-                    ctx = ModelInfraErrorContext(
-                        transport_type=EnumInfraTransportType.CONSUL,
-                        operation=operation,
-                        target_name="consul_handler",
-                        correlation_id=correlation_id,
-                    )
-                    raise InfraTimeoutError(
-                        f"Consul operation timed out: {e}",
-                        context=ctx,
-                        timeout_seconds=op_context.timeout_seconds,
-                    ) from e
-
-            except consul.ConsulException as e:
-                error_msg = f"Consul error: {type(e).__name__}"
-                retry_state = retry_state.next_attempt(
-                    error_message=error_msg,
-                    max_delay_seconds=retry_config.max_delay_seconds,
-                )
-                # NOTE: Circuit breaker failures are recorded only on final retry attempt.
-                # Rationale: Transient failures during retry shouldn't count toward threshold.
-                # Only persistent failures (after all retries exhausted) indicate true service
-                # degradation. This prevents circuit breaker from opening due to temporary
-                # network blips. Pattern consistent with VaultHandler implementation.
-                if not retry_state.is_retriable():
-                    if self._circuit_breaker_initialized:
-                        async with self._circuit_breaker_lock:
-                            await self._record_circuit_failure(
-                                operation, correlation_id
-                            )
-                    ctx = ModelInfraErrorContext(
-                        transport_type=EnumInfraTransportType.CONSUL,
-                        operation=operation,
-                        target_name="consul_handler",
-                        correlation_id=correlation_id,
-                    )
-                    raise InfraConnectionError(
-                        f"Consul operation failed: {type(e).__name__}",
-                        context=ctx,
-                    ) from e
-
-            except Exception as e:
-                error_msg = f"Unexpected error: {type(e).__name__}"
-                retry_state = retry_state.next_attempt(
-                    error_message=error_msg,
-                    max_delay_seconds=retry_config.max_delay_seconds,
-                )
-                # NOTE: Circuit breaker failures are recorded only on final retry attempt.
-                # Rationale: Transient failures during retry shouldn't count toward threshold.
-                # Only persistent failures (after all retries exhausted) indicate true service
-                # degradation. This prevents circuit breaker from opening due to temporary
-                # network blips. Pattern consistent with VaultHandler implementation.
-                if not retry_state.is_retriable():
-                    if self._circuit_breaker_initialized:
-                        async with self._circuit_breaker_lock:
-                            await self._record_circuit_failure(
-                                operation, correlation_id
-                            )
-                    ctx = ModelInfraErrorContext(
-                        transport_type=EnumInfraTransportType.CONSUL,
-                        operation=operation,
-                        target_name="consul_handler",
-                        correlation_id=correlation_id,
-                    )
-                    raise InfraConnectionError(
-                        f"Consul operation failed: {type(e).__name__}",
-                        context=ctx,
-                    ) from e
-
-            # Use delay from retry state (already calculated with backoff)
-            logger.debug(
-                "Retrying Consul operation",
-                extra={
-                    "operation": operation,
-                    "attempt": retry_state.attempt,
-                    "max_attempts": retry_state.max_attempts,
-                    "backoff_seconds": retry_state.delay_seconds,
-                    "last_error": retry_state.last_error,
-                    "correlation_id": str(correlation_id),
-                },
+        retry_config = self._config.retry
+        try:
+            loop = asyncio.get_running_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(self._executor, func),
+                timeout=op_context.timeout_seconds,
             )
 
-            await asyncio.sleep(retry_state.delay_seconds)
+            await self._reset_circuit_if_enabled()
+            return (result,)
 
-        # Should never reach here, but satisfy type checker
-        if retry_state.last_error is not None:
-            raise RuntimeError(f"Retry exhausted: {retry_state.last_error}")
-        raise RuntimeError("Retry loop completed without result")
+        except Exception as e:
+            classification = self._classify_error(e, operation)
+
+            if not classification.should_retry:
+                error = await self._handle_non_retriable_error(
+                    classification, operation, correlation_id, e
+                )
+                raise error from e
+
+            new_state, error_to_raise = await self._handle_retriable_error(
+                classification,
+                retry_state,
+                retry_config.max_delay_seconds,
+                operation,
+                correlation_id,
+                op_context,
+                e,
+            )
+
+            self._last_retry_state = new_state
+
+            if error_to_raise is not None:
+                raise error_to_raise from e
+
+            return None
 
     async def _kv_get(
         self,

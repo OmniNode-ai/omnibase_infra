@@ -834,6 +834,66 @@ class MixinNodeIntrospection:
         fsm_indicators = {"_state", "current_state", "_current_state", "state"}
         return any(hasattr(self, indicator) for indicator in fsm_indicators)
 
+    def _extract_state_value(self, state: object) -> str:
+        """Extract string value from a state object.
+
+        Handles both enum states (with .value attribute) and plain values.
+
+        Args:
+            state: The state object to extract value from
+
+        Returns:
+            String representation of the state value
+        """
+        if hasattr(state, "value"):
+            return str(state.value)
+        return str(state)
+
+    def _get_state_from_attribute(self, attr_name: str) -> str | None:
+        """Try to get state value from a named attribute.
+
+        Args:
+            attr_name: Name of the attribute to check
+
+        Returns:
+            State value as string if found and not None, None otherwise
+        """
+        if not hasattr(self, attr_name):
+            return None
+        state = getattr(self, attr_name)
+        if state is None:
+            return None
+        return self._extract_state_value(state)
+
+    async def _get_state_from_method(self) -> str | None:
+        """Try to get state value from get_state method.
+
+        Handles both sync and async get_state methods.
+
+        Returns:
+            State value as string if method exists and returns non-None, None otherwise
+        """
+        if not hasattr(self, "get_state"):
+            return None
+
+        method = self.get_state
+        if not callable(method):
+            return None
+
+        try:
+            result = method()
+            if asyncio.iscoroutine(result):
+                result = await result
+            if result is None:
+                return None
+            return self._extract_state_value(result)
+        except Exception as e:
+            logger.debug(
+                f"Failed to get state from get_state method: {e}",
+                extra={"error": str(e)},
+            )
+            return None
+
     async def get_capabilities(self) -> CapabilitiesDict:
         """Extract node capabilities via reflection.
 
@@ -1041,37 +1101,16 @@ class MixinNodeIntrospection:
             ```
         """
         self._ensure_initialized()
+
         # Check for state attributes in order of preference
         state_attrs = ["_state", "current_state", "_current_state", "state"]
-
         for attr_name in state_attrs:
-            if hasattr(self, attr_name):
-                state = getattr(self, attr_name)
-                if state is not None:
-                    # Handle enum states
-                    if hasattr(state, "value"):
-                        return str(state.value)
-                    return str(state)
+            state_value = self._get_state_from_attribute(attr_name)
+            if state_value is not None:
+                return state_value
 
-        # Check for get_state method
-        if hasattr(self, "get_state"):
-            method = self.get_state
-            if callable(method):
-                try:
-                    result = method()
-                    if asyncio.iscoroutine(result):
-                        result = await result
-                    if result is not None:
-                        if hasattr(result, "value"):
-                            return str(result.value)
-                        return str(result)
-                except Exception as e:
-                    logger.debug(
-                        f"Failed to get state from get_state method: {e}",
-                        extra={"error": str(e)},
-                    )
-
-        return None
+        # Fall back to get_state method
+        return await self._get_state_from_method()
 
     async def get_introspection_data(self) -> ModelNodeIntrospectionEvent:
         """Get introspection data with caching support.
@@ -1535,6 +1574,232 @@ class MixinNodeIntrospection:
             extra={"node_id": self._introspection_node_id},
         )
 
+    def _parse_correlation_id(self, raw_value: str | None) -> UUID | None:
+        """Parse correlation ID from request data with graceful fallback.
+
+        Args:
+            raw_value: Raw correlation_id value from request JSON
+
+        Returns:
+            Parsed UUID or None if parsing fails or value is empty
+        """
+        if not raw_value:
+            return None
+
+        try:
+            # UUID() raises ValueError for malformed strings,
+            # TypeError for non-string inputs (e.g., int, list).
+            # Convert to string first for safer handling of unexpected types.
+            return UUID(str(raw_value))
+        except (ValueError, TypeError) as e:
+            # Log warning with structured fields for monitoring.
+            # Truncate received value preview to avoid log bloat
+            # from potentially malicious oversized input.
+            logger.warning(
+                "Invalid correlation_id format in introspection "
+                "request, generating new correlation_id",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                    "received_value_type": type(raw_value).__name__,
+                    "received_value_preview": str(raw_value)[:50],
+                },
+            )
+            return None
+
+    @staticmethod
+    def _should_log_failure(consecutive_failures: int, threshold: int) -> bool:
+        """Determine if failure should be logged based on rate limiting.
+
+        Logs first failure and every Nth consecutive failure to prevent log spam.
+
+        Args:
+            consecutive_failures: Current consecutive failure count
+            threshold: Log every Nth failure
+
+        Returns:
+            True if this failure should be logged at error level
+        """
+        return consecutive_failures == 1 or consecutive_failures % threshold == 0
+
+    async def _cleanup_registry_subscription(self) -> None:
+        """Clean up the current registry subscription."""
+        if self._registry_unsubscribe is not None:
+            try:
+                result = self._registry_unsubscribe()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as cleanup_error:
+                logger.debug(
+                    "Error unsubscribing registry listener for "
+                    f"{self._introspection_node_id}",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "error_type": type(cleanup_error).__name__,
+                        "error_message": str(cleanup_error),
+                    },
+                )
+            self._registry_unsubscribe = None
+
+    async def _handle_introspection_request(self, message: ModelEventMessage) -> None:
+        """Handle incoming introspection request.
+
+        Includes error recovery with rate-limited logging to prevent
+        log spam during sustained failures. Continues processing on
+        non-fatal errors to maintain graceful degradation.
+
+        Args:
+            message: The incoming event message
+        """
+        try:
+            await self._process_introspection_request(message)
+            # Reset failure counter on success
+            self._registry_callback_consecutive_failures = 0
+        except Exception as e:
+            self._handle_request_error(e)
+
+    async def _process_introspection_request(self, message: ModelEventMessage) -> None:
+        """Process the introspection request message.
+
+        Args:
+            message: The incoming event message
+
+        Raises:
+            Exception: If processing fails (will be caught by caller)
+        """
+        # Early exit if message has no parseable value
+        if not hasattr(message, "value") or not message.value:
+            await self.publish_introspection(
+                reason="request",
+                correlation_id=uuid4(),
+            )
+            return
+
+        # Parse request data
+        request_data = json.loads(message.value.decode("utf-8"))
+
+        # Check if request targets a specific node (early exit if not us)
+        target_node_id = request_data.get("target_node_id")
+        if target_node_id and target_node_id != self._introspection_node_id:
+            return
+
+        # Parse correlation ID with graceful fallback
+        correlation_id = self._parse_correlation_id(request_data.get("correlation_id"))
+
+        # Respond with introspection data
+        await self.publish_introspection(
+            reason="request",
+            correlation_id=correlation_id,
+        )
+
+    def _handle_request_error(self, error: Exception) -> None:
+        """Handle error during introspection request processing.
+
+        Tracks consecutive failures and rate-limits error logging.
+
+        Args:
+            error: The exception that occurred
+        """
+        # Track consecutive failures for rate-limited logging
+        self._registry_callback_consecutive_failures += 1
+        self._registry_callback_last_failure_time = time.time()
+
+        # Rate-limit error logging to prevent log spam during sustained failures
+        if self._should_log_failure(
+            self._registry_callback_consecutive_failures,
+            self._registry_callback_failure_log_threshold,
+        ):
+            logger.error(
+                f"Error handling introspection request for {self._introspection_node_id}",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                    "consecutive_failures": self._registry_callback_consecutive_failures,
+                    "log_rate_limited": self._registry_callback_consecutive_failures
+                    > 1,
+                },
+                exc_info=True,
+            )
+        else:
+            # Log at debug level for rate-limited failures
+            logger.debug(
+                f"Suppressed error log for introspection request "
+                f"(failure {self._registry_callback_consecutive_failures})",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "error_type": type(error).__name__,
+                    "consecutive_failures": self._registry_callback_consecutive_failures,
+                },
+            )
+
+    async def _attempt_subscription(self) -> bool:
+        """Attempt to subscribe to the request introspection topic.
+
+        Returns:
+            True if subscribed successfully and should wait for stop signal,
+            False if subscription not supported or failed
+
+        Note:
+            This method should only be called when event bus is verified to exist.
+            The caller (_registry_listener_loop) checks for None before calling.
+        """
+        event_bus = self._introspection_event_bus
+        if event_bus is None or not hasattr(event_bus, "subscribe"):
+            logger.warning(
+                "Event bus does not support subscribe for "
+                f"{self._introspection_node_id}",
+                extra={"node_id": self._introspection_node_id},
+            )
+            return False
+
+        request_topic = self._request_introspection_topic
+        unsubscribe = await event_bus.subscribe(
+            topic=request_topic,
+            group_id=f"introspection-{self._introspection_node_id}",
+            on_message=self._handle_introspection_request,
+        )
+        self._registry_unsubscribe = unsubscribe
+
+        logger.info(
+            f"Registry listener subscribed for {self._introspection_node_id}",
+            extra={
+                "node_id": self._introspection_node_id,
+                "topic": request_topic,
+            },
+        )
+        return True
+
+    async def _wait_for_backoff_or_stop(self, backoff_seconds: float) -> bool:
+        """Wait for backoff period or stop signal.
+
+        Args:
+            backoff_seconds: Time to wait in seconds
+
+        Returns:
+            True if stop signal received, False if timeout (should retry)
+
+        Note:
+            This method should only be called when stop_event is verified to exist.
+            The caller (_registry_listener_loop) initializes the event before calling.
+        """
+        stop_event = self._introspection_stop_event
+        if stop_event is None:
+            # Should not happen if called correctly, but handle gracefully
+            return False
+
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=backoff_seconds,
+            )
+            # Stop signal received during backoff
+            return True
+        except TimeoutError:
+            # Normal timeout, continue to retry
+            return False
+
     async def _registry_listener_loop(
         self,
         max_retries: int = 3,
@@ -1594,190 +1859,14 @@ class MixinNodeIntrospection:
             extra={"node_id": self._introspection_node_id},
         )
 
-        def _parse_correlation_id(raw_value: str | None) -> UUID | None:
-            """Parse correlation ID from request data with graceful fallback.
-
-            Args:
-                raw_value: Raw correlation_id value from request JSON
-
-            Returns:
-                Parsed UUID or None if parsing fails or value is empty
-            """
-            if not raw_value:
-                return None
-
-            try:
-                # UUID() raises ValueError for malformed strings,
-                # TypeError for non-string inputs (e.g., int, list).
-                # Convert to string first for safer handling of unexpected types.
-                return UUID(str(raw_value))
-            except (ValueError, TypeError) as e:
-                # Log warning with structured fields for monitoring.
-                # Truncate received value preview to avoid log bloat
-                # from potentially malicious oversized input.
-                logger.warning(
-                    "Invalid correlation_id format in introspection "
-                    "request, generating new correlation_id",
-                    extra={
-                        "node_id": self._introspection_node_id,
-                        "error_type": type(e).__name__,
-                        "error_message": str(e),
-                        "received_value_type": type(raw_value).__name__,
-                        "received_value_preview": str(raw_value)[:50],
-                    },
-                )
-                return None
-
-        def _should_log_failure(consecutive_failures: int, threshold: int) -> bool:
-            """Determine if failure should be logged based on rate limiting.
-
-            Logs first failure and every Nth consecutive failure to prevent log spam.
-
-            Args:
-                consecutive_failures: Current consecutive failure count
-                threshold: Log every Nth failure
-
-            Returns:
-                True if this failure should be logged at error level
-            """
-            return consecutive_failures == 1 or consecutive_failures % threshold == 0
-
-        async def on_request(message: ModelEventMessage) -> None:
-            """Handle incoming introspection request.
-
-            Includes error recovery with rate-limited logging to prevent
-            log spam during sustained failures. Continues processing on
-            non-fatal errors to maintain graceful degradation.
-            """
-            try:
-                # Early exit if message has no parseable value
-                if not hasattr(message, "value") or not message.value:
-                    await self.publish_introspection(
-                        reason="request",
-                        correlation_id=uuid4(),
-                    )
-                    self._registry_callback_consecutive_failures = 0
-                    return
-
-                # Parse request data
-                request_data = json.loads(message.value.decode("utf-8"))
-
-                # Check if request targets a specific node (early exit if not us)
-                target_node_id = request_data.get("target_node_id")
-                if target_node_id and target_node_id != self._introspection_node_id:
-                    return
-
-                # Parse correlation ID with graceful fallback
-                correlation_id = _parse_correlation_id(
-                    request_data.get("correlation_id")
-                )
-
-                # Respond with introspection data
-                await self.publish_introspection(
-                    reason="request",
-                    correlation_id=correlation_id,
-                )
-
-                # Reset failure counter on success
-                self._registry_callback_consecutive_failures = 0
-
-            except Exception as e:
-                # Track consecutive failures for rate-limited logging
-                self._registry_callback_consecutive_failures += 1
-                self._registry_callback_last_failure_time = time.time()
-
-                # Rate-limit error logging to prevent log spam during sustained failures
-                if _should_log_failure(
-                    self._registry_callback_consecutive_failures,
-                    self._registry_callback_failure_log_threshold,
-                ):
-                    logger.error(  # noqa: G201
-                        f"Error handling introspection request for {self._introspection_node_id}",
-                        extra={
-                            "node_id": self._introspection_node_id,
-                            "error_type": type(e).__name__,
-                            "error_message": str(e),
-                            "consecutive_failures": (
-                                self._registry_callback_consecutive_failures
-                            ),
-                            "log_rate_limited": (
-                                self._registry_callback_consecutive_failures > 1
-                            ),
-                        },
-                        exc_info=True,
-                    )
-                else:
-                    # Log at debug level for rate-limited failures
-                    logger.debug(
-                        f"Suppressed error log for introspection request "
-                        f"(failure {self._registry_callback_consecutive_failures})",
-                        extra={
-                            "node_id": self._introspection_node_id,
-                            "error_type": type(e).__name__,
-                            "consecutive_failures": (
-                                self._registry_callback_consecutive_failures
-                            ),
-                        },
-                    )
-
-                # Continue processing - graceful degradation
-                # The callback should not raise exceptions that would disrupt the listener
-
-        # Helper function to clean up subscription
-        async def cleanup_subscription() -> None:
-            """Clean up the current subscription."""
-            if self._registry_unsubscribe is not None:
-                try:
-                    result = self._registry_unsubscribe()
-                    if asyncio.iscoroutine(result):
-                        await result
-                except Exception as cleanup_error:
-                    logger.debug(
-                        "Error unsubscribing registry listener for "
-                        f"{self._introspection_node_id}",
-                        extra={
-                            "node_id": self._introspection_node_id,
-                            "error_type": type(cleanup_error).__name__,
-                            "error_message": str(cleanup_error),
-                        },
-                    )
-                self._registry_unsubscribe = None
-
         # Retry loop with exponential backoff for subscription failures
         retry_count = 0
         while not self._introspection_stop_event.is_set():
             try:
-                # Subscribe to request topic using configured topic
-                request_topic = self._request_introspection_topic
-                if hasattr(self._introspection_event_bus, "subscribe"):
-                    unsubscribe = await self._introspection_event_bus.subscribe(
-                        topic=request_topic,
-                        group_id=f"introspection-{self._introspection_node_id}",
-                        on_message=on_request,
-                    )
-                    self._registry_unsubscribe = unsubscribe
-
-                    # Reset retry count on successful subscription
-                    retry_count = 0
-
-                    logger.info(
-                        f"Registry listener subscribed for {self._introspection_node_id}",
-                        extra={
-                            "node_id": self._introspection_node_id,
-                            "topic": request_topic,
-                        },
-                    )
-
+                if await self._attempt_subscription():
                     # Wait for stop signal
                     await self._introspection_stop_event.wait()
-                    # Stop signal received, exit loop
-                    break
-
-                logger.warning(
-                    "Event bus does not support subscribe for "
-                    f"{self._introspection_node_id}",
-                    extra={"node_id": self._introspection_node_id},
-                )
+                # Exit loop after subscription ends or not supported
                 break
 
             except asyncio.CancelledError:
@@ -1788,70 +1877,84 @@ class MixinNodeIntrospection:
                 break
             except Exception as e:
                 retry_count += 1
-                logger.error(  # noqa: G201
-                    f"Error in registry listener for {self._introspection_node_id}",
-                    extra={
-                        "node_id": self._introspection_node_id,
-                        "error_type": type(e).__name__,
-                        "error_message": str(e),
-                        "retry_count": retry_count,
-                        "max_retries": max_retries,
-                    },
-                    exc_info=True,
-                )
-
-                # Clean up any partial subscription before retry
-                await cleanup_subscription()
-
-                # Check if we should retry
-                if retry_count >= max_retries:
-                    # Use error() with exc_info=True instead of exception()
-                    # to include structured error_type and error_message fields
-                    # for log aggregation
-                    logger.error(  # noqa: G201
-                        "Registry listener exhausted retries",
-                        extra={
-                            "node_id": self._introspection_node_id,
-                            "retry_count": retry_count,
-                            "max_retries": max_retries,
-                            "error_type": type(e).__name__,
-                            "error_message": str(e),
-                        },
-                        exc_info=True,
-                    )
+                if not await self._handle_subscription_error(
+                    e, retry_count, max_retries, base_backoff_seconds
+                ):
                     break
-
-                # Exponential backoff before retry
-                backoff = base_backoff_seconds * (2 ** (retry_count - 1))
-                logger.info(
-                    f"Registry listener retrying in {backoff}s for "
-                    f"{self._introspection_node_id}",
-                    extra={
-                        "node_id": self._introspection_node_id,
-                        "backoff_seconds": backoff,
-                        "retry_count": retry_count,
-                    },
-                )
-
-                # Wait for backoff period or stop signal
-                try:
-                    await asyncio.wait_for(
-                        self._introspection_stop_event.wait(),
-                        timeout=backoff,
-                    )
-                    # Stop signal received during backoff
-                    break
-                except TimeoutError:
-                    # Normal timeout, continue to retry
-                    pass
 
         # Final cleanup
-        await cleanup_subscription()
+        await self._cleanup_registry_subscription()
 
         logger.info(
             f"Registry listener stopped for {self._introspection_node_id}",
             extra={"node_id": self._introspection_node_id},
         )
+
+    async def _handle_subscription_error(
+        self,
+        error: Exception,
+        retry_count: int,
+        max_retries: int,
+        base_backoff_seconds: float,
+    ) -> bool:
+        """Handle subscription error with retry logic.
+
+        Args:
+            error: The exception that occurred
+            retry_count: Current retry attempt number
+            max_retries: Maximum retry attempts
+            base_backoff_seconds: Base backoff time for exponential retry
+
+        Returns:
+            True if should continue retrying, False if should stop
+        """
+        logger.error(
+            f"Error in registry listener for {self._introspection_node_id}",
+            extra={
+                "node_id": self._introspection_node_id,
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+                "retry_count": retry_count,
+                "max_retries": max_retries,
+            },
+            exc_info=True,
+        )
+
+        # Clean up any partial subscription before retry
+        await self._cleanup_registry_subscription()
+
+        # Check if we should retry
+        if retry_count >= max_retries:
+            logger.error(
+                "Registry listener exhausted retries",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "retry_count": retry_count,
+                    "max_retries": max_retries,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                },
+                exc_info=True,
+            )
+            return False
+
+        # Exponential backoff before retry
+        backoff = base_backoff_seconds * (2 ** (retry_count - 1))
+        logger.info(
+            f"Registry listener retrying in {backoff}s for "
+            f"{self._introspection_node_id}",
+            extra={
+                "node_id": self._introspection_node_id,
+                "backoff_seconds": backoff,
+                "retry_count": retry_count,
+            },
+        )
+
+        # Wait for backoff period or stop signal
+        if await self._wait_for_backoff_or_stop(backoff):
+            return False  # Stop signal received
+
+        return True  # Continue retrying
 
     async def start_introspection_tasks(
         self,
