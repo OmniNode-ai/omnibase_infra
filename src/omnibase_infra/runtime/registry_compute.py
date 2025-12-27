@@ -149,8 +149,8 @@ class _MetricsTimer:
 _SEMVER_SORT_SENTINEL = chr(127)
 
 # Environment variable for configuring the semver LRU cache size
-# Set COMPUTE_REGISTRY_CACHE_SIZE to tune cache size for large deployments
-ENV_COMPUTE_REGISTRY_CACHE_SIZE = "COMPUTE_REGISTRY_CACHE_SIZE"
+# Set ONEX_COMPUTE_REGISTRY_CACHE_SIZE to tune cache size for large deployments
+ENV_COMPUTE_REGISTRY_CACHE_SIZE = "ONEX_COMPUTE_REGISTRY_CACHE_SIZE"
 
 # Default cache size when environment variable is not set
 _DEFAULT_SEMVER_CACHE_SIZE = 128

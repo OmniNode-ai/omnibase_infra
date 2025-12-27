@@ -19,13 +19,13 @@ Usage:
     python -m omnibase_infra.runtime.kernel
 
     # Run with custom contracts directory
-    CONTRACTS_DIR=/path/to/contracts python -m omnibase_infra.runtime.kernel
+    ONEX_CONTRACTS_DIR=/path/to/contracts python -m omnibase_infra.runtime.kernel
 
     # Or via the installed entrypoint
     onex-runtime
 
 Environment Variables:
-    CONTRACTS_DIR: Path to contracts directory (default: ./contracts)
+    ONEX_CONTRACTS_DIR: Path to contracts directory (default: ./contracts)
     ONEX_HTTP_PORT: Port for health check HTTP server (default: 8085)
     ONEX_LOG_LEVEL: Logging level (default: INFO)
     ONEX_ENVIRONMENT: Runtime environment name (default: local)
@@ -327,7 +327,7 @@ async def bootstrap() -> int:
 
     try:
         # 1. Determine contracts directory
-        contracts_dir = Path(os.getenv("CONTRACTS_DIR", DEFAULT_CONTRACTS_DIR))
+        contracts_dir = Path(os.getenv("ONEX_CONTRACTS_DIR", DEFAULT_CONTRACTS_DIR))
         logger.info(
             "ONEX Kernel starting with contracts_dir=%s (correlation_id=%s)",
             contracts_dir,

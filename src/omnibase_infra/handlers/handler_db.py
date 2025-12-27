@@ -72,6 +72,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ProtocolConfigurationError,
     RuntimeHostError,
 )
 from omnibase_infra.handlers.models import (
@@ -86,14 +87,161 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_env_int(
+    env_var: str,
+    default: int,
+    *,
+    min_value: int | None = None,
+    max_value: int | None = None,
+) -> int:
+    """Parse an integer environment variable with proper error handling.
+
+    Args:
+        env_var: Name of the environment variable to parse.
+        default: Default value to use if env var is not set or invalid.
+        min_value: Optional minimum valid value (inclusive).
+        max_value: Optional maximum valid value (inclusive).
+
+    Returns:
+        Parsed integer value, or default if parsing fails or value is out of range.
+
+    Raises:
+        ProtocolConfigurationError: If the environment variable contains an invalid
+            non-numeric value. The error includes context for debugging without
+            exposing the actual invalid value.
+
+    Note:
+        Following ONEX security guidelines, the actual invalid value is never
+        exposed in error messages. Only the environment variable name and
+        expected type are included.
+    """
+    raw_value = os.environ.get(env_var)
+    if raw_value is None:
+        return default
+
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="parse_env_config",
+            target_name="db_handler",
+            correlation_id=uuid4(),
+        )
+        raise ProtocolConfigurationError(
+            f"Invalid value for {env_var} environment variable: expected integer",
+            context=context,
+            parameter=env_var,
+            value="[REDACTED]",
+        ) from None
+
+    # Range validation with fallback to default
+    if min_value is not None and parsed < min_value:
+        logger.warning(
+            "Environment variable %s value %d is below minimum %d, using default %d",
+            env_var,
+            parsed,
+            min_value,
+            default,
+        )
+        return default
+    if max_value is not None and parsed > max_value:
+        logger.warning(
+            "Environment variable %s value %d is above maximum %d, using default %d",
+            env_var,
+            parsed,
+            max_value,
+            default,
+        )
+        return default
+
+    return parsed
+
+
+def _parse_env_float(
+    env_var: str,
+    default: float,
+    *,
+    min_value: float | None = None,
+    max_value: float | None = None,
+) -> float:
+    """Parse a float environment variable with proper error handling.
+
+    Args:
+        env_var: Name of the environment variable to parse.
+        default: Default value to use if env var is not set or invalid.
+        min_value: Optional minimum valid value (inclusive).
+        max_value: Optional maximum valid value (inclusive).
+
+    Returns:
+        Parsed float value, or default if parsing fails or value is out of range.
+
+    Raises:
+        ProtocolConfigurationError: If the environment variable contains an invalid
+            non-numeric value. The error includes context for debugging without
+            exposing the actual invalid value.
+
+    Note:
+        Following ONEX security guidelines, the actual invalid value is never
+        exposed in error messages. Only the environment variable name and
+        expected type are included.
+    """
+    raw_value = os.environ.get(env_var)
+    if raw_value is None:
+        return default
+
+    try:
+        parsed = float(raw_value)
+    except ValueError:
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="parse_env_config",
+            target_name="db_handler",
+            correlation_id=uuid4(),
+        )
+        raise ProtocolConfigurationError(
+            f"Invalid value for {env_var} environment variable: expected numeric value",
+            context=context,
+            parameter=env_var,
+            value="[REDACTED]",
+        ) from None
+
+    # Range validation with fallback to default
+    if min_value is not None and parsed < min_value:
+        logger.warning(
+            "Environment variable %s value %f is below minimum %f, using default %f",
+            env_var,
+            parsed,
+            min_value,
+            default,
+        )
+        return default
+    if max_value is not None and parsed > max_value:
+        logger.warning(
+            "Environment variable %s value %f is above maximum %f, using default %f",
+            env_var,
+            parsed,
+            max_value,
+            default,
+        )
+        return default
+
+    return parsed
+
+
 # MVP pool size fixed at 5 connections.
 # Note: Recommended range is 10-20 for production workloads.
 # Configurable pool size deferred to Beta release.
-_DEFAULT_POOL_SIZE: int = int(os.environ.get("ONEX_DB_POOL_SIZE", "5"))
+_DEFAULT_POOL_SIZE: int = _parse_env_int(
+    "ONEX_DB_POOL_SIZE", 5, min_value=1, max_value=100
+)
 
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_DB: str = "db-handler"
-_DEFAULT_TIMEOUT_SECONDS: float = float(os.environ.get("ONEX_DB_TIMEOUT", "30.0"))
+_DEFAULT_TIMEOUT_SECONDS: float = _parse_env_float(
+    "ONEX_DB_TIMEOUT", 30.0, min_value=0.1, max_value=3600.0
+)
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
 
 

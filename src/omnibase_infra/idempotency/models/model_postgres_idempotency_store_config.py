@@ -27,11 +27,55 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 
 # Module-level defaults from environment variables
 # These allow runtime configuration without code changes
-_DEFAULT_TTL_SECONDS = int(os.environ.get("ONEX_IDEMPOTENCY_TTL_SECONDS", "86400"))
-_DEFAULT_CLEANUP_INTERVAL = int(
-    os.environ.get("ONEX_IDEMPOTENCY_CLEANUP_INTERVAL", "3600")
-)
-_DEFAULT_BATCH_SIZE = int(os.environ.get("ONEX_IDEMPOTENCY_BATCH_SIZE", "10000"))
+
+
+def _parse_env_int(env_var: str, default: str) -> int:
+    """Parse an environment variable as an integer with proper error handling.
+
+    Args:
+        env_var: Name of the environment variable to parse.
+        default: Default string value if environment variable is not set.
+
+    Returns:
+        The parsed integer value.
+
+    Raises:
+        ProtocolConfigurationError: If the environment variable value cannot be
+            parsed as an integer. The error includes proper ONEX context for
+            debugging while avoiding exposure of potentially sensitive values.
+    """
+    raw_value = os.environ.get(env_var, default)
+    try:
+        return int(raw_value)
+    except ValueError:
+        # Deferred imports to avoid circular import during module loading.
+        # These imports are only needed when an error occurs, which is rare.
+        from omnibase_infra.enums import EnumInfraTransportType as TransportType
+        from omnibase_infra.errors.error_infra import (
+            ProtocolConfigurationError as ConfigError,
+        )
+        from omnibase_infra.models.errors.model_infra_error_context import (
+            ModelInfraErrorContext as ErrorContext,
+        )
+
+        context = ErrorContext(
+            transport_type=TransportType.DATABASE,
+            operation="parse_env_config",
+            target_name="postgres_idempotency_store",
+            correlation_id=uuid4(),
+        )
+        raise ConfigError(
+            f"Invalid value for {env_var} environment variable: "
+            f"expected integer, got non-numeric value",
+            context=context,
+            parameter=env_var,
+            value="[REDACTED]",  # Don't expose actual invalid value
+        ) from None
+
+
+_DEFAULT_TTL_SECONDS = _parse_env_int("ONEX_IDEMPOTENCY_TTL_SECONDS", "86400")
+_DEFAULT_CLEANUP_INTERVAL = _parse_env_int("ONEX_IDEMPOTENCY_CLEANUP_INTERVAL", "3600")
+_DEFAULT_BATCH_SIZE = _parse_env_int("ONEX_IDEMPOTENCY_BATCH_SIZE", "10000")
 
 
 class ModelPostgresIdempotencyStoreConfig(BaseModel):

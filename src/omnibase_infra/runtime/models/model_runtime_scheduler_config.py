@@ -18,53 +18,53 @@ Environment Variables:
     or if parsing fails. Invalid values log warnings and use defaults.
 
     Core Settings:
-        RUNTIME_SCHEDULER_TICK_INTERVAL_MS: Tick interval in milliseconds (integer, 10-60000)
+        ONEX_RUNTIME_SCHEDULER_TICK_INTERVAL_MS: Tick interval in milliseconds (integer, 10-60000)
             Default: 1000 (1 second)
             Example: "5000" (5 seconds)
             Warning: Logs warning if not a valid integer, uses default
 
-        RUNTIME_SCHEDULER_ID: Unique scheduler identifier
+        ONEX_RUNTIME_SCHEDULER_ID: Unique scheduler identifier
             Default: "runtime-scheduler-default"
             Example: "runtime-scheduler-prod-1"
 
-        RUNTIME_SCHEDULER_TICK_TOPIC: Kafka topic for publishing ticks
+        ONEX_RUNTIME_SCHEDULER_TICK_TOPIC: Kafka topic for publishing ticks
             Default: "runtime.tick.v1"
             Example: "prod.runtime.tick.v1"
 
     Restart-Safety Settings:
-        RUNTIME_SCHEDULER_PERSIST_SEQUENCE: Enable sequence number persistence (boolean)
+        ONEX_RUNTIME_SCHEDULER_PERSIST_SEQUENCE: Enable sequence number persistence (boolean)
             Default: true
             True values: "true", "1", "yes", "on" (case-insensitive)
             False values: "false", "0", "no", "off" (case-insensitive)
 
-        RUNTIME_SCHEDULER_SEQUENCE_KEY: Key for sequence number storage
+        ONEX_RUNTIME_SCHEDULER_SEQUENCE_KEY: Key for sequence number storage
             Default: "runtime_scheduler_sequence"
             Example: "scheduler_seq_prod"
 
     Performance Settings:
-        RUNTIME_SCHEDULER_MAX_JITTER_MS: Maximum jitter in milliseconds (integer, 0-10000)
+        ONEX_RUNTIME_SCHEDULER_MAX_JITTER_MS: Maximum jitter in milliseconds (integer, 0-10000)
             Default: 100
             Example: "50"
             Warning: Logs warning if not a valid integer, uses default
 
     Circuit Breaker Settings:
-        RUNTIME_SCHEDULER_CB_THRESHOLD: Failures before circuit opens (integer, 1-100)
+        ONEX_RUNTIME_SCHEDULER_CB_THRESHOLD: Failures before circuit opens (integer, 1-100)
             Default: 5
             Example: "10"
             Warning: Logs warning if not a valid integer, uses default
 
-        RUNTIME_SCHEDULER_CB_RESET_TIMEOUT: Reset timeout in seconds (float, 1.0-3600.0)
+        ONEX_RUNTIME_SCHEDULER_CB_RESET_TIMEOUT: Reset timeout in seconds (float, 1.0-3600.0)
             Default: 60.0
             Example: "120.0"
             Warning: Logs warning if not a valid float, uses default
 
     Metrics Settings:
-        RUNTIME_SCHEDULER_ENABLE_METRICS: Enable metrics collection (boolean)
+        ONEX_RUNTIME_SCHEDULER_ENABLE_METRICS: Enable metrics collection (boolean)
             Default: true
             True values: "true", "1", "yes", "on" (case-insensitive)
             False values: "false", "0", "no", "off" (case-insensitive)
 
-        RUNTIME_SCHEDULER_METRICS_PREFIX: Prefix for metrics names
+        ONEX_RUNTIME_SCHEDULER_METRICS_PREFIX: Prefix for metrics names
             Default: "runtime_scheduler"
             Example: "prod_runtime_scheduler"
 
@@ -421,16 +421,16 @@ class ModelRuntimeSchedulerConfig(BaseModel):
         """Apply environment variable overrides to configuration.
 
         Environment variables are mapped as follows:
-            - RUNTIME_SCHEDULER_TICK_INTERVAL_MS -> tick_interval_ms
-            - RUNTIME_SCHEDULER_ID -> scheduler_id
-            - RUNTIME_SCHEDULER_TICK_TOPIC -> tick_topic
-            - RUNTIME_SCHEDULER_PERSIST_SEQUENCE -> persist_sequence_number
-            - RUNTIME_SCHEDULER_SEQUENCE_KEY -> sequence_number_key
-            - RUNTIME_SCHEDULER_MAX_JITTER_MS -> max_tick_jitter_ms
-            - RUNTIME_SCHEDULER_CB_THRESHOLD -> circuit_breaker_threshold
-            - RUNTIME_SCHEDULER_CB_RESET_TIMEOUT -> circuit_breaker_reset_timeout_seconds
-            - RUNTIME_SCHEDULER_ENABLE_METRICS -> enable_metrics
-            - RUNTIME_SCHEDULER_METRICS_PREFIX -> metrics_prefix
+            - ONEX_RUNTIME_SCHEDULER_TICK_INTERVAL_MS -> tick_interval_ms
+            - ONEX_RUNTIME_SCHEDULER_ID -> scheduler_id
+            - ONEX_RUNTIME_SCHEDULER_TICK_TOPIC -> tick_topic
+            - ONEX_RUNTIME_SCHEDULER_PERSIST_SEQUENCE -> persist_sequence_number
+            - ONEX_RUNTIME_SCHEDULER_SEQUENCE_KEY -> sequence_number_key
+            - ONEX_RUNTIME_SCHEDULER_MAX_JITTER_MS -> max_tick_jitter_ms
+            - ONEX_RUNTIME_SCHEDULER_CB_THRESHOLD -> circuit_breaker_threshold
+            - ONEX_RUNTIME_SCHEDULER_CB_RESET_TIMEOUT -> circuit_breaker_reset_timeout_seconds
+            - ONEX_RUNTIME_SCHEDULER_ENABLE_METRICS -> enable_metrics
+            - ONEX_RUNTIME_SCHEDULER_METRICS_PREFIX -> metrics_prefix
 
         Returns:
             New configuration instance with environment overrides applied
@@ -438,16 +438,16 @@ class ModelRuntimeSchedulerConfig(BaseModel):
         overrides: dict[str, object] = {}
 
         env_mappings: dict[str, str] = {
-            "RUNTIME_SCHEDULER_TICK_INTERVAL_MS": "tick_interval_ms",
-            "RUNTIME_SCHEDULER_ID": "scheduler_id",
-            "RUNTIME_SCHEDULER_TICK_TOPIC": "tick_topic",
-            "RUNTIME_SCHEDULER_PERSIST_SEQUENCE": "persist_sequence_number",
-            "RUNTIME_SCHEDULER_SEQUENCE_KEY": "sequence_number_key",
-            "RUNTIME_SCHEDULER_MAX_JITTER_MS": "max_tick_jitter_ms",
-            "RUNTIME_SCHEDULER_CB_THRESHOLD": "circuit_breaker_threshold",
-            "RUNTIME_SCHEDULER_CB_RESET_TIMEOUT": "circuit_breaker_reset_timeout_seconds",
-            "RUNTIME_SCHEDULER_ENABLE_METRICS": "enable_metrics",
-            "RUNTIME_SCHEDULER_METRICS_PREFIX": "metrics_prefix",
+            "ONEX_RUNTIME_SCHEDULER_TICK_INTERVAL_MS": "tick_interval_ms",
+            "ONEX_RUNTIME_SCHEDULER_ID": "scheduler_id",
+            "ONEX_RUNTIME_SCHEDULER_TICK_TOPIC": "tick_topic",
+            "ONEX_RUNTIME_SCHEDULER_PERSIST_SEQUENCE": "persist_sequence_number",
+            "ONEX_RUNTIME_SCHEDULER_SEQUENCE_KEY": "sequence_number_key",
+            "ONEX_RUNTIME_SCHEDULER_MAX_JITTER_MS": "max_tick_jitter_ms",
+            "ONEX_RUNTIME_SCHEDULER_CB_THRESHOLD": "circuit_breaker_threshold",
+            "ONEX_RUNTIME_SCHEDULER_CB_RESET_TIMEOUT": "circuit_breaker_reset_timeout_seconds",
+            "ONEX_RUNTIME_SCHEDULER_ENABLE_METRICS": "enable_metrics",
+            "ONEX_RUNTIME_SCHEDULER_METRICS_PREFIX": "metrics_prefix",
         }
 
         # Integer fields for type conversion

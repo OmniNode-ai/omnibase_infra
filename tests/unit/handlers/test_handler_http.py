@@ -2089,6 +2089,158 @@ class TestHttpRestHandlerDeterministicIntegration:
         await handler.shutdown()
 
 
+class TestHttpRestHandlerEnvVarParsing:
+    """Test suite for environment variable parsing error handling.
+
+    These tests verify that invalid environment variable values produce
+    ProtocolConfigurationError with proper context instead of raw ValueError.
+    """
+
+    def test_parse_env_float_with_default(self) -> None:
+        """Test _parse_env_float returns default when env var is not set."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_float
+
+        # Ensure env var is not set
+        os.environ.pop("TEST_FLOAT_VAR", None)
+
+        result = _parse_env_float("TEST_FLOAT_VAR", 42.5)
+        assert result == 42.5
+
+    def test_parse_env_float_with_valid_value(self) -> None:
+        """Test _parse_env_float parses valid float string."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_float
+
+        os.environ["TEST_FLOAT_VAR"] = "123.456"
+        try:
+            result = _parse_env_float("TEST_FLOAT_VAR", 0.0)
+            assert result == 123.456
+        finally:
+            os.environ.pop("TEST_FLOAT_VAR", None)
+
+    def test_parse_env_float_with_invalid_value_raises_protocol_error(self) -> None:
+        """Test _parse_env_float raises ProtocolConfigurationError for invalid value."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_float
+
+        os.environ["TEST_FLOAT_VAR"] = "not_a_number"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                _parse_env_float("TEST_FLOAT_VAR", 0.0)
+
+            error_msg = str(exc_info.value)
+            assert "TEST_FLOAT_VAR" in error_msg
+            assert "expected a numeric value" in error_msg
+        finally:
+            os.environ.pop("TEST_FLOAT_VAR", None)
+
+    def test_parse_env_int_with_default(self) -> None:
+        """Test _parse_env_int returns default when env var is not set."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_int
+
+        # Ensure env var is not set
+        os.environ.pop("TEST_INT_VAR", None)
+
+        result = _parse_env_int("TEST_INT_VAR", 100)
+        assert result == 100
+
+    def test_parse_env_int_with_valid_value(self) -> None:
+        """Test _parse_env_int parses valid integer string."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_int
+
+        os.environ["TEST_INT_VAR"] = "12345"
+        try:
+            result = _parse_env_int("TEST_INT_VAR", 0)
+            assert result == 12345
+        finally:
+            os.environ.pop("TEST_INT_VAR", None)
+
+    def test_parse_env_int_with_invalid_value_raises_protocol_error(self) -> None:
+        """Test _parse_env_int raises ProtocolConfigurationError for invalid value."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_int
+
+        os.environ["TEST_INT_VAR"] = "abc123"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                _parse_env_int("TEST_INT_VAR", 0)
+
+            error_msg = str(exc_info.value)
+            assert "TEST_INT_VAR" in error_msg
+            assert "expected an integer value" in error_msg
+        finally:
+            os.environ.pop("TEST_INT_VAR", None)
+
+    def test_parse_env_int_with_float_string_raises_protocol_error(self) -> None:
+        """Test _parse_env_int raises ProtocolConfigurationError for float string."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_int
+
+        # "123.456" is a valid float but not a valid integer
+        os.environ["TEST_INT_VAR"] = "123.456"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                _parse_env_int("TEST_INT_VAR", 0)
+
+            error_msg = str(exc_info.value)
+            assert "TEST_INT_VAR" in error_msg
+            assert "expected an integer value" in error_msg
+        finally:
+            os.environ.pop("TEST_INT_VAR", None)
+
+    def test_parse_env_float_error_includes_context(self) -> None:
+        """Test _parse_env_float error includes proper ModelInfraErrorContext."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_float
+
+        os.environ["TEST_FLOAT_VAR"] = "invalid"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                _parse_env_float("TEST_FLOAT_VAR", 0.0)
+
+            # Verify context is properly set
+            # Note: RuntimeHostError extracts context fields into additional_context dict
+            error = exc_info.value
+            assert error.context is not None
+            additional = error.context.get("additional_context", {})
+            assert additional.get("operation") == "parse_env_config"
+            assert additional.get("target_name") == "http_handler"
+        finally:
+            os.environ.pop("TEST_FLOAT_VAR", None)
+
+    def test_parse_env_int_error_includes_context(self) -> None:
+        """Test _parse_env_int error includes proper ModelInfraErrorContext."""
+        import os
+
+        from omnibase_infra.handlers.handler_http import _parse_env_int
+
+        os.environ["TEST_INT_VAR"] = "invalid"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                _parse_env_int("TEST_INT_VAR", 0)
+
+            # Verify context is properly set
+            # Note: RuntimeHostError extracts context fields into additional_context dict
+            error = exc_info.value
+            assert error.context is not None
+            additional = error.context.get("additional_context", {})
+            assert additional.get("operation") == "parse_env_config"
+            assert additional.get("target_name") == "http_handler"
+        finally:
+            os.environ.pop("TEST_INT_VAR", None)
+
+
 __all__: list[str] = [
     "TestHttpRestHandlerInitialization",
     "TestHttpRestHandlerGetOperations",
@@ -2101,4 +2253,5 @@ __all__: list[str] = [
     "TestHttpRestHandlerSizeLimits",
     "TestHttpRestHandlerLogWarnings",
     "TestHttpRestHandlerDeterministicIntegration",
+    "TestHttpRestHandlerEnvVarParsing",
 ]

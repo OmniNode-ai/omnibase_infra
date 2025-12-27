@@ -34,12 +34,79 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TIMEOUT_SECONDS: float = float(os.environ.get("ONEX_HTTP_TIMEOUT", "30.0"))
-_DEFAULT_MAX_REQUEST_SIZE: int = int(
-    os.environ.get("ONEX_HTTP_MAX_REQUEST_SIZE", str(10 * 1024 * 1024))
+
+def _parse_env_float(env_var: str, default: float) -> float:
+    """Safely parse a float environment variable with proper error handling.
+
+    Args:
+        env_var: Name of the environment variable to parse.
+        default: Default value to use if environment variable is not set.
+
+    Returns:
+        Parsed float value or default if not set.
+
+    Raises:
+        ProtocolConfigurationError: If environment variable contains an invalid
+            non-numeric value that cannot be parsed as a float.
+    """
+    raw_value = os.environ.get(env_var)
+    if raw_value is None:
+        return default
+
+    try:
+        return float(raw_value)
+    except ValueError:
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="parse_env_config",
+            target_name="http_handler",
+            correlation_id=uuid4(),
+        )
+        raise ProtocolConfigurationError(
+            f"Invalid value for {env_var} environment variable: expected a numeric value",
+            context=context,
+        )
+
+
+def _parse_env_int(env_var: str, default: int) -> int:
+    """Safely parse an integer environment variable with proper error handling.
+
+    Args:
+        env_var: Name of the environment variable to parse.
+        default: Default value to use if environment variable is not set.
+
+    Returns:
+        Parsed integer value or default if not set.
+
+    Raises:
+        ProtocolConfigurationError: If environment variable contains an invalid
+            non-numeric value that cannot be parsed as an integer.
+    """
+    raw_value = os.environ.get(env_var)
+    if raw_value is None:
+        return default
+
+    try:
+        return int(raw_value)
+    except ValueError:
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="parse_env_config",
+            target_name="http_handler",
+            correlation_id=uuid4(),
+        )
+        raise ProtocolConfigurationError(
+            f"Invalid value for {env_var} environment variable: expected an integer value",
+            context=context,
+        )
+
+
+_DEFAULT_TIMEOUT_SECONDS: float = _parse_env_float("ONEX_HTTP_TIMEOUT", 30.0)
+_DEFAULT_MAX_REQUEST_SIZE: int = _parse_env_int(
+    "ONEX_HTTP_MAX_REQUEST_SIZE", 10 * 1024 * 1024
 )  # 10 MB default
-_DEFAULT_MAX_RESPONSE_SIZE: int = int(
-    os.environ.get("ONEX_HTTP_MAX_RESPONSE_SIZE", str(50 * 1024 * 1024))
+_DEFAULT_MAX_RESPONSE_SIZE: int = _parse_env_int(
+    "ONEX_HTTP_MAX_RESPONSE_SIZE", 50 * 1024 * 1024
 )  # 50 MB default
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 # Streaming chunk size for responses without Content-Length header

@@ -32,11 +32,37 @@ See Also:
     - docs/patterns/circuit_breaker_implementation.md: Implementation details
 """
 
+from __future__ import annotations
+
 import os
+from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumInfraTransportType
+
+if TYPE_CHECKING:
+    from omnibase_infra.errors.error_infra import ProtocolConfigurationError
+    from omnibase_infra.models.errors.model_infra_error_context import (
+        ModelInfraErrorContext,
+    )
+
+
+def _get_error_classes() -> tuple[
+    type[ProtocolConfigurationError], type[ModelInfraErrorContext]
+]:
+    """Lazy import of error classes to avoid circular import.
+
+    Returns:
+        Tuple of (ProtocolConfigurationError, ModelInfraErrorContext)
+    """
+    from omnibase_infra.errors.error_infra import ProtocolConfigurationError
+    from omnibase_infra.models.errors.model_infra_error_context import (
+        ModelInfraErrorContext,
+    )
+
+    return ProtocolConfigurationError, ModelInfraErrorContext
 
 
 class ModelCircuitBreakerConfig(BaseModel):
@@ -140,7 +166,7 @@ class ModelCircuitBreakerConfig(BaseModel):
         service_name: str = "unknown",
         transport_type: EnumInfraTransportType = EnumInfraTransportType.HTTP,
         prefix: str = "ONEX_CB",
-    ) -> "ModelCircuitBreakerConfig":
+    ) -> ModelCircuitBreakerConfig:
         """Create configuration from environment variables.
 
         Reads circuit breaker settings from environment variables, falling back
@@ -165,8 +191,9 @@ class ModelCircuitBreakerConfig(BaseModel):
             ModelCircuitBreakerConfig with values from environment or defaults.
 
         Raises:
-            ValueError: If environment variable values cannot be parsed as
-                int (threshold) or float (reset_timeout).
+            ProtocolConfigurationError: If environment variable values cannot be
+                parsed as int (threshold) or float (reset_timeout). The error
+                includes ModelInfraErrorContext with transport_type and service_name.
 
         Example:
             ```python
@@ -194,8 +221,44 @@ class ModelCircuitBreakerConfig(BaseModel):
             environment to allow tuning without identifying which service
             each variable affects.
         """
-        threshold = int(os.environ.get(f"{prefix}_THRESHOLD", "5"))
-        reset_timeout = float(os.environ.get(f"{prefix}_RESET_TIMEOUT", "60.0"))
+        threshold_var = f"{prefix}_THRESHOLD"
+        reset_timeout_var = f"{prefix}_RESET_TIMEOUT"
+
+        ProtocolConfigurationError, ModelInfraErrorContext = _get_error_classes()
+
+        try:
+            threshold = int(os.environ.get(threshold_var, "5"))
+        except ValueError as e:
+            context = ModelInfraErrorContext(
+                transport_type=transport_type,
+                operation="parse_env_config",
+                target_name=service_name,
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid value for {threshold_var} environment variable: "
+                "expected integer",
+                context=context,
+                parameter=threshold_var,
+                value="[REDACTED]",
+            ) from e
+
+        try:
+            reset_timeout = float(os.environ.get(reset_timeout_var, "60.0"))
+        except ValueError as e:
+            context = ModelInfraErrorContext(
+                transport_type=transport_type,
+                operation="parse_env_config",
+                target_name=service_name,
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid value for {reset_timeout_var} environment variable: "
+                "expected float",
+                context=context,
+                parameter=reset_timeout_var,
+                value="[REDACTED]",
+            ) from e
 
         return cls(
             threshold=threshold,
