@@ -4,8 +4,8 @@
 
 This test suite validates environment variable handling for the HTTP handler:
 - ONEX_HTTP_TIMEOUT (float, default: 30.0, range: 0.1-3600.0)
-- ONEX_HTTP_MAX_REQUEST_SIZE (int, default: 10MB, range: 1-1GB)
-- ONEX_HTTP_MAX_RESPONSE_SIZE (int, default: 50MB, range: 1-1GB)
+- ONEX_HTTP_MAX_REQUEST_SIZE (int, default: 10MB, range: 1KB-100MB)
+- ONEX_HTTP_MAX_RESPONSE_SIZE (int, default: 50MB, range: 1KB-100MB)
 
 Test Organization:
     - TestHttpHandlerTimeoutEnvParsing: ONEX_HTTP_TIMEOUT validation
@@ -44,8 +44,8 @@ _HTTP_TIMEOUT_MAX: float = 3600.0
 
 _HTTP_MAX_REQUEST_SIZE_DEFAULT: int = 10 * 1024 * 1024  # 10 MB
 _HTTP_MAX_RESPONSE_SIZE_DEFAULT: int = 50 * 1024 * 1024  # 50 MB
-_HTTP_SIZE_MIN: int = 1
-_HTTP_SIZE_MAX: int = 1073741824  # 1 GB
+_HTTP_SIZE_MIN: int = 1024  # 1 KB
+_HTTP_SIZE_MAX: int = 104857600  # 100 MB
 
 
 @pytest.mark.unit
@@ -270,7 +270,7 @@ class TestHttpHandlerMaxRequestSizeEnvParsing:
     def test_max_request_size_below_minimum_uses_default(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test max request size below minimum (1 byte) uses default with warning."""
+        """Test max request size below minimum (1 KB) uses default with warning."""
         with patch.dict(os.environ, {"ONEX_HTTP_MAX_REQUEST_SIZE": "0"}, clear=True):
             with caplog.at_level(logging.WARNING):
                 result = parse_env_int(
@@ -289,8 +289,8 @@ class TestHttpHandlerMaxRequestSizeEnvParsing:
     def test_max_request_size_above_maximum_uses_default(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test max request size above maximum (1GB) uses default with warning."""
-        too_large = 2 * 1073741824  # 2 GB
+        """Test max request size above maximum (100 MB) uses default with warning."""
+        too_large = 2 * 104857600  # 200 MB
         with patch.dict(
             os.environ, {"ONEX_HTTP_MAX_REQUEST_SIZE": str(too_large)}, clear=True
         ):
@@ -309,8 +309,8 @@ class TestHttpHandlerMaxRequestSizeEnvParsing:
             assert "above maximum" in caplog.text
 
     def test_max_request_size_at_minimum_boundary_is_valid(self) -> None:
-        """Test max request size at exact minimum boundary (1 byte) is accepted."""
-        with patch.dict(os.environ, {"ONEX_HTTP_MAX_REQUEST_SIZE": "1"}, clear=True):
+        """Test max request size at exact minimum boundary (1 KB) is accepted."""
+        with patch.dict(os.environ, {"ONEX_HTTP_MAX_REQUEST_SIZE": "1024"}, clear=True):
             result = parse_env_int(
                 "ONEX_HTTP_MAX_REQUEST_SIZE",
                 _HTTP_MAX_REQUEST_SIZE_DEFAULT,
@@ -320,10 +320,10 @@ class TestHttpHandlerMaxRequestSizeEnvParsing:
                 service_name="http_handler",
             )
 
-            assert result == 1
+            assert result == 1024
 
     def test_max_request_size_at_maximum_boundary_is_valid(self) -> None:
-        """Test max request size at exact maximum boundary (1GB) is accepted."""
+        """Test max request size at exact maximum boundary (100 MB) is accepted."""
         with patch.dict(
             os.environ, {"ONEX_HTTP_MAX_REQUEST_SIZE": str(_HTTP_SIZE_MAX)}, clear=True
         ):
@@ -336,7 +336,7 @@ class TestHttpHandlerMaxRequestSizeEnvParsing:
                 service_name="http_handler",
             )
 
-            assert result == 1073741824
+            assert result == 104857600
 
 
 @pytest.mark.unit
@@ -421,7 +421,7 @@ class TestHttpHandlerMaxResponseSizeEnvParsing:
     def test_max_response_size_below_minimum_uses_default(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test max response size below minimum (1 byte) uses default with warning."""
+        """Test max response size below minimum (1 KB) uses default with warning."""
         with patch.dict(
             os.environ, {"ONEX_HTTP_MAX_RESPONSE_SIZE": "-100"}, clear=True
         ):
@@ -442,8 +442,8 @@ class TestHttpHandlerMaxResponseSizeEnvParsing:
     def test_max_response_size_above_maximum_uses_default(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test max response size above maximum (1GB) uses default with warning."""
-        too_large = 5 * 1073741824  # 5 GB
+        """Test max response size above maximum (100 MB) uses default with warning."""
+        too_large = 2 * 104857600  # 200 MB
         with patch.dict(
             os.environ, {"ONEX_HTTP_MAX_RESPONSE_SIZE": str(too_large)}, clear=True
         ):
@@ -462,8 +462,10 @@ class TestHttpHandlerMaxResponseSizeEnvParsing:
             assert "above maximum" in caplog.text
 
     def test_max_response_size_at_minimum_boundary_is_valid(self) -> None:
-        """Test max response size at exact minimum boundary (1 byte) is accepted."""
-        with patch.dict(os.environ, {"ONEX_HTTP_MAX_RESPONSE_SIZE": "1"}, clear=True):
+        """Test max response size at exact minimum boundary (1 KB) is accepted."""
+        with patch.dict(
+            os.environ, {"ONEX_HTTP_MAX_RESPONSE_SIZE": "1024"}, clear=True
+        ):
             result = parse_env_int(
                 "ONEX_HTTP_MAX_RESPONSE_SIZE",
                 _HTTP_MAX_RESPONSE_SIZE_DEFAULT,
@@ -473,10 +475,10 @@ class TestHttpHandlerMaxResponseSizeEnvParsing:
                 service_name="http_handler",
             )
 
-            assert result == 1
+            assert result == 1024
 
     def test_max_response_size_at_maximum_boundary_is_valid(self) -> None:
-        """Test max response size at exact maximum boundary (1GB) is accepted."""
+        """Test max response size at exact maximum boundary (100 MB) is accepted."""
         with patch.dict(
             os.environ, {"ONEX_HTTP_MAX_RESPONSE_SIZE": str(_HTTP_SIZE_MAX)}, clear=True
         ):
@@ -489,7 +491,7 @@ class TestHttpHandlerMaxResponseSizeEnvParsing:
                 service_name="http_handler",
             )
 
-            assert result == 1073741824
+            assert result == 104857600
 
 
 @pytest.mark.unit
