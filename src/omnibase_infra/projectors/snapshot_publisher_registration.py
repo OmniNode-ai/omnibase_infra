@@ -381,6 +381,21 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             self._version_tracker[key] = next_version
             return next_version
 
+    async def _cleanup_failed_consumer(self) -> None:
+        """Clean up Kafka consumer after a failed cache load operation.
+
+        Stops the consumer, resets the started flag, and clears the reference.
+        This method is idempotent and safe to call even if no consumer exists.
+        """
+        if self._consumer_started:
+            try:
+                if self._consumer is not None:
+                    await self._consumer.stop()
+            except Exception:
+                pass
+            self._consumer_started = False
+            self._consumer = None
+
     async def publish_snapshot(
         self,
         snapshot: ModelRegistrationProjection,
@@ -786,14 +801,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             except TimeoutError as e:
                 async with self._circuit_breaker_lock:
                     await self._record_circuit_failure("load_cache", correlation_id)
-                # Clean up consumer on failure
-                if self._consumer_started:
-                    try:
-                        await consumer.stop()
-                    except Exception:
-                        pass
-                    self._consumer_started = False
-                    self._consumer = None
+                await self._cleanup_failed_consumer()
                 raise InfraTimeoutError(
                     f"Timeout loading snapshot cache from topic {self._config.topic}",
                     context=ctx,
@@ -802,14 +810,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             except Exception as e:
                 async with self._circuit_breaker_lock:
                     await self._record_circuit_failure("load_cache", correlation_id)
-                # Clean up consumer on failure
-                if self._consumer_started:
-                    try:
-                        await consumer.stop()
-                    except Exception:
-                        pass
-                    self._consumer_started = False
-                    self._consumer = None
+                await self._cleanup_failed_consumer()
                 raise InfraConnectionError(
                     f"Failed to load snapshot cache from topic {self._config.topic}: {e}",
                     context=ctx,

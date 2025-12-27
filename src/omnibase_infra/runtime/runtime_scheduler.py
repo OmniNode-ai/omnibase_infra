@@ -346,6 +346,9 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             },
         )
 
+        # Always close Valkey client if it exists (idempotent)
+        await self._close_valkey_client()
+
     # =========================================================================
     # Core Methods
     # =========================================================================
