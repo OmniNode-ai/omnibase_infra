@@ -46,10 +46,10 @@ import os
 import signal
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
@@ -78,6 +78,9 @@ from omnibase_infra.runtime.container_wiring import (
 )
 from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
 from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT, HealthServer
+from omnibase_infra.runtime.introspection_message_handler import (
+    IntrospectionMessageHandler,
+)
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.validation import validate_runtime_config
@@ -506,11 +509,13 @@ async def bootstrap() -> int:
                     try:
                         from omnibase_infra.handlers import ConsulHandler
 
-                        consul_handler = ConsulHandler(
-                            host=consul_host,
-                            port=consul_port,
+                        consul_handler = ConsulHandler()
+                        await consul_handler.initialize(
+                            {
+                                "host": consul_host,
+                                "port": consul_port,
+                            }
                         )
-                        await consul_handler.initialize()
                         logger.info(
                             "ConsulHandler initialized for dual registration (correlation_id=%s)",
                             correlation_id,
@@ -748,257 +753,18 @@ async def bootstrap() -> int:
         # events to the HandlerNodeIntrospected via DispatcherNodeIntrospected.
         # Unlike RuntimeHostProcess which routes based on handler_type field,
         # this consumer directly parses introspection events from JSON.
-        if introspection_dispatcher is not None and isinstance(event_bus, KafkaEventBus):
-            # Capture dispatcher in closure for type safety
-            captured_dispatcher = introspection_dispatcher
-
-            async def handle_introspection_message(msg: ModelEventMessage) -> None:
-                """Handle incoming introspection event message.
-
-                This callback is invoked for each message received on the input topic.
-                It parses the raw JSON payload as ModelNodeIntrospectionEvent and routes
-                it to the introspection dispatcher.
-
-                Args:
-                    msg: The event message containing raw bytes in .value field.
-                """
-                # Generate callback correlation_id for this message
-                callback_correlation_id = uuid4()
-                callback_start_time = time.time()
-
-                logger.debug(
-                    "Introspection message callback invoked (correlation_id=%s)",
-                    callback_correlation_id,
-                    extra={
-                        "message_offset": getattr(msg, "offset", None),
-                        "message_partition": getattr(msg, "partition", None),
-                        "message_topic": getattr(msg, "topic", None),
-                    },
-                )
-
-                try:
-                    # ModelEventMessage has .value as bytes
-                    if msg.value is None:
-                        logger.debug(
-                            "Message value is None, skipping (correlation_id=%s)",
-                            callback_correlation_id,
-                        )
-                        return
-
-                    # Parse raw bytes as JSON
-                    if isinstance(msg.value, bytes):
-                        logger.debug(
-                            "Parsing message value as bytes (correlation_id=%s)",
-                            callback_correlation_id,
-                            extra={"value_length": len(msg.value)},
-                        )
-                        payload_dict = json.loads(msg.value.decode("utf-8"))
-                    elif isinstance(msg.value, str):
-                        logger.debug(
-                            "Parsing message value as string (correlation_id=%s)",
-                            callback_correlation_id,
-                            extra={"value_length": len(msg.value)},
-                        )
-                        payload_dict = json.loads(msg.value)
-                    elif isinstance(msg.value, dict):
-                        logger.debug(
-                            "Message value already dict (correlation_id=%s)",
-                            callback_correlation_id,
-                        )
-                        payload_dict = msg.value
-                    else:
-                        logger.debug(
-                            "Unexpected message value type: %s (correlation_id=%s)",
-                            type(msg.value).__name__,
-                            callback_correlation_id,
-                        )
-                        return
-
-                    # Parse as ModelEventEnvelope containing ModelNodeIntrospectionEvent
-                    # Events MUST be wrapped in envelopes on the wire
-                    logger.debug(
-                        "Validating payload as ModelEventEnvelope (correlation_id=%s)",
-                        callback_correlation_id,
-                    )
-
-                    # First, parse as envelope to extract payload and metadata
-                    try:
-                        raw_envelope = ModelEventEnvelope[dict].model_validate(
-                            payload_dict
-                        )
-                    except Exception as envelope_error:
-                        # For backwards compatibility, try parsing as raw event
-                        logger.warning(
-                            "Failed to parse as envelope, trying raw event format "
-                            "(correlation_id=%s): %s",
-                            callback_correlation_id,
-                            str(envelope_error),
-                        )
-                        # Wrap raw event in envelope for processing
-                        introspection_event = ModelNodeIntrospectionEvent.model_validate(
-                            payload_dict
-                        )
-                        event_envelope = ModelEventEnvelope(
-                            payload=introspection_event,
-                            correlation_id=introspection_event.correlation_id or uuid4(),
-                            envelope_timestamp=datetime.now(UTC),
-                        )
-                        logger.info(
-                            "Raw event wrapped in envelope (correlation_id=%s)",
-                            callback_correlation_id,
-                            extra={
-                                "node_id": str(introspection_event.node_id),
-                                "node_type": introspection_event.node_type,
-                            },
-                        )
-                    else:
-                        # Validate payload as ModelNodeIntrospectionEvent
-                        introspection_event = ModelNodeIntrospectionEvent.model_validate(
-                            raw_envelope.payload
-                        )
-                        # Create typed envelope with validated payload
-                        event_envelope = ModelEventEnvelope[ModelNodeIntrospectionEvent](
-                            payload=introspection_event,
-                            envelope_id=raw_envelope.envelope_id,
-                            envelope_timestamp=raw_envelope.envelope_timestamp,
-                            correlation_id=raw_envelope.correlation_id
-                            or introspection_event.correlation_id
-                            or uuid4(),
-                            source_tool=raw_envelope.source_tool,
-                            target_tool=raw_envelope.target_tool,
-                            metadata=raw_envelope.metadata,
-                            priority=raw_envelope.priority,
-                            timeout_seconds=raw_envelope.timeout_seconds,
-                            trace_id=raw_envelope.trace_id,
-                            span_id=raw_envelope.span_id,
-                        )
-                        logger.info(
-                            "Envelope parsed successfully (correlation_id=%s)",
-                            callback_correlation_id,
-                            extra={
-                                "envelope_id": str(event_envelope.envelope_id),
-                                "node_id": str(introspection_event.node_id),
-                                "node_type": introspection_event.node_type,
-                                "event_version": introspection_event.node_version,
-                            },
-                        )
-
-                    # Route to dispatcher
-                    logger.info(
-                        "Routing to introspection dispatcher (correlation_id=%s)",
-                        callback_correlation_id,
-                        extra={
-                            "envelope_correlation_id": str(event_envelope.correlation_id),
-                            "node_id": introspection_event.node_id,
-                        },
-                    )
-                    dispatcher_start_time = time.time()
-                    result = await captured_dispatcher.handle(event_envelope)
-                    dispatcher_duration = time.time() - dispatcher_start_time
-
-                    if result.is_successful():
-                        logger.info(
-                            "Introspection event processed successfully: node_id=%s in %.3fs (correlation_id=%s)",
-                            introspection_event.node_id,
-                            dispatcher_duration,
-                            callback_correlation_id,
-                            extra={
-                                "envelope_correlation_id": str(event_envelope.correlation_id),
-                                "dispatcher_duration_seconds": dispatcher_duration,
-                                "node_id": introspection_event.node_id,
-                                "node_type": introspection_event.node_type,
-                            },
-                        )
-
-                        # Publish output events to output_topic
-                        if result.output_events:
-                            for output_event in result.output_events:
-                                # Wrap output event in envelope
-                                output_envelope = ModelEventEnvelope(
-                                    payload=output_event,
-                                    correlation_id=event_envelope.correlation_id,
-                                    envelope_timestamp=datetime.now(UTC),
-                                )
-
-                                # Publish to output topic
-                                await event_bus.publish_envelope(
-                                    envelope=output_envelope,
-                                    topic=config.output_topic,
-                                )
-
-                                logger.info(
-                                    "Published output event to %s (correlation_id=%s)",
-                                    config.output_topic,
-                                    callback_correlation_id,
-                                    extra={
-                                        "output_event_type": type(output_event).__name__,
-                                        "envelope_id": str(output_envelope.envelope_id),
-                                        "node_id": str(introspection_event.node_id),
-                                    },
-                                )
-
-                            logger.debug(
-                                "Published %d output events to %s (correlation_id=%s)",
-                                len(result.output_events),
-                                config.output_topic,
-                                callback_correlation_id,
-                            )
-                    else:
-                        logger.warning(
-                            "Introspection event processing failed: %s (correlation_id=%s)",
-                            result.error_message,
-                            callback_correlation_id,
-                            extra={
-                                "envelope_correlation_id": str(event_envelope.correlation_id),
-                                "error_message": result.error_message,
-                                "node_id": introspection_event.node_id,
-                                "dispatcher_duration_seconds": dispatcher_duration,
-                            },
-                        )
-
-                except ValidationError as validation_error:
-                    # Not an introspection event - skip silently
-                    # (other message types on the topic are handled by RuntimeHostProcess)
-                    logger.debug(
-                        "Message is not a valid introspection event, skipping (correlation_id=%s)",
-                        callback_correlation_id,
-                        extra={
-                            "validation_error_count": validation_error.error_count(),
-                        },
-                    )
-
-                except json.JSONDecodeError as json_error:
-                    logger.warning(
-                        "Failed to decode JSON from message: %s (correlation_id=%s)",
-                        json_error,
-                        callback_correlation_id,
-                        extra={
-                            "error_type": type(json_error).__name__,
-                            "error_position": getattr(json_error, "pos", None),
-                        },
-                    )
-
-                except Exception as msg_error:
-                    logger.error(
-                        "Failed to process introspection message: %s (correlation_id=%s)",
-                        msg_error,
-                        callback_correlation_id,
-                        extra={
-                            "error_type": type(msg_error).__name__,
-                        },
-                        exc_info=True,
-                    )
-
-                finally:
-                    callback_duration = time.time() - callback_start_time
-                    logger.debug(
-                        "Introspection message callback completed in %.3fs (correlation_id=%s)",
-                        callback_duration,
-                        callback_correlation_id,
-                        extra={
-                            "callback_duration_seconds": callback_duration,
-                        },
-                    )
+        #
+        # The message handler is extracted to IntrospectionMessageHandler for
+        # better testability and separation of concerns (PR #101 code quality).
+        if introspection_dispatcher is not None and isinstance(
+            event_bus, KafkaEventBus
+        ):
+            # Create extracted message handler with proper dependency injection
+            introspection_message_handler = IntrospectionMessageHandler(
+                dispatcher=introspection_dispatcher,
+                event_bus=event_bus,
+                output_topic=config.output_topic,
+            )
 
             # Subscribe with callback - returns unsubscribe function
             subscribe_start_time = time.time()
@@ -1015,7 +781,7 @@ async def bootstrap() -> int:
             introspection_unsubscribe = await event_bus.subscribe(
                 topic=config.input_topic,
                 group_id=f"{config.consumer_group}-introspection",
-                on_message=handle_introspection_message,
+                on_message=introspection_message_handler.handle_message,
             )
             subscribe_duration = time.time() - subscribe_start_time
 

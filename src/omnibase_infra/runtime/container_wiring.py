@@ -684,8 +684,8 @@ async def wire_registration_handlers(
     container: ModelONEXContainer,
     pool: asyncpg.Pool,
     liveness_interval_seconds: int | None = None,
-    projector: "ProjectorRegistration | None" = None,
-    consul_handler: "ConsulHandler | None" = None,
+    projector: ProjectorRegistration | None = None,
+    consul_handler: ConsulHandler | None = None,
 ) -> dict[str, list[str]]:
     """Register registration orchestrator handlers with the container.
 
@@ -739,7 +739,10 @@ async def wire_registration_handlers(
     from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_registration_acked import (
         get_liveness_interval_seconds,
     )
-    from omnibase_infra.projectors import ProjectionReaderRegistration, ProjectorRegistration
+    from omnibase_infra.projectors import (
+        ProjectionReaderRegistration,
+        ProjectorRegistration,
+    )
 
     # Resolve the actual liveness interval (from param, env var, or default)
     resolved_liveness_interval = get_liveness_interval_seconds(
@@ -779,9 +782,7 @@ async def wire_registration_handlers(
                 },
             )
             services_registered.append("ProjectorRegistration")
-            logger.debug(
-                "Registered ProjectorRegistration in container (global scope)"
-            )
+            logger.debug("Registered ProjectorRegistration in container (global scope)")
 
         # 2. Register HandlerNodeIntrospected (with projector and consul_handler if available)
         handler_introspected = HandlerNodeIntrospected(

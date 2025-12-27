@@ -253,10 +253,7 @@ class OrchestratorPipeline:
             data = json.loads(message.value.decode("utf-8"))
 
             # Handle both envelope format and direct event format
-            if "payload" in data:
-                payload = data["payload"]
-            else:
-                payload = data
+            payload = data.get("payload", data)
 
             return ModelNodeIntrospectionEvent.model_validate(payload)
 
@@ -371,9 +368,7 @@ async def mock_consul_client() -> AsyncMock:
         AsyncMock: Mock Consul client with register_service method.
     """
     mock = AsyncMock()
-    mock.register_service = AsyncMock(
-        return_value=MagicMock(success=True, error=None)
-    )
+    mock.register_service = AsyncMock(return_value=MagicMock(success=True, error=None))
     return mock
 
 
@@ -619,9 +614,9 @@ class TestFullOrchestratorFlow:
 
         # Verify processing completed
         assert unique_node_id in pipeline.processed_events
-        assert len(pipeline.processing_errors) == 0, (
-            f"Pipeline had errors: {pipeline.processing_errors}"
-        )
+        assert (
+            len(pipeline.processing_errors) == 0
+        ), f"Pipeline had errors: {pipeline.processing_errors}"
 
         # Verify effect was called (mocks were invoked)
         mock_consul_client.register_service.assert_called()
@@ -644,13 +639,15 @@ class TestFullOrchestratorFlow:
         node_ids = [uuid4() for _ in range(3)]
         node_types = ["effect", "compute", "reducer"]
 
-        for node_id, node_type in zip(node_ids, node_types):
+        for node_id, node_type in zip(node_ids, node_types, strict=False):
             event = ModelNodeIntrospectionEvent(
                 node_id=node_id,
                 node_type=node_type,
                 node_version="1.0.0",
                 capabilities=ModelNodeCapabilities(),
-                endpoints={"health": f"http://localhost:808{node_types.index(node_type)}/health"},
+                endpoints={
+                    "health": f"http://localhost:808{node_types.index(node_type)}/health"
+                },
                 metadata=ModelNodeMetadata(),
                 correlation_id=uuid4(),
                 timestamp=datetime.now(UTC),
@@ -687,9 +684,9 @@ class TestFullOrchestratorFlow:
 
         # Verify all events processed
         for node_id in node_ids:
-            assert node_id in pipeline.processed_events, (
-                f"Event for node {node_id} was not processed"
-            )
+            assert (
+                node_id in pipeline.processed_events
+            ), f"Event for node {node_id} was not processed"
 
     async def test_malformed_message_handled_gracefully(
         self,
@@ -757,9 +754,9 @@ class TestFullOrchestratorFlow:
             elapsed += poll_interval
 
         # Valid event should still be processed
-        assert unique_node_id in pipeline.processed_events, (
-            "Valid event should be processed after malformed message"
-        )
+        assert (
+            unique_node_id in pipeline.processed_events
+        ), "Valid event should be processed after malformed message"
 
 
 # =============================================================================
@@ -882,14 +879,14 @@ class TestFullPipelineWithRealInfrastructure:
 
         intent_types = {intent.intent_type for intent in output.intents}
         assert "consul.register" in intent_types, "Should include Consul intent"
-        assert "postgres.upsert_registration" in intent_types, (
-            "Should include PostgreSQL intent"
-        )
+        assert (
+            "postgres.upsert_registration" in intent_types
+        ), "Should include PostgreSQL intent"
 
         # Verify new state
-        assert output.result.status == "pending", (
-            f"Expected pending status, got {output.result.status}"
-        )
+        assert (
+            output.result.status == "pending"
+        ), f"Expected pending status, got {output.result.status}"
 
     async def test_effect_executes_dual_registration(
         self,
@@ -987,7 +984,7 @@ class TestPipelineLifecycle:
             # Wait for message
             try:
                 await asyncio.wait_for(message_received.wait(), timeout=10.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pytest.fail("Message not received within timeout")
 
             assert len(received_messages) >= 1

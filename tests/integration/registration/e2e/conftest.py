@@ -76,16 +76,15 @@ elif _project_env_file.exists():
     load_dotenv(_project_env_file)
 
 # Import infrastructure configuration
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from tests.infrastructure_config import (
     DEFAULT_CONSUL_PORT,
     DEFAULT_KAFKA_PORT,
     DEFAULT_POSTGRES_PORT,
     REMOTE_INFRA_HOST,
 )
-
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-
-from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 
 if TYPE_CHECKING:
     import asyncpg
@@ -314,6 +313,9 @@ async def wired_container(
     await wire_registration_handlers(container, postgres_pool)
 
     return container
+
+    # Cleanup: ModelONEXContainer doesn't have explicit cleanup methods,
+    # but using yield ensures proper fixture teardown semantics.
 
 
 @pytest.fixture

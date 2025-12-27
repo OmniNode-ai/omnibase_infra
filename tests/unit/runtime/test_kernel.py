@@ -395,7 +395,9 @@ class TestBootstrap:
 
         with (
             patch("omnibase_infra.runtime.kernel.KafkaEventBus") as mock_kafka_bus,
-            patch("omnibase_infra.runtime.kernel.InMemoryEventBus") as mock_inmemory_bus,
+            patch(
+                "omnibase_infra.runtime.kernel.InMemoryEventBus"
+            ) as mock_inmemory_bus,
             patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event,
         ):
             mock_kafka_instance = MagicMock()
@@ -556,10 +558,20 @@ class TestBootstrap:
                     exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify wait_for was called with correct timeout
-        mock_wait_for.assert_called_once()
-        call_kwargs = mock_wait_for.call_args[1]
-        assert call_kwargs["timeout"] == 45
+        # Verify wait_for was called with correct timeout for shutdown
+        # Note: wait_for may be called multiple times (once for producer start,
+        # once for shutdown), so we check that at least one call used our timeout
+        assert mock_wait_for.call_count >= 1
+        # Find the shutdown call that used our configured grace period
+        shutdown_calls = [
+            call
+            for call in mock_wait_for.call_args_list
+            if call[1].get("timeout") == 45
+        ]
+        assert len(shutdown_calls) >= 1, (
+            f"Expected at least one wait_for call with timeout=45, "
+            f"got calls: {mock_wait_for.call_args_list}"
+        )
 
 
 class TestConfigureLogging:
@@ -974,9 +986,9 @@ class TestHttpPortValidation:
         # Verify HealthServer was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
-        assert call_kwargs["port"] == DEFAULT_HTTP_PORT, (
-            f"Expected default port for {description}"
-        )
+        assert (
+            call_kwargs["port"] == DEFAULT_HTTP_PORT
+        ), f"Expected default port for {description}"
 
         # Verify warning was logged about invalid port value
         warning_calls = [
@@ -984,6 +996,6 @@ class TestHttpPortValidation:
             for call in mock_logger.warning.call_args_list
             if "invalid" in str(call).lower() and "onex_http_port" in str(call).lower()
         ]
-        assert len(warning_calls) == 1, (
-            f"Expected exactly one warning logged for {description}"
-        )
+        assert (
+            len(warning_calls) == 1
+        ), f"Expected exactly one warning logged for {description}"

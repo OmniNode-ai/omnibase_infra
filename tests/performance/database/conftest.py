@@ -1,0 +1,503 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Pytest configuration and fixtures for database performance tests.
+
+This module provides fixtures for testing PostgreSQL query performance
+using EXPLAIN ANALYZE to verify index usage and query efficiency.
+
+Fixture Dependency Graph:
+    postgres_pool (session-scoped)
+        -> schema_initialized
+            -> seeded_test_data
+                -> query_analyzer
+
+Environment Requirements:
+    POSTGRES_HOST: PostgreSQL server hostname
+    POSTGRES_PORT: PostgreSQL server port (default: 5436)
+    POSTGRES_DATABASE: Database name (default: omninode_bridge)
+    POSTGRES_USER: Database user (default: postgres)
+    POSTGRES_PASSWORD: Database password (required)
+
+Related:
+    - PR #101: Query performance tests with EXPLAIN ANALYZE
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import TYPE_CHECKING
+from uuid import uuid4
+
+import pytest
+from dotenv import load_dotenv
+
+# Load environment configuration
+_project_root = Path(__file__).parent.parent.parent.parent
+_env_file = _project_root / ".env"
+if _env_file.exists():
+    load_dotenv(_env_file)
+
+from tests.infrastructure_config import (
+    DEFAULT_POSTGRES_PORT,
+)
+
+if TYPE_CHECKING:
+    import asyncpg
+
+
+# =============================================================================
+# Infrastructure Availability
+# =============================================================================
+
+POSTGRES_HOST = os.getenv("POSTGRES_HOST")
+POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)))
+POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+
+# Normalize empty password to None
+if POSTGRES_PASSWORD and not POSTGRES_PASSWORD.strip():
+    POSTGRES_PASSWORD = None
+
+POSTGRES_AVAILABLE = bool(POSTGRES_HOST and POSTGRES_PASSWORD)
+
+# =============================================================================
+# Module-Level Markers
+# =============================================================================
+
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.database,
+    pytest.mark.skipif(
+        not POSTGRES_AVAILABLE,
+        reason=(
+            "PostgreSQL required for database performance tests. "
+            f"POSTGRES_HOST: {'set' if POSTGRES_HOST else 'MISSING'}. "
+            f"POSTGRES_PASSWORD: {'set' if POSTGRES_PASSWORD else 'MISSING'}."
+        ),
+    ),
+]
+
+
+# =============================================================================
+# Migration Paths
+# =============================================================================
+
+MIGRATIONS_DIR = Path(__file__).parent.parent.parent.parent / "docker" / "migrations"
+
+
+# =============================================================================
+# Database Fixtures
+# =============================================================================
+
+
+def _build_postgres_dsn() -> str:
+    """Build PostgreSQL DSN from environment variables."""
+    return (
+        f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
+        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
+    )
+
+
+@pytest.fixture(scope="session")
+def event_loop_policy() -> object:
+    """Use default event loop policy for session-scoped async fixtures."""
+    import asyncio
+
+    return asyncio.DefaultEventLoopPolicy()
+
+
+@pytest.fixture(scope="module")
+async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
+    """Create asyncpg connection pool for database performance tests.
+
+    Module-scoped to share pool across tests in the same file while
+    avoiding event loop issues with session scope.
+
+    Yields:
+        asyncpg.Pool: Connection pool for database operations.
+    """
+    import asyncpg
+
+    if not POSTGRES_AVAILABLE:
+        pytest.skip("PostgreSQL not available")
+
+    dsn = _build_postgres_dsn()
+    pool = await asyncpg.create_pool(
+        dsn,
+        min_size=2,
+        max_size=5,
+        command_timeout=60.0,
+    )
+
+    yield pool
+
+    await pool.close()
+
+
+@pytest.fixture(scope="module")
+async def schema_initialized(
+    postgres_pool: asyncpg.Pool,
+) -> asyncpg.Pool:
+    """Ensure all migrations are applied before tests run.
+
+    Applies all SQL migration files in order (001, 002, etc.).
+
+    Args:
+        postgres_pool: Database connection pool.
+
+    Returns:
+        asyncpg.Pool: Same pool, with schema guaranteed initialized.
+    """
+    # Apply all migrations in order
+    migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
+
+    async with postgres_pool.acquire() as conn:
+        for migration_file in migration_files:
+            sql = migration_file.read_text()
+            await conn.execute(sql)
+
+    return postgres_pool
+
+
+@pytest.fixture
+async def seeded_test_data(
+    schema_initialized: asyncpg.Pool,
+) -> AsyncGenerator[dict[str, list], None]:
+    """Seed test data for query performance verification.
+
+    Creates test records with varied updated_at timestamps and states
+    to enable meaningful EXPLAIN ANALYZE testing.
+
+    Args:
+        schema_initialized: Pool with schema guaranteed initialized.
+
+    Yields:
+        Dictionary containing lists of created entity IDs and metadata.
+    """
+    pool = schema_initialized
+    test_data: dict[str, list] = {
+        "entity_ids": [],
+        "recent_ids": [],
+        "old_ids": [],
+        "active_ids": [],
+        "pending_ids": [],
+    }
+
+    now = datetime.now(UTC)
+
+    async with pool.acquire() as conn:
+        # Create 100 test records with varied timestamps and states
+        for i in range(100):
+            entity_id = uuid4()
+            last_event_id = uuid4()
+
+            # Vary the updated_at time: 50 recent (< 1 hour), 50 older (> 24 hours)
+            if i < 50:
+                updated_at = now - timedelta(minutes=i)
+                test_data["recent_ids"].append(entity_id)
+            else:
+                updated_at = now - timedelta(hours=24 + i)
+                test_data["old_ids"].append(entity_id)
+
+            # Vary states: 40 active, 30 pending, 30 awaiting_ack
+            if i < 40:
+                state = "active"
+                test_data["active_ids"].append(entity_id)
+            elif i < 70:
+                state = "pending_registration"
+                test_data["pending_ids"].append(entity_id)
+            else:
+                state = "awaiting_ack"
+
+            test_data["entity_ids"].append(entity_id)
+
+            await conn.execute(
+                """
+                INSERT INTO registration_projections (
+                    entity_id, domain, current_state, node_type, node_version,
+                    last_applied_event_id, last_applied_offset,
+                    registered_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (entity_id, domain) DO UPDATE SET
+                    current_state = EXCLUDED.current_state,
+                    updated_at = EXCLUDED.updated_at,
+                    last_applied_event_id = EXCLUDED.last_applied_event_id
+                """,
+                entity_id,
+                "registration",
+                state,
+                "effect",
+                "1.0.0",
+                last_event_id,
+                i,
+                now,
+                updated_at,
+            )
+
+    yield test_data
+
+    # Cleanup: remove test records
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            DELETE FROM registration_projections
+            WHERE entity_id = ANY($1::uuid[])
+            """,
+            test_data["entity_ids"],
+        )
+
+
+# =============================================================================
+# Query Analysis Utilities
+# =============================================================================
+
+
+class QueryAnalyzer:
+    """Utility class for analyzing query plans with EXPLAIN ANALYZE.
+
+    Provides methods to execute EXPLAIN ANALYZE and parse the results
+    to verify index usage and query efficiency.
+
+    Attributes:
+        pool: Database connection pool.
+
+    Example:
+        >>> analyzer = QueryAnalyzer(pool)
+        >>> result = await analyzer.explain_analyze(
+        ...     "SELECT * FROM registration_projections WHERE updated_at > $1",
+        ...     datetime.now(UTC) - timedelta(hours=1)
+        ... )
+        >>> assert result.uses_index("idx_registration_updated_at")
+    """
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        """Initialize query analyzer.
+
+        Args:
+            pool: Database connection pool.
+        """
+        self.pool = pool
+
+    async def explain_analyze(
+        self,
+        query: str,
+        *args: object,
+    ) -> ExplainResult:
+        """Execute EXPLAIN ANALYZE on a query.
+
+        Args:
+            query: SQL query to analyze.
+            *args: Query parameters.
+
+        Returns:
+            ExplainResult with parsed plan information.
+        """
+        explain_query = f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {query}"
+
+        async with self.pool.acquire() as conn:
+            result = await conn.fetchval(explain_query, *args)
+
+        return ExplainResult(result)
+
+    async def explain_only(
+        self,
+        query: str,
+        *args: object,
+    ) -> ExplainResult:
+        """Execute EXPLAIN (without ANALYZE) on a query.
+
+        Useful for checking query plans without actually running the query.
+
+        Args:
+            query: SQL query to analyze.
+            *args: Query parameters.
+
+        Returns:
+            ExplainResult with parsed plan information.
+        """
+        explain_query = f"EXPLAIN (FORMAT JSON) {query}"
+
+        async with self.pool.acquire() as conn:
+            result = await conn.fetchval(explain_query, *args)
+
+        return ExplainResult(result)
+
+
+class ExplainResult:
+    """Parsed result from EXPLAIN ANALYZE.
+
+    Provides methods to query the explain plan for index usage,
+    scan types, and performance metrics.
+
+    Attributes:
+        raw_plan: Raw JSON plan from PostgreSQL.
+        plan: Parsed plan dictionary.
+    """
+
+    def __init__(self, raw_plan: list[dict]) -> None:
+        """Initialize with raw EXPLAIN JSON output.
+
+        Args:
+            raw_plan: JSON output from EXPLAIN (FORMAT JSON).
+        """
+        self.raw_plan = raw_plan
+        self.plan = raw_plan[0] if raw_plan else {}
+
+    def _find_nodes(
+        self,
+        node: dict | None = None,
+        node_type: str | None = None,
+    ) -> list[dict]:
+        """Recursively find all nodes in the plan tree.
+
+        Args:
+            node: Starting node (defaults to root Plan).
+            node_type: Optional filter by Node Type.
+
+        Returns:
+            List of matching plan nodes.
+        """
+        if node is None:
+            node = self.plan.get("Plan", {})
+
+        results = []
+
+        current_type = node.get("Node Type", "")
+        if node_type is None or current_type == node_type:
+            results.append(node)
+
+        # Recurse into child nodes
+        for child in node.get("Plans", []):
+            results.extend(self._find_nodes(child, node_type))
+
+        return results
+
+    def uses_index(self, index_name: str) -> bool:
+        """Check if the query plan uses a specific index.
+
+        Args:
+            index_name: Name of the index to check for.
+
+        Returns:
+            True if the index is used in the query plan.
+        """
+        for node in self._find_nodes():
+            if node.get("Index Name") == index_name:
+                return True
+        return False
+
+    def uses_any_index(self) -> bool:
+        """Check if the query plan uses any index scan.
+
+        Returns:
+            True if any index scan node is present in the plan.
+        """
+        index_node_types = {
+            "Index Scan",
+            "Index Only Scan",
+            "Bitmap Index Scan",
+            "Bitmap Heap Scan",
+        }
+        for node in self._find_nodes():
+            if node.get("Node Type") in index_node_types:
+                return True
+        return False
+
+    def uses_seq_scan(self) -> bool:
+        """Check if the query plan uses a sequential scan.
+
+        Returns:
+            True if a Seq Scan node is present in the plan.
+        """
+        return len(self._find_nodes(node_type="Seq Scan")) > 0
+
+    def get_execution_time_ms(self) -> float | None:
+        """Get total execution time from EXPLAIN ANALYZE.
+
+        Returns:
+            Execution time in milliseconds, or None if not available.
+        """
+        return self.plan.get("Execution Time")
+
+    def get_planning_time_ms(self) -> float | None:
+        """Get planning time from EXPLAIN ANALYZE.
+
+        Returns:
+            Planning time in milliseconds, or None if not available.
+        """
+        return self.plan.get("Planning Time")
+
+    def get_total_cost(self) -> float:
+        """Get total estimated cost from the plan.
+
+        Returns:
+            Total cost estimate from the root plan node.
+        """
+        plan_node = self.plan.get("Plan", {})
+        cost = plan_node.get("Total Cost", 0.0)
+        return float(cost) if cost is not None else 0.0
+
+    def get_actual_rows(self) -> int:
+        """Get actual rows returned from EXPLAIN ANALYZE.
+
+        Returns:
+            Number of rows actually returned by the root plan node.
+        """
+        plan_node = self.plan.get("Plan", {})
+        rows = plan_node.get("Actual Rows", 0)
+        return int(rows) if rows is not None else 0
+
+    def get_index_names(self) -> list[str]:
+        """Get all index names used in the query plan.
+
+        Returns:
+            List of index names referenced in the plan.
+        """
+        indexes = []
+        for node in self._find_nodes():
+            index_name = node.get("Index Name")
+            if index_name:
+                indexes.append(index_name)
+        return indexes
+
+    def __str__(self) -> str:
+        """Format explain result for display."""
+        import json
+
+        return json.dumps(self.raw_plan, indent=2)
+
+
+@pytest.fixture
+def query_analyzer(
+    seeded_test_data: dict[str, list],
+    schema_initialized: asyncpg.Pool,
+) -> QueryAnalyzer:
+    """Create QueryAnalyzer for running EXPLAIN ANALYZE tests.
+
+    Args:
+        seeded_test_data: Fixture ensuring test data exists.
+        schema_initialized: Pool with schema initialized.
+
+    Returns:
+        QueryAnalyzer instance for test use.
+    """
+    return QueryAnalyzer(schema_initialized)
+
+
+# =============================================================================
+# Exports
+# =============================================================================
+
+__all__ = [
+    "ExplainResult",
+    "POSTGRES_AVAILABLE",
+    "QueryAnalyzer",
+    "postgres_pool",
+    "query_analyzer",
+    "schema_initialized",
+    "seeded_test_data",
+]

@@ -18,6 +18,15 @@ Design:
     - Returns ModelDispatchResult with success/failure status
     - Uses EnumNodeKind.ORCHESTRATOR for time injection
 
+Circuit Breaker Consideration:
+    This dispatcher does NOT currently implement MixinAsyncCircuitBreaker because
+    it wraps an internal handler (HandlerNodeRegistrationAcked) that performs
+    in-process state transitions without external service calls. If the handler
+    is modified to make external calls (e.g., database, HTTP, Kafka), consider
+    adding circuit breaker protection similar to DispatcherNodeIntrospected.
+
+    See: docs/patterns/dispatcher_resilience.md for implementation guidance.
+
 Related:
     - OMN-888: Registration Orchestrator
     - OMN-892: 2-way Registration E2E Integration Test
@@ -191,6 +200,7 @@ class DispatcherNodeRegistrationAcked:
                 completed_at=completed_at,
                 duration_ms=duration_ms,
                 output_count=len(output_events),
+                output_events=output_events,
                 correlation_id=correlation_id,
             )
 
@@ -199,7 +209,7 @@ class DispatcherNodeRegistrationAcked:
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             sanitized_error = sanitize_error_message(e)
 
-            logger.error(
+            logger.exception(
                 "DispatcherNodeRegistrationAcked failed: %s",
                 sanitized_error,
                 extra={

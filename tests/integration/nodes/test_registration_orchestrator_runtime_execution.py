@@ -243,8 +243,12 @@ class MockEffectImpl:
 
 
 @pytest.fixture
-def mock_container() -> MagicMock:
-    """Create a mock ONEX container."""
+def simple_mock_container() -> MagicMock:
+    """Create a simple mock ONEX container for runtime execution tests.
+
+    This is a simpler version than the conftest.py mock_container, providing
+    just the basic container.config attribute needed for NodeOrchestrator.
+    """
     container = MagicMock()
     container.config = MagicMock()
     return container
@@ -322,7 +326,7 @@ def mock_event_emitter() -> MagicMock:
 
 @pytest.fixture
 def configured_container(
-    mock_container: MagicMock,
+    simple_mock_container: MagicMock,
     mock_reducer: MockReducerImpl,
     mock_effect: MockEffectImpl,
     mock_event_emitter: MagicMock,
@@ -337,15 +341,15 @@ def configured_container(
             return mock_effect
         return mock_event_emitter
 
-    mock_container.service_registry = MagicMock()
-    mock_container.service_registry.resolve = MagicMock(side_effect=resolve_mock)
+    simple_mock_container.service_registry = MagicMock()
+    simple_mock_container.service_registry.resolve = MagicMock(side_effect=resolve_mock)
 
     # Store references for test access
-    mock_container._test_reducer = mock_reducer
-    mock_container._test_effect = mock_effect
-    mock_container._test_emitter = mock_event_emitter
+    simple_mock_container._test_reducer = mock_reducer
+    simple_mock_container._test_effect = mock_effect
+    simple_mock_container._test_emitter = mock_event_emitter
 
-    return mock_container
+    return simple_mock_container
 
 
 @pytest.fixture
@@ -396,9 +400,9 @@ class TestWorkflowSequenceExecution:
         # All effect timestamps should be after reducer timestamp
         reducer_time = mock_reducer.call_timestamps[0]
         for effect_time in mock_effect.call_timestamps:
-            assert effect_time >= reducer_time, (
-                f"Effect called before reducer: {effect_time} < {reducer_time}"
-            )
+            assert (
+                effect_time >= reducer_time
+            ), f"Effect called before reducer: {effect_time} < {reducer_time}"
 
     @pytest.mark.asyncio
     async def test_effects_receive_reducer_intents(
@@ -418,9 +422,9 @@ class TestWorkflowSequenceExecution:
         # Verify intents match
         assert len(mock_effect.executed_intents) == len(intents)
         for i, executed in enumerate(mock_effect.executed_intents):
-            assert executed == intents[i], (
-                f"Intent mismatch at index {i}: {executed} != {intents[i]}"
-            )
+            assert (
+                executed == intents[i]
+            ), f"Intent mismatch at index {i}: {executed} != {intents[i]}"
 
     @pytest.mark.asyncio
     async def test_effect_order_follows_intent_order(

@@ -53,7 +53,6 @@ See Also:
 """
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -64,9 +63,6 @@ from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
-
-if TYPE_CHECKING:
-    pass  # Future type imports if needed
 
 
 class ModelDispatchResult(BaseModel):

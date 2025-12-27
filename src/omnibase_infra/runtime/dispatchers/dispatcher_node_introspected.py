@@ -10,17 +10,27 @@ The adapter:
 - Extracts correlation_id from envelope metadata
 - Injects current time via ModelDispatchContext (for ORCHESTRATOR node kind)
 - Calls the wrapped handler and emits output events
+- Provides circuit breaker resilience via MixinAsyncCircuitBreaker
 
 Design:
     The adapter follows ONEX dispatcher patterns:
     - Implements ProtocolMessageDispatcher protocol
+    - Uses MixinAsyncCircuitBreaker for fault tolerance
     - Stateless operation (handler instance is injected)
     - Returns ModelDispatchResult with success/failure status
     - Uses EnumNodeKind.ORCHESTRATOR for time injection
 
+Circuit Breaker Pattern:
+    - Uses MixinAsyncCircuitBreaker for resilience against handler failures
+    - Configured for KAFKA transport (threshold=3, reset_timeout=20.0s)
+    - Opens circuit after 3 consecutive failures to prevent cascading issues
+    - Transitions to HALF_OPEN after timeout to test recovery
+    - Raises InfraUnavailableError when circuit is OPEN
+
 Related:
     - OMN-888: Registration Orchestrator
     - OMN-892: 2-way Registration E2E Integration Test
+    - docs/patterns/dispatcher_resilience.md
 """
 
 from __future__ import annotations
@@ -35,8 +45,11 @@ from uuid import UUID, uuid4
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
@@ -51,7 +64,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class DispatcherNodeIntrospected:
+class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
     """Dispatcher adapter for HandlerNodeIntrospected.
 
     This dispatcher wraps HandlerNodeIntrospected to integrate it with
@@ -61,10 +74,17 @@ class DispatcherNodeIntrospected:
     - Time injection: Uses current time from dispatch context
     - Correlation tracking: Extracts or generates correlation_id
     - Error handling: Returns structured ModelDispatchResult on failure
+    - Circuit breaker: Fault tolerance via MixinAsyncCircuitBreaker
+
+    Circuit Breaker Configuration:
+        - threshold: 3 consecutive failures before opening circuit
+        - reset_timeout: 20.0 seconds before attempting recovery
+        - transport_type: KAFKA (event dispatching transport)
+        - service_name: dispatcher.registration.node-introspected
 
     Thread Safety:
-        This dispatcher is stateless and safe for concurrent invocation.
-        The wrapped handler must also be coroutine-safe.
+        This dispatcher uses asyncio.Lock for coroutine-safe circuit breaker
+        state management. The wrapped handler must also be coroutine-safe.
 
     Attributes:
         _handler: The wrapped HandlerNodeIntrospected instance.
@@ -76,12 +96,26 @@ class DispatcherNodeIntrospected:
     """
 
     def __init__(self, handler: HandlerNodeIntrospected) -> None:
-        """Initialize dispatcher with wrapped handler.
+        """Initialize dispatcher with wrapped handler and circuit breaker.
 
         Args:
             handler: HandlerNodeIntrospected instance to delegate to.
+
+        Circuit Breaker:
+            Initialized with KAFKA transport settings per dispatcher_resilience.md:
+            - threshold=3: Open after 3 consecutive failures
+            - reset_timeout=20.0: 20 seconds before testing recovery
         """
         self._handler = handler
+
+        # Initialize circuit breaker using mixin pattern
+        # Configuration follows docs/patterns/dispatcher_resilience.md guidelines
+        self._init_circuit_breaker(
+            threshold=3,  # Open after 3 failures (KAFKA is critical)
+            reset_timeout=20.0,  # 20 seconds recovery window
+            service_name="dispatcher.registration.node-introspected",
+            transport_type=EnumInfraTransportType.KAFKA,
+        )
 
     @property
     def dispatcher_id(self) -> str:
@@ -128,14 +162,28 @@ class DispatcherNodeIntrospected:
         Deserializes the envelope payload to ModelNodeIntrospectionEvent,
         delegates to the wrapped handler, and returns a structured result.
 
+        Circuit Breaker Integration:
+            - Checks circuit state before processing (raises if OPEN)
+            - Records failures to track service health
+            - Resets on success to maintain circuit health
+            - InfraUnavailableError propagates to caller for DLQ handling
+
         Args:
             envelope: Event envelope containing introspection payload.
 
         Returns:
             ModelDispatchResult: Success with output events or error details.
+
+        Raises:
+            InfraUnavailableError: If circuit breaker is OPEN.
         """
         started_at = datetime.now(UTC)
         correlation_id = envelope.correlation_id or uuid4()
+
+        # Check circuit breaker before processing (coroutine-safe)
+        # If circuit is OPEN, raises InfraUnavailableError immediately
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("handle", correlation_id)
 
         try:
             # Validate payload type
@@ -172,6 +220,10 @@ class DispatcherNodeIntrospected:
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
 
+            # Record success for circuit breaker (coroutine-safe)
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
             logger.info(
                 "DispatcherNodeIntrospected processed event",
                 extra={
@@ -195,12 +247,21 @@ class DispatcherNodeIntrospected:
                 correlation_id=correlation_id,
             )
 
+        except InfraUnavailableError:
+            # Circuit breaker errors should propagate for engine-level handling
+            # (e.g., routing to DLQ)
+            raise
+
         except Exception as e:
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             sanitized_error = sanitize_error_message(e)
 
-            logger.error(
+            # Record failure for circuit breaker (coroutine-safe)
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("handle", correlation_id)
+
+            logger.exception(
                 "DispatcherNodeIntrospected failed: %s",
                 sanitized_error,
                 extra={

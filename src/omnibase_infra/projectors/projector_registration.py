@@ -29,7 +29,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -41,6 +41,7 @@ from omnibase_infra.models.projection import (
     ModelRegistrationProjection,
     ModelSequenceInfo,
 )
+from omnibase_infra.models.registration import ModelNodeCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -847,10 +848,10 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         self,
         entity_id: UUID,
         domain: str,
-        new_state: "EnumRegistrationState",
+        new_state: EnumRegistrationState,
         node_type: str,
         node_version: str,
-        capabilities: "ModelNodeCapabilities",
+        capabilities: ModelNodeCapabilities,
         event_id: UUID,
         now: datetime,
         ack_deadline: datetime | None = None,

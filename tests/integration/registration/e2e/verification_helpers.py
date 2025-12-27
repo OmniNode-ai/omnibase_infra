@@ -89,8 +89,8 @@ async def verify_consul_registration(
         },
     }
 
-    start_time = asyncio.get_event_loop().time()
-    while asyncio.get_event_loop().time() - start_time < timeout_seconds:
+    start_time = asyncio.get_running_loop().time()
+    while asyncio.get_running_loop().time() - start_time < timeout_seconds:
         try:
             result = await consul_handler.execute(envelope)
             if result.result and result.result.payload:
@@ -132,10 +132,10 @@ async def wait_for_consul_registration(
     Raises:
         TimeoutError: If service not found within timeout.
     """
-    start_time = asyncio.get_event_loop().time()
+    start_time = asyncio.get_running_loop().time()
     last_error: Exception | None = None
 
-    while asyncio.get_event_loop().time() - start_time < timeout_seconds:
+    while asyncio.get_running_loop().time() - start_time < timeout_seconds:
         try:
             result = await verify_consul_registration(
                 consul_handler, service_id, timeout_seconds=poll_interval
@@ -218,10 +218,10 @@ async def wait_for_postgres_registration(
     Raises:
         TimeoutError: If registration not found or state not matched within timeout.
     """
-    start_time = asyncio.get_event_loop().time()
+    start_time = asyncio.get_running_loop().time()
     last_projection: ModelRegistrationProjection | None = None
 
-    while asyncio.get_event_loop().time() - start_time < timeout_seconds:
+    while asyncio.get_running_loop().time() - start_time < timeout_seconds:
         projection = await verify_postgres_registration(projection_reader, node_id)
         if projection is not None:
             last_projection = projection
@@ -418,11 +418,11 @@ async def verify_dual_registration(
     Raises:
         TimeoutError: If either registration not found within timeout.
     """
-    start_time = asyncio.get_event_loop().time()
+    start_time = asyncio.get_running_loop().time()
     consul_result: dict[str, object] | None = None
     postgres_result: ModelRegistrationProjection | None = None
 
-    while asyncio.get_event_loop().time() - start_time < timeout_seconds:
+    while asyncio.get_running_loop().time() - start_time < timeout_seconds:
         # Check Consul
         if consul_result is None:
             consul_result = await verify_consul_registration(
@@ -485,11 +485,11 @@ async def verify_state_transition(
         AssertionError: If initial state doesn't match from_state.
     """
     # First, verify current state matches from_state (or wait for it)
-    start_time = asyncio.get_event_loop().time()
+    start_time = asyncio.get_running_loop().time()
 
     # Wait for from_state first (might not be there yet)
     initial_projection: ModelRegistrationProjection | None = None
-    while asyncio.get_event_loop().time() - start_time < timeout_seconds / 2:
+    while asyncio.get_running_loop().time() - start_time < timeout_seconds / 2:
         projection = await verify_postgres_registration(projection_reader, node_id)
         if projection is not None:
             initial_projection = projection
@@ -511,7 +511,7 @@ async def verify_state_transition(
         )
 
     # Now wait for to_state
-    remaining_time = timeout_seconds - (asyncio.get_event_loop().time() - start_time)
+    remaining_time = timeout_seconds - (asyncio.get_running_loop().time() - start_time)
     if remaining_time <= 0:
         raise TimeoutError(
             f"Timeout waiting for state transition from '{from_state}' to '{to_state}' "
@@ -599,9 +599,9 @@ async def wait_for_heartbeat_update(
     Raises:
         TimeoutError: If heartbeat not updated within timeout.
     """
-    start_time = asyncio.get_event_loop().time()
+    start_time = asyncio.get_running_loop().time()
 
-    while asyncio.get_event_loop().time() - start_time < timeout_seconds:
+    while asyncio.get_running_loop().time() - start_time < timeout_seconds:
         projection = await verify_postgres_registration(projection_reader, node_id)
         if (
             projection is not None
@@ -676,9 +676,9 @@ def assert_registration_initiated(event: ModelNodeRegistrationInitiated) -> None
     assert event.correlation_id is not None, "correlation_id is required"
     assert event.causation_id is not None, "causation_id is required"
     assert event.emitted_at is not None, "emitted_at is required"
-    assert event.registration_attempt_id is not None, (
-        "registration_attempt_id is required"
-    )
+    assert (
+        event.registration_attempt_id is not None
+    ), "registration_attempt_id is required"
 
 
 def assert_node_became_active(event: ModelNodeBecameActive) -> None:
@@ -738,9 +738,9 @@ def assert_registration_rejected(event: ModelNodeRegistrationRejected) -> None:
     assert event.correlation_id is not None, "correlation_id is required"
     assert event.causation_id is not None, "causation_id is required"
     assert event.emitted_at is not None, "emitted_at is required"
-    assert event.rejection_reason is not None and event.rejection_reason.strip(), (
-        "rejection_reason is required"
-    )
+    assert (
+        event.rejection_reason is not None and event.rejection_reason.strip()
+    ), "rejection_reason is required"
 
 
 def assert_ack_received(event: ModelNodeRegistrationAckReceived) -> None:

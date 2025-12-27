@@ -52,6 +52,7 @@ from omnibase_infra.errors import (
     UnknownHandlerTypeError,
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
 from omnibase_infra.runtime.envelope_validator import (
     normalize_correlation_id,
     validate_envelope,
@@ -143,7 +144,7 @@ class RuntimeHostProcess:
 
     def __init__(
         self,
-        event_bus: InMemoryEventBus | None = None,
+        event_bus: InMemoryEventBus | KafkaEventBus | None = None,
         input_topic: str = DEFAULT_INPUT_TOPIC,
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
         config: JsonValue | None = None,
@@ -152,7 +153,8 @@ class RuntimeHostProcess:
         """Initialize the runtime host process.
 
         Args:
-            event_bus: Optional event bus instance. If None, creates InMemoryEventBus.
+            event_bus: Optional event bus instance (InMemoryEventBus or KafkaEventBus).
+                       If None, creates InMemoryEventBus.
             input_topic: Topic to subscribe to for incoming envelopes.
             output_topic: Topic to publish responses to.
             config: Optional configuration dict that can override topics and group_id.
@@ -199,7 +201,9 @@ class RuntimeHostProcess:
         self._handler_registry: ProtocolBindingRegistry | None = handler_registry
 
         # Create or use provided event bus
-        self._event_bus: InMemoryEventBus = event_bus or InMemoryEventBus()
+        self._event_bus: InMemoryEventBus | KafkaEventBus = (
+            event_bus or InMemoryEventBus()
+        )
 
         # Extract configuration with defaults
         config = config or {}
@@ -350,11 +354,11 @@ class RuntimeHostProcess:
         )
 
     @property
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> InMemoryEventBus | KafkaEventBus:
         """Return the owned event bus instance.
 
         Returns:
-            The InMemoryEventBus instance managed by this process.
+            The event bus instance managed by this process.
         """
         return self._event_bus
 

@@ -201,7 +201,8 @@ class ModelLogContextKwargs(TypedDict, total=False):
 # - str: A single output topic
 # - list[str]: Multiple output topics
 # - None: No output topics to publish
-DispatcherOutput = str | list[str] | None
+# - ModelDispatchResult: Protocol-based dispatchers return this for structured output
+DispatcherOutput = str | list[str] | None | ModelDispatchResult
 
 # Module-level logger for fallback when no custom logger is provided
 _module_logger = logging.getLogger(__name__)

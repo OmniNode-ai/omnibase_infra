@@ -55,6 +55,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -173,9 +174,9 @@ class HandlerNodeIntrospected:
     def __init__(
         self,
         projection_reader: ProjectionReaderRegistration,
-        projector: "ProjectorRegistration | None" = None,
+        projector: ProjectorRegistration | None = None,
         ack_timeout_seconds: float | None = None,
-        consul_handler: "ConsulHandler | None" = None,
+        consul_handler: ConsulHandler | None = None,
     ) -> None:
         """Initialize the handler with a projection reader and optional components.
 
@@ -426,8 +427,6 @@ class HandlerNodeIntrospected:
                 # Parse URL to extract host and port
                 # URL format: http://host:port/path
                 try:
-                    from urllib.parse import urlparse
-
                     parsed = urlparse(health_url)
                     if parsed.hostname:
                         address = parsed.hostname

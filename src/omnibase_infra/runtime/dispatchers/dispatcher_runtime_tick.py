@@ -18,6 +18,15 @@ Design:
     - Returns ModelDispatchResult with success/failure status
     - Uses EnumNodeKind.ORCHESTRATOR for time injection
 
+Circuit Breaker Consideration:
+    This dispatcher does NOT currently implement MixinAsyncCircuitBreaker because
+    it wraps an internal handler (HandlerRuntimeTick) that performs in-process
+    timeout scanning without external service calls. If the handler is modified
+    to make external calls (e.g., database queries, HTTP requests), consider
+    adding circuit breaker protection similar to DispatcherNodeIntrospected.
+
+    See: docs/patterns/dispatcher_resilience.md for implementation guidance.
+
 Related:
     - OMN-888: Registration Orchestrator
     - OMN-932: Durable Timeout Handling
@@ -190,6 +199,7 @@ class DispatcherRuntimeTick:
                 completed_at=completed_at,
                 duration_ms=duration_ms,
                 output_count=len(output_events),
+                output_events=output_events,
                 correlation_id=correlation_id,
             )
 
@@ -198,7 +208,7 @@ class DispatcherRuntimeTick:
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             sanitized_error = sanitize_error_message(e)
 
-            logger.error(
+            logger.exception(
                 "DispatcherRuntimeTick failed: %s",
                 sanitized_error,
                 extra={

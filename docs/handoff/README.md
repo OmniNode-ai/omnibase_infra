@@ -23,7 +23,8 @@ This diagnostic package provides tools to identify and fix the event processing 
 ### 1. Run Automated Diagnostic
 
 ```bash
-cd /workspace/omnibase_infra3
+# Navigate to the repository root (if not already there)
+cd "$(git rev-parse --show-toplevel)"
 
 # Run diagnostic with full report
 ./scripts/diagnose_e2e.sh --rebuild --full-report

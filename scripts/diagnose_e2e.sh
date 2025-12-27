@@ -205,7 +205,7 @@ check_required_log "$STARTUP_LOG" "consumer started successfully" "Consumer star
 check_required_log "$STARTUP_LOG" "ONEX Runtime Kernel" "Kernel banner displayed"
 
 # Check for startup errors
-if grep -qi "error\|exception" "$STARTUP_LOG" | grep -v "WARNING"; then
+if grep -i "error\|exception" "$STARTUP_LOG" | grep -qv "WARNING"; then
     log_warning "Startup errors detected:"
     grep -i "error\|exception" "$STARTUP_LOG" | grep -v "WARNING" | head -10
 fi
