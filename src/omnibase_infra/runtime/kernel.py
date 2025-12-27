@@ -78,8 +78,8 @@ from omnibase_infra.runtime.container_wiring import (
 )
 from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
 from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT, HealthServer
-from omnibase_infra.runtime.introspection_message_handler import (
-    IntrospectionMessageHandler,
+from omnibase_infra.runtime.introspection_event_router import (
+    IntrospectionEventRouter,
 )
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
@@ -759,8 +759,8 @@ async def bootstrap() -> int:
         if introspection_dispatcher is not None and isinstance(
             event_bus, KafkaEventBus
         ):
-            # Create extracted message handler with proper dependency injection
-            introspection_message_handler = IntrospectionMessageHandler(
+            # Create extracted event router with proper dependency injection
+            introspection_event_router = IntrospectionEventRouter(
                 dispatcher=introspection_dispatcher,
                 event_bus=event_bus,
                 output_topic=config.output_topic,
@@ -781,7 +781,7 @@ async def bootstrap() -> int:
             introspection_unsubscribe = await event_bus.subscribe(
                 topic=config.input_topic,
                 group_id=f"{config.consumer_group}-introspection",
-                on_message=introspection_message_handler.handle_message,
+                on_message=introspection_event_router.handle_message,
             )
             subscribe_duration = time.time() - subscribe_start_time
 

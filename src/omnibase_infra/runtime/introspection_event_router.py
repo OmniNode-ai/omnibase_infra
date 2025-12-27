@@ -1,23 +1,23 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Introspection message handler for kernel event processing.
+"""Introspection event router for kernel event processing.
 
-This module provides an extracted message handler for processing introspection
+This module provides an extracted event router for routing introspection
 events in the ONEX kernel. Extracted from kernel.py for better testability
 and separation of concerns.
 
-The handler:
+The router:
     - Parses incoming Kafka messages as ModelEventEnvelope or raw events
     - Validates payload as ModelNodeIntrospectionEvent
     - Routes to the introspection dispatcher
     - Publishes output events to the configured output topic
 
 Design:
-    This class encapsulates the message processing logic that was previously
+    This class encapsulates the message routing logic that was previously
     a nested callback in kernel.py. By extracting it, we enable:
     - Unit testing without full kernel bootstrap
     - Mocking of dependencies for isolation
-    - Clearer separation between bootstrap and event processing
+    - Clearer separation between bootstrap and event routing
 
 Related:
     - OMN-888: Registration Orchestrator
@@ -26,7 +26,7 @@ Related:
 
 from __future__ import annotations
 
-__all__ = ["IntrospectionMessageHandler"]
+__all__ = ["IntrospectionEventRouter"]
 
 import json
 import logging
@@ -50,15 +50,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class IntrospectionMessageHandler:
-    """Handler for processing introspection event messages from Kafka.
+class IntrospectionEventRouter:
+    """Router for introspection event messages from Kafka.
 
-    This handler processes incoming Kafka messages, parses them as
+    This router handles incoming Kafka messages, parses them as
     ModelNodeIntrospectionEvent payloads (wrapped in envelopes or raw),
     and routes them to the introspection dispatcher for registration
     orchestration.
 
-    The handler propagates correlation IDs from incoming messages for
+    The router propagates correlation IDs from incoming messages for
     distributed tracing. If no correlation ID is present, it generates
     a new one to ensure all operations can be traced.
 
@@ -68,7 +68,7 @@ class IntrospectionMessageHandler:
         _output_topic: The topic to publish output events to.
 
     Example:
-        >>> handler = IntrospectionMessageHandler(
+        >>> router = IntrospectionEventRouter(
         ...     dispatcher=introspection_dispatcher,
         ...     event_bus=kafka_bus,
         ...     output_topic="registration.output",
@@ -77,7 +77,7 @@ class IntrospectionMessageHandler:
         >>> await event_bus.subscribe(
         ...     topic="registration.input",
         ...     group_id="my-group",
-        ...     on_message=handler.handle_message,
+        ...     on_message=router.handle_message,
         ... )
     """
 
@@ -87,7 +87,7 @@ class IntrospectionMessageHandler:
         event_bus: KafkaEventBus,
         output_topic: str,
     ) -> None:
-        """Initialize the message handler.
+        """Initialize the event router.
 
         Args:
             dispatcher: The DispatcherNodeIntrospected to route events to.

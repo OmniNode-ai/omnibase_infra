@@ -204,10 +204,11 @@ check_required_log "$STARTUP_LOG" "dispatcher created and wired" "Dispatcher cre
 check_required_log "$STARTUP_LOG" "consumer started successfully" "Consumer started"
 check_required_log "$STARTUP_LOG" "ONEX Runtime Kernel" "Kernel banner displayed"
 
-# Check for startup errors
-if grep -i "error\|exception" "$STARTUP_LOG" | grep -qv "WARNING"; then
+# Check for startup errors (store in variable to handle empty results safely)
+startup_errors=$(grep -i "error\|exception" "$STARTUP_LOG" | grep -v "WARNING" || true)
+if [ -n "$startup_errors" ]; then
     log_warning "Startup errors detected:"
-    grep -i "error\|exception" "$STARTUP_LOG" | grep -v "WARNING" | head -10
+    echo "$startup_errors" | head -10
 fi
 
 # =============================================================================

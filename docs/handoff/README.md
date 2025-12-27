@@ -14,7 +14,7 @@ This diagnostic package provides tools to identify and fix the event processing 
 
 1. **`DIAGNOSTIC_QUICKSTART.md`** - Start here (5-minute quickstart)
 2. **`E2E_DIAGNOSTIC_MANUAL.md`** - Comprehensive manual (step-by-step guide)
-3. **`../../scripts/diagnose_e2e.sh`** - Automated diagnostic script
+3. **`scripts/diagnose_e2e.sh`** - Automated diagnostic script (run from project root)
 
 ---
 
@@ -87,7 +87,7 @@ echo $?
 → Read `E2E_DIAGNOSTIC_MANUAL.md`
 
 ### For Automated Diagnosis
-→ Run `../../scripts/diagnose_e2e.sh`
+→ Run `./scripts/diagnose_e2e.sh` from project root
 
 ---
 

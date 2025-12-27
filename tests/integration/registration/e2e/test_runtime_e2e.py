@@ -166,9 +166,9 @@ class TestRuntimeE2EFlow:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(RUNTIME_HEALTH_URL)
 
-            assert (
-                response.status_code == 200
-            ), f"Runtime health check failed: {response.status_code}"
+            assert response.status_code == 200, (
+                f"Runtime health check failed: {response.status_code}"
+            )
 
             # Verify health response structure
             health_data = response.json()
@@ -284,9 +284,9 @@ class TestRuntimeE2EFlow:
                 domain="registration",
                 correlation_id=uuid4(),
             )
-            assert (
-                projection is not None
-            ), f"Projection for node {i} ({node_id}) not found after {max_wait_seconds}s"
+            assert projection is not None, (
+                f"Projection for node {i} ({node_id}) not found after {max_wait_seconds}s"
+            )
 
     @pytest.mark.asyncio
     async def test_runtime_publishes_completion_event(
@@ -343,9 +343,9 @@ class TestRuntimeE2EFlow:
             # Wait for completion event
             try:
                 await asyncio.wait_for(completion_received.wait(), timeout=30.0)
-                assert (
-                    len(received_completions) > 0
-                ), "Expected completion event from runtime"
+                assert len(received_completions) > 0, (
+                    "Expected completion event from runtime"
+                )
 
                 # Verify completion event structure
                 completion = received_completions[0]
@@ -433,9 +433,9 @@ class TestRuntimeErrorHandling:
         # Verify runtime is still healthy
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(RUNTIME_HEALTH_URL)
-            assert (
-                response.status_code == 200
-            ), "Runtime became unhealthy after malformed message"
+            assert response.status_code == 200, (
+                "Runtime became unhealthy after malformed message"
+            )
 
     @pytest.mark.asyncio
     async def test_runtime_handles_missing_fields(
@@ -461,9 +461,9 @@ class TestRuntimeErrorHandling:
         # Verify runtime is still healthy
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(RUNTIME_HEALTH_URL)
-            assert (
-                response.status_code == 200
-            ), "Runtime became unhealthy after incomplete event"
+            assert response.status_code == 200, (
+                "Runtime became unhealthy after incomplete event"
+            )
 
 
 class TestRuntimePerformance:

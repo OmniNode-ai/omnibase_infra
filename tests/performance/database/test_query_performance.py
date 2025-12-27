@@ -76,7 +76,7 @@ class TestUpdatedAtIndexUsage:
 
         # Verify index is used (not seq scan)
         assert result.uses_any_index(), (
-            f"Expected index scan for recent changes query.\n" f"Query plan:\n{result}"
+            f"Expected index scan for recent changes query.\nQuery plan:\n{result}"
         )
 
         # Verify the specific updated_at index is used
@@ -126,7 +126,7 @@ class TestUpdatedAtIndexUsage:
 
         # Verify index usage
         assert result.uses_any_index(), (
-            f"Expected index scan for time range query.\n" f"Query plan:\n{result}"
+            f"Expected index scan for time range query.\nQuery plan:\n{result}"
         )
 
         print("\nTime range audit query performance:")
@@ -161,7 +161,7 @@ class TestUpdatedAtIndexUsage:
 
         # Verify index is used
         assert result.uses_any_index(), (
-            f"Expected index scan for state+time query.\n" f"Query plan:\n{result}"
+            f"Expected index scan for state+time query.\nQuery plan:\n{result}"
         )
 
         # Check for composite index usage
@@ -242,7 +242,7 @@ class TestExistingIndexUsage:
 
         # Verify index usage
         assert result.uses_any_index(), (
-            f"Expected index scan for state filter query.\n" f"Query plan:\n{result}"
+            f"Expected index scan for state filter query.\nQuery plan:\n{result}"
         )
 
         print("\nState filter query performance:")
@@ -271,7 +271,7 @@ class TestExistingIndexUsage:
 
         # Verify index is used
         assert result.uses_any_index(), (
-            f"Expected index scan for domain+state query.\n" f"Query plan:\n{result}"
+            f"Expected index scan for domain+state query.\nQuery plan:\n{result}"
         )
 
         indexes_used = result.get_index_names()
@@ -316,15 +316,15 @@ class TestQueryPerformanceThresholds:
 
         # Primary key should use index
         assert result.uses_any_index(), (
-            f"Expected index scan for PK lookup.\n" f"Query plan:\n{result}"
+            f"Expected index scan for PK lookup.\nQuery plan:\n{result}"
         )
 
         # Performance threshold
         exec_time = result.get_execution_time_ms()
         if exec_time is not None:
-            assert (
-                exec_time < 10.0
-            ), f"PK lookup took {exec_time:.2f}ms, expected < 10ms"
+            assert exec_time < 10.0, (
+                f"PK lookup took {exec_time:.2f}ms, expected < 10ms"
+            )
 
         print("\nPrimary key lookup performance:")
         print(f"  Execution time: {exec_time:.2f}ms" if exec_time else "  N/A")
@@ -352,9 +352,9 @@ class TestQueryPerformanceThresholds:
 
         exec_time = result.get_execution_time_ms()
         if exec_time is not None:
-            assert (
-                exec_time < 50.0
-            ), f"Count by state took {exec_time:.2f}ms, expected < 50ms"
+            assert exec_time < 50.0, (
+                f"Count by state took {exec_time:.2f}ms, expected < 50ms"
+            )
 
         print("\nCount by state performance:")
         print(f"  Execution time: {exec_time:.2f}ms" if exec_time else "  N/A")
@@ -387,15 +387,14 @@ class TestQueryPerformanceThresholds:
 
         # Should use updated_at index for filtering
         assert result.uses_any_index(), (
-            f"Expected index scan for time-filtered aggregation.\n"
-            f"Query plan:\n{result}"
+            f"Expected index scan for time-filtered aggregation.\nQuery plan:\n{result}"
         )
 
         exec_time = result.get_execution_time_ms()
         if exec_time is not None:
-            assert (
-                exec_time < 100.0
-            ), f"Audit count took {exec_time:.2f}ms, expected < 100ms"
+            assert exec_time < 100.0, (
+                f"Audit count took {exec_time:.2f}ms, expected < 100ms"
+            )
 
         print("\nAudit count by time performance:")
         print(f"  Execution time: {exec_time:.2f}ms" if exec_time else "  N/A")
@@ -467,9 +466,9 @@ class TestQueryPlanAnalysis:
         )
 
         # Should show estimated costs without execution time
-        assert (
-            result.get_execution_time_ms() is None
-        ), "EXPLAIN (without ANALYZE) should not have execution time"
+        assert result.get_execution_time_ms() is None, (
+            "EXPLAIN (without ANALYZE) should not have execution time"
+        )
 
         print("\nEXPLAIN only result:")
         print(f"  Uses index: {result.uses_any_index()}")
@@ -591,11 +590,11 @@ class TestQueryPlanStability:
         )
 
         # Both should use index
-        assert (
-            result_with_limit.uses_any_index()
-        ), "Query with LIMIT should still use index"
+        assert result_with_limit.uses_any_index(), (
+            "Query with LIMIT should still use index"
+        )
 
         # LIMIT should reduce cost
-        assert (
-            result_with_limit.get_total_cost() <= result_no_limit.get_total_cost()
-        ), "LIMIT should not increase query cost"
+        assert result_with_limit.get_total_cost() <= result_no_limit.get_total_cost(), (
+            "LIMIT should not increase query cost"
+        )

@@ -400,9 +400,9 @@ class TestWorkflowSequenceExecution:
         # All effect timestamps should be after reducer timestamp
         reducer_time = mock_reducer.call_timestamps[0]
         for effect_time in mock_effect.call_timestamps:
-            assert (
-                effect_time >= reducer_time
-            ), f"Effect called before reducer: {effect_time} < {reducer_time}"
+            assert effect_time >= reducer_time, (
+                f"Effect called before reducer: {effect_time} < {reducer_time}"
+            )
 
     @pytest.mark.asyncio
     async def test_effects_receive_reducer_intents(
@@ -422,9 +422,9 @@ class TestWorkflowSequenceExecution:
         # Verify intents match
         assert len(mock_effect.executed_intents) == len(intents)
         for i, executed in enumerate(mock_effect.executed_intents):
-            assert (
-                executed == intents[i]
-            ), f"Intent mismatch at index {i}: {executed} != {intents[i]}"
+            assert executed == intents[i], (
+                f"Intent mismatch at index {i}: {executed} != {intents[i]}"
+            )
 
     @pytest.mark.asyncio
     async def test_effect_order_follows_intent_order(

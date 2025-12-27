@@ -153,9 +153,9 @@ from omnibase_infra.runtime.dispatchers import (
     DispatcherRuntimeTick,
 )
 
-# Introspection message handler (PR #101)
-from omnibase_infra.runtime.introspection_message_handler import (
-    IntrospectionMessageHandler,
+# Introspection event router (PR #101)
+from omnibase_infra.runtime.introspection_event_router import (
+    IntrospectionEventRouter,
 )
 
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
@@ -253,6 +253,6 @@ __all__: list[str] = [
     "DispatcherNodeIntrospected",
     "DispatcherRuntimeTick",
     "DispatcherNodeRegistrationAcked",
-    # Introspection message handler (PR #101)
-    "IntrospectionMessageHandler",
+    # Introspection event router (PR #101)
+    "IntrospectionEventRouter",
 ]

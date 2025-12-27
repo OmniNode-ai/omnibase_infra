@@ -315,9 +315,9 @@ class TestSuite1NodeStartupIntrospection:
             event = await test_node.get_introspection_data()
 
             # Verify node type is correct
-            assert (
-                event.node_type == node_type.value
-            ), f"Expected node_type '{node_type.value}', got '{event.node_type}'"
+            assert event.node_type == node_type.value, (
+                f"Expected node_type '{node_type.value}', got '{event.node_type}'"
+            )
             assert event.node_id == type_node_id
 
 
@@ -392,9 +392,9 @@ class TestSuite2RegistryDualRegistration:
         )
 
         # For a new node, handler should emit NodeRegistrationInitiated
-        assert (
-            len(result_events) == 1
-        ), f"Expected 1 event (NodeRegistrationInitiated), got {len(result_events)}"
+        assert len(result_events) == 1, (
+            f"Expected 1 event (NodeRegistrationInitiated), got {len(result_events)}"
+        )
 
         # Verify the emitted event type
         from omnibase_infra.models.registration.events.model_node_registration_initiated import (
@@ -467,9 +467,9 @@ class TestSuite2RegistryDualRegistration:
             timeout_seconds=10.0,
         )
 
-        assert (
-            consul_result is not None
-        ), f"Service {service_id} should be found in Consul"
+        assert consul_result is not None, (
+            f"Service {service_id} should be found in Consul"
+        )
         assert consul_result["service_id"] == service_id
 
     @pytest.mark.asyncio
@@ -529,9 +529,9 @@ class TestSuite2RegistryDualRegistration:
             timeout_seconds=10.0,
         )
 
-        assert (
-            pg_result is not None
-        ), f"Node {unique_node_id} should be found in PostgreSQL"
+        assert pg_result is not None, (
+            f"Node {unique_node_id} should be found in PostgreSQL"
+        )
         assert pg_result.entity_id == unique_node_id
         assert pg_result.current_state == EnumRegistrationState.PENDING_REGISTRATION
         assert pg_result.node_type == EnumNodeKind.EFFECT
@@ -790,9 +790,9 @@ class TestSuite2RegistryDualRegistration:
         )
 
         # For a node in blocking state, handler should return empty list (no-op)
-        assert (
-            len(result_events) == 0
-        ), f"Expected 0 events for blocking state, got {len(result_events)}"
+        assert len(result_events) == 0, (
+            f"Expected 0 events for blocking state, got {len(result_events)}"
+        )
 
     @pytest.mark.asyncio
     async def test_handler_allows_retriable_states(
@@ -874,9 +874,9 @@ class TestSuite2RegistryDualRegistration:
         )
 
         # For a node in retriable state, handler should emit NodeRegistrationInitiated
-        assert (
-            len(result_events) == 1
-        ), f"Expected 1 event for retriable state, got {len(result_events)}"
+        assert len(result_events) == 1, (
+            f"Expected 1 event for retriable state, got {len(result_events)}"
+        )
         assert isinstance(result_events[0], ModelNodeRegistrationInitiated), (
             f"Expected ModelNodeRegistrationInitiated, "
             f"got {type(result_events[0]).__name__}"
@@ -1043,9 +1043,9 @@ class TestSuite3ReIntrospection:
                 # Wait for introspection response
                 try:
                     await asyncio.wait_for(event_received.wait(), timeout=15.0)
-                    assert (
-                        len(received_introspection) > 0
-                    ), "Expected at least one introspection event from node"
+                    assert len(received_introspection) > 0, (
+                        "Expected at least one introspection event from node"
+                    )
 
                     # Verify introspection event has expected fields
                     introspection_event = received_introspection[-1]
@@ -1144,9 +1144,9 @@ class TestSuite3ReIntrospection:
                 # Wait for matching response
                 try:
                     await asyncio.wait_for(event_received.wait(), timeout=15.0)
-                    assert (
-                        len(matching_responses) > 0
-                    ), "Expected response with matching correlation_id"
+                    assert len(matching_responses) > 0, (
+                        "Expected response with matching correlation_id"
+                    )
 
                     # Verify correlation_id was preserved
                     response = matching_responses[-1]
@@ -1246,9 +1246,9 @@ class TestSuite4HeartbeatPublishing:
             await asyncio.sleep(65.0)
 
             # Verify we received at least 2 heartbeats
-            assert (
-                len(collected_heartbeats) >= 2
-            ), f"Expected at least 2 heartbeats, got {len(collected_heartbeats)}"
+            assert len(collected_heartbeats) >= 2, (
+                f"Expected at least 2 heartbeats, got {len(collected_heartbeats)}"
+            )
 
             # Verify interval is within tolerance
             if len(collected_heartbeats) >= 2:
@@ -1369,9 +1369,9 @@ class TestSuite4HeartbeatPublishing:
         timing.assert_passed()
 
         # Log timing for debugging
-        assert (
-            timing.elapsed_ms < threshold_ms
-        ), f"Heartbeat overhead {timing.elapsed_ms:.2f}ms exceeds {threshold_ms}ms threshold"
+        assert timing.elapsed_ms < threshold_ms, (
+            f"Heartbeat overhead {timing.elapsed_ms:.2f}ms exceeds {threshold_ms}ms threshold"
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.slow
@@ -1522,9 +1522,9 @@ class TestHeartbeatPerformanceExtended:
             await asyncio.sleep(100.0)
 
             # Verify we have enough heartbeats
-            assert (
-                len(collected_heartbeats) >= 3
-            ), f"Expected at least 3 heartbeats, got {len(collected_heartbeats)}"
+            assert len(collected_heartbeats) >= 3, (
+                f"Expected at least 3 heartbeats, got {len(collected_heartbeats)}"
+            )
 
             # Assert interval consistency using helper
             assert_heartbeat_interval(
@@ -1536,9 +1536,9 @@ class TestHeartbeatPerformanceExtended:
             # Calculate and verify stats
             stats = calculate_heartbeat_stats(collected_heartbeats)
             assert stats["count"] >= 2, "Expected at least 2 intervals"
-            assert (
-                25.0 <= stats["avg_interval_s"] <= 35.0
-            ), f"Average interval {stats['avg_interval_s']:.1f}s outside expected range"
+            assert 25.0 <= stats["avg_interval_s"] <= 35.0, (
+                f"Average interval {stats['avg_interval_s']:.1f}s outside expected range"
+            )
 
         finally:
             await introspectable_test_node.stop_introspection_tasks()
@@ -1650,9 +1650,9 @@ class TestSuite5RegistryRecovery:
         )
 
         # Assertions
-        assert (
-            recovered_projection is not None
-        ), "New orchestrator should be able to read existing registration"
+        assert recovered_projection is not None, (
+            "New orchestrator should be able to read existing registration"
+        )
         assert recovered_projection.entity_id == unique_node_id
         assert recovered_projection.current_state == EnumRegistrationState.ACTIVE
         assert recovered_projection.node_type == EnumNodeKind.EFFECT
@@ -1847,20 +1847,20 @@ class TestSuite5RegistryRecovery:
         # Assertions
         assert final_result is not None, "Registration should exist"
         assert final_result.entity_id == unique_node_id, "Entity ID should be preserved"
-        assert (
-            final_result.node_version == "2.0.0"
-        ), f"Version should be updated to 2.0.0, got {final_result.node_version}"
-        assert (
-            final_result.current_state == EnumRegistrationState.ACTIVE
-        ), "State should be updated to ACTIVE"
+        assert final_result.node_version == "2.0.0", (
+            f"Version should be updated to 2.0.0, got {final_result.node_version}"
+        )
+        assert final_result.current_state == EnumRegistrationState.ACTIVE, (
+            "State should be updated to ACTIVE"
+        )
 
         # Verify original registration time is preserved (UPSERT, not INSERT)
-        assert (
-            final_result.registered_at == first_result.registered_at
-        ), "registered_at should be preserved on UPSERT"
-        assert (
-            final_result.updated_at > first_result.updated_at
-        ), "updated_at should be newer after UPSERT"
+        assert final_result.registered_at == first_result.registered_at, (
+            "registered_at should be preserved on UPSERT"
+        )
+        assert final_result.updated_at > first_result.updated_at, (
+            "updated_at should be newer after UPSERT"
+        )
 
 
 # =============================================================================
@@ -1956,9 +1956,9 @@ class TestSuite6MultipleNodes:
                 projection_reader=projection_reader,
                 node_id=node_id,
             )
-            assert (
-                projection is not None
-            ), f"Node {i} ({node_id}) should be found in PostgreSQL"
+            assert projection is not None, (
+                f"Node {i} ({node_id}) should be found in PostgreSQL"
+            )
             assert projection.entity_id == node_id
             assert projection.current_state == EnumRegistrationState.ACTIVE
 
@@ -2035,9 +2035,9 @@ class TestSuite6MultipleNodes:
         )
 
         assert projection is not None, "Registration should exist"
-        assert (
-            projection.entity_id == unique_node_id
-        ), "Entity ID should match unique_node_id"
+        assert projection.entity_id == unique_node_id, (
+            "Entity ID should match unique_node_id"
+        )
         assert projection.current_state == EnumRegistrationState.ACTIVE
 
         # Verify no corruption - version should be one of the submitted values
@@ -2170,9 +2170,9 @@ class TestSuite6MultipleNodes:
         ):
             pg_result = postgres_results[i]
             assert pg_result is not None
-            assert (
-                pg_result.node_version == f"1.{i}.0"
-            ), f"PostgreSQL version mismatch for node {i}"
+            assert pg_result.node_version == f"1.{i}.0", (
+                f"PostgreSQL version mismatch for node {i}"
+            )
 
 
 # =============================================================================
@@ -2251,9 +2251,9 @@ class TestSuite7GracefulDegradation:
 
         # Verify publish returns False gracefully (no event bus)
         success = await node.publish_introspection(reason="test")
-        assert (
-            success is False
-        ), "Publish should return False when no event bus available"
+        assert success is False, (
+            "Publish should return False when no event bus available"
+        )
 
         # Verify core node functions still work
         result = await node.execute_operation({"test": "data"})
@@ -2317,9 +2317,9 @@ class TestSuite7GracefulDegradation:
             timeout_seconds=10.0,
         )
 
-        assert (
-            pg_result is not None
-        ), f"Node {unique_node_id} should be found in PostgreSQL"
+        assert pg_result is not None, (
+            f"Node {unique_node_id} should be found in PostgreSQL"
+        )
         assert pg_result.entity_id == unique_node_id
         assert pg_result.current_state == EnumRegistrationState.PENDING_REGISTRATION
         assert pg_result.node_type == EnumNodeKind.EFFECT
@@ -2379,9 +2379,9 @@ class TestSuite7GracefulDegradation:
             timeout_seconds=10.0,
         )
 
-        assert (
-            consul_result is not None
-        ), f"Service {service_id} should be found in Consul"
+        assert consul_result is not None, (
+            f"Service {service_id} should be found in Consul"
+        )
         assert consul_result["service_id"] == service_id
 
     @pytest.mark.asyncio
@@ -2433,9 +2433,9 @@ class TestSuite7GracefulDegradation:
         )
 
         # Verify partial success status
-        assert (
-            response.status == "partial"
-        ), f"Expected status 'partial', got '{response.status}'"
+        assert response.status == "partial", (
+            f"Expected status 'partial', got '{response.status}'"
+        )
         assert response.is_partial_failure() is True
         assert response.is_complete_success() is False
         assert response.is_complete_failure() is False
@@ -2728,9 +2728,9 @@ class TestSuite8RegistrySelfRegistration:
         # Verify fields
         assert result is not None, "Registry projection should exist"
         assert result.entity_id == registry_node_id
-        assert (
-            result.node_type == EnumNodeKind.ORCHESTRATOR
-        ), f"Expected node_type ORCHESTRATOR, got '{result.node_type}'"
+        assert result.node_type == EnumNodeKind.ORCHESTRATOR, (
+            f"Expected node_type ORCHESTRATOR, got '{result.node_type}'"
+        )
         assert result.current_state == EnumRegistrationState.ACTIVE
         # Note: endpoints are stored in capabilities, not as a top-level field
         assert result.capabilities is not None
@@ -2766,9 +2766,9 @@ class TestSuite8RegistrySelfRegistration:
         assert_introspection_event_complete(registry_event)
 
         # Additional registry-specific validations
-        assert (
-            registry_event.node_type == "orchestrator"
-        ), f"Registry should be type 'orchestrator', got '{registry_event.node_type}'"
+        assert registry_event.node_type == "orchestrator", (
+            f"Registry should be type 'orchestrator', got '{registry_event.node_type}'"
+        )
         assert registry_event.endpoints is not None
         assert "health" in registry_event.endpoints
         assert "api" in registry_event.endpoints

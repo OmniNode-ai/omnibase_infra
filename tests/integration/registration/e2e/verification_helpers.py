@@ -676,9 +676,9 @@ def assert_registration_initiated(event: ModelNodeRegistrationInitiated) -> None
     assert event.correlation_id is not None, "correlation_id is required"
     assert event.causation_id is not None, "causation_id is required"
     assert event.emitted_at is not None, "emitted_at is required"
-    assert (
-        event.registration_attempt_id is not None
-    ), "registration_attempt_id is required"
+    assert event.registration_attempt_id is not None, (
+        "registration_attempt_id is required"
+    )
 
 
 def assert_node_became_active(event: ModelNodeBecameActive) -> None:
@@ -738,9 +738,9 @@ def assert_registration_rejected(event: ModelNodeRegistrationRejected) -> None:
     assert event.correlation_id is not None, "correlation_id is required"
     assert event.causation_id is not None, "causation_id is required"
     assert event.emitted_at is not None, "emitted_at is required"
-    assert (
-        event.rejection_reason is not None and event.rejection_reason.strip()
-    ), "rejection_reason is required"
+    assert event.rejection_reason is not None and event.rejection_reason.strip(), (
+        "rejection_reason is required"
+    )
 
 
 def assert_ack_received(event: ModelNodeRegistrationAckReceived) -> None:

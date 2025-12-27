@@ -214,8 +214,13 @@ class RuntimeHostProcess:
         # Note: ModelRuntimeConfig uses field name "consumer_group" with alias "group_id".
         # When config.model_dump() is called, it outputs "consumer_group" by default.
         # We check both keys for backwards compatibility with existing configs.
+        # Empty strings and whitespace-only strings fall through to the next option.
+        consumer_group = config.get("consumer_group")
+        group_id = config.get("group_id")
         self._group_id: str = str(
-            config.get("consumer_group") or config.get("group_id") or DEFAULT_GROUP_ID
+            (consumer_group if consumer_group and str(consumer_group).strip() else None)
+            or (group_id if group_id and str(group_id).strip() else None)
+            or DEFAULT_GROUP_ID
         )
 
         # Health check configuration (from lifecycle subcontract pattern)

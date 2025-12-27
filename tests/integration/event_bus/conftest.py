@@ -35,9 +35,9 @@ KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "192.168.86.200:2
 
 
 @pytest.fixture
-async def ensure_test_topic() -> (
-    AsyncGenerator[Callable[[str, int], Coroutine[None, None, str]], None]
-):
+async def ensure_test_topic() -> AsyncGenerator[
+    Callable[[str, int], Coroutine[None, None, str]], None
+]:
     """Create test topics via Kafka admin API before tests and cleanup after.
 
     This fixture handles explicit topic creation for Redpanda/Kafka brokers
@@ -204,9 +204,9 @@ async def created_broadcast_topic(
 
 
 @pytest.fixture
-async def topic_factory() -> (
-    AsyncGenerator[Callable[[str, int, int], Coroutine[None, None, str]], None]
-):
+async def topic_factory() -> AsyncGenerator[
+    Callable[[str, int, int], Coroutine[None, None, str]], None
+]:
     """Factory fixture for creating topics with custom configurations.
 
     Similar to ensure_test_topic but allows specifying replication factor.

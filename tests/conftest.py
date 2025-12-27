@@ -54,9 +54,9 @@ def assert_has_methods(
         assert hasattr(obj, method_name), f"{name} must have '{method_name}' method"
         # __len__ and __iter__ are special - they are callable via len()/iter()
         if not method_name.startswith("__"):
-            assert callable(
-                getattr(obj, method_name)
-            ), f"{name}.{method_name} must be callable"
+            assert callable(getattr(obj, method_name)), (
+                f"{name}.{method_name} must be callable"
+            )
 
 
 def assert_has_async_methods(
@@ -90,9 +90,9 @@ def assert_has_async_methods(
         assert hasattr(obj, method_name), f"{name} must have '{method_name}' method"
         method = getattr(obj, method_name)
         assert callable(method), f"{name}.{method_name} must be callable"
-        assert asyncio.iscoroutinefunction(
-            method
-        ), f"{name}.{method_name} must be async (coroutine function)"
+        assert asyncio.iscoroutinefunction(method), (
+            f"{name}.{method_name} must be async (coroutine function)"
+        )
 
 
 def assert_method_signature(
@@ -137,9 +137,9 @@ def assert_method_signature(
     )
 
     for expected in expected_params:
-        assert (
-            expected in params
-        ), f"{name}.{method_name} must have '{expected}' parameter, got: {params}"
+        assert expected in params, (
+            f"{name}.{method_name} must have '{expected}' parameter, got: {params}"
+        )
 
 
 # =============================================================================
@@ -265,16 +265,16 @@ def assert_dispatcher_protocol_interface(dispatcher: object) -> None:
     """
     required_props = ["dispatcher_id", "category", "message_types", "node_kind"]
     for prop in required_props:
-        assert hasattr(
-            dispatcher, prop
-        ), f"ProtocolMessageDispatcher must have '{prop}' property"
+        assert hasattr(dispatcher, prop), (
+            f"ProtocolMessageDispatcher must have '{prop}' property"
+        )
 
-    assert hasattr(
-        dispatcher, "handle"
-    ), "ProtocolMessageDispatcher must have 'handle' method"
-    assert callable(
-        dispatcher.handle
-    ), "ProtocolMessageDispatcher.handle must be callable"
+    assert hasattr(dispatcher, "handle"), (
+        "ProtocolMessageDispatcher must have 'handle' method"
+    )
+    assert callable(dispatcher.handle), (
+        "ProtocolMessageDispatcher.handle must be callable"
+    )
 
 
 @pytest.fixture
@@ -398,11 +398,10 @@ async def container_with_registries() -> AsyncGenerator[ModelONEXContainer, None
     # Wire infrastructure services (async operation)
     await wire_infrastructure_services(container)
 
+    # Yield container for proper fixture teardown semantics.
+    # ModelONEXContainer doesn't have explicit cleanup methods currently,
+    # but using yield allows for future cleanup needs.
     return container
-
-    # Cleanup: ModelONEXContainer doesn't have explicit cleanup methods,
-    # but using yield ensures proper fixture teardown semantics and allows
-    # for future cleanup needs.
 
 
 @pytest.fixture
