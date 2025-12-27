@@ -68,6 +68,25 @@ Environment Variables:
             Default: "runtime_scheduler"
             Example: "prod_runtime_scheduler"
 
+    Valkey (Redis-compatible) Settings:
+        REDIS_HOST: Valkey host for sequence number persistence
+            Default: "localhost"
+            Example: "192.168.86.200" or "omninode-bridge-valkey"
+
+        REDIS_PORT: Valkey port (integer, 1-65535)
+            Default: 6379
+
+        REDIS_PASSWORD: Valkey password (optional)
+            Default: None (no authentication)
+
+        ONEX_RUNTIME_SCHEDULER_VALKEY_TIMEOUT: Timeout for Valkey ops (float)
+            Default: 5.0 seconds
+            Range: 0.1-60.0
+
+        ONEX_RUNTIME_SCHEDULER_VALKEY_RETRIES: Connection retries (integer)
+            Default: 3
+            Range: 0-10
+
 Parsing Behavior:
     - Integer/Float fields: Logs warning and uses default if parsing fails
     - Boolean fields: Logs warning if value not in expected set, treats as False
@@ -108,6 +127,11 @@ class ModelRuntimeSchedulerConfig(BaseModel):
         circuit_breaker_reset_timeout_seconds: Reset timeout in seconds (1.0-3600.0)
         enable_metrics: Whether to collect scheduler metrics
         metrics_prefix: Prefix for metrics names
+        valkey_host: Valkey host for sequence number persistence
+        valkey_port: Valkey port for sequence number persistence (1-65535)
+        valkey_password: Valkey password (optional)
+        valkey_timeout_seconds: Timeout for Valkey operations (0.1-60.0)
+        valkey_connection_retries: Connection retries before fallback (0-10)
 
     Example:
         ```python
@@ -193,6 +217,36 @@ class ModelRuntimeSchedulerConfig(BaseModel):
         description="Prefix for metrics names",
         min_length=1,
         max_length=255,
+    )
+
+    # Valkey (Redis-compatible) configuration for sequence number persistence
+    valkey_host: str = Field(
+        default="localhost",
+        description="Valkey host for sequence number persistence",
+        min_length=1,
+        max_length=255,
+    )
+    valkey_port: int = Field(
+        default=6379,
+        description="Valkey port for sequence number persistence",
+        ge=1,
+        le=65535,
+    )
+    valkey_password: str | None = Field(
+        default=None,
+        description="Valkey password (optional, from REDIS_PASSWORD env var)",
+    )
+    valkey_timeout_seconds: float = Field(
+        default=5.0,
+        description="Timeout for Valkey operations in seconds",
+        ge=0.1,
+        le=60.0,
+    )
+    valkey_connection_retries: int = Field(
+        default=3,
+        description="Number of connection retries before fallback",
+        ge=0,
+        le=10,
     )
 
     @field_validator("scheduler_id", mode="before")
@@ -448,6 +502,12 @@ class ModelRuntimeSchedulerConfig(BaseModel):
             "ONEX_RUNTIME_SCHEDULER_CB_RESET_TIMEOUT": "circuit_breaker_reset_timeout_seconds",
             "ONEX_RUNTIME_SCHEDULER_ENABLE_METRICS": "enable_metrics",
             "ONEX_RUNTIME_SCHEDULER_METRICS_PREFIX": "metrics_prefix",
+            # Valkey configuration from Redis environment variables
+            "REDIS_HOST": "valkey_host",
+            "REDIS_PORT": "valkey_port",
+            "REDIS_PASSWORD": "valkey_password",
+            "ONEX_RUNTIME_SCHEDULER_VALKEY_TIMEOUT": "valkey_timeout_seconds",
+            "ONEX_RUNTIME_SCHEDULER_VALKEY_RETRIES": "valkey_connection_retries",
         }
 
         # Integer fields for type conversion
@@ -455,11 +515,14 @@ class ModelRuntimeSchedulerConfig(BaseModel):
             "tick_interval_ms",
             "max_tick_jitter_ms",
             "circuit_breaker_threshold",
+            "valkey_port",
+            "valkey_connection_retries",
         }
 
         # Float fields for type conversion
         float_fields = {
             "circuit_breaker_reset_timeout_seconds",
+            "valkey_timeout_seconds",
         }
 
         # Boolean fields for type conversion
@@ -549,6 +612,11 @@ class ModelRuntimeSchedulerConfig(BaseModel):
             circuit_breaker_reset_timeout_seconds=60.0,
             enable_metrics=True,
             metrics_prefix="runtime_scheduler",
+            valkey_host="localhost",
+            valkey_port=6379,
+            valkey_password=None,
+            valkey_timeout_seconds=5.0,
+            valkey_connection_retries=3,
         )
         return base_config.apply_environment_overrides()
 

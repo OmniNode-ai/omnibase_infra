@@ -87,9 +87,58 @@ SENSITIVE_PATTERNS: tuple[str, ...] = (
     "postgresql://",
     "mysql://",
     "redis://",
+    "rediss://",  # Redis with TLS
+    "valkey://",  # Valkey (Redis-compatible)
     "amqp://",
     "kafka://",
 )
+
+
+def sanitize_error_string(error_str: str, max_length: int = 500) -> str:
+    """Sanitize a raw error string for safe inclusion in logs and responses.
+
+    This function removes or masks potentially sensitive information from
+    error message strings. Use this when you have a raw error string rather
+    than an exception object.
+
+    SECURITY NOTE: This function is REQUIRED when logging error messages from
+    Redis/Valkey connections, as these may include connection strings with
+    embedded credentials.
+
+    Sanitization rules:
+        1. Check for common patterns indicating credentials/connection strings
+        2. If sensitive patterns detected, return generic redacted message
+        3. Truncate long messages to prevent excessive data exposure
+
+    Args:
+        error_str: The error string to sanitize
+        max_length: Maximum length of the sanitized message (default 500)
+
+    Returns:
+        Sanitized error message safe for storage and logging.
+
+    Example:
+        >>> safe_msg = sanitize_error_string("Connection failed: redis://user:pass@host:6379")
+        >>> "user:pass" not in safe_msg
+        True
+        >>> "[REDACTED" in safe_msg
+        True
+    """
+    if not error_str:
+        return ""
+
+    # Check for sensitive patterns in the error message (case-insensitive)
+    error_lower = error_str.lower()
+    for pattern in SENSITIVE_PATTERNS:
+        if pattern in error_lower:
+            # Sensitive data detected - return generic message
+            return "[REDACTED - potentially sensitive data]"
+
+    # Truncate long messages to prevent data leakage through verbose errors
+    if len(error_str) > max_length:
+        return error_str[:max_length] + "... [truncated]"
+
+    return error_str
 
 
 def sanitize_error_message(exception: Exception, max_length: int = 500) -> str:
@@ -157,4 +206,5 @@ def sanitize_error_message(exception: Exception, max_length: int = 500) -> str:
 __all__: list[str] = [
     "SENSITIVE_PATTERNS",
     "sanitize_error_message",
+    "sanitize_error_string",
 ]
