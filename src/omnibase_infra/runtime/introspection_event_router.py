@@ -112,16 +112,24 @@ class IntrospectionEventRouter:
             UUID: The extracted or generated correlation ID.
         """
         # Try to extract from message headers if available
-        if hasattr(msg, "headers") and msg.headers:
-            for key, value in msg.headers:
-                if key == "correlation_id":
-                    try:
-                        if isinstance(value, bytes):
-                            return UUID(value.decode("utf-8"))
-                        elif isinstance(value, str):
-                            return UUID(value)
-                    except (ValueError, TypeError):
-                        pass  # Fall through to generate new ID
+        # ModelEventHeaders is a Pydantic model with typed attributes, not a dict/list
+        if hasattr(msg, "headers") and msg.headers is not None:
+            headers = msg.headers
+            if (
+                hasattr(headers, "correlation_id")
+                and headers.correlation_id is not None
+            ):
+                # ModelEventHeaders.correlation_id is already a UUID
+                if isinstance(headers.correlation_id, UUID):
+                    return headers.correlation_id
+                # Handle string or bytes if headers come from raw Kafka
+                try:
+                    if isinstance(headers.correlation_id, bytes):
+                        return UUID(headers.correlation_id.decode("utf-8"))
+                    elif isinstance(headers.correlation_id, str):
+                        return UUID(headers.correlation_id)
+                except (ValueError, TypeError):
+                    pass  # Fall through to try payload extraction
 
         # If we can peek at the payload, try to extract correlation_id
         # This happens when we can parse the message but before full validation

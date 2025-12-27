@@ -5,7 +5,7 @@
 -- Design Notes:
 --   - Adds index on updated_at for efficient audit trail queries
 --   - Supports time-range filtering for compliance and debugging
---   - Partial index excludes NULL values (though updated_at is NOT NULL)
+--   - Standard B-tree indexes (not partial) since updated_at is NOT NULL
 --   - Composite index with current_state enables efficient audit-by-state queries
 --
 -- Query Patterns Optimized:
@@ -94,3 +94,21 @@ COMMENT ON INDEX idx_registration_state_updated_at IS
 --    FROM registration_projections
 --    WHERE updated_at >= NOW() - INTERVAL '24 hours'
 --    GROUP BY current_state;
+
+-- =============================================================================
+-- ROLLBACK MIGRATION
+-- =============================================================================
+-- To rollback this migration, execute the following:
+--
+--   DROP INDEX IF EXISTS idx_registration_updated_at;
+--   DROP INDEX IF EXISTS idx_registration_state_updated_at;
+--
+-- Note: Dropping indexes is non-destructive (no data loss).
+
+-- =============================================================================
+-- INDEX MAINTENANCE NOTES
+-- =============================================================================
+-- B-tree indexes on timestamp columns may become bloated with high UPDATE frequency.
+-- Monitor index size with: SELECT pg_size_pretty(pg_relation_size('idx_registration_updated_at'));
+-- Consider REINDEX CONCURRENTLY during maintenance windows if bloat exceeds 50%.
+-- PostgreSQL 12+ supports REINDEX CONCURRENTLY for online index rebuild.

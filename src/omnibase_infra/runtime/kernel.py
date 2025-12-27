@@ -603,8 +603,13 @@ async def bootstrap() -> int:
                 if postgres_pool is not None:
                     try:
                         await postgres_pool.close()
-                    except Exception:
-                        pass
+                    except Exception as cleanup_error:
+                        logger.warning(
+                            "Cleanup failed for PostgreSQL pool close: %s (correlation_id=%s)",
+                            cleanup_error,
+                            correlation_id,
+                            exc_info=True,
+                        )
                     postgres_pool = None
                 projector = None
                 introspection_dispatcher = None

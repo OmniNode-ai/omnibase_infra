@@ -11,7 +11,7 @@
 ### Option 1: Automated Diagnostic Script
 
 ```bash
-cd /workspace/omnibase_infra3
+cd "$(git rev-parse --show-toplevel)"
 
 # Run automated diagnostic
 ./scripts/diagnose_e2e.sh --rebuild --full-report
@@ -34,7 +34,7 @@ cd /workspace/omnibase_infra3
 Follow the comprehensive manual:
 
 ```bash
-cd /workspace/omnibase_infra3
+cd "$(git rev-parse --show-toplevel)"
 
 # Open manual
 cat docs/handoff/E2E_DIAGNOSTIC_MANUAL.md
@@ -172,7 +172,7 @@ After running `./scripts/diagnose_e2e.sh --full-report`:
 
 ```bash
 # Check handler wiring
-cd /workspace/omnibase_infra3
+cd "$(git rev-parse --show-toplevel)"
 grep -A 20 "wire_registration_handlers" src/omnibase_infra/runtime/container_wiring.py
 
 # Verify database connection
@@ -224,7 +224,7 @@ docker exec omnibase-infra-postgres psql -U postgres -d omninode_bridge \
 ## ✅ Verification After Fix
 
 ```bash
-cd /workspace/omnibase_infra3
+cd "$(git rev-parse --show-toplevel)"
 
 # Rebuild with fix
 cd docker

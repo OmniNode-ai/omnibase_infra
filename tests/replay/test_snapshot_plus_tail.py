@@ -42,6 +42,18 @@ from omnibase_infra.models.registration import (
 )
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+
+# =============================================================================
+# Module-Level Markers
+# =============================================================================
+# These markers enable selective test execution:
+#   pytest -m "replay" - run only replay tests
+#   pytest -m "not replay" - skip replay tests
+
+pytestmark = [
+    pytest.mark.replay,
+]
+
 from tests.helpers import (
     DeterministicClock,
     DeterministicIdGenerator,

@@ -41,6 +41,19 @@ import pytest
 from tests.performance.database.conftest import QueryAnalyzer
 
 # =============================================================================
+# Module-Level Markers
+# =============================================================================
+# These markers enable selective test execution:
+#   pytest -m "performance" - run only performance tests
+#   pytest -m "database" - run only database tests
+#   pytest -m "not performance" - skip performance tests
+
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.database,
+]
+
+# =============================================================================
 # Updated_At Index Tests (PR #101 Requirement)
 # =============================================================================
 

@@ -24,7 +24,7 @@ Kafka Message → Callback Invoked → JSON Parsing → Model Validation
 ## 🚀 Step 1: Rebuild Runtime Container
 
 ```bash
-cd /workspace/omnibase_infra3/docker
+cd "$(git rev-parse --show-toplevel)/docker"
 
 # Stop existing runtime if running
 docker compose -f docker-compose.e2e.yml down runtime
@@ -46,7 +46,7 @@ sleep 15
 ## 🏥 Step 2: Verify Container Health
 
 ```bash
-cd /workspace/omnibase_infra3/docker
+cd "$(git rev-parse --show-toplevel)/docker"
 
 # Check container status
 docker compose -f docker-compose.e2e.yml ps runtime
@@ -67,7 +67,7 @@ docker compose -f docker-compose.e2e.yml logs runtime | head -100
 ## 📝 Step 3: Capture Startup Logs
 
 ```bash
-cd /workspace/omnibase_infra3/docker
+cd "$(git rev-parse --show-toplevel)/docker"
 
 # Capture last 100 lines of startup logs
 docker compose -f docker-compose.e2e.yml logs runtime | tail -100 > /tmp/runtime_startup.log
@@ -130,7 +130,7 @@ grep -i "error\|exception\|failed" /tmp/runtime_startup.log
 ### Terminal 1: Capture Container Logs (Live)
 
 ```bash
-cd /workspace/omnibase_infra3/docker
+cd "$(git rev-parse --show-toplevel)/docker"
 
 # Stream container logs to file
 docker compose -f docker-compose.e2e.yml logs -f runtime > /tmp/runtime_test_logs.txt
@@ -141,7 +141,7 @@ docker compose -f docker-compose.e2e.yml logs -f runtime > /tmp/runtime_test_log
 ### Terminal 2: Run E2E Test
 
 ```bash
-cd /workspace/omnibase_infra3
+cd "$(git rev-parse --show-toplevel)"
 
 # Set verbose pytest output
 export PYTEST_CURRENT_TEST=""
@@ -179,7 +179,7 @@ This means: **event was published but projection not created** → pipeline brok
 **Stop log capture** in Terminal 1 (Ctrl+C), then analyze:
 
 ```bash
-cd /workspace/omnibase_infra3
+cd "$(git rev-parse --show-toplevel)"
 
 # Open captured logs
 cat /tmp/runtime_test_logs.txt
@@ -627,7 +627,7 @@ After applying fix:
 
 ```bash
 # Rebuild container with fix
-cd /workspace/omnibase_infra3/docker
+cd "$(git rev-parse --show-toplevel)/docker"
 docker compose -f docker-compose.e2e.yml build runtime
 docker compose -f docker-compose.e2e.yml up -d runtime
 
@@ -635,7 +635,7 @@ docker compose -f docker-compose.e2e.yml up -d runtime
 sleep 15
 
 # Rerun test
-cd /workspace/omnibase_infra3
+cd "$(git rev-parse --show-toplevel)"
 poetry run pytest \
   tests/integration/registration/e2e/test_runtime_e2e.py::TestRuntimeE2EFlow::test_introspection_event_processed_by_runtime \
   -v -s
@@ -732,7 +732,7 @@ docker exec omnibase-infra-runtime nslookup redpanda
 
 ### One-Command Full Diagnostic
 ```bash
-cd /workspace/omnibase_infra3
+cd "$(git rev-parse --show-toplevel)"
 
 # Rebuild, restart, test, capture logs
 (

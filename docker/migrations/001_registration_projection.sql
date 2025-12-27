@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS registration_projections (
     -- Node types MUST match omnibase_core.enums.EnumNodeKind values (lowercase serialized form)
     -- Source of truth: omnibase_core/enums/enum_node_kind.py
     -- When EnumNodeKind changes, this constraint MUST be updated to match
+    -- TESTING: Integration tests should validate INSERT with invalid node_type is rejected
+    -- See: tests/integration/test_registration_projection_constraints.py
     CONSTRAINT valid_node_type CHECK (node_type IN ('effect', 'compute', 'reducer', 'orchestrator'))
 );
 
@@ -272,3 +274,28 @@ COMMENT ON COLUMN registration_projections.last_applied_partition IS
 -- 3. Idempotency: Duplicate events are handled gracefully
 --
 -- See projector_registration.py for the complete upsert SQL implementation.
+
+-- =============================================================================
+-- ROLLBACK MIGRATION
+-- =============================================================================
+-- CAUTION: Rollback will DROP DATA. Only use if migration was applied in error.
+--
+-- To rollback this migration, execute the following:
+--
+--   DROP TABLE IF EXISTS registration_projections CASCADE;
+--   DROP TYPE IF EXISTS registration_state CASCADE;
+--
+-- Note: CASCADE will drop dependent objects (indexes, constraints).
+-- Consider backing up data before rollback: COPY registration_projections TO '/tmp/backup.csv' CSV HEADER;
+
+-- =============================================================================
+-- INDEX MAINTENANCE NOTES
+-- =============================================================================
+-- Partial indexes (idx_registration_ack_deadline, idx_registration_liveness_deadline,
+-- idx_registration_ack_timeout_scan, idx_registration_liveness_timeout_scan) are
+-- space-efficient but require careful maintenance:
+--
+-- 1. Monitor index usage: SELECT * FROM pg_stat_user_indexes WHERE relname = 'registration_projections';
+-- 2. Check bloat: SELECT pg_size_pretty(pg_relation_size('idx_registration_ack_deadline'));
+-- 3. REINDEX CONCURRENTLY for online rebuilds (PostgreSQL 12+).
+-- 4. GIN index (idx_registration_capabilities) may need periodic VACUUM for JSONB updates.

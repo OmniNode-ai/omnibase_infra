@@ -13,11 +13,24 @@ Fixtures:
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from typing import TYPE_CHECKING
 
 import pytest
+
+# Module-level logger for test cleanup diagnostics
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# Module-Level Markers
+# =============================================================================
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.kafka,
+]
 
 if TYPE_CHECKING:
     from aiokafka.admin import AIOKafkaAdminClient
@@ -140,12 +153,21 @@ async def ensure_test_topic() -> AsyncGenerator[
         if created_topics:
             try:
                 await admin.delete_topics(created_topics)
-            except Exception:
-                pass  # Ignore cleanup errors
+            except Exception as e:
+                logger.warning(
+                    "Cleanup failed for Kafka topics %s: %s",
+                    created_topics,
+                    e,
+                    exc_info=True,
+                )
         try:
             await admin.close()
-        except Exception:
-            pass  # Ignore close errors
+        except Exception as e:
+            logger.warning(
+                "Failed to close Kafka admin client: %s",
+                e,
+                exc_info=True,
+            )
 
 
 @pytest.fixture
@@ -268,9 +290,18 @@ async def topic_factory() -> AsyncGenerator[
         if created_topics:
             try:
                 await admin.delete_topics(created_topics)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "Cleanup failed for Kafka topics %s: %s",
+                    created_topics,
+                    e,
+                    exc_info=True,
+                )
         try:
             await admin.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "Failed to close Kafka admin client: %s",
+                e,
+                exc_info=True,
+            )

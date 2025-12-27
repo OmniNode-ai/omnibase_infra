@@ -11,9 +11,17 @@ Provides fixtures for performance testing including:
 Usage:
     Fixtures are automatically available to all tests in this package.
 
+Supported Event Bus Implementations:
+    The ONEX infrastructure supports multiple event bus implementations:
+    - InMemoryEventBus: Used for unit and performance tests (this module)
+    - KafkaEventBus: Used for integration and E2E tests with real Kafka/Redpanda
+
+    This module uses InMemoryEventBus for deterministic performance benchmarking.
+    For Kafka-based testing, see tests/integration/event_bus/conftest.py and
+    tests/integration/registration/e2e/conftest.py.
+
 Related:
     - OMN-57: Event bus performance testing requirements
-    - InMemoryEventBus: Primary implementation under test
 """
 
 from __future__ import annotations
@@ -28,6 +36,14 @@ import pytest
 
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+
+# -----------------------------------------------------------------------------
+# Module-Level Markers
+# -----------------------------------------------------------------------------
+
+pytestmark = [
+    pytest.mark.performance,
+]
 
 # -----------------------------------------------------------------------------
 # Event Bus Fixtures

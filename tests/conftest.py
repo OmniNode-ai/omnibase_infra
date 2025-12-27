@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
+
+# Module-level logger for test cleanup diagnostics
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -400,7 +404,8 @@ async def container_with_registries() -> AsyncGenerator[ModelONEXContainer, None
 
     # Yield container for proper fixture teardown semantics.
     # ModelONEXContainer doesn't have explicit cleanup methods currently,
-    # but using yield allows for future cleanup needs.
+    # but using yield allows for future cleanup needs and ensures proper
+    # pytest async fixture lifecycle management.
     return container
 
 
@@ -557,14 +562,23 @@ async def cleanup_consul_test_services():
                             "payload": {"service_id": service_id},
                         }
                         await handler.execute(deregister_envelope)
-                    except Exception:
-                        pass  # Best effort cleanup
+                    except Exception as e:
+                        logger.warning(
+                            "Cleanup failed for Consul service %s: %s",
+                            service_id,
+                            e,
+                            exc_info=True,
+                        )
 
         finally:
             await handler.shutdown()
 
-    except Exception:
-        pass  # Best effort cleanup - don't fail tests due to cleanup errors
+    except Exception as e:
+        logger.warning(
+            "Consul test cleanup failed: %s",
+            e,
+            exc_info=True,
+        )
 
 
 @pytest.fixture
@@ -594,6 +608,19 @@ async def cleanup_postgres_test_projections():
     Note:
         This fixture requires PostgreSQL to be available. It skips cleanup
         gracefully if the database is not reachable or tables don't exist.
+
+    Warning:
+        PRODUCTION DATABASE SAFETY: This fixture executes DELETE operations
+        against the configured database. The cleanup query uses pattern matching
+        (LIKE '%test%', '%integration%') to target only test data. However:
+
+        - NEVER run tests against a production database
+        - Always verify POSTGRES_HOST points to a test/dev environment
+        - The .env file should specify isolated test infrastructure
+        - Production databases should use network isolation or read-only users
+
+        The query intentionally uses restrictive WHERE clauses to minimize
+        risk of accidental production data deletion.
     """
     import os
 
@@ -635,14 +662,22 @@ async def cleanup_postgres_test_projections():
             )
         except asyncpg.UndefinedTableError:
             pass  # Table doesn't exist, nothing to cleanup
-        except Exception:
-            pass  # Best effort cleanup
+        except Exception as e:
+            logger.warning(
+                "PostgreSQL projection cleanup query failed: %s",
+                e,
+                exc_info=True,
+            )
 
         finally:
             await conn.close()
 
-    except Exception:
-        pass  # Best effort cleanup - don't fail tests due to cleanup errors
+    except Exception as e:
+        logger.warning(
+            "PostgreSQL test cleanup failed: %s",
+            e,
+            exc_info=True,
+        )
 
 
 @pytest.fixture
@@ -716,14 +751,22 @@ async def cleanup_kafka_test_consumer_groups():
             if test_groups:
                 try:
                     await admin_client.delete_consumer_groups(test_groups)
-                except KafkaError:
-                    pass  # Best effort cleanup
+                except KafkaError as e:
+                    logger.warning(
+                        "Kafka consumer group cleanup failed: %s",
+                        e,
+                        exc_info=True,
+                    )
 
         finally:
             await admin_client.close()
 
-    except Exception:
-        pass  # Best effort cleanup - don't fail tests due to cleanup errors
+    except Exception as e:
+        logger.warning(
+            "Kafka test cleanup failed: %s",
+            e,
+            exc_info=True,
+        )
 
 
 @pytest.fixture

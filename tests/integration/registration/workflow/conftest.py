@@ -1293,7 +1293,15 @@ def deterministic_introspection_event_factory(
 
     Returns:
         Factory callable that creates introspection events with deterministic values.
+
+    Note:
+        The imports below are inside the function rather than at module level
+        because the TYPE_CHECKING imports at the top of this file are only
+        available during static type analysis (mypy/pyright), not at runtime.
+        These models need to be instantiated at runtime when creating events,
+        so they must be imported here for actual use.
     """
+    # Runtime imports: TYPE_CHECKING imports at module level are not available at runtime
     from omnibase_infra.models.registration.model_node_capabilities import (
         ModelNodeCapabilities,
     )

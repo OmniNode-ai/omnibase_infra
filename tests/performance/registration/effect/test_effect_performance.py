@@ -60,6 +60,17 @@ if TYPE_CHECKING:
 
 
 # -----------------------------------------------------------------------------
+# Module-Level Markers
+# -----------------------------------------------------------------------------
+# These markers enable selective test execution:
+#   pytest -m "performance" - run only performance tests
+#   pytest -m "not performance" - skip performance tests
+
+pytestmark = [
+    pytest.mark.performance,
+]
+
+# -----------------------------------------------------------------------------
 # Simulated Effect Executor for Load Testing
 # -----------------------------------------------------------------------------
 

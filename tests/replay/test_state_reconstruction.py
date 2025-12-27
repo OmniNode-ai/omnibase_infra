@@ -41,6 +41,17 @@ from tests.helpers import (
     create_introspection_event,
 )
 
+# =============================================================================
+# Module-Level Markers
+# =============================================================================
+# These markers enable selective test execution:
+#   pytest -m "replay" - run only replay tests
+#   pytest -m "not replay" - skip replay tests
+
+pytestmark = [
+    pytest.mark.replay,
+]
+
 __all__ = [
     "TestEventLogReconstruction",
     "TestMultipleReconstructionScenarios",

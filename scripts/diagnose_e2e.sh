@@ -205,7 +205,8 @@ check_required_log "$STARTUP_LOG" "consumer started successfully" "Consumer star
 check_required_log "$STARTUP_LOG" "ONEX Runtime Kernel" "Kernel banner displayed"
 
 # Check for startup errors (store in variable to handle empty results safely)
-startup_errors=$(grep -i "error\|exception" "$STARTUP_LOG" | grep -v "WARNING" || true)
+# Exclude false positives: WARNING lines, metric names (validation_error_count, error_count)
+startup_errors=$(grep -i "error\|exception" "$STARTUP_LOG" | grep -v "WARNING" | grep -v "error_count" || true)
 if [ -n "$startup_errors" ]; then
     log_warning "Startup errors detected:"
     echo "$startup_errors" | head -10
@@ -443,7 +444,7 @@ $(grep -i "error\|exception\|failed" "$FULL_LOG" | grep -v "WARNING" | grep -v "
 
 ## Correlation IDs
 \`\`\`
-$(grep -oP "correlation_id=\K[a-f0-9-]+" "$FULL_LOG" | sort -u | head -20)
+$(grep -oE "correlation_id=[a-f0-9-]+" "$FULL_LOG" | sed 's/correlation_id=//' | sort -u | head -20)
 \`\`\`
 
 ---

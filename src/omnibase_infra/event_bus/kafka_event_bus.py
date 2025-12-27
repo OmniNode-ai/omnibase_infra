@@ -650,8 +650,12 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     if self._producer is not None:
                         try:
                             await self._producer.stop()
-                        except Exception:
-                            pass  # Best effort cleanup
+                        except Exception as cleanup_err:
+                            logger.warning(
+                                "Cleanup failed for Kafka producer stop: %s",
+                                cleanup_err,
+                                exc_info=True,
+                            )
                     self._producer = None
                 # Record failure (circuit breaker lock required)
                 async with self._circuit_breaker_lock:
@@ -688,8 +692,12 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     if self._producer is not None:
                         try:
                             await self._producer.stop()
-                        except Exception:
-                            pass  # Best effort cleanup
+                        except Exception as cleanup_err:
+                            logger.warning(
+                                "Cleanup failed for Kafka producer stop: %s",
+                                cleanup_err,
+                                exc_info=True,
+                            )
                     self._producer = None
                 # Record failure (circuit breaker lock required)
                 async with self._circuit_breaker_lock:
@@ -947,8 +955,12 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     if self._producer is not None:
                         try:
                             await self._producer.stop()
-                        except Exception:
-                            pass  # Best effort cleanup
+                        except Exception as cleanup_err:
+                            logger.warning(
+                                "Cleanup failed for Kafka producer stop during publish: %s",
+                                cleanup_err,
+                                exc_info=True,
+                            )
                     self._producer = None
                 last_exception = e
                 async with self._circuit_breaker_lock:
@@ -1197,8 +1209,13 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             # Clean up consumer on failure to prevent resource leak
             try:
                 await consumer.stop()
-            except Exception:
-                pass  # Best effort cleanup
+            except Exception as cleanup_err:
+                logger.warning(
+                    "Cleanup failed for Kafka consumer stop (topic=%s): %s",
+                    topic,
+                    cleanup_err,
+                    exc_info=True,
+                )
 
             # Propagate timeout error to surface startup failures (differentiate from connection errors)
             context = ModelInfraErrorContext(
@@ -1230,8 +1247,13 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             # Clean up consumer on failure to prevent resource leak
             try:
                 await consumer.stop()
-            except Exception:
-                pass  # Best effort cleanup
+            except Exception as cleanup_err:
+                logger.warning(
+                    "Cleanup failed for Kafka consumer stop (topic=%s): %s",
+                    topic,
+                    cleanup_err,
+                    exc_info=True,
+                )
 
             # Propagate connection error to surface startup failures (differentiate from timeout)
             context = ModelInfraErrorContext(

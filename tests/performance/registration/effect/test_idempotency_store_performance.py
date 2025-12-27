@@ -39,6 +39,17 @@ from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
 )
 
 # -----------------------------------------------------------------------------
+# Module-Level Markers
+# -----------------------------------------------------------------------------
+# These markers enable selective test execution:
+#   pytest -m "performance" - run only performance tests
+#   pytest -m "not performance" - skip performance tests
+
+pytestmark = [
+    pytest.mark.performance,
+]
+
+# -----------------------------------------------------------------------------
 # LRU Eviction Efficiency Tests
 # -----------------------------------------------------------------------------
 

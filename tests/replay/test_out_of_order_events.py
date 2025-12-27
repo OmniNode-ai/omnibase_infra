@@ -57,6 +57,17 @@ from tests.helpers.replay_utils import (
     detect_timestamp_order_violations,
 )
 
+# =============================================================================
+# Module-Level Markers
+# =============================================================================
+# These markers enable selective test execution:
+#   pytest -m "replay" - run only replay tests
+#   pytest -m "not replay" - skip replay tests
+
+pytestmark = [
+    pytest.mark.replay,
+]
+
 if TYPE_CHECKING:
     from omnibase_core.nodes import ModelReducerOutput
 

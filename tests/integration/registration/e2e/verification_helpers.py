@@ -98,10 +98,19 @@ async def verify_consul_registration(
                 # Check if we got a found response (not NotFound)
                 if hasattr(payload_data, "value") and payload_data.value is not None:
                     return {"service_id": service_id, "value": payload_data.value}
-        except Exception as e:
+        except (TimeoutError, ConnectionError, OSError) as e:
+            # Network/connection errors - log and retry
             logger.debug(
                 "Consul KV lookup failed (retrying): %s",
                 type(e).__name__,
+                extra={"service_id": service_id},
+            )
+        except Exception as e:
+            # Unexpected errors - log with more detail but still retry
+            logger.warning(
+                "Unexpected error during Consul lookup (retrying): %s: %s",
+                type(e).__name__,
+                str(e),
                 extra={"service_id": service_id},
             )
 
@@ -142,11 +151,21 @@ async def wait_for_consul_registration(
             )
             if result is not None:
                 return result
-        except Exception as e:
+        except (TimeoutError, ConnectionError, OSError) as e:
+            # Expected network/connection errors - log at debug and retry
             last_error = e
             logger.debug(
                 "Consul wait poll failed: %s",
                 type(e).__name__,
+                extra={"service_id": service_id},
+            )
+        except Exception as e:
+            # Unexpected errors - log with more detail
+            last_error = e
+            logger.warning(
+                "Unexpected error during Consul poll: %s: %s",
+                type(e).__name__,
+                str(e),
                 extra={"service_id": service_id},
             )
 
@@ -184,10 +203,23 @@ async def verify_postgres_registration(
     """
     try:
         return await projection_reader.get_entity_state(node_id, domain)
-    except Exception as e:
+    except (TimeoutError, ConnectionError, OSError) as e:
+        # Expected network/database connection errors
         logger.debug(
             "Projection reader lookup failed: %s",
             type(e).__name__,
+            extra={"node_id": str(node_id), "domain": domain},
+        )
+        return None
+    except KeyError:
+        # Entity not found - expected case, no need to log
+        return None
+    except Exception as e:
+        # Unexpected errors - log with more detail
+        logger.warning(
+            "Unexpected error during projection lookup: %s: %s",
+            type(e).__name__,
+            str(e),
             extra={"node_id": str(node_id), "domain": domain},
         )
         return None
@@ -292,8 +324,12 @@ async def wait_for_kafka_event(
                     data = json.loads(message.value.decode("utf-8"))
                     result = ModelEventEnvelope.model_validate(data)
                     event_found.set()
-                except Exception:
-                    pass
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    # Malformed message data - skip silently (expected in test scenarios)
+                    logger.debug("Failed to decode Kafka message: %s", type(e).__name__)
+                except ValueError as e:
+                    # Pydantic validation failed - message doesn't match expected schema
+                    logger.debug("Failed to validate event envelope: %s", e)
 
     group_id = f"e2e-test-{correlation_id.hex[:8]}"
     unsubscribe = await event_bus.subscribe(topic, group_id, handler)
@@ -346,19 +382,30 @@ async def collect_registration_events(
                 payload = data.get("payload", data)
                 event_node_id = payload.get("node_id") or payload.get("entity_id")
                 if event_node_id and UUID(event_node_id) == node_id:
-                    # Try to match event type
-                    event_type_name = data.get("event_type", "")
+                    # Try to match event type using exact comparison
+                    # to prevent false positives from partial string matches
+                    event_type_name = data.get("event_type")
+                    if event_type_name is None:
+                        # Skip events without explicit event_type field
+                        return
+
                     for type_name, model_class in type_map.items():
-                        if (
-                            type_name in event_type_name
-                            or type_name.lower() in str(data).lower()
+                        # Exact match: event_type equals the model class name
+                        # or ends with the model class name (for namespaced types)
+                        if event_type_name == type_name or event_type_name.endswith(
+                            f".{type_name}"
                         ):
                             try:
                                 event = model_class.model_validate(payload)
                                 collected.append(event)
-                            except Exception:
+                            except ValueError:
+                                # Pydantic validation failed - skip this event
                                 pass
-            except Exception:
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                # Malformed message - skip silently
+                pass
+            except (KeyError, TypeError):
+                # Missing expected fields in message structure
                 pass
 
     # Subscribe to registration event topics
@@ -373,8 +420,17 @@ async def collect_registration_events(
         try:
             unsub = await event_bus.subscribe(topic, group_id, handler)
             unsubscribers.append(unsub)
-        except Exception:
-            pass
+        except (TimeoutError, ConnectionError, OSError) as e:
+            # Network errors during subscription - skip this topic
+            logger.debug("Failed to subscribe to topic %s: %s", topic, type(e).__name__)
+        except Exception as e:
+            # Unexpected errors - log but continue with other topics
+            logger.warning(
+                "Unexpected error subscribing to topic %s: %s: %s",
+                topic,
+                type(e).__name__,
+                str(e),
+            )
 
     await asyncio.sleep(timeout_seconds)
 
@@ -382,8 +438,12 @@ async def collect_registration_events(
     for unsub in unsubscribers:
         try:
             await unsub()
-        except Exception:
+        except (TimeoutError, ConnectionError, OSError):
+            # Network errors during cleanup - best effort
             pass
+        except Exception as e:
+            # Unexpected errors during cleanup - log but continue
+            logger.debug("Error during subscription cleanup: %s", type(e).__name__)
 
     return collected
 

@@ -33,8 +33,6 @@ Related:
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -206,15 +204,10 @@ def workflow_steps() -> list[tuple[UUID, str]]:
     ]
 
 
-@pytest.fixture
-def correlation_id() -> UUID:
-    """Create a correlation ID for request tracing."""
-    return uuid4()
-
-
 # =============================================================================
 # Test Classes
 # =============================================================================
+# NOTE: correlation_id fixture is provided by chaos/conftest.py
 
 
 @pytest.mark.unit

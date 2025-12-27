@@ -433,9 +433,17 @@ class HandlerNodeIntrospected:
                         address = parsed.hostname
                     if parsed.port:
                         port = parsed.port
-                except Exception:
+                except Exception as e:
                     # If parsing fails, continue without address/port
-                    pass
+                    logger.debug(
+                        "URL parsing failed for endpoint: %s",
+                        health_url[:50] + "..." if len(health_url) > 50 else health_url,
+                        extra={
+                            "node_id": str(node_id),
+                            "error": str(e),
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
 
         # Build Consul registration payload
         consul_payload: dict[str, JsonValue] = {
@@ -473,13 +481,15 @@ class HandlerNodeIntrospected:
             # Log error but don't propagate - PostgreSQL is source of truth
             # Consul registration is best-effort for service discovery
             logger.warning(
-                "Consul registration failed (non-fatal)",
+                "Consul registration failed (non-fatal): %s",
+                str(e),
                 extra={
                     "node_id": str(node_id),
                     "service_name": service_name,
                     "error_type": type(e).__name__,
                     "correlation_id": str(correlation_id),
                 },
+                exc_info=True,
             )
 
 

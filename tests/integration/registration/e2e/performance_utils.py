@@ -43,7 +43,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar
 
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
@@ -502,7 +502,7 @@ class PerformanceCollector:
                 f"{failure_details}"
             )
 
-    def get_summary(self) -> dict[str, Any]:
+    def get_summary(self) -> dict[str, object]:
         """Get summary statistics for all collected results.
 
         Returns:

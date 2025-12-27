@@ -95,7 +95,9 @@ pytestmark = [
 # Test Topic Constants
 # =============================================================================
 
-# Test-specific topic to avoid interference with other tests
+# Test-specific topic to avoid interference with other tests and runtime.
+# This is intentionally hardcoded (not from env) to ensure test isolation.
+# The runtime uses ONEX_INPUT_TOPIC env var; these tests use a separate topic.
 TEST_INTROSPECTION_TOPIC = "e2e-test.node.introspection.v1"
 
 
@@ -639,7 +641,7 @@ class TestFullOrchestratorFlow:
         node_ids = [uuid4() for _ in range(3)]
         node_types = ["effect", "compute", "reducer"]
 
-        for node_id, node_type in zip(node_ids, node_types, strict=False):
+        for node_id, node_type in zip(node_ids, node_types, strict=True):
             event = ModelNodeIntrospectionEvent(
                 node_id=node_id,
                 node_type=node_type,

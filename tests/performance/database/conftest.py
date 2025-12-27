@@ -24,6 +24,8 @@ Related:
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
@@ -33,6 +35,8 @@ from uuid import uuid4
 
 import pytest
 from dotenv import load_dotenv
+
+_logger = logging.getLogger(__name__)
 
 # Load environment configuration
 _project_root = Path(__file__).parent.parent.parent.parent
@@ -145,20 +149,78 @@ async def schema_initialized(
     """Ensure all migrations are applied before tests run.
 
     Applies all SQL migration files in order (001, 002, etc.).
+    Uses a migration tracking table for idempotency and logs migration status.
 
     Args:
         postgres_pool: Database connection pool.
 
     Returns:
         asyncpg.Pool: Same pool, with schema guaranteed initialized.
+
+    Raises:
+        RuntimeError: If a migration fails (non-idempotent migration that conflicts).
+
+    Note:
+        Migrations are expected to be idempotent (use IF NOT EXISTS, ON CONFLICT, etc.).
+        The migration_history table tracks applied migrations to prevent re-application.
     """
     # Apply all migrations in order
     migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
 
+    if not migration_files:
+        _logger.warning("No migration files found in %s", MIGRATIONS_DIR)
+        return postgres_pool
+
     async with postgres_pool.acquire() as conn:
+        # Create migration tracking table for idempotency
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS _migration_history (
+                filename TEXT PRIMARY KEY,
+                applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                checksum TEXT
+            )
+        """)
+
         for migration_file in migration_files:
-            sql = migration_file.read_text()
-            await conn.execute(sql)
+            filename = migration_file.name
+
+            # Check if migration was already applied
+            already_applied = await conn.fetchval(
+                "SELECT 1 FROM _migration_history WHERE filename = $1",
+                filename,
+            )
+
+            if already_applied:
+                _logger.debug("Migration %s already applied, skipping", filename)
+                continue
+
+            # Read and apply migration
+            try:
+                sql = migration_file.read_text()
+
+                # Calculate simple checksum for tracking
+                checksum = hashlib.md5(sql.encode()).hexdigest()
+
+                _logger.info("Applying migration: %s", filename)
+                await conn.execute(sql)
+
+                # Record successful migration
+                await conn.execute(
+                    """
+                    INSERT INTO _migration_history (filename, checksum)
+                    VALUES ($1, $2)
+                    ON CONFLICT (filename) DO NOTHING
+                    """,
+                    filename,
+                    checksum,
+                )
+                _logger.info("Migration %s applied successfully", filename)
+
+            except Exception as e:
+                _logger.exception("Migration %s failed", filename)
+                raise RuntimeError(
+                    f"Migration {filename} failed: {type(e).__name__}: {e}"
+                ) from e
 
     return postgres_pool
 
@@ -256,6 +318,54 @@ async def seeded_test_data(
 # =============================================================================
 
 
+class QueryAnalyzerError(Exception):
+    """Error raised when query analysis fails."""
+
+
+def _validate_query_for_explain(query: str) -> None:
+    """Validate that a query is safe for EXPLAIN analysis.
+
+    Args:
+        query: The SQL query to validate.
+
+    Raises:
+        QueryAnalyzerError: If the query is not safe for EXPLAIN analysis.
+
+    Note:
+        EXPLAIN supports SELECT, INSERT, UPDATE, DELETE, and VALUES statements.
+        We restrict to SELECT for safety in test scenarios.
+    """
+    # Normalize whitespace and get first keyword
+    normalized = query.strip().upper()
+
+    # Only allow SELECT statements for EXPLAIN in tests
+    # This prevents accidental mutation via EXPLAIN ANALYZE on INSERT/UPDATE/DELETE
+    allowed_prefixes = ("SELECT", "WITH")  # WITH for CTEs that end in SELECT
+
+    if not any(normalized.startswith(prefix) for prefix in allowed_prefixes):
+        raise QueryAnalyzerError(
+            f"EXPLAIN analysis only supports SELECT queries in test context. "
+            f"Query starts with: {normalized[:20]}..."
+        )
+
+    # Basic SQL injection check - reject queries with suspicious patterns
+    # Note: Parameters are passed separately and handled safely by asyncpg
+    suspicious_patterns = [
+        ";--",  # Comment injection
+        "; DROP",  # Statement injection
+        "; DELETE",
+        "; INSERT",
+        "; UPDATE",
+        "; TRUNCATE",
+    ]
+    for pattern in suspicious_patterns:
+        if pattern in normalized:
+            raise QueryAnalyzerError(
+                f"Query contains suspicious pattern that may indicate SQL injection: "
+                f"'{pattern}'"
+            )
+
+
 class QueryAnalyzer:
     """Utility class for analyzing query plans with EXPLAIN ANALYZE.
 
@@ -290,12 +400,20 @@ class QueryAnalyzer:
         """Execute EXPLAIN ANALYZE on a query.
 
         Args:
-            query: SQL query to analyze.
-            *args: Query parameters.
+            query: SQL query to analyze (must be a SELECT statement).
+            *args: Query parameters (safely handled by asyncpg).
 
         Returns:
             ExplainResult with parsed plan information.
+
+        Raises:
+            QueryAnalyzerError: If query validation fails or EXPLAIN output is malformed.
         """
+        # Validate query is safe for EXPLAIN
+        _validate_query_for_explain(query)
+
+        # Build EXPLAIN query - the original query's parameters are passed
+        # to asyncpg which handles them safely via prepared statements
         explain_query = f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {query}"
 
         async with self.pool.acquire() as conn:
@@ -313,12 +431,19 @@ class QueryAnalyzer:
         Useful for checking query plans without actually running the query.
 
         Args:
-            query: SQL query to analyze.
-            *args: Query parameters.
+            query: SQL query to analyze (must be a SELECT statement).
+            *args: Query parameters (safely handled by asyncpg).
 
         Returns:
             ExplainResult with parsed plan information.
+
+        Raises:
+            QueryAnalyzerError: If query validation fails or EXPLAIN output is malformed.
         """
+        # Validate query is safe for EXPLAIN
+        _validate_query_for_explain(query)
+
+        # Build EXPLAIN query - parameters handled safely by asyncpg
         explain_query = f"EXPLAIN (FORMAT JSON) {query}"
 
         async with self.pool.acquire() as conn:
@@ -338,14 +463,39 @@ class ExplainResult:
         plan: Parsed plan dictionary.
     """
 
-    def __init__(self, raw_plan: list[dict]) -> None:
+    def __init__(self, raw_plan: list[dict] | None) -> None:
         """Initialize with raw EXPLAIN JSON output.
 
         Args:
             raw_plan: JSON output from EXPLAIN (FORMAT JSON).
+
+        Raises:
+            QueryAnalyzerError: If the raw_plan is malformed or missing expected structure.
         """
+        # Validate raw_plan is not None
+        if raw_plan is None:
+            raise QueryAnalyzerError(
+                "EXPLAIN returned None - query may have failed or returned no plan"
+            )
+
+        # Validate raw_plan is a list
+        if not isinstance(raw_plan, list):
+            raise QueryAnalyzerError(
+                f"EXPLAIN output should be a list, got {type(raw_plan).__name__}"
+            )
+
+        # Validate list is not empty
+        if not raw_plan:
+            raise QueryAnalyzerError("EXPLAIN output is empty - no plan returned")
+
+        # Validate first element is a dict
+        if not isinstance(raw_plan[0], dict):
+            raise QueryAnalyzerError(
+                f"EXPLAIN plan entry should be a dict, got {type(raw_plan[0]).__name__}"
+            )
+
         self.raw_plan = raw_plan
-        self.plan = raw_plan[0] if raw_plan else {}
+        self.plan = raw_plan[0]
 
     def _find_nodes(
         self,
@@ -496,6 +646,7 @@ __all__ = [
     "ExplainResult",
     "POSTGRES_AVAILABLE",
     "QueryAnalyzer",
+    "QueryAnalyzerError",
     "postgres_pool",
     "query_analyzer",
     "schema_initialized",

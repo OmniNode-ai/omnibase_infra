@@ -45,6 +45,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 from collections.abc import AsyncGenerator
@@ -54,6 +55,9 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
+
+# Module-level logger for test cleanup diagnostics
+logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
@@ -312,10 +316,11 @@ async def wired_container(
     # Wire registration handlers with database pool
     await wire_registration_handlers(container, postgres_pool)
 
+    # Yield container for proper fixture teardown semantics.
+    # ModelONEXContainer doesn't have explicit cleanup methods currently,
+    # but using yield allows for future cleanup needs and ensures proper
+    # pytest fixture lifecycle management.
     return container
-
-    # Cleanup: ModelONEXContainer doesn't have explicit cleanup methods,
-    # but using yield ensures proper fixture teardown semantics.
 
 
 @pytest.fixture
@@ -462,8 +467,13 @@ async def cleanup_consul_services(
                 "payload": {"service_id": service_id},
             }
             await real_consul_handler.execute(envelope)
-        except Exception:
-            pass  # Best effort cleanup
+        except Exception as e:
+            logger.warning(
+                "Cleanup failed for Consul service %s: %s",
+                service_id,
+                e,
+                exc_info=True,
+            )
 
 
 # =============================================================================
@@ -835,6 +845,16 @@ async def cleanup_projections(
     Args:
         postgres_pool: Database connection pool.
         unique_node_id: Node ID to cleanup.
+
+    Warning:
+        PRODUCTION DATABASE SAFETY: This fixture executes DELETE operations
+        against the configured database. The cleanup is scoped to a specific
+        entity_id (unique_node_id) which should be a test-generated UUID.
+
+        - NEVER run E2E tests against a production database
+        - Always verify POSTGRES_HOST points to a test/dev environment
+        - Use .env.docker or dedicated test infrastructure
+        - Production databases should have network isolation
     """
     yield
 
@@ -848,8 +868,13 @@ async def cleanup_projections(
                 """,
                 unique_node_id,
             )
-    except Exception:
-        pass  # Best effort cleanup - table may not exist in all environments
+    except Exception as e:
+        logger.warning(
+            "Cleanup failed for projection entity_id %s: %s",
+            unique_node_id,
+            e,
+            exc_info=True,
+        )
 
 
 @pytest.fixture
@@ -869,6 +894,16 @@ async def cleanup_node_ids(
 
     Yields:
         List to append node IDs for cleanup.
+
+    Warning:
+        PRODUCTION DATABASE SAFETY: This fixture executes DELETE operations
+        against the configured database. The cleanup is scoped to specific
+        entity_ids which should be test-generated UUIDs.
+
+        - NEVER run E2E tests against a production database
+        - Always verify POSTGRES_HOST points to a test/dev environment
+        - Use .env.docker or dedicated test infrastructure
+        - Production databases should have network isolation
     """
     node_ids_to_cleanup: list[UUID] = []
 
@@ -885,8 +920,13 @@ async def cleanup_node_ids(
                     """,
                     node_ids_to_cleanup,
                 )
-        except Exception:
-            pass  # Best effort cleanup - table may not exist in all environments
+        except Exception as e:
+            logger.warning(
+                "Cleanup failed for %d projection entity_ids: %s",
+                len(node_ids_to_cleanup),
+                e,
+                exc_info=True,
+            )
 
 
 # =============================================================================

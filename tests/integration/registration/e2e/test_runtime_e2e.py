@@ -49,11 +49,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import warnings
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
+
+logger = logging.getLogger(__name__)
 
 import httpx
 import pytest
@@ -170,9 +173,16 @@ class TestRuntimeE2EFlow:
                 f"Runtime health check failed: {response.status_code}"
             )
 
-            # Verify health response structure
-            health_data = response.json()
-            assert "status" in health_data or response.status_code == 200
+            # Verify health response structure if JSON is returned
+            # Note: Some health endpoints return empty body with 200 status
+            try:
+                health_data = response.json()
+                assert "status" in health_data, (
+                    "Health response should contain 'status' field"
+                )
+            except (ValueError, KeyError):
+                # Empty body or non-JSON response is acceptable if status was 200
+                pass
 
     @pytest.mark.asyncio
     async def test_introspection_event_processed_by_runtime(
@@ -510,8 +520,17 @@ class TestRuntimePerformance:
 
             await asyncio.sleep(0.1)
 
-        # Log processing time
-        print(
-            f"Runtime processed event in {processing_time:.2f}s (SLA: {sla_seconds}s)"
+        # Verify SLA was met with informative assertion message
+        assert processing_time < sla_seconds, (
+            f"Runtime processing time {processing_time:.2f}s exceeded SLA of {sla_seconds}s"
         )
-        assert processing_time < sla_seconds
+
+        # Log processing time for debugging (only visible with -v flag)
+        logger.info(
+            "Runtime processed event within SLA",
+            extra={
+                "processing_time_seconds": processing_time,
+                "sla_seconds": sla_seconds,
+                "margin_seconds": sla_seconds - processing_time,
+            },
+        )

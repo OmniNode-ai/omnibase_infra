@@ -79,9 +79,6 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
-# Default semantic version constant for service metadata registration
-SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
-
 logger = logging.getLogger(__name__)
 
 
