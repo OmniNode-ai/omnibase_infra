@@ -21,7 +21,6 @@ from omnibase_core.models.dispatch import ModelHandlerOutput
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
-    InfraAuthenticationError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
@@ -268,7 +267,10 @@ class MixinVaultToken:
             Token renewal information including new TTL
 
         Raises:
-            InfraAuthenticationError: If token renewal fails
+            InfraAuthenticationError: If token authentication/authorization fails
+            InfraConnectionError: If connection to Vault fails
+            InfraTimeoutError: If renewal operation times out
+            InfraUnavailableError: If circuit breaker is open
         """
         if correlation_id is None:
             correlation_id = uuid4()
@@ -285,48 +287,38 @@ class MixinVaultToken:
             result: dict[str, JsonValue] = self._client.auth.token.renew_self()
             return result
 
-        try:
-            result = await self._execute_with_retry(
-                "vault.renew_token",
-                renew_func,
-                correlation_id,
-            )
+        # _execute_with_retry already raises properly typed errors:
+        # - InfraAuthenticationError for auth failures (Forbidden, InvalidRequest)
+        # - InfraConnectionError for connection failures
+        # - InfraTimeoutError for timeout errors
+        # - InfraUnavailableError for circuit breaker open
+        # Let these errors propagate naturally without masking them
+        result = await self._execute_with_retry(
+            "vault.renew_token",
+            renew_func,
+            correlation_id,
+        )
 
-            # Extract TTL from renewal response
-            token_ttl = self._extract_ttl_from_renewal_response(
-                result, self._config.default_token_ttl, correlation_id
-            )
+        # Extract TTL from renewal response
+        token_ttl = self._extract_ttl_from_renewal_response(
+            result, self._config.default_token_ttl, correlation_id
+        )
 
-            # Refresh TTL from Vault lookup (may override renewal response)
-            token_ttl = await self._refresh_ttl_from_vault_lookup(
-                token_ttl, correlation_id
-            )
+        # Refresh TTL from Vault lookup (may override renewal response)
+        token_ttl = await self._refresh_ttl_from_vault_lookup(token_ttl, correlation_id)
 
-            # Update token expiration tracking
-            self._token_expires_at = time.time() + token_ttl
+        # Update token expiration tracking
+        self._token_expires_at = time.time() + token_ttl
 
-            logger.info(
-                "Token renewed successfully",
-                extra={
-                    "new_ttl_seconds": token_ttl,
-                    "correlation_id": str(correlation_id),
-                },
-            )
+        logger.info(
+            "Token renewed successfully",
+            extra={
+                "new_ttl_seconds": token_ttl,
+                "correlation_id": str(correlation_id),
+            },
+        )
 
-            return result
-
-        except Exception as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="vault.renew_token",
-                target_name="vault_handler",
-                correlation_id=correlation_id,
-                namespace=self._config.namespace if self._config else None,
-            )
-            raise InfraAuthenticationError(
-                "Failed to renew Vault token",
-                context=ctx,
-            ) from e
+        return result
 
     async def _renew_token_operation(
         self,

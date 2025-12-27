@@ -5,7 +5,6 @@ Comprehensive unit tests for MixinAsyncCircuitBreaker.
 
 This test suite validates:
 - Basic circuit breaker functionality (state management, failure counting)
-- State transitions (CLOSED → OPEN → HALF_OPEN → CLOSED)
 - Thread safety with concurrent operations (100+ parallel tasks)
 - Correlation ID propagation and generation
 - Error context validation
@@ -13,15 +12,19 @@ This test suite validates:
 
 Test Organization:
     - TestMixinAsyncCircuitBreakerBasics: Basic functionality
-    - TestMixinAsyncCircuitBreakerStateTransitions: State machine transitions
     - TestMixinAsyncCircuitBreakerThreadSafety: Concurrency and race conditions
     - TestMixinAsyncCircuitBreakerCorrelationId: Correlation ID handling
     - TestMixinAsyncCircuitBreakerErrorContext: Error context validation
     - TestMixinAsyncCircuitBreakerEdgeCases: Edge cases and boundary conditions
 
+Related Test Files:
+    - test_circuit_breaker_transitions.py: Dedicated state transition tests
+    - test_mixin_async_circuit_breaker_race_conditions.py: Race condition tests
+    - test_effect_circuit_breaker.py: Effect-level integration tests
+    - test_recovery_circuit_breaker.py: Chaos/recovery tests
+
 Coverage Goals:
     - >90% code coverage for mixin
-    - All state transitions tested
     - Thread safety validated with parallel execution
     - All error paths tested
 """
@@ -229,135 +232,6 @@ class TestMixinAsyncCircuitBreakerBasics:
         assert service.get_state() == CircuitState.CLOSED
         assert service.get_failure_count() == 0
         assert service._circuit_breaker_open is False
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-class TestMixinAsyncCircuitBreakerStateTransitions:
-    """Test circuit breaker state machine transitions."""
-
-    async def test_state_transition_closed_to_open(self) -> None:
-        """Test CLOSED → OPEN transition when threshold is reached."""
-        service = CircuitBreakerServiceStub(threshold=3)
-
-        # Start in CLOSED state
-        assert service.get_state() == CircuitState.CLOSED
-
-        # Record failures to reach threshold
-        await service.record_failure("test_operation")
-        await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.CLOSED  # Still closed
-
-        await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN  # Now open
-
-    async def test_state_transition_open_to_half_open(self) -> None:
-        """Test OPEN → HALF_OPEN transition after reset timeout."""
-        service = CircuitBreakerServiceStub(threshold=2, reset_timeout=0.1)
-
-        # Open the circuit
-        await service.record_failure("test_operation")
-        await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
-
-        # Wait for reset timeout
-        await asyncio.sleep(0.15)
-
-        # Next check should transition to HALF_OPEN (no error)
-        await service.check_circuit("test_operation")
-
-        # Circuit should be half-open (failures reset)
-        assert service.get_failure_count() == 0
-        assert service._circuit_breaker_open is False
-
-    async def test_state_transition_half_open_to_closed(self) -> None:
-        """Test HALF_OPEN → CLOSED transition on successful operation.
-
-        This test verifies that:
-        1. Circuit opens after failures reach threshold
-        2. Circuit transitions to HALF_OPEN after reset timeout
-        3. A successful operation in HALF_OPEN state returns correct result
-        4. Successful operation transitions circuit to CLOSED state
-        """
-        service = CircuitBreakerServiceStub(threshold=2, reset_timeout=0.1)
-
-        # Open the circuit
-        await service.record_failure("test_operation")
-        await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
-
-        # Wait for reset timeout (circuit will transition to HALF_OPEN on next check)
-        await asyncio.sleep(0.15)
-
-        # Execute a SUCCESSFUL operation - this should:
-        # 1. Transition from OPEN to HALF_OPEN (during check_circuit)
-        # 2. Execute the operation successfully
-        # 3. Call reset_circuit (which transitions HALF_OPEN to CLOSED)
-        # 4. Return the successful result
-        result = await service.execute_operation("test_after_recovery")
-
-        # Verify the operation succeeded and returned correct result
-        assert result == "success:test_after_recovery"
-
-        # Circuit should now be fully closed
-        assert service.get_state() == CircuitState.CLOSED
-        assert service.get_failure_count() == 0
-
-    async def test_state_transition_half_open_to_open(self) -> None:
-        """Test HALF_OPEN → OPEN transition on failure after timeout.
-
-        This test verifies that:
-        1. Circuit opens after failures reach threshold
-        2. Circuit transitions to HALF_OPEN after reset timeout
-        3. A failed operation in HALF_OPEN state raises the expected error
-        4. Failed operation transitions circuit back to OPEN state
-        """
-        service = CircuitBreakerServiceStub(threshold=2, reset_timeout=0.1)
-
-        # Open the circuit
-        await service.record_failure("test_operation")
-        await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
-
-        # Wait for reset timeout (circuit will transition to HALF_OPEN on next check)
-        await asyncio.sleep(0.15)
-
-        # Execute a FAILING operation - this should:
-        # 1. Transition from OPEN to HALF_OPEN (during check_circuit)
-        # 2. Execute the operation which fails
-        # 3. Call record_circuit_failure
-        # 4. Raise RuntimeError
-        with pytest.raises(RuntimeError, match="Simulated operation failure"):
-            await service.execute_operation("test_after_recovery", should_fail=True)
-
-        # One failure recorded - still below threshold of 2, but in HALF_OPEN
-        # the circuit immediately opens on first failure (standard circuit breaker behavior)
-        # Actually, looking at the code, it needs threshold failures to open
-        # So we need another failure to open the circuit
-        await service.record_failure("test_operation")
-
-        # Circuit should be open again after reaching threshold
-        assert service.get_state() == CircuitState.OPEN
-
-    async def test_auto_reset_after_timeout(self) -> None:
-        """Test automatic reset after timeout elapsed."""
-        service = CircuitBreakerServiceStub(threshold=2, reset_timeout=0.1)
-
-        # Open the circuit
-        await service.record_failure("test_operation")
-        await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
-
-        # Before timeout - should raise
-        with pytest.raises(InfraUnavailableError):
-            await service.check_circuit("test_operation")
-
-        # Wait for timeout
-        await asyncio.sleep(0.15)
-
-        # After timeout - should not raise (auto-reset to HALF_OPEN)
-        await service.check_circuit("test_operation")
-        assert service.get_failure_count() == 0
 
 
 @pytest.mark.unit

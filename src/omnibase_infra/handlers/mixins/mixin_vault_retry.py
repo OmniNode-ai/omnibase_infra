@@ -12,7 +12,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, TypeVar
+from typing import TypeVar
 from uuid import UUID
 
 import hvac

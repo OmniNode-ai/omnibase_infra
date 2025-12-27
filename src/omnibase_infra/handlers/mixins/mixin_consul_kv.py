@@ -29,7 +29,6 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.models.consul import (
     ConsulPayload,
-    ModelConsulHandlerPayload,
     ModelConsulKVGetFoundPayload,
     ModelConsulKVGetNotFoundPayload,
     ModelConsulKVGetRecursePayload,

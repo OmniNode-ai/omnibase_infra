@@ -57,7 +57,6 @@ operation (planned for Beta release).
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -356,8 +355,8 @@ class DbHandler(MixinEnvelopeExtraction):
         connection information may be helpful, while ensuring credentials
         are never exposed. The raw DSN should NEVER be logged directly.
 
-        Replaces the password portion of the DSN with asterisks. Handles
-        standard PostgreSQL DSN formats.
+        Uses urllib.parse for robust parsing instead of regex, handling
+        edge cases like IPv6 addresses and URL-encoded passwords.
 
         Args:
             dsn: Raw PostgreSQL connection string containing credentials.
@@ -369,13 +368,17 @@ class DbHandler(MixinEnvelopeExtraction):
             >>> handler._sanitize_dsn("postgresql://user:secret@host:5432/db")
             'postgresql://user:***@host:5432/db'
 
+            >>> handler._sanitize_dsn("postgresql://user:p%40ss@[::1]:5432/db")
+            'postgresql://user:***@[::1]:5432/db'
+
         Note:
             This method is intentionally NOT used in production error paths.
             It exists as a utility for development/debugging only. See class
             docstring "Security Policy - DSN Handling" for full policy.
         """
-        # Match password in DSN formats: user:password@ or :password@
-        return re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", dsn)
+        from omnibase_infra.utils.util_dsn_validation import sanitize_dsn
+
+        return sanitize_dsn(dsn)
 
     def _extract_parameters(
         self, payload: dict[str, JsonValue], operation: str, correlation_id: UUID

@@ -47,7 +47,6 @@ from omnibase_infra.handlers.models import (
 )
 from omnibase_infra.handlers.models.consul import (
     ConsulPayload,
-    ModelConsulDeregisterPayload,
     ModelConsulHandlerConfig,
     ModelConsulHandlerPayload,
 )

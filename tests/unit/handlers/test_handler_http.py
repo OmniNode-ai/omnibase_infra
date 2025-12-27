@@ -22,6 +22,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
@@ -1926,10 +1927,9 @@ class TestHttpRestHandlerPrepareRequestContent:
         return HttpRestHandler()
 
     @pytest.fixture
-    def error_context(self) -> MagicMock:
-        """Create mock error context."""
+    def error_context(self) -> ModelInfraErrorContext:
+        """Create error context fixture."""
         from omnibase_infra.enums import EnumInfraTransportType
-        from omnibase_infra.errors import ModelInfraErrorContext
 
         return ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.HTTP,
@@ -1939,7 +1939,7 @@ class TestHttpRestHandlerPrepareRequestContent:
         )
 
     def test_get_method_returns_empty_content(
-        self, handler: HttpRestHandler, error_context: MagicMock
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
     ) -> None:
         """Test GET method returns empty content regardless of body."""
         body_content = ModelHttpBodyContent(
@@ -1957,7 +1957,7 @@ class TestHttpRestHandlerPrepareRequestContent:
         assert headers == {"X-Custom": "value"}
 
     def test_post_with_none_body_returns_empty_content(
-        self, handler: HttpRestHandler, error_context: MagicMock
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
     ) -> None:
         """Test POST with None body returns empty content."""
         body_content = ModelHttpBodyContent(body=None, pre_serialized=None)
@@ -1973,7 +1973,7 @@ class TestHttpRestHandlerPrepareRequestContent:
         assert headers == {}
 
     def test_post_with_pre_serialized_bytes(
-        self, handler: HttpRestHandler, error_context: MagicMock
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
     ) -> None:
         """Test POST with pre-serialized bytes uses them directly."""
         pre_serialized = b'{"key": "value"}'
@@ -1994,7 +1994,7 @@ class TestHttpRestHandlerPrepareRequestContent:
         assert headers == {"Content-Type": "application/json"}
 
     def test_post_with_pre_serialized_preserves_existing_content_type(
-        self, handler: HttpRestHandler, error_context: MagicMock
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
     ) -> None:
         """Test POST with pre-serialized preserves existing Content-Type header."""
         pre_serialized = b'{"key": "value"}'
@@ -2016,7 +2016,7 @@ class TestHttpRestHandlerPrepareRequestContent:
         assert headers == {"Content-Type": "application/json; charset=utf-8"}
 
     def test_post_with_dict_body_fallback(
-        self, handler: HttpRestHandler, error_context: MagicMock
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
     ) -> None:
         """Test POST with dict body uses json parameter when no pre-serialized."""
         body = {"key": "value", "number": 42}
@@ -2034,7 +2034,7 @@ class TestHttpRestHandlerPrepareRequestContent:
         assert headers == {}
 
     def test_post_with_string_body(
-        self, handler: HttpRestHandler, error_context: MagicMock
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
     ) -> None:
         """Test POST with string body uses content parameter."""
         body = "raw string content"
@@ -2052,7 +2052,7 @@ class TestHttpRestHandlerPrepareRequestContent:
         assert headers == {}
 
     def test_post_with_list_body_serializes_to_json(
-        self, handler: HttpRestHandler, error_context: MagicMock
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
     ) -> None:
         """Test POST with list body serializes to JSON string."""
         body = [1, 2, 3, "four"]
@@ -2070,7 +2070,7 @@ class TestHttpRestHandlerPrepareRequestContent:
         assert headers == {}
 
     def test_post_with_non_serializable_body_raises_error(
-        self, handler: HttpRestHandler, error_context: MagicMock
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
     ) -> None:
         """Test POST with non-JSON-serializable body raises ProtocolConfigurationError."""
 
@@ -2090,7 +2090,7 @@ class TestHttpRestHandlerPrepareRequestContent:
         assert "NonSerializable" in str(exc_info.value)
 
     def test_headers_not_mutated(
-        self, handler: HttpRestHandler, error_context: MagicMock
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
     ) -> None:
         """Test original headers dict is not mutated."""
         original_headers = {"X-Custom": "value"}
@@ -2113,7 +2113,7 @@ class TestHttpRestHandlerPrepareRequestContent:
         assert headers == {"X-Custom": "value", "Content-Type": "application/json"}
 
     def test_content_type_check_case_insensitive(
-        self, handler: HttpRestHandler, error_context: MagicMock
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
     ) -> None:
         """Test Content-Type header check is case-insensitive."""
         pre_serialized = b'{"key": "value"}'

@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import hvac
 from omnibase_core.enums.enum_handler_type import EnumHandlerType
@@ -42,7 +42,6 @@ from omnibase_infra.handlers.mixins import (
     MixinVaultSecrets,
     MixinVaultToken,
 )
-from omnibase_infra.handlers.models import ModelOperationContext, ModelRetryState
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 

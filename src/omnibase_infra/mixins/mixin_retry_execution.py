@@ -41,11 +41,8 @@ See Also:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, TypeVar, cast
@@ -63,6 +60,8 @@ from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
 )
 
 if TYPE_CHECKING:
+    from concurrent.futures import ThreadPoolExecutor
+
     from omnibase_infra.handlers.models.model_consul_retry_config import (
         ModelConsulRetryConfig,
     )

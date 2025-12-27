@@ -28,7 +28,6 @@ from omnibase_infra.errors import (
 from omnibase_infra.handlers.models.consul import (
     ConsulPayload,
     ModelConsulDeregisterPayload,
-    ModelConsulHandlerPayload,
     ModelConsulRegisterPayload,
 )
 from omnibase_infra.handlers.models.model_consul_handler_response import (

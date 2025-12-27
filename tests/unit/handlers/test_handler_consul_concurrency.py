@@ -535,13 +535,30 @@ class TestConsulHandlerConcurrentRetry:
             mock_consul_client.kv.get.side_effect = get_response_handler2
             await handler2.initialize(consul_config)
 
-            # Now set up per-handler response behavior
+            # Now set up per-handler response behavior using key-based differentiation
+            # This allows us to test that each handler has isolated retry state
+            key_call_counts: dict[str, int] = {}
+
             def combined_response(
-                *args: object, **kwargs: object
+                key: str, *args: object, **kwargs: object
             ) -> tuple[int, dict[str, object] | None]:
-                # Use thread local or key-based differentiation
-                # For simplicity, always succeed (isolation test is about state, not responses)
-                return success_response
+                """Return different responses based on which handler is calling.
+
+                Handler1 (h1/ keys): Fail first call per key, succeed on retry
+                Handler2 (h2/ keys): Always succeed immediately
+                """
+                with lock:
+                    if key.startswith("h1/"):
+                        # Track calls per unique key for handler1
+                        key_call_counts[key] = key_call_counts.get(key, 0) + 1
+                        # Fail first call for each unique key to force retry
+                        if key_call_counts[key] == 1:
+                            raise consul.ConsulException("Handler1 execution error")
+                        return success_response
+                    else:  # h2/ keys
+                        # Handler2 always succeeds immediately
+                        key_call_counts[key] = key_call_counts.get(key, 0) + 1
+                        return success_response
 
             mock_consul_client.kv.get.side_effect = combined_response
 
@@ -593,6 +610,28 @@ class TestConsulHandlerConcurrentRetry:
             assert len(results2) == 5, (
                 f"Expected 5 results from handler2, got {len(results2)}"
             )
+
+            # All operations should succeed after retry
+            assert all(results1), "All handler1 operations should succeed after retry"
+            assert all(results2), "All handler2 operations should succeed immediately"
+
+            # Verify handler1 actually retried (each operation fails once, then succeeds)
+            # Each of 5 h1/ keys should have been called exactly 2 times
+            h1_keys = [k for k in key_call_counts if k.startswith("h1/")]
+            assert len(h1_keys) == 5, f"Expected 5 h1/ keys, got {len(h1_keys)}"
+            for key in h1_keys:
+                assert key_call_counts[key] == 2, (
+                    f"Expected 2 calls for {key} (fail + retry), got {key_call_counts[key]}"
+                )
+
+            # Verify handler2 succeeded immediately without retry
+            # Each of 5 h2/ keys should have been called exactly 1 time
+            h2_keys = [k for k in key_call_counts if k.startswith("h2/")]
+            assert len(h2_keys) == 5, f"Expected 5 h2/ keys, got {len(h2_keys)}"
+            for key in h2_keys:
+                assert key_call_counts[key] == 1, (
+                    f"Expected 1 call for {key} (immediate success), got {key_call_counts[key]}"
+                )
 
             # Verify handlers are still independent
             assert handler1._initialized is True
