@@ -162,7 +162,7 @@ class TestValidateVersionLenient:
         with pytest.raises(ValueError, match="non-integer component"):
             validate_version_lenient("abc.0.0")
 
-    def test_negative_component_rejected(self) -> None:
+    def test_leading_hyphen_rejected_as_empty_component(self) -> None:
         """Test version starting with '-' is rejected as empty component."""
         # Note: "-1.0.0" splits as ["", "1", "0", "0"], so it's detected as empty component
         with pytest.raises(ValueError, match="empty component"):

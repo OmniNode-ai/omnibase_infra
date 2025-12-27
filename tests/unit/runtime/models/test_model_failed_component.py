@@ -599,3 +599,229 @@ class TestModelFailedComponentEdgeCases:
         assert modified.component_name == "ModifiedComponent"
         assert modified.error_message == "Original error"
         assert original.component_name == "OriginalComponent"
+
+
+class TestModelFailedComponentJsonDeserialization:
+    """Tests for ModelFailedComponent JSON deserialization using model_validate_json.
+
+    These tests validate the model's behavior when parsing JSON strings directly,
+    covering valid cases, malformed JSON, type mismatches, and constraint violations.
+
+    Related Tickets:
+        - PR #102 review: Add JSON deserialization tests using model_validate_json
+    """
+
+    def test_model_validate_json_valid(self) -> None:
+        """Test JSON deserialization with valid JSON containing all fields."""
+        json_str = (
+            '{"component_name": "KafkaEventBus", "error_message": "Connection timeout"}'
+        )
+        failed = ModelFailedComponent.model_validate_json(json_str)
+        assert failed.component_name == "KafkaEventBus"
+        assert failed.error_message == "Connection timeout"
+
+    def test_model_validate_json_roundtrip(self) -> None:
+        """Test JSON roundtrip serialization/deserialization."""
+        original = ModelFailedComponent(
+            component_name="RoundtripComponent",
+            error_message="Roundtrip error message",
+        )
+        json_str = original.model_dump_json()
+        restored = ModelFailedComponent.model_validate_json(json_str)
+        assert original == restored
+        assert restored.component_name == "RoundtripComponent"
+        assert restored.error_message == "Roundtrip error message"
+
+    def test_model_validate_json_with_unicode(self) -> None:
+        """Test JSON deserialization with unicode characters."""
+        json_str = '{"component_name": "Component\\u2605", "error_message": "Error with \\u00e9"}'
+        failed = ModelFailedComponent.model_validate_json(json_str)
+        assert failed.component_name == "Component\u2605"
+        assert "\u00e9" in failed.error_message
+
+    def test_model_validate_json_with_escaped_characters(self) -> None:
+        """Test JSON deserialization with escaped special characters."""
+        json_str = '{"component_name": "Comp\\"Name\\"", "error_message": "Error with\\nNewline"}'
+        failed = ModelFailedComponent.model_validate_json(json_str)
+        assert '"' in failed.component_name
+        assert "\n" in failed.error_message
+
+    def test_model_validate_json_malformed_json(self) -> None:
+        """Test that malformed JSON raises ValidationError."""
+        malformed_json = '{"component_name": "Test", "error_message": }'
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(malformed_json)
+        # Pydantic wraps JSON parse errors in ValidationError
+        assert exc_info.value.error_count() > 0
+
+    def test_model_validate_json_incomplete_json(self) -> None:
+        """Test that incomplete JSON raises ValidationError."""
+        incomplete_json = '{"component_name": "Test"'
+        with pytest.raises(ValidationError):
+            ModelFailedComponent.model_validate_json(incomplete_json)
+
+    def test_model_validate_json_empty_string(self) -> None:
+        """Test that empty string raises ValidationError."""
+        with pytest.raises(ValidationError):
+            ModelFailedComponent.model_validate_json("")
+
+    def test_model_validate_json_not_object(self) -> None:
+        """Test that non-object JSON raises ValidationError."""
+        with pytest.raises(ValidationError):
+            ModelFailedComponent.model_validate_json("[]")
+        with pytest.raises(ValidationError):
+            ModelFailedComponent.model_validate_json('"just a string"')
+        with pytest.raises(ValidationError):
+            ModelFailedComponent.model_validate_json("123")
+
+    def test_model_validate_json_wrong_type_component_name_int(self) -> None:
+        """Test that integer component_name raises ValidationError (strict mode)."""
+        json_str = '{"component_name": 123, "error_message": "Error"}'
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(json_str)
+        error_str = str(exc_info.value)
+        assert "component_name" in error_str
+
+    def test_model_validate_json_wrong_type_component_name_null(self) -> None:
+        """Test that null component_name raises ValidationError."""
+        json_str = '{"component_name": null, "error_message": "Error"}'
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(json_str)
+        assert "component_name" in str(exc_info.value)
+
+    def test_model_validate_json_wrong_type_error_message_bool(self) -> None:
+        """Test that boolean error_message raises ValidationError (strict mode)."""
+        json_str = '{"component_name": "Test", "error_message": true}'
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(json_str)
+        error_str = str(exc_info.value)
+        assert "error_message" in error_str
+
+    def test_model_validate_json_wrong_type_error_message_array(self) -> None:
+        """Test that array error_message raises ValidationError."""
+        json_str = '{"component_name": "Test", "error_message": ["error1", "error2"]}'
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(json_str)
+        assert "error_message" in str(exc_info.value)
+
+    def test_model_validate_json_wrong_type_error_message_object(self) -> None:
+        """Test that object error_message raises ValidationError."""
+        json_str = '{"component_name": "Test", "error_message": {"detail": "error"}}'
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(json_str)
+        assert "error_message" in str(exc_info.value)
+
+    def test_model_validate_json_extra_fields_forbidden(self) -> None:
+        """Test that extra fields in JSON raise ValidationError (extra='forbid')."""
+        json_str = '{"component_name": "Test", "error_message": "Error", "extra_field": "value"}'
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(json_str)
+        error_str = str(exc_info.value).lower()
+        assert "extra_field" in error_str or "extra" in error_str
+
+    def test_model_validate_json_multiple_extra_fields(self) -> None:
+        """Test that multiple extra fields raise ValidationError."""
+        json_str = (
+            '{"component_name": "Test", "error_message": "Error", '
+            '"field1": "a", "field2": "b"}'
+        )
+        with pytest.raises(ValidationError):
+            ModelFailedComponent.model_validate_json(json_str)
+
+    def test_model_validate_json_missing_component_name(self) -> None:
+        """Test that missing component_name raises ValidationError."""
+        json_str = '{"error_message": "Error"}'
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(json_str)
+        assert "component_name" in str(exc_info.value)
+
+    def test_model_validate_json_missing_error_message(self) -> None:
+        """Test that missing error_message raises ValidationError."""
+        json_str = '{"component_name": "Test"}'
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(json_str)
+        assert "error_message" in str(exc_info.value)
+
+    def test_model_validate_json_empty_object(self) -> None:
+        """Test that empty JSON object raises ValidationError."""
+        json_str = "{}"
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(json_str)
+        # Should complain about missing fields
+        error_str = str(exc_info.value)
+        assert "component_name" in error_str or "error_message" in error_str
+
+    def test_model_validate_json_empty_component_name(self) -> None:
+        """Test that empty string component_name violates min_length constraint."""
+        json_str = '{"component_name": "", "error_message": "Error"}'
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(json_str)
+        error_str = str(exc_info.value)
+        assert "component_name" in error_str
+
+    def test_model_validate_json_empty_error_message(self) -> None:
+        """Test that empty string error_message violates min_length constraint."""
+        json_str = '{"component_name": "Test", "error_message": ""}'
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(json_str)
+        error_str = str(exc_info.value)
+        assert "error_message" in error_str
+
+    def test_model_validate_json_whitespace_valid(self) -> None:
+        """Test that whitespace-only strings satisfy min_length=1."""
+        json_str = '{"component_name": " ", "error_message": "\\t"}'
+        failed = ModelFailedComponent.model_validate_json(json_str)
+        assert failed.component_name == " "
+        assert failed.error_message == "\t"
+
+    @pytest.mark.parametrize(
+        ("json_str", "expected_name", "expected_msg"),
+        [
+            (
+                '{"component_name": "A", "error_message": "B"}',
+                "A",
+                "B",
+            ),
+            (
+                '{"component_name": "Kafka::Bus", "error_message": "Timeout: 30s"}',
+                "Kafka::Bus",
+                "Timeout: 30s",
+            ),
+            (
+                '{"component_name": "Component<T>", "error_message": "Failed!"}',
+                "Component<T>",
+                "Failed!",
+            ),
+        ],
+        ids=["simple", "with_colons", "with_special_chars"],
+    )
+    def test_model_validate_json_parametrized(
+        self,
+        json_str: str,
+        expected_name: str,
+        expected_msg: str,
+    ) -> None:
+        """Test JSON deserialization with various valid inputs."""
+        failed = ModelFailedComponent.model_validate_json(json_str)
+        assert failed.component_name == expected_name
+        assert failed.error_message == expected_msg
+
+    @pytest.mark.parametrize(
+        "invalid_json",
+        [
+            '{"component_name": 1, "error_message": "Error"}',  # int
+            '{"component_name": 1.5, "error_message": "Error"}',  # float
+            '{"component_name": true, "error_message": "Error"}',  # bool
+            '{"component_name": [], "error_message": "Error"}',  # array
+            '{"component_name": {}, "error_message": "Error"}',  # object
+        ],
+        ids=["int", "float", "bool", "array", "object"],
+    )
+    def test_model_validate_json_strict_rejects_non_string_types(
+        self,
+        invalid_json: str,
+    ) -> None:
+        """Test that strict mode rejects non-string types via JSON."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelFailedComponent.model_validate_json(invalid_json)
+        assert "component_name" in str(exc_info.value)

@@ -25,6 +25,7 @@ Use ModelSemVer directly for all version handling:
 from __future__ import annotations
 
 import re
+import warnings
 
 # Semantic versioning pattern: MAJOR.MINOR.PATCH[-prerelease][+build]
 # See: https://semver.org/
@@ -205,8 +206,17 @@ def clear_normalize_version_cache() -> None:
     """REMOVED: Cache no longer exists since normalize_version_cached was removed.
 
     This function is kept for API compatibility but does nothing.
+
+    .. deprecated::
+        This function is deprecated and will be removed in a future version.
+        Caching is now handled internally by ModelSemVer.
     """
-    # No-op since cache no longer exists
+    warnings.warn(
+        "clear_normalize_version_cache() is deprecated and does nothing. "
+        "Caching is handled internally by ModelSemVer.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
 
 __all__: list[str] = [

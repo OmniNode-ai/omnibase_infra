@@ -472,8 +472,6 @@ class TestEndToEndIntrospectionWorkflow:
         # node_id is a UUID, verify it matches the node's internal ID
 
         assert data.node_id == node._introspection_node_id
-        # node_type is stored as EnumNodeKind (a StrEnum that inherits from str).
-        # Compare directly to the enum for type consistency with _introspection_node_type.
         assert data.node_type == EnumNodeKind.EFFECT
         assert data.version == "1.0.0"
 
