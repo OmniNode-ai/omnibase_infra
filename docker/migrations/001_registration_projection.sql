@@ -89,6 +89,9 @@ CREATE TABLE IF NOT EXISTS registration_projections (
     PRIMARY KEY (entity_id, domain),
     CONSTRAINT valid_offset CHECK (last_applied_offset >= 0),
     CONSTRAINT valid_sequence CHECK (last_applied_sequence IS NULL OR last_applied_sequence >= 0),
+    -- Node types MUST match omnibase_core.enums.EnumNodeKind values (lowercase serialized form)
+    -- Source of truth: omnibase_core/enums/enum_node_kind.py
+    -- When EnumNodeKind changes, this constraint MUST be updated to match
     CONSTRAINT valid_node_type CHECK (node_type IN ('effect', 'compute', 'reducer', 'orchestrator'))
 );
 

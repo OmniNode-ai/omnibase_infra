@@ -61,6 +61,7 @@ from uuid import UUID, uuid4
 from omnibase_infra.enums import EnumRegistrationState
 
 if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
     from pydantic import BaseModel
 
     from omnibase_infra.handlers import ConsulHandler
@@ -437,7 +438,7 @@ class HandlerNodeIntrospected:
                     pass
 
         # Build Consul registration payload
-        consul_payload: dict[str, object] = {
+        consul_payload: dict[str, JsonValue] = {
             "name": service_name,
             "service_id": service_id,
             "tags": ["onex", f"node-type:{node_type}"],
@@ -449,14 +450,14 @@ class HandlerNodeIntrospected:
 
         try:
             # Build envelope for ConsulHandler.execute()
-            envelope: dict[str, object] = {
+            envelope: dict[str, JsonValue] = {
                 "operation": "consul.register",
                 "payload": consul_payload,
                 "correlation_id": str(correlation_id),
                 "envelope_id": str(uuid4()),
             }
 
-            await self._consul_handler.execute(envelope)  # type: ignore[arg-type]
+            await self._consul_handler.execute(envelope)
 
             logger.info(
                 "Node registered with Consul for service discovery",

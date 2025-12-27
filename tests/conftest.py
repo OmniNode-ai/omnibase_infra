@@ -436,3 +436,325 @@ async def container_with_handler_registry(
         )
     )
     return registry
+
+
+# =============================================================================
+# Infrastructure Cleanup Fixtures
+# =============================================================================
+# These fixtures ensure test isolation by cleaning up shared infrastructure
+# resources (Consul, PostgreSQL, Kafka) after tests complete. They are designed
+# to be used in integration tests that interact with real infrastructure.
+#
+# Related: tests/integration/registration/e2e/conftest.py (E2E-specific cleanup)
+# =============================================================================
+
+
+@pytest.fixture
+async def cleanup_consul_test_services():
+    """Clean up orphaned Consul service registrations after each test.
+
+    This fixture provides comprehensive Consul cleanup by:
+    1. Yielding to let the test run
+    2. After the test, querying all registered services
+    3. Deregistering any services matching test patterns
+
+    Test Service Identification Patterns:
+        - Service ID starts with "test-"
+        - Service ID contains "-test-" (e.g., "e2e-test-node-123")
+        - Service name starts with "test"
+        - Service name contains "integration-test"
+
+    Usage:
+        For tests that register Consul services and need cleanup,
+        include this fixture. It handles cleanup even if the test fails.
+
+        >>> async def test_consul_registration(cleanup_consul_test_services):
+        ...     # Register a test service
+        ...     await consul_client.register_service(
+        ...         service_id="test-my-service-123",
+        ...         service_name="test-service",
+        ...         tags=["test"],
+        ...     )
+        ...     # Fixture will deregister after test completes
+
+    Note:
+        This fixture requires Consul to be available. It skips cleanup
+        gracefully if Consul is not reachable or not configured.
+    """
+    import os
+    import socket
+
+    yield  # Let the test run
+
+    # Check if Consul is configured and reachable
+    consul_host = os.getenv("CONSUL_HOST")
+    consul_port = int(os.getenv("CONSUL_PORT", "8500"))
+
+    if not consul_host:
+        return  # Consul not configured, skip cleanup
+
+    # Quick reachability check
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(2.0)
+            if sock.connect_ex((consul_host, consul_port)) != 0:
+                return  # Consul not reachable
+    except (OSError, TimeoutError):
+        return  # Consul not reachable
+
+    # Import and create handler for cleanup
+    try:
+        from omnibase_infra.handlers import ConsulHandler
+
+        handler = ConsulHandler()
+        await handler.initialize(
+            {
+                "host": consul_host,
+                "port": consul_port,
+                "scheme": os.getenv("CONSUL_SCHEME", "http"),
+                "timeout_seconds": 10.0,
+            }
+        )
+
+        try:
+            # Get all registered services
+            list_envelope = {
+                "operation": "consul.list_services",
+                "payload": {},
+            }
+            result = await handler.execute(list_envelope)
+
+            if result and isinstance(result, dict) and result.get("success"):
+                services = result.get("data", {})
+
+                # Identify test services to cleanup
+                test_service_ids: list[str] = []
+                for service_id, service_info in services.items():
+                    service_name = ""
+                    if isinstance(service_info, dict):
+                        service_name = service_info.get("Service", "")
+                    elif isinstance(service_info, list) and service_info:
+                        service_name = str(service_info[0]) if service_info else ""
+
+                    # Check if this is a test service
+                    service_id_lower = service_id.lower()
+                    service_name_lower = service_name.lower()
+                    is_test_service = (
+                        service_id.startswith(("test-", "e2e-"))
+                        or "-test-" in service_id_lower
+                        or service_name_lower.startswith("test")
+                        or "integration-test" in service_name_lower
+                    )
+
+                    if is_test_service:
+                        test_service_ids.append(service_id)
+
+                # Deregister test services
+                for service_id in test_service_ids:
+                    try:
+                        deregister_envelope = {
+                            "operation": "consul.deregister_service",
+                            "payload": {"service_id": service_id},
+                        }
+                        await handler.execute(deregister_envelope)
+                    except Exception:
+                        pass  # Best effort cleanup
+
+        finally:
+            await handler.shutdown()
+
+    except Exception:
+        pass  # Best effort cleanup - don't fail tests due to cleanup errors
+
+
+@pytest.fixture
+async def cleanup_postgres_test_projections():
+    """Clean up stale PostgreSQL projection rows after tests.
+
+    This fixture provides comprehensive PostgreSQL cleanup by:
+    1. Yielding to let the test run
+    2. After the test, deleting projection rows matching test patterns
+
+    Cleanup Targets:
+        - registration_projections table: Rows with entity_id matching test patterns
+        - Patterns: UUID entity_id values (cleaned up by test-specific fixtures)
+        - Rows where node_id starts with test prefixes are cleaned
+
+    Table Cleanup Patterns:
+        - registration_projections: Test node registrations
+
+    Usage:
+        For tests that create projection rows and need cleanup:
+
+        >>> async def test_projector(cleanup_postgres_test_projections, postgres_pool):
+        ...     # Create test projection
+        ...     await projector.upsert(node_id=test_node_id, ...)
+        ...     # Fixture will cleanup test patterns after test
+
+    Note:
+        This fixture requires PostgreSQL to be available. It skips cleanup
+        gracefully if the database is not reachable or tables don't exist.
+    """
+    import os
+
+    yield  # Let the test run
+
+    # Check if PostgreSQL is configured
+    postgres_host = os.getenv("POSTGRES_HOST")
+    postgres_password = os.getenv("POSTGRES_PASSWORD")
+
+    if not postgres_host or not postgres_password:
+        return  # PostgreSQL not configured, skip cleanup
+
+    # Build connection string
+    postgres_port = os.getenv("POSTGRES_PORT", "5436")
+    postgres_database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
+    postgres_user = os.getenv("POSTGRES_USER", "postgres")
+
+    dsn = (
+        f"postgresql://{postgres_user}:{postgres_password}"
+        f"@{postgres_host}:{postgres_port}/{postgres_database}"
+    )
+
+    try:
+        import asyncpg
+
+        conn = await asyncpg.connect(dsn, timeout=10.0)
+
+        try:
+            # Clean up registration_projections with test-like metadata
+            # This targets rows that may have been left by failed tests
+            # by checking for common test patterns in metadata or status fields
+            await conn.execute(
+                """
+                DELETE FROM registration_projections
+                WHERE metadata::text LIKE '%test%'
+                   OR metadata::text LIKE '%integration%'
+                   OR status = 'TEST'
+                """,
+            )
+        except asyncpg.UndefinedTableError:
+            pass  # Table doesn't exist, nothing to cleanup
+        except Exception:
+            pass  # Best effort cleanup
+
+        finally:
+            await conn.close()
+
+    except Exception:
+        pass  # Best effort cleanup - don't fail tests due to cleanup errors
+
+
+@pytest.fixture
+async def cleanup_kafka_test_consumer_groups():
+    """Reset Kafka consumer group offsets for test consumer groups after tests.
+
+    This fixture provides Kafka consumer group cleanup by:
+    1. Yielding to let the test run
+    2. After the test, deleting consumer groups matching test patterns
+
+    Test Consumer Group Identification Patterns:
+        - Group ID starts with "test-"
+        - Group ID contains "-test-"
+        - Group ID starts with "e2e-"
+        - Group ID contains "integration"
+
+    Usage:
+        For tests that create Kafka consumer groups and need cleanup:
+
+        >>> async def test_kafka_consumer(cleanup_kafka_test_consumer_groups):
+        ...     # Subscribe with test consumer group
+        ...     await bus.subscribe("topic", "test-group-123", handler)
+        ...     # Fixture will delete consumer group after test
+
+    Note:
+        This fixture requires Kafka to be available. It skips cleanup
+        gracefully if Kafka is not reachable or not configured.
+        Consumer groups are deleted using the Kafka admin client.
+    """
+    import os
+
+    yield  # Let the test run
+
+    # Check if Kafka is configured
+    bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+    if not bootstrap_servers:
+        return  # Kafka not configured, skip cleanup
+
+    try:
+        from aiokafka.admin import AIOKafkaAdminClient
+        from aiokafka.errors import KafkaError
+
+        admin_client = AIOKafkaAdminClient(
+            bootstrap_servers=bootstrap_servers,
+        )
+
+        try:
+            await admin_client.start()
+
+            # List all consumer groups
+            consumer_groups = await admin_client.list_consumer_groups()
+
+            # Identify test consumer groups
+            test_groups: list[str] = []
+            for group_info in consumer_groups:
+                group_id = (
+                    group_info[0] if isinstance(group_info, tuple) else str(group_info)
+                )
+
+                group_id_lower = group_id.lower()
+                is_test_group = (
+                    group_id.startswith(("test-", "e2e-"))
+                    or "-test-" in group_id_lower
+                    or "integration" in group_id_lower
+                )
+
+                if is_test_group:
+                    test_groups.append(group_id)
+
+            # Delete test consumer groups
+            if test_groups:
+                try:
+                    await admin_client.delete_consumer_groups(test_groups)
+                except KafkaError:
+                    pass  # Best effort cleanup
+
+        finally:
+            await admin_client.close()
+
+    except Exception:
+        pass  # Best effort cleanup - don't fail tests due to cleanup errors
+
+
+@pytest.fixture
+async def full_infrastructure_cleanup(
+    cleanup_consul_test_services,
+    cleanup_postgres_test_projections,
+    cleanup_kafka_test_consumer_groups,
+):
+    """Combined fixture that provides cleanup for all infrastructure components.
+
+    This is a convenience fixture that combines all infrastructure cleanup
+    fixtures into a single dependency. Use this for E2E tests that interact
+    with multiple infrastructure components.
+
+    Components Cleaned:
+        - Consul: Test service registrations (services matching test patterns)
+        - PostgreSQL: Test projection rows (rows matching test patterns)
+        - Kafka: Test consumer groups (groups matching test patterns)
+
+    Usage:
+        >>> async def test_full_e2e_flow(full_infrastructure_cleanup):
+        ...     # Test that uses Consul, PostgreSQL, and Kafka
+        ...     # All test artifacts will be cleaned up after test
+
+    Note:
+        Each cleanup fixture operates independently and handles errors
+        gracefully. If one infrastructure component is unavailable,
+        cleanup for other components will still proceed.
+
+        The dependent fixtures (cleanup_consul_test_services, etc.) use
+        yield and handle their own teardown, so this fixture returns
+        immediately after they yield.
+    """
+    return  # Dependent fixtures handle their own teardown
