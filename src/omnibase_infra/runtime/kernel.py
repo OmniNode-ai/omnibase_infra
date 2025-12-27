@@ -827,10 +827,9 @@ if __name__ == "__main__":
 
 
 __all__: list[str] = [
-    "bootstrap",
-    "main",
-    "load_runtime_config",
-    # Environment variable constants
     "ENV_CONTRACTS_DIR",
     "ENV_CONTRACTS_DIR_LEGACY",
+    "bootstrap",
+    "load_runtime_config",
+    "main",
 ]

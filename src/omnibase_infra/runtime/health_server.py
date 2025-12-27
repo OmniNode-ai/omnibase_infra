@@ -537,4 +537,4 @@ class HealthServer:
             )
 
 
-__all__: list[str] = ["HealthServer", "DEFAULT_HTTP_PORT", "DEFAULT_HTTP_HOST"]
+__all__: list[str] = ["DEFAULT_HTTP_HOST", "DEFAULT_HTTP_PORT", "HealthServer"]

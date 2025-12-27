@@ -177,8 +177,8 @@ class ContainerValidationError(ContainerWiringError):
 
 
 __all__ = [
+    "ContainerValidationError",
     "ContainerWiringError",
     "ServiceRegistrationError",
     "ServiceResolutionError",
-    "ContainerValidationError",
 ]

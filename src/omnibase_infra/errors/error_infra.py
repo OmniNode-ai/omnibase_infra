@@ -499,13 +499,13 @@ class UnknownHandlerTypeError(RuntimeHostError):
 
 
 __all__: list[str] = [
-    "RuntimeHostError",
-    "ProtocolConfigurationError",
-    "SecretResolutionError",
+    "EnvelopeValidationError",
+    "InfraAuthenticationError",
     "InfraConnectionError",
     "InfraTimeoutError",
-    "InfraAuthenticationError",
     "InfraUnavailableError",
-    "EnvelopeValidationError",
+    "ProtocolConfigurationError",
+    "RuntimeHostError",
+    "SecretResolutionError",
     "UnknownHandlerTypeError",
 ]

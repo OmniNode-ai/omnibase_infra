@@ -1170,13 +1170,13 @@ class RegistrationReducer:
 
 
 __all__ = [
-    "RegistrationReducer",
-    # Validation types (for tests and custom validators)
-    "ModelValidationResult",  # Canonical ONEX name (Model* convention)
-    "ValidationResult",  # Backwards compatibility alias
-    "ValidationErrorCode",
+    "PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS",
+    "PERF_THRESHOLD_INTENT_BUILD_MS",
     # Performance threshold constants (for tests and monitoring)
     "PERF_THRESHOLD_REDUCE_MS",
-    "PERF_THRESHOLD_INTENT_BUILD_MS",
-    "PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS",
+    # Validation types (for tests and custom validators)
+    "ModelValidationResult",  # Canonical ONEX name (Model* convention)
+    "RegistrationReducer",
+    "ValidationErrorCode",
+    "ValidationResult",  # Backwards compatibility alias
 ]

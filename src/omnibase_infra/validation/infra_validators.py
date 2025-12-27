@@ -47,7 +47,6 @@ from omnibase_core.validation import (
     validate_architecture,
     validate_contracts,
     validate_patterns,
-    validate_union_usage,
     validate_union_usage_file,
 )
 
@@ -1230,39 +1229,39 @@ def get_validation_summary(
 
 
 __all__ = [
-    # Type aliases
-    "ValidationResult",
-    "ExemptionPattern",
-    # Re-exported types from omnibase_core.validation
-    "CircularImportValidationResult",
-    # Constants
-    "INFRA_SRC_PATH",
-    "INFRA_NODES_PATH",
+    "EXEMPTIONS_YAML_PATH",
     "INFRA_MAX_UNIONS",
     "INFRA_MAX_VIOLATIONS",
+    "INFRA_NODES_PATH",
     "INFRA_PATTERNS_STRICT",
+    # Constants
+    "INFRA_SRC_PATH",
     "INFRA_UNIONS_STRICT",
-    "EXEMPTIONS_YAML_PATH",
     "SKIP_DIRECTORY_NAMES",
+    # Re-exported types from omnibase_core.validation
+    "CircularImportValidationResult",
+    "ExemptionPattern",
+    # Type aliases
+    "ValidationResult",
+    "get_architecture_exemptions",
     # Exemption loaders
     "get_pattern_exemptions",
-    "get_union_exemptions",
-    "get_architecture_exemptions",
     # Path skip configuration
     "get_skip_directories",
-    "load_skip_directories_from_yaml",
-    # Path utilities
-    "is_skip_directory",
-    "should_skip_path",
+    "get_union_exemptions",
+    "get_validation_summary",
     # Union pattern utilities
     "is_simple_optional",
+    # Path utilities
+    "is_skip_directory",
+    "load_skip_directories_from_yaml",
+    "should_skip_path",
+    "validate_infra_all",
     # Validators
     "validate_infra_architecture",
+    "validate_infra_circular_imports",
+    "validate_infra_contract_deep",
     "validate_infra_contracts",
     "validate_infra_patterns",
-    "validate_infra_contract_deep",
     "validate_infra_union_usage",
-    "validate_infra_circular_imports",
-    "validate_infra_all",
-    "get_validation_summary",
 ]

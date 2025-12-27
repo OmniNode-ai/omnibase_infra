@@ -870,9 +870,9 @@ __all__ = [
     "EXECUTION_SHAPE_RULES",
     # Exception
     "ExecutionShapeViolationError",
+    # Validator class
+    "RuntimeShapeValidator",
     # Functions
     "detect_message_category",
     "enforce_execution_shape",
-    # Validator class
-    "RuntimeShapeValidator",
 ]

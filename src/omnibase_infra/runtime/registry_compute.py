@@ -1066,12 +1066,12 @@ class RegistryCompute:
 # =============================================================================
 
 __all__: list[str] = [
-    # Registry class
-    "RegistryCompute",
     # Environment variable constants
     "ENV_COMPUTE_REGISTRY_CACHE_SIZE",
     "ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY",
     # Re-export models for convenience
     "ModelComputeKey",
     "ModelComputeRegistration",
+    # Registry class
+    "RegistryCompute",
 ]

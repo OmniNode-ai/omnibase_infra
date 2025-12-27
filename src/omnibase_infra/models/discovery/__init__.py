@@ -23,13 +23,13 @@ from omnibase_infra.models.discovery.model_node_introspection_event import (
 )
 
 __all__ = [
-    "CapabilitiesTypedDict",
     "DEFAULT_HEARTBEAT_TOPIC",
     "DEFAULT_INTROSPECTION_TOPIC",
     "DEFAULT_REQUEST_INTROSPECTION_TOPIC",
     "INVALID_TOPIC_CHARS",
     "TOPIC_PATTERN",
     "VERSION_SUFFIX_PATTERN",
+    "CapabilitiesTypedDict",
     "ModelIntrospectionConfig",
     "ModelIntrospectionPerformanceMetrics",
     "ModelIntrospectionTaskConfig",

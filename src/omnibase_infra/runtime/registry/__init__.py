@@ -50,12 +50,12 @@ from omnibase_infra.runtime.registry.registry_message_type import (
 )
 
 __all__: list[str] = [
-    # Models
-    "ModelMessageTypeEntry",
-    "ModelDomainConstraint",
-    # Protocol
-    "ProtocolMessageTypeRegistry",
     # Registry implementation
     "MessageTypeRegistry",
     "MessageTypeRegistryError",
+    "ModelDomainConstraint",
+    # Models
+    "ModelMessageTypeEntry",
+    # Protocol
+    "ProtocolMessageTypeRegistry",
 ]
