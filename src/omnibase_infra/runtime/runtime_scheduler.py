@@ -77,7 +77,12 @@ from redis.exceptions import RedisError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraTimeoutError,
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+)
 from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
@@ -412,6 +417,14 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
         # Serialize tick to JSON bytes
         tick_bytes = tick.model_dump_json().encode("utf-8")
 
+        # Prepare error context for ONEX error types
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="emit_tick",
+            target_name=self._config.tick_topic,
+            correlation_id=correlation_id,
+        )
+
         try:
             # Publish tick event
             await self._event_bus.publish(
@@ -437,8 +450,8 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                 },
             )
 
-        except Exception as e:
-            # Record failure
+        except TimeoutError as e:
+            # Record failure for timeout
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
                     operation="emit_tick",
@@ -447,17 +460,25 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
 
             await self._record_tick_failure(correlation_id)
 
-            logger.exception(
-                "Failed to emit tick",
-                extra={
-                    "scheduler_id": self.scheduler_id,
-                    "sequence_number": current_sequence,
-                    "correlation_id": str(correlation_id),
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                },
-            )
-            raise
+            raise InfraTimeoutError(
+                f"Timeout emitting tick to topic {self._config.tick_topic}",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            # Record failure for other errors
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="emit_tick",
+                    correlation_id=correlation_id,
+                )
+
+            await self._record_tick_failure(correlation_id)
+
+            raise InfraConnectionError(
+                f"Failed to emit tick to topic {self._config.tick_topic}",
+                context=ctx,
+            ) from e
 
     async def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
         """Get current scheduler metrics.
@@ -799,7 +820,8 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                     "Error closing Valkey client",
                     extra={
                         "scheduler_id": self.scheduler_id,
-                        "error": str(e),
+                        # SECURITY: Sanitize error to prevent credential exposure
+                        "error": sanitize_error_string(str(e)),
                         "error_type": type(e).__name__,
                     },
                 )

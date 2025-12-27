@@ -852,13 +852,15 @@ class TestRuntimeSchedulerMetrics:
         mock_event_bus: AsyncMock,
     ) -> None:
         """Test that failure count increments on publish errors."""
+        from omnibase_infra.errors import InfraConnectionError
+
         # Configure event bus to fail
         mock_event_bus.publish = AsyncMock(side_effect=Exception("Publish failed"))
 
         scheduler = RuntimeScheduler(config=scheduler_config, event_bus=mock_event_bus)
 
-        # Try to emit tick (should fail)
-        with pytest.raises(Exception, match="Publish failed"):
+        # Try to emit tick (should fail with wrapped ONEX error)
+        with pytest.raises(InfraConnectionError):
             await scheduler.emit_tick()
 
         metrics = await scheduler.get_metrics()

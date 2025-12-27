@@ -21,6 +21,34 @@ Note:
       context manager. Nodes should wrap their operations with this context
       manager to accurately report concurrent operation counts.
 
+    - **track_operation() Usage Guidelines**:
+
+      Within MixinNodeIntrospection itself, only ``publish_introspection()`` uses
+      ``track_operation()``. This is intentional for the following reasons:
+
+      1. **_publish_heartbeat()**: Explicitly excluded because it's an internal
+         background task. Tracking it would cause self-referential counting
+         (heartbeat counting itself as active) and would report infrastructure
+         overhead rather than business load.
+
+      2. **get_introspection_data()**: Called by ``publish_introspection()``, which
+         already wraps the entire operation. Adding tracking here would cause
+         double-counting. Additionally, this is metadata gathering, not a business
+         operation that represents node load.
+
+      3. **start/stop_introspection_tasks()**: One-time lifecycle operations that
+         complete quickly. They spawn/cancel background tasks but don't represent
+         ongoing load. The counter would increment and immediately decrement.
+
+      4. **get_capabilities(), get_endpoints(), get_current_state()**: Internal
+         metadata operations that are part of introspection data gathering, not
+         independent business operations.
+
+      **For consuming nodes**: Use ``track_operation()`` in your business methods
+      (e.g., ``execute_query()``, ``process_request()``, ``handle_event()``) to
+      accurately report concurrent operation counts in heartbeats. See the
+      ``track_operation()`` docstring for usage examples.
+
 Security Considerations:
     This mixin uses Python reflection (via the ``inspect`` module) to automatically
     discover node capabilities. While this enables powerful service discovery, it

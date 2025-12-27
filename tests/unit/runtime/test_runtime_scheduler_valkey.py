@@ -348,6 +348,34 @@ class TestValkeyConnectionRetry:
 
                 assert client is mock_valkey_client
 
+    async def test_retry_on_asyncio_timeout_error(
+        self,
+        valkey_enabled_config: ModelRuntimeSchedulerConfig,
+        mock_event_bus: AsyncMock,
+        mock_valkey_client: MagicMock,
+    ) -> None:
+        """Test that connection is retried on asyncio TimeoutError.
+
+        This is distinct from RedisTimeoutError and tests the asyncio.wait_for
+        timeout wrapper around the ping operation.
+        """
+        mock_valkey_client.ping = AsyncMock(
+            side_effect=[TimeoutError("asyncio timeout"), True]
+        )
+
+        with patch(
+            "omnibase_infra.runtime.runtime_scheduler.redis.Redis"
+        ) as mock_redis:
+            mock_redis.return_value = mock_valkey_client
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                scheduler = RuntimeScheduler(
+                    config=valkey_enabled_config, event_bus=mock_event_bus
+                )
+
+                client = await scheduler._get_valkey_client()
+
+                assert client is mock_valkey_client
+
     async def test_marks_unavailable_on_unexpected_redis_error(
         self,
         valkey_enabled_config: ModelRuntimeSchedulerConfig,
@@ -548,6 +576,61 @@ class TestSequenceNumberLoading:
             assert scheduler._sequence_number == 0
             assert scheduler._valkey_available is False
 
+    async def test_load_sequence_handles_timeout_error_during_get(
+        self,
+        valkey_enabled_config: ModelRuntimeSchedulerConfig,
+        mock_event_bus: AsyncMock,
+        mock_valkey_client: MagicMock,
+    ) -> None:
+        """Test that asyncio TimeoutError during get marks Valkey unavailable.
+
+        This tests the asyncio.wait_for timeout, distinct from RedisTimeoutError.
+        """
+        mock_valkey_client.get = AsyncMock(
+            side_effect=TimeoutError("Operation timed out")
+        )
+
+        with patch(
+            "omnibase_infra.runtime.runtime_scheduler.redis.Redis"
+        ) as mock_redis:
+            mock_redis.return_value = mock_valkey_client
+
+            scheduler = RuntimeScheduler(
+                config=valkey_enabled_config, event_bus=mock_event_bus
+            )
+
+            await scheduler._load_sequence_number()
+
+            # Should fall back to 0 and mark unavailable
+            assert scheduler._sequence_number == 0
+            assert scheduler._valkey_available is False
+
+    async def test_load_sequence_handles_generic_redis_error(
+        self,
+        valkey_enabled_config: ModelRuntimeSchedulerConfig,
+        mock_event_bus: AsyncMock,
+        mock_valkey_client: MagicMock,
+    ) -> None:
+        """Test that generic RedisError during get is handled gracefully."""
+        mock_valkey_client.get = AsyncMock(
+            side_effect=RedisError("Unknown Redis error")
+        )
+
+        with patch(
+            "omnibase_infra.runtime.runtime_scheduler.redis.Redis"
+        ) as mock_redis:
+            mock_redis.return_value = mock_valkey_client
+
+            scheduler = RuntimeScheduler(
+                config=valkey_enabled_config, event_bus=mock_event_bus
+            )
+
+            await scheduler._load_sequence_number()
+
+            # Should fall back to 0 (but not necessarily mark unavailable
+            # since generic RedisError doesn't mark unavailable in load)
+            assert scheduler._sequence_number == 0
+
 
 # ============================================================================
 # Sequence Number Persistence Tests
@@ -692,6 +775,105 @@ class TestSequenceNumberPersistence:
             # This correctly reflects that the sequence was never persisted
             assert scheduler._last_persisted_sequence == 0
 
+    async def test_persist_handles_timeout_error(
+        self,
+        valkey_enabled_config: ModelRuntimeSchedulerConfig,
+        mock_event_bus: AsyncMock,
+        mock_valkey_client: MagicMock,
+    ) -> None:
+        """Test that asyncio TimeoutError during persistence is handled.
+
+        This tests the asyncio.wait_for timeout, distinct from RedisTimeoutError.
+        When a timeout occurs during persistence:
+        - Should not raise an exception (graceful fallback)
+        - Should mark Valkey as unavailable
+        - Should NOT update _last_persisted_sequence (persistence failed)
+        """
+        mock_valkey_client.set = AsyncMock(
+            side_effect=TimeoutError("Operation timed out")
+        )
+
+        with patch(
+            "omnibase_infra.runtime.runtime_scheduler.redis.Redis"
+        ) as mock_redis:
+            mock_redis.return_value = mock_valkey_client
+
+            scheduler = RuntimeScheduler(
+                config=valkey_enabled_config, event_bus=mock_event_bus
+            )
+            scheduler._sequence_number = 100
+
+            # Should not raise
+            await scheduler._persist_sequence_number()
+
+            # Should mark unavailable
+            assert scheduler._valkey_available is False
+            # Last persisted should NOT be updated since persistence failed
+            assert scheduler._last_persisted_sequence == 0
+
+    async def test_persist_handles_redis_timeout_error(
+        self,
+        valkey_enabled_config: ModelRuntimeSchedulerConfig,
+        mock_event_bus: AsyncMock,
+        mock_valkey_client: MagicMock,
+    ) -> None:
+        """Test that RedisTimeoutError during persistence is handled.
+
+        When a Redis timeout occurs during persistence:
+        - Should not raise an exception (graceful fallback)
+        - Should mark Valkey as unavailable
+        - Should NOT update _last_persisted_sequence (persistence failed)
+        """
+        mock_valkey_client.set = AsyncMock(side_effect=RedisTimeoutError("Timeout"))
+
+        with patch(
+            "omnibase_infra.runtime.runtime_scheduler.redis.Redis"
+        ) as mock_redis:
+            mock_redis.return_value = mock_valkey_client
+
+            scheduler = RuntimeScheduler(
+                config=valkey_enabled_config, event_bus=mock_event_bus
+            )
+            scheduler._sequence_number = 100
+
+            # Should not raise
+            await scheduler._persist_sequence_number()
+
+            # Should mark unavailable
+            assert scheduler._valkey_available is False
+            # Last persisted should NOT be updated since persistence failed
+            assert scheduler._last_persisted_sequence == 0
+
+    async def test_persist_handles_generic_redis_error(
+        self,
+        valkey_enabled_config: ModelRuntimeSchedulerConfig,
+        mock_event_bus: AsyncMock,
+        mock_valkey_client: MagicMock,
+    ) -> None:
+        """Test that generic RedisError during persistence is handled.
+
+        When a generic Redis error occurs during persistence:
+        - Should not raise an exception (graceful fallback)
+        - Should NOT update _last_persisted_sequence (persistence failed)
+        """
+        mock_valkey_client.set = AsyncMock(side_effect=RedisError("Unknown error"))
+
+        with patch(
+            "omnibase_infra.runtime.runtime_scheduler.redis.Redis"
+        ) as mock_redis:
+            mock_redis.return_value = mock_valkey_client
+
+            scheduler = RuntimeScheduler(
+                config=valkey_enabled_config, event_bus=mock_event_bus
+            )
+            scheduler._sequence_number = 100
+
+            # Should not raise
+            await scheduler._persist_sequence_number()
+
+            # Last persisted should NOT be updated since persistence failed
+            assert scheduler._last_persisted_sequence == 0
+
     async def test_persist_closes_client_on_completion(
         self,
         valkey_enabled_config: ModelRuntimeSchedulerConfig,
@@ -777,6 +959,61 @@ class TestValkeyClientCleanup:
 
         # Client reference should still be cleared
         assert scheduler._valkey_client is None
+
+    async def test_double_close_is_handled_gracefully(
+        self,
+        valkey_enabled_config: ModelRuntimeSchedulerConfig,
+        mock_event_bus: AsyncMock,
+        mock_valkey_client: MagicMock,
+    ) -> None:
+        """Test that calling _close_valkey_client() twice is safe.
+
+        The atomic swap pattern in _close_valkey_client() should prevent
+        double-close issues even with concurrent coroutine access.
+        """
+        scheduler = RuntimeScheduler(
+            config=valkey_enabled_config, event_bus=mock_event_bus
+        )
+        scheduler._valkey_client = mock_valkey_client
+
+        # First close
+        await scheduler._close_valkey_client()
+        assert scheduler._valkey_client is None
+        assert mock_valkey_client.aclose.call_count == 1
+
+        # Second close should be a no-op (client already None)
+        await scheduler._close_valkey_client()
+        assert scheduler._valkey_client is None
+        # aclose should NOT be called again
+        assert mock_valkey_client.aclose.call_count == 1
+
+    async def test_concurrent_close_is_safe(
+        self,
+        valkey_enabled_config: ModelRuntimeSchedulerConfig,
+        mock_event_bus: AsyncMock,
+        mock_valkey_client: MagicMock,
+    ) -> None:
+        """Test that concurrent _close_valkey_client() calls are safe.
+
+        Due to the atomic swap pattern, even if multiple coroutines call
+        close simultaneously, aclose should only be called once.
+        """
+        scheduler = RuntimeScheduler(
+            config=valkey_enabled_config, event_bus=mock_event_bus
+        )
+        scheduler._valkey_client = mock_valkey_client
+
+        # Call close concurrently from multiple coroutines
+        await asyncio.gather(
+            scheduler._close_valkey_client(),
+            scheduler._close_valkey_client(),
+            scheduler._close_valkey_client(),
+        )
+
+        # Client should be None
+        assert scheduler._valkey_client is None
+        # aclose should only be called once due to atomic swap
+        assert mock_valkey_client.aclose.call_count == 1
 
 
 # ============================================================================
