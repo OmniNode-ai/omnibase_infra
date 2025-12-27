@@ -209,7 +209,7 @@ def clear_normalize_version_cache() -> None:
     # No-op since cache no longer exists
 
 
-__all__ = [
+__all__: list[str] = [
     "SEMVER_PATTERN",
     "validate_semver",
     "validate_version_lenient",

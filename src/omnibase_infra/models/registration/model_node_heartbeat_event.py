@@ -36,6 +36,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
         timestamp: Event timestamp.
 
     Example:
+        >>> from datetime import UTC, datetime
         >>> from uuid import uuid4
         >>> from omnibase_core.enums import EnumNodeKind
         >>> event = ModelNodeHeartbeatEvent(
@@ -46,6 +47,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
         ...     active_operations_count=5,
         ...     memory_usage_mb=256.0,
         ...     cpu_usage_percent=15.5,
+        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
         ... )
     """
 
@@ -91,9 +93,29 @@ class ModelNodeHeartbeatEvent(BaseModel):
     correlation_id: UUID | None = Field(
         default=None, description="Request correlation ID for tracing"
     )
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), description="Event timestamp"
-    )
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
+    timestamp: datetime = Field(..., description="Event timestamp")
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
+        """Validate that timestamp is timezone-aware.
+
+        Args:
+            v: The timestamp value to validate.
+
+        Returns:
+            The validated timestamp.
+
+        Raises:
+            ValueError: If timestamp is naive (no timezone info).
+        """
+        if v.tzinfo is None:
+            raise ValueError(
+                "timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            )
+        return v
 
 
 __all__ = ["ModelNodeHeartbeatEvent"]

@@ -64,7 +64,18 @@ from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.registry_compute import RegistryCompute
 
 if TYPE_CHECKING:
+    import asyncpg
     from omnibase_core.container import ModelONEXContainer
+
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeIntrospected,
+        HandlerNodeRegistrationAcked,
+        HandlerRuntimeTick,
+    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+
+# Default semantic version constant for service metadata registration
+SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 
 logger = logging.getLogger(__name__)
 
@@ -664,6 +675,347 @@ async def get_or_create_compute_registry(
             ) from e
 
 
+async def wire_registration_handlers(
+    container: ModelONEXContainer,
+    pool: asyncpg.Pool,
+    liveness_interval_seconds: int | None = None,
+) -> dict[str, list[str]]:
+    """Register registration orchestrator handlers with the container.
+
+    Registers ProjectionReaderRegistration and the three registration handlers:
+    - HandlerNodeIntrospected
+    - HandlerRuntimeTick
+    - HandlerNodeRegistrationAcked
+
+    All handlers depend on ProjectionReaderRegistration, which is registered first.
+    This enables declarative dependency resolution when constructing the
+    NodeRegistrationOrchestrator.
+
+    Args:
+        container: ONEX container instance to register services in.
+        pool: asyncpg connection pool for database access.
+        liveness_interval_seconds: Liveness deadline interval for ack handler.
+            If None, uses ONEX_LIVENESS_INTERVAL_SECONDS env var or default (60s).
+
+    Returns:
+        Summary dict with:
+            - services: List of registered service class names
+
+    Raises:
+        RuntimeError: If service registration fails
+
+    Example:
+        >>> from omnibase_core.container import ModelONEXContainer
+        >>> import asyncpg
+        >>> container = ModelONEXContainer()
+        >>> pool = await asyncpg.create_pool(dsn)
+        >>> summary = await wire_registration_handlers(container, pool)
+        >>> print(summary)
+        {'services': ['ProjectionReaderRegistration', 'HandlerNodeIntrospected', ...]}
+        >>> # Resolve handlers from container
+        >>> handler = await container.service_registry.resolve_service(HandlerNodeIntrospected)
+    """
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeIntrospected,
+        HandlerNodeRegistrationAcked,
+        HandlerRuntimeTick,
+    )
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_registration_acked import (
+        get_liveness_interval_seconds,
+    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+
+    # Resolve the actual liveness interval (from param, env var, or default)
+    resolved_liveness_interval = get_liveness_interval_seconds(
+        liveness_interval_seconds
+    )
+
+    services_registered: list[str] = []
+
+    try:
+        # 1. Register ProjectionReaderRegistration (dependency for all handlers)
+        projection_reader = ProjectionReaderRegistration(pool)
+
+        await container.service_registry.register_instance(
+            interface=ProjectionReaderRegistration,
+            instance=projection_reader,
+            scope="global",
+            metadata={
+                "description": "Registration projection reader for orchestrator state queries",
+                "version": str(SEMVER_DEFAULT),
+            },
+        )
+
+        services_registered.append("ProjectionReaderRegistration")
+        logger.debug(
+            "Registered ProjectionReaderRegistration in container (global scope)"
+        )
+
+        # 2. Register HandlerNodeIntrospected
+        handler_introspected = HandlerNodeIntrospected(projection_reader)
+
+        await container.service_registry.register_instance(
+            interface=HandlerNodeIntrospected,
+            instance=handler_introspected,
+            scope="global",
+            metadata={
+                "description": "Handler for NodeIntrospectionEvent - registration trigger",
+                "version": str(SEMVER_DEFAULT),
+            },
+        )
+
+        services_registered.append("HandlerNodeIntrospected")
+        logger.debug("Registered HandlerNodeIntrospected in container (global scope)")
+
+        # 3. Register HandlerRuntimeTick
+        handler_runtime_tick = HandlerRuntimeTick(projection_reader)
+
+        await container.service_registry.register_instance(
+            interface=HandlerRuntimeTick,
+            instance=handler_runtime_tick,
+            scope="global",
+            metadata={
+                "description": "Handler for RuntimeTick - timeout detection",
+                "version": str(SEMVER_DEFAULT),
+            },
+        )
+
+        services_registered.append("HandlerRuntimeTick")
+        logger.debug("Registered HandlerRuntimeTick in container (global scope)")
+
+        # 4. Register HandlerNodeRegistrationAcked
+        handler_acked = HandlerNodeRegistrationAcked(
+            projection_reader,
+            liveness_interval_seconds=resolved_liveness_interval,
+        )
+
+        await container.service_registry.register_instance(
+            interface=HandlerNodeRegistrationAcked,
+            instance=handler_acked,
+            scope="global",
+            metadata={
+                "description": "Handler for NodeRegistrationAcked command - ack processing",
+                "version": str(SEMVER_DEFAULT),
+                "liveness_interval_seconds": resolved_liveness_interval,
+            },
+        )
+
+        services_registered.append("HandlerNodeRegistrationAcked")
+        logger.debug(
+            "Registered HandlerNodeRegistrationAcked in container (global scope)"
+        )
+
+    except AttributeError as e:
+        error_str = str(e)
+        if "service_registry" in error_str:
+            hint = (
+                "Container missing 'service_registry' attribute. "
+                "Expected ModelONEXContainer from omnibase_core."
+            )
+        elif "register_instance" in error_str:
+            hint = (
+                "Container.service_registry missing 'register_instance' method. "
+                "Check omnibase_core version compatibility (requires v0.5.6 or later)."
+            )
+        else:
+            hint = f"Missing attribute in registration chain: {e}"
+
+        logger.exception(
+            "Failed to register registration handlers",
+            extra={
+                "error": error_str,
+                "error_type": "AttributeError",
+                "hint": hint,
+            },
+        )
+        raise RuntimeError(
+            f"Registration handler wiring failed - {hint}\nOriginal error: {e}"
+        ) from e
+
+    except Exception as e:
+        logger.exception(
+            "Failed to register registration handlers",
+            extra={"error": str(e), "error_type": type(e).__name__},
+        )
+        raise RuntimeError(f"Failed to wire registration handlers: {e}") from e
+
+    logger.info(
+        "Registration handlers wired successfully",
+        extra={
+            "service_count": len(services_registered),
+            "services": services_registered,
+        },
+    )
+
+    return {"services": services_registered}
+
+
+async def get_projection_reader_from_container(
+    container: ModelONEXContainer,
+) -> ProjectionReaderRegistration:
+    """Get ProjectionReaderRegistration from container.
+
+    Resolves ProjectionReaderRegistration using ModelONEXContainer.service_registry.
+    This is the preferred method for accessing the projection reader in container-based code.
+
+    Args:
+        container: ONEX container instance with registered ProjectionReaderRegistration.
+
+    Returns:
+        ProjectionReaderRegistration instance from container.
+
+    Raises:
+        RuntimeError: If ProjectionReaderRegistration not registered in container.
+
+    Example:
+        >>> pool = await asyncpg.create_pool(dsn)
+        >>> await wire_registration_handlers(container, pool)
+        >>> reader = await get_projection_reader_from_container(container)
+    """
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+
+    try:
+        reader: ProjectionReaderRegistration = (
+            await container.service_registry.resolve_service(
+                ProjectionReaderRegistration
+            )
+        )
+        return reader
+    except Exception as e:
+        logger.exception(
+            "Failed to resolve ProjectionReaderRegistration from container",
+            extra={
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "service_type": "ProjectionReaderRegistration",
+            },
+        )
+        raise RuntimeError(
+            f"ProjectionReaderRegistration not registered in container.\n"
+            f"Fix: Call wire_registration_handlers(container, pool) first.\n"
+            f"Original error: {e}"
+        ) from e
+
+
+async def get_handler_node_introspected_from_container(
+    container: ModelONEXContainer,
+) -> HandlerNodeIntrospected:
+    """Get HandlerNodeIntrospected from container.
+
+    Args:
+        container: ONEX container instance with registered handlers.
+
+    Returns:
+        HandlerNodeIntrospected instance from container.
+
+    Raises:
+        RuntimeError: If handler not registered in container.
+    """
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeIntrospected,
+    )
+
+    try:
+        handler: HandlerNodeIntrospected = (
+            await container.service_registry.resolve_service(HandlerNodeIntrospected)
+        )
+        return handler
+    except Exception as e:
+        logger.exception(
+            "Failed to resolve HandlerNodeIntrospected from container",
+            extra={
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "service_type": "HandlerNodeIntrospected",
+            },
+        )
+        raise RuntimeError(
+            f"HandlerNodeIntrospected not registered in container.\n"
+            f"Fix: Call wire_registration_handlers(container, pool) first.\n"
+            f"Original error: {e}"
+        ) from e
+
+
+async def get_handler_runtime_tick_from_container(
+    container: ModelONEXContainer,
+) -> HandlerRuntimeTick:
+    """Get HandlerRuntimeTick from container.
+
+    Args:
+        container: ONEX container instance with registered handlers.
+
+    Returns:
+        HandlerRuntimeTick instance from container.
+
+    Raises:
+        RuntimeError: If handler not registered in container.
+    """
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerRuntimeTick,
+    )
+
+    try:
+        handler: HandlerRuntimeTick = await container.service_registry.resolve_service(
+            HandlerRuntimeTick
+        )
+        return handler
+    except Exception as e:
+        logger.exception(
+            "Failed to resolve HandlerRuntimeTick from container",
+            extra={
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "service_type": "HandlerRuntimeTick",
+            },
+        )
+        raise RuntimeError(
+            f"HandlerRuntimeTick not registered in container.\n"
+            f"Fix: Call wire_registration_handlers(container, pool) first.\n"
+            f"Original error: {e}"
+        ) from e
+
+
+async def get_handler_node_registration_acked_from_container(
+    container: ModelONEXContainer,
+) -> HandlerNodeRegistrationAcked:
+    """Get HandlerNodeRegistrationAcked from container.
+
+    Args:
+        container: ONEX container instance with registered handlers.
+
+    Returns:
+        HandlerNodeRegistrationAcked instance from container.
+
+    Raises:
+        RuntimeError: If handler not registered in container.
+    """
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeRegistrationAcked,
+    )
+
+    try:
+        handler: HandlerNodeRegistrationAcked = (
+            await container.service_registry.resolve_service(
+                HandlerNodeRegistrationAcked
+            )
+        )
+        return handler
+    except Exception as e:
+        logger.exception(
+            "Failed to resolve HandlerNodeRegistrationAcked from container",
+            extra={
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "service_type": "HandlerNodeRegistrationAcked",
+            },
+        )
+        raise RuntimeError(
+            f"HandlerNodeRegistrationAcked not registered in container.\n"
+            f"Fix: Call wire_registration_handlers(container, pool) first.\n"
+            f"Original error: {e}"
+        ) from e
+
+
 __all__: list[str] = [
     "wire_infrastructure_services",
     "get_policy_registry_from_container",
@@ -671,4 +1023,10 @@ __all__: list[str] = [
     "get_or_create_policy_registry",
     "get_compute_registry_from_container",
     "get_or_create_compute_registry",
+    # Registration handlers (OMN-888)
+    "wire_registration_handlers",
+    "get_projection_reader_from_container",
+    "get_handler_node_introspected_from_container",
+    "get_handler_runtime_tick_from_container",
+    "get_handler_node_registration_acked_from_container",
 ]

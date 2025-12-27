@@ -587,6 +587,7 @@ def sample_introspection_event() -> ModelNodeIntrospectionEvent:
         node_version="1.0.0",
         correlation_id=uuid4(),
         endpoints={"health": "http://localhost:8080/health"},
+        timestamp=datetime.now(UTC),
     )
 
 
@@ -610,6 +611,7 @@ def introspection_event_factory() -> ProtocolIntrospectionEventFactory:
             node_version=node_version,
             correlation_id=correlation_id or uuid4(),
             endpoints={"health": "http://localhost:8080/health"},
+            timestamp=datetime.now(UTC),
         )
 
     return _create_event

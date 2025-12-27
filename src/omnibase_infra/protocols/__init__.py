@@ -54,7 +54,7 @@ from omnibase_infra.protocols.protocol_snapshot_publisher import (
     ProtocolSnapshotPublisher,
 )
 
-__all__ = [
+__all__: list[str] = [
     "ProtocolEventBusLike",
     "ProtocolIdempotencyStore",
     "ProtocolPluginCompute",

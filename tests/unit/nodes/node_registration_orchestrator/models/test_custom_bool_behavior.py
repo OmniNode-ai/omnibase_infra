@@ -40,6 +40,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
@@ -604,7 +605,7 @@ class TestModelReducerExecutionResultImmutability:
     which ensures thread safety and prevents accidental state mutation.
     Attempting to mutate any field should raise a ValidationError.
 
-    The model uses tuple[RegistrationIntentUnion, ...] for the intents field
+    The model uses tuple[ProtocolRegistrationIntent, ...] for the intents field
     instead of list to maintain full immutability - tuples are immutable
     containers, while lists would allow mutation even with frozen=True.
 
@@ -627,8 +628,6 @@ class TestModelReducerExecutionResultImmutability:
         Frozen Pydantic models prevent field assignment after construction.
         This ensures thread safety and immutable state semantics.
         """
-        from pydantic import ValidationError
-
         result = ModelReducerExecutionResult(
             state=initial_state,
             intents=(sample_consul_intent,),
@@ -656,8 +655,6 @@ class TestModelReducerExecutionResultImmutability:
         The intents field is a tuple (immutable container) and the model is frozen.
         Attempting to replace the entire field should raise ValidationError.
         """
-        from pydantic import ValidationError
-
         result = ModelReducerExecutionResult(
             state=initial_state,
             intents=(sample_consul_intent,),

@@ -702,6 +702,19 @@ pattern_exemptions:
 
     ticket: OMN-1007
   # ==========================================================================
+  # ModelRegistryResponse Factory Method Exemptions (PR #79)
+  # ==========================================================================
+  # from_backend_results is a classmethod factory that requires all parameters
+  # to construct a response from individual backend results. Each parameter is
+  # a distinct required context for computing the response status.
+  - file_pattern: 'model_registry_response\.py'
+    method_pattern: "Function 'from_backend_results'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Classmethod factory requires all parameters to construct response from backend results: node_id, correlation_id, consul_result, postgres_result, timestamp. These are distinct required inputs for computing status, processing_time, and error_summary.
+
+    ticket: PR-79
+  # ==========================================================================
   # Union Reduction Phase 3 Result Model Exemptions (OMN-1003)
   # ==========================================================================
   # Result models use comprehensive APIs with factory methods, computed properties,
@@ -781,7 +794,7 @@ architecture_exemptions:
     reason: >
       Domain-grouped protocols for registration orchestrator workflow. ProtocolReducer and ProtocolEffect define the complete interface for the reducer-effect pattern in node registration. Per CLAUDE.md convention.
 
-      Architectural documentation included in module: - Thread safety requirements (lines 13-24): Implementations MUST be thread-safe - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors - Protocol contracts with examples in docstrings
+      Architectural documentation included in module: - Concurrency safety requirements (lines 13-24): Implementations MUST be coroutine-safe - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors - Protocol contracts with examples in docstrings
 
       Full architectural documentation: - Node architecture: docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md - Protocol design: docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md - Node README: src/omnibase_infra/nodes/node_registration_orchestrator/README.md
 

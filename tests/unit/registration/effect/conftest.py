@@ -306,6 +306,7 @@ def sample_introspection_event(
         network_id="test-network",
         deployment_id="test-deployment",
         epoch=1,
+        timestamp=datetime.now(UTC),  # Required: time injection pattern
     )
 
 

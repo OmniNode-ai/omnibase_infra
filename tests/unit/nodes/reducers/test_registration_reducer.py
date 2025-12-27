@@ -55,6 +55,9 @@ from tests.helpers import create_introspection_event
 if TYPE_CHECKING:
     from typing import Literal
 
+# Fixed test timestamp for deterministic testing (time injection pattern)
+TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+
 
 # -----------------------------------------------------------------------------
 # Test Constants
@@ -107,6 +110,7 @@ def valid_event() -> ModelNodeIntrospectionEvent:
         endpoints={"health": "http://localhost:8080/health"},
         capabilities=ModelNodeCapabilities(postgres=True, read=True, write=True),
         metadata=ModelNodeMetadata(environment="test"),
+        timestamp=TEST_TIMESTAMP,
     )
 
 
@@ -125,6 +129,7 @@ def event_without_health_endpoint() -> ModelNodeIntrospectionEvent:
         endpoints={},
         capabilities=ModelNodeCapabilities(),
         metadata=ModelNodeMetadata(),
+        timestamp=TEST_TIMESTAMP,
     )
 
 
@@ -992,6 +997,7 @@ class TestConsulIntentBuilding:
             node_version="2.3.4",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1247,6 +1253,7 @@ class TestPostgresIntentBuilding:
             endpoints={"health": "http://localhost:8080/health"},
             capabilities=ModelNodeCapabilities(postgres=True, database=True, read=True),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1444,6 +1451,7 @@ class TestEdgeCases:
             node_version="1.0.0",
             endpoints={},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1464,6 +1472,7 @@ class TestEdgeCases:
             endpoints={"health": "http://localhost:8080/health"},
             capabilities=ModelNodeCapabilities(),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1484,7 +1493,6 @@ class TestEdgeCases:
         from unittest.mock import MagicMock
 
         node_id = uuid4()
-        timestamp = datetime.now(UTC)
 
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = node_id
@@ -1494,7 +1502,7 @@ class TestEdgeCases:
         mock_event.capabilities = ModelNodeCapabilities()
         mock_event.metadata = ModelNodeMetadata()
         mock_event.correlation_id = None  # Force deterministic derivation
-        mock_event.timestamp = timestamp
+        mock_event.timestamp = TEST_TIMESTAMP
 
         output = reducer.reduce(initial_state, mock_event)
 
@@ -1516,6 +1524,7 @@ class TestEdgeCases:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         output1 = reducer.reduce(state, event)
@@ -1558,7 +1567,7 @@ class TestEdgeCases:
             network_id="prod-network",
             deployment_id="deploy-123",
             epoch=42,
-            timestamp=datetime.now(UTC),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -2728,6 +2737,7 @@ class TestDeterminismProperty:
             node_version=node_version,
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute reduce twice with identical inputs
@@ -2836,7 +2846,6 @@ class TestDeterminismProperty:
 
         reducer = RegistrationReducer()
         node_id = uuid4()
-        fixed_timestamp = datetime.now(UTC)
 
         # Create mock event without correlation_id (forces derivation)
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
@@ -2847,7 +2856,7 @@ class TestDeterminismProperty:
         mock_event.capabilities = ModelNodeCapabilities()
         mock_event.metadata = ModelNodeMetadata()
         mock_event.correlation_id = None  # Force deterministic derivation
-        mock_event.timestamp = fixed_timestamp
+        mock_event.timestamp = TEST_TIMESTAMP
 
         # Derive event ID multiple times
         derived_id_1 = reducer._derive_deterministic_event_id(mock_event)
@@ -2894,6 +2903,7 @@ class TestDeterminismProperty:
             node_version="1.0.0",
             endpoints=endpoints,
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute reduce twice
@@ -2949,6 +2959,7 @@ class TestDeterminismProperty:
             node_version="2.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute reduce on all reducer instances
@@ -3063,6 +3074,7 @@ class TestDeterminismProperty:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute reduce twice
@@ -3115,6 +3127,7 @@ class TestEdgeCasesComprehensive:
             node_version="1.0.0",
             endpoints={},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3169,6 +3182,7 @@ class TestEdgeCasesComprehensive:
             node_version="2.5.0",
             endpoints=many_endpoints,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3212,6 +3226,7 @@ class TestEdgeCasesComprehensive:
             node_version=long_version,
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3301,7 +3316,6 @@ class TestEdgeCasesComprehensive:
         """
         from unittest.mock import MagicMock
 
-        fixed_timestamp = datetime.now(UTC)
         node_id1 = uuid4()
         node_id2 = uuid4()
 
@@ -3315,7 +3329,7 @@ class TestEdgeCasesComprehensive:
         mock_event1.capabilities = ModelNodeCapabilities()
         mock_event1.metadata = ModelNodeMetadata()
         mock_event1.correlation_id = None
-        mock_event1.timestamp = fixed_timestamp
+        mock_event1.timestamp = TEST_TIMESTAMP
 
         mock_event2 = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event2.node_id = node_id2
@@ -3325,7 +3339,7 @@ class TestEdgeCasesComprehensive:
         mock_event2.capabilities = ModelNodeCapabilities()
         mock_event2.metadata = ModelNodeMetadata()
         mock_event2.correlation_id = None
-        mock_event2.timestamp = fixed_timestamp
+        mock_event2.timestamp = TEST_TIMESTAMP
 
         output1 = reducer.reduce(initial_state, mock_event1)
         output2 = reducer.reduce(initial_state, mock_event2)
@@ -3358,6 +3372,7 @@ class TestEdgeCasesComprehensive:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3392,6 +3407,7 @@ class TestEdgeCasesComprehensive:
                 "docs": "http://localhost:8080/wendang/index",
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -4113,6 +4129,7 @@ class TestEventReplayDeterminism:
                         write=(i % 3 == 0),
                     ),
                     metadata=ModelNodeMetadata(environment=f"env-{i}"),
+                    timestamp=TEST_TIMESTAMP,
                 )
             )
 
@@ -4182,6 +4199,7 @@ class TestEventReplayDeterminism:
                     node_version="1.0.0",
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
+                    timestamp=TEST_TIMESTAMP,
                 )
             )
 
@@ -4281,6 +4299,7 @@ class TestEventReplayDeterminism:
                     node_version=f"{i}.0.0",
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
+                    timestamp=TEST_TIMESTAMP,
                 )
             )
 
@@ -4368,6 +4387,7 @@ class TestEventReplayDeterminism:
                     node_version=f"{i + 1}.0.0",
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
+                    timestamp=TEST_TIMESTAMP,
                 )
             )
 
@@ -4406,7 +4426,6 @@ class TestEventReplayDeterminism:
         from unittest.mock import MagicMock
 
         # Create a mock event without correlation_id to force ID derivation
-        fixed_timestamp = datetime.now(UTC)
         node_id = uuid4()
 
         def create_mock_event() -> MagicMock:
@@ -4419,7 +4438,7 @@ class TestEventReplayDeterminism:
             mock.capabilities = ModelNodeCapabilities()
             mock.metadata = ModelNodeMetadata()
             mock.correlation_id = None  # Forces deterministic derivation
-            mock.timestamp = fixed_timestamp
+            mock.timestamp = TEST_TIMESTAMP
             return mock
 
         # Derive ID multiple times from same event
@@ -4475,6 +4494,7 @@ class TestEventReplayDeterminism:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Process first introspection
@@ -4502,6 +4522,7 @@ class TestEventReplayDeterminism:
             node_version="2.0.0",
             endpoints={"health": "http://localhost:8081/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         output2 = reducer.reduce(state, event2)
         first_pass_final = output2.result
@@ -4557,6 +4578,7 @@ class TestEventReplayDeterminism:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         events_and_expected_status.append((event1, "pending"))
 
@@ -4567,6 +4589,7 @@ class TestEventReplayDeterminism:
             node_version="2.0.0",
             endpoints={"health": "http://localhost:8081/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         events_and_expected_status.append((event2, "pending"))
 
@@ -4577,6 +4600,7 @@ class TestEventReplayDeterminism:
             node_version="3.0.0",
             endpoints={"health": "http://localhost:8082/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         events_and_expected_status.append((event3, "pending"))
 
@@ -4809,6 +4833,7 @@ class TestPropertyBasedStateInvariants:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Transition: idle -> pending
@@ -4883,6 +4908,7 @@ class TestPropertyBasedStateInvariants:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # First reduce - should process the event
@@ -5111,6 +5137,7 @@ class TestBoundaryConditions:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=max_uuid,  # Also test max correlation_id
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5159,6 +5186,7 @@ class TestBoundaryConditions:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=min_uuid,  # Also test min correlation_id
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5194,6 +5222,7 @@ class TestBoundaryConditions:
                 node_version="",  # Empty version string - should be rejected
                 endpoints={"health": "http://localhost:8080/health"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
 
         # Verify the validation error is about the version
@@ -5217,6 +5246,7 @@ class TestBoundaryConditions:
             node_version="0.0.0",  # Minimal valid version
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5267,6 +5297,7 @@ class TestBoundaryConditions:
                 "api": very_long_url,
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5320,6 +5351,7 @@ class TestBoundaryConditions:
             endpoints={"health": "http://localhost:8080/health"},
             metadata=special_metadata,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5441,6 +5473,7 @@ class TestBoundaryConditions:
             capabilities=full_capabilities,
             metadata=extensive_metadata,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5502,6 +5535,7 @@ class TestBoundaryConditions:
                 node_version="1.0.0",
                 endpoints={"health": "http://localhost:8080/health"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
 
             output = reducer.reduce(initial_state, event)

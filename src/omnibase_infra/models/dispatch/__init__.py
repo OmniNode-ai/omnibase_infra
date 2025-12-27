@@ -53,6 +53,7 @@ Usage:
     >>> from omnibase_infra.enums import EnumMessageCategory
     >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
     >>> from uuid import uuid4
+    >>> from datetime import datetime, UTC
     >>>
     >>> # Register a dispatcher
     >>> dispatcher = ModelDispatcherRegistration(
@@ -60,6 +61,7 @@ Usage:
     ...     dispatcher_name="User Event Dispatcher",
     ...     node_kind=EnumNodeKind.REDUCER,
     ...     supported_categories=[EnumMessageCategory.EVENT],
+    ...     registered_at=datetime.now(UTC),
     ... )
     >>>
     >>> # Create a route
@@ -75,12 +77,15 @@ Usage:
     True
     >>>
     >>> # Create a dispatch result
+    >>> # NOTE: Per ONEX guidelines, always include correlation_id (generate with uuid4() if not propagated)
     >>> result = ModelDispatchResult(
     ...     dispatch_id=uuid4(),
     ...     status=EnumDispatchStatus.SUCCESS,
     ...     topic="dev.user.events.v1",
     ...     route_id="user-route",
     ...     dispatcher_id="user-dispatcher",
+    ...     started_at=datetime.now(UTC),
+    ...     correlation_id=uuid4(),  # Always generate if not propagating from incoming message
     ... )
 
 See Also:

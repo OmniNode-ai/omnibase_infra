@@ -41,6 +41,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+# Test timestamp constant for reproducible tests
+TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.node_registration_orchestrator.models import (
     ModelConsulIntentPayload,
@@ -271,6 +274,7 @@ def introspection_event(
         capabilities={},
         endpoints={"health": "http://localhost:8080/health"},
         correlation_id=correlation_id,
+        timestamp=TEST_TIMESTAMP,
     )
 
 
@@ -551,6 +555,7 @@ class TestStateTransitions:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         initial_state = ModelReducerState.initial()
@@ -591,6 +596,7 @@ class TestStateTransitions:
                 node_version="1.0.0",
                 endpoints={"health": "http://localhost:8080/health"},
                 correlation_id=correlation_id,
+                timestamp=TEST_TIMESTAMP,
             )
             for nid in node_ids
         ]
@@ -1024,6 +1030,7 @@ class TestCorrelationTracking:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=corr_id_1,
+            timestamp=TEST_TIMESTAMP,
         )
         event_2 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),  # Different node
@@ -1031,6 +1038,7 @@ class TestCorrelationTracking:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8081/health"},
             correlation_id=corr_id_2,
+            timestamp=TEST_TIMESTAMP,
         )
 
         state = ModelReducerState.initial()
@@ -1127,6 +1135,7 @@ class TestConcurrencyAndThreadSafety:
                 node_version="1.0.0",
                 endpoints={"health": f"http://localhost:{8080 + i}/health"},
                 correlation_id=correlation_id,
+                timestamp=TEST_TIMESTAMP,
             )
             for i in range(10)
         ]
@@ -1188,6 +1197,7 @@ class TestConcurrencyAndThreadSafety:
                 node_version="1.0.0",
                 endpoints={"health": f"http://localhost:{8080 + i}/health"},
                 correlation_id=correlation_id,
+                timestamp=TEST_TIMESTAMP,
             )
             for i in range(5)
         ]

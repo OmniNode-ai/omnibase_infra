@@ -82,15 +82,18 @@ from __future__ import annotations
 import asyncio
 import functools
 import threading
+import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
 from omnibase_infra.runtime.models import ModelPolicyKey, ModelPolicyRegistration
+from omnibase_infra.runtime.util_version import normalize_version
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -588,10 +591,13 @@ class PolicyRegistry:
 
     @staticmethod
     def _normalize_version(version: str) -> str:
-        """Normalize version string for consistent lookups using ModelSemVer.
+        """Normalize version string for consistent lookups.
 
-        Converts version strings to canonical x.y.z format using ModelSemVer.parse().
-        This is the local normalization method for PolicyRegistry.
+        Delegates to the shared normalize_version utility which is the
+        SINGLE SOURCE OF TRUTH for version normalization in omnibase_infra.
+
+        This method wraps the shared utility to convert ValueError to
+        ProtocolConfigurationError for PolicyRegistry's error contract.
 
         Normalization rules:
             1. Strip leading/trailing whitespace
@@ -615,46 +621,13 @@ class PolicyRegistry:
             >>> PolicyRegistry._normalize_version("v2.1")
             '2.1.0'
         """
-        if not version or not version.strip():
-            raise ProtocolConfigurationError(
-                "Version cannot be empty",
-                version=version,
-            )
-
-        # Strip whitespace
-        normalized = version.strip()
-
-        # Strip leading 'v' or 'V' prefix
-        if normalized.startswith(("v", "V")):
-            normalized = normalized[1:]
-
-        # Split on first hyphen to handle prerelease suffix
-        parts = normalized.split("-", 1)
-        version_part = parts[0]
-        prerelease = parts[1] if len(parts) > 1 else None
-
-        # Expand to three-part version (x.y.z) for ModelSemVer parsing
-        version_nums = version_part.split(".")
-        while len(version_nums) < 3:
-            version_nums.append("0")
-        expanded_version = ".".join(version_nums)
-
-        # Parse with ModelSemVer for validation
         try:
-            semver = ModelSemVer.parse(expanded_version)
-        except Exception as e:
+            return normalize_version(version)
+        except ValueError as e:
             raise ProtocolConfigurationError(
-                f"Invalid version format: {e}",
+                str(e),
                 version=version,
             ) from e
-
-        result: str = semver.to_string()
-
-        # Re-add prerelease if present
-        if prerelease:
-            result = f"{result}-{prerelease}"
-
-        return result
 
     def register(
         self,
@@ -702,15 +675,21 @@ class PolicyRegistry:
         # Normalize policy type
         normalized_type = self._normalize_policy_type(policy_type)
 
+        # Normalize version string before storing to prevent lookup mismatches
+        # This ensures "1.0", "1.0.0", and "v1.0.0" all resolve to "1.0.0"
+        # Note: ModelPolicyRegistration already normalizes, but we normalize again
+        # here to guarantee consistency with lookup operations
+        normalized_version = self._normalize_version(version)
+
         # Validate version format (ensures semantic versioning compliance)
         # This calls _parse_semver which will raise ProtocolConfigurationError if invalid
-        self._parse_semver(version)
+        self._parse_semver(normalized_version)
 
-        # Register the policy using ModelPolicyKey
+        # Register the policy using ModelPolicyKey with normalized version
         key = ModelPolicyKey(
             policy_id=policy_id,
             policy_type=normalized_type,
-            version=version,
+            version=normalized_version,
         )
         with self._lock:
             self._registry[key] = policy_class
@@ -785,6 +764,23 @@ class PolicyRegistry:
             ...     version="1.0.0",
             ... )
         """
+        # Check for non-normalized version and emit deprecation warning
+        # This implements the deprecation timeline documented in the docstring
+        try:
+            normalized = self._normalize_version(version)
+            if normalized != version:
+                warnings.warn(
+                    f"Passing non-normalized version '{version}' is deprecated. "
+                    f"Use normalized format '{normalized}' instead. "
+                    f"Deprecation timeline: v1.1.0 warning added, v1.2.0 visible by default, "
+                    f"v2.0.0 will raise ValueError.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+        except ProtocolConfigurationError:
+            # Invalid version format - let ModelPolicyRegistration handle the error
+            pass
+
         # Version normalization is handled by ModelPolicyRegistration validator
         # which normalizes partial versions and v-prefixed versions automatically
         try:
@@ -796,16 +792,36 @@ class PolicyRegistry:
                 allow_async=allow_async,
             )
         except ValidationError as e:
-            # Extract version validation error and re-raise as ProtocolConfigurationError
-            # for backward compatibility with existing API
+            # Convert all validation errors to ProtocolConfigurationError for consistency
+            # This ensures uniform error handling across all validation failures
             for error in e.errors():
-                if error.get("loc") == ("version",):
+                field_loc = error.get("loc", ())
+                field_name = field_loc[0] if field_loc else "unknown"
+                error_msg = error.get("msg", str(e))
+
+                if field_name == "version":
                     raise ProtocolConfigurationError(
-                        f"Invalid version format: {error.get('msg', str(e))}",
+                        f"Invalid version format: {error_msg}",
                         version=version,
                     ) from e
-            # Re-raise other validation errors as-is
-            raise
+                if field_name == "policy_id":
+                    raise ProtocolConfigurationError(
+                        f"Invalid policy_id: {error_msg}",
+                        policy_id=policy_id,
+                    ) from e
+                if field_name == "policy_type":
+                    raise ProtocolConfigurationError(
+                        f"Invalid policy_type: {error_msg}",
+                        policy_type=str(policy_type),
+                    ) from e
+                if field_name == "policy_class":
+                    raise ProtocolConfigurationError(
+                        f"Invalid policy_class: {error_msg}",
+                    ) from e
+            # Fallback for any unhandled validation errors
+            raise ProtocolConfigurationError(
+                f"Validation error in policy registration: {e}",
+            ) from e
 
         self.register(registration)
 
@@ -819,7 +835,7 @@ class PolicyRegistry:
 
         Resolves the policy class registered for the given policy configuration.
         If policy_type is not specified, returns the first matching policy_id.
-        If version is not specified, returns the latest version (lexicographically).
+        If version is not specified, returns the latest version (by semantic version).
 
         Performance Characteristics:
             - Best case: O(1) - Direct lookup with policy_id only (single version, no filters)
@@ -1090,8 +1106,7 @@ class PolicyRegistry:
                 Raises:
                     ProtocolConfigurationError: If version format is invalid
                 """
-                from omnibase_core.models.errors import ModelOnexError
-
+                # ModelOnexError is imported at module level
                 try:
                     return ModelSemVer.parse(normalized_version)
                 except ModelOnexError as e:
@@ -1115,26 +1130,12 @@ class PolicyRegistry:
                 passing to the LRU-cached parsing function. This ensures that
                 equivalent versions (e.g., "1.0" and "1.0.0", "v1.0.0" and "1.0.0")
                 share the same cache entry, improving cache hit rates.
+
+                All validation (empty strings, prerelease suffix, format) is
+                delegated to _normalize_version to eliminate code duplication.
                 """
-                # Validate not empty after trimming
-                cleaned = version.strip()
-                if not cleaned:
-                    raise ProtocolConfigurationError(
-                        "Version string cannot be empty or whitespace-only",
-                        version=version,
-                    )
-
-                # Handle empty prerelease suffix (e.g., "1.0.0-")
-                # This check is done before normalization to provide a clear error
-                if cleaned.endswith("-") or (
-                    cleaned.startswith(("v", "V")) and cleaned[1:].endswith("-")
-                ):
-                    raise ProtocolConfigurationError(
-                        "Prerelease suffix cannot be empty after hyphen",
-                        version=version,
-                    )
-
-                # Use PolicyRegistry._normalize_version for normalization
+                # Delegate all validation to _normalize_version (single source of truth)
+                # This eliminates duplicated validation logic (empty check, prerelease suffix)
                 normalized = PolicyRegistry._normalize_version(version)
 
                 # Now call the cached function with the NORMALIZED version

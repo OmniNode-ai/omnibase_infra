@@ -10,9 +10,9 @@ This scanner queries the registration projection for nodes that have:
 The scanner is used by the orchestrator during RuntimeTick processing
 to identify nodes requiring timeout decision events.
 
-Thread Safety:
+Coroutine Safety:
     This scanner is stateless and delegates all database operations to the
-    ProjectionReaderRegistration, which handles thread safety and circuit
+    ProjectionReaderRegistration, which handles coroutine safety and circuit
     breaker protection.
 
 Related Tickets:

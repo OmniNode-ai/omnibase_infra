@@ -2,6 +2,8 @@
 # Copyright (c) 2025 OmniNode Team
 """Tests for MessageTypeRegistry."""
 
+from datetime import UTC, datetime
+
 import pytest
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
@@ -190,6 +192,7 @@ class TestMessageTypeRegistryRegistration:
             handler_ids=("user-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         registry.register_message_type(entry)
 
@@ -220,6 +223,7 @@ class TestMessageTypeRegistryRegistration:
             handler_ids=("user-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         registry.register_message_type(entry1)
 
@@ -229,6 +233,7 @@ class TestMessageTypeRegistryRegistration:
             handler_ids=("audit-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         registry.register_message_type(entry2)
 
@@ -254,6 +259,7 @@ class TestMessageTypeRegistryRegistration:
             handler_ids=("handler-a",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         registry.register_message_type(entry1)
 
@@ -263,6 +269,7 @@ class TestMessageTypeRegistryRegistration:
             handler_ids=("handler-a",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         registry.register_message_type(entry2)
 
@@ -298,6 +305,7 @@ class TestMessageTypeRegistryRegistration:
             handler_ids=("user-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         with pytest.raises(ModelOnexError) as exc_info:
@@ -320,6 +328,7 @@ class TestMessageTypeRegistryRegistration:
             handler_ids=("handler1",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         registry.register_message_type(entry1)
 
@@ -329,6 +338,7 @@ class TestMessageTypeRegistryRegistration:
             handler_ids=("handler2",),
             allowed_categories=frozenset([EnumMessageCategory.COMMAND]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         with pytest.raises(MessageTypeRegistryError) as exc_info:
@@ -345,6 +355,7 @@ class TestMessageTypeRegistryRegistration:
             handler_ids=("handler1",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         registry.register_message_type(entry1)
 
@@ -354,6 +365,7 @@ class TestMessageTypeRegistryRegistration:
             handler_ids=("handler2",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="order"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         with pytest.raises(MessageTypeRegistryError) as exc_info:
@@ -705,6 +717,7 @@ class TestMessageTypeRegistryDomainCrossDomain:
                 owning_domain="notification",
                 allowed_cross_domains=frozenset({"user"}),
             ),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         registry.register_message_type(entry)
         registry.freeze()
@@ -727,6 +740,7 @@ class TestMessageTypeRegistryDomainCrossDomain:
             handler_ids=("user-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         registry.register_message_type(entry)
         registry.freeze()

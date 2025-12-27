@@ -130,6 +130,21 @@ from omnibase_infra.runtime.wiring import (
     wire_handlers_from_contract,
 )
 
+# Container wiring (OMN-888)
+from omnibase_infra.runtime.container_wiring import (
+    get_compute_registry_from_container,
+    get_handler_node_introspected_from_container,
+    get_handler_node_registration_acked_from_container,
+    get_handler_registry_from_container,
+    get_handler_runtime_tick_from_container,
+    get_or_create_compute_registry,
+    get_or_create_policy_registry,
+    get_policy_registry_from_container,
+    get_projection_reader_from_container,
+    wire_infrastructure_services,
+    wire_registration_handlers,
+)
+
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
 from omnibase_infra.runtime.chain_aware_dispatch import (
     ChainAwareDispatcher,
@@ -208,4 +223,16 @@ __all__: list[str] = [
     "ChainAwareDispatcher",
     "propagate_chain_context",
     "validate_dispatch_chain",
+    # Container wiring (OMN-888)
+    "wire_infrastructure_services",
+    "wire_registration_handlers",
+    "get_policy_registry_from_container",
+    "get_handler_registry_from_container",
+    "get_or_create_policy_registry",
+    "get_compute_registry_from_container",
+    "get_or_create_compute_registry",
+    "get_projection_reader_from_container",
+    "get_handler_node_introspected_from_container",
+    "get_handler_runtime_tick_from_container",
+    "get_handler_node_registration_acked_from_container",
 ]

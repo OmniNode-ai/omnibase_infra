@@ -1104,8 +1104,13 @@ class TestPolicyRegistryPolicyTypeNormalization:
     def test_invalid_policy_type_raises_error(
         self, policy_registry: PolicyRegistry
     ) -> None:
-        """Test that invalid policy type string raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test that invalid policy type string raises ProtocolConfigurationError.
+
+        The PolicyRegistry catches ValidationError and converts it to
+        ProtocolConfigurationError for consistent error handling across
+        all validation failures.
+        """
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             policy_registry.register_policy(
                 policy_id="invalid-type",
                 policy_class=MockSyncPolicy,  # type: ignore[arg-type]

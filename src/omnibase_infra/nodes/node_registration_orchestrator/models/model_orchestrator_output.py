@@ -99,19 +99,23 @@ class ModelOrchestratorOutput(BaseModel):
         """Convert list/sequence to tuple for immutability.
 
         This validator ensures explicit handling of all input types rather than
-        silent fallback to empty tuple, which could mask invalid input.
+        silent fallback to empty tuple, which could mask invalid input. In strict
+        mode, all elements must already be ModelIntentExecutionResult instances -
+        no silent type coercion from dicts or other types.
 
         Args:
             v: The input value to coerce. Must be either a tuple or a Sequence
-                (excluding str and bytes).
+                (excluding str and bytes) containing only ModelIntentExecutionResult
+                instances.
 
         Returns:
             A tuple of ModelIntentExecutionResult items.
 
         Raises:
             ValueError: If the input is None, str, bytes, or any other non-sequence
-                type. This ensures invalid input types are explicitly rejected
-                rather than silently converted to empty tuple.
+                type, OR if any element is not a ModelIntentExecutionResult instance.
+                This ensures invalid input types are explicitly rejected rather than
+                silently coerced.
 
         Edge Cases:
             - ``None``: Raises ValueError (explicit rejection)
@@ -119,7 +123,8 @@ class ModelOrchestratorOutput(BaseModel):
             - Empty tuple ``()``: Passed through (same as default)
             - Empty list ``[]``: Converted to empty tuple
             - Other non-sequence types (int, dict, etc.): Raises ValueError
-            - Non-empty Sequence: Converts to tuple
+            - Sequence with dict elements: Raises ValueError (strict mode - no coercion)
+            - Sequence with ModelIntentExecutionResult: Converts to tuple
 
         Example:
             >>> # Valid inputs
@@ -130,11 +135,28 @@ class ModelOrchestratorOutput(BaseModel):
             >>> # Invalid inputs raise ValueError
             >>> _coerce_intent_results_to_tuple(None)  # Raises ValueError
             >>> _coerce_intent_results_to_tuple("not a sequence")  # Raises ValueError
+            >>> _coerce_intent_results_to_tuple([{"target": "consul"}])  # Raises ValueError
         """
         if isinstance(v, tuple):
-            return v  # type: ignore[return-value]  # Runtime validated by Pydantic
+            # Validate tuple contents in strict mode
+            for i, item in enumerate(v):
+                if not isinstance(item, ModelIntentExecutionResult):
+                    raise ValueError(
+                        f"intent_results[{i}] must be a ModelIntentExecutionResult, "
+                        f"got {type(item).__name__}"
+                    )
+            return v  # type: ignore[return-value]  # Runtime validated above
         if isinstance(v, Sequence) and not isinstance(v, str | bytes):
-            return tuple(v)  # type: ignore[return-value]  # Runtime validated by Pydantic
+            # Validate and convert to tuple - strict mode requires model instances
+            result: list[ModelIntentExecutionResult] = []
+            for i, item in enumerate(v):
+                if not isinstance(item, ModelIntentExecutionResult):
+                    raise ValueError(
+                        f"intent_results[{i}] must be a ModelIntentExecutionResult, "
+                        f"got {type(item).__name__}"
+                    )
+                result.append(item)
+            return tuple(result)
         raise ValueError(
             f"intent_results must be a tuple or Sequence (excluding str/bytes), "
             f"got {type(v).__name__}"

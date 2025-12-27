@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Node introspection event model for capability discovery and reporting."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TypedDict
 from uuid import UUID
 
 from omnibase_core.enums import EnumNodeKind
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
     ModelIntrospectionPerformanceMetrics,
@@ -82,50 +82,48 @@ class ModelNodeIntrospectionEvent(BaseModel):
             None when metrics were not captured or are unavailable.
 
     Example:
-        ```python
-        from uuid import uuid4
-
-        from omnibase_infra.models.discovery import (
-            ModelIntrospectionPerformanceMetrics,
-            ModelNodeIntrospectionEvent,
-        )
-
-        # Basic event without performance metrics
-        event = ModelNodeIntrospectionEvent(
-            node_id=uuid4(),
-            node_type="EFFECT",
-            capabilities={
-                "operations": ["execute", "query", "batch_execute"],
-                "protocols": ["ProtocolDatabaseAdapter"],
-                "has_fsm": True,
-            },
-            endpoints={
-                "health": "http://localhost:8080/health",
-                "metrics": "http://localhost:8080/metrics",
-            },
-            current_state="connected",
-            version="1.0.0",
-            reason="startup",
-            correlation_id=uuid4(),
-        )
-
-        # Event with performance metrics attached
-        event_with_metrics = ModelNodeIntrospectionEvent(
-            node_id=uuid4(),
-            node_type="EFFECT",
-            capabilities={"operations": ["execute"], "protocols": [], "has_fsm": False},
-            endpoints={"health": "/health"},
-            version="1.0.0",
-            reason="request",
-            correlation_id=uuid4(),
-            performance_metrics=ModelIntrospectionPerformanceMetrics(
-                get_capabilities_ms=15.2,
-                total_introspection_ms=18.5,
-                cache_hit=True,
-                method_count=5,
-            ),
-        )
-        ```
+        >>> from datetime import UTC, datetime
+        >>> from uuid import uuid4
+        >>> from omnibase_infra.models.discovery import (
+        ...     ModelIntrospectionPerformanceMetrics,
+        ...     ModelNodeIntrospectionEvent,
+        ... )
+        >>> # Basic event without performance metrics
+        >>> event = ModelNodeIntrospectionEvent(
+        ...     node_id=uuid4(),
+        ...     node_type="EFFECT",
+        ...     capabilities={
+        ...         "operations": ["execute", "query", "batch_execute"],
+        ...         "protocols": ["ProtocolDatabaseAdapter"],
+        ...         "has_fsm": True,
+        ...     },
+        ...     endpoints={
+        ...         "health": "http://localhost:8080/health",
+        ...         "metrics": "http://localhost:8080/metrics",
+        ...     },
+        ...     current_state="connected",
+        ...     version="1.0.0",
+        ...     reason="startup",
+        ...     correlation_id=uuid4(),
+        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
+        ... )
+        >>> # Event with performance metrics attached
+        >>> event_with_metrics = ModelNodeIntrospectionEvent(
+        ...     node_id=uuid4(),
+        ...     node_type="EFFECT",
+        ...     capabilities={"operations": ["execute"], "protocols": [], "has_fsm": False},
+        ...     endpoints={"health": "/health"},
+        ...     version="1.0.0",
+        ...     reason="request",
+        ...     correlation_id=uuid4(),
+        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
+        ...     performance_metrics=ModelIntrospectionPerformanceMetrics(
+        ...         get_capabilities_ms=15.2,
+        ...         total_introspection_ms=18.5,
+        ...         cache_hit=True,
+        ...         method_count=5,
+        ...     ),
+        ... )
     """
 
     node_id: UUID = Field(..., description="Unique node identifier")
@@ -188,9 +186,10 @@ class ModelNodeIntrospectionEvent(BaseModel):
         description="Correlation ID for distributed tracing (required for idempotency)",
     )
 
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="UTC timestamp of introspection generation",
+        ...,
+        description="UTC timestamp of introspection generation (must be explicitly provided)",
     )
 
     # Optional performance metrics from introspection operation
@@ -200,6 +199,27 @@ class ModelNodeIntrospectionEvent(BaseModel):
         "Includes timing data, cache hit/miss info, and threshold violation tracking. "
         "None when metrics were not captured or are unavailable.",
     )
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
+        """Validate that timestamp is timezone-aware.
+
+        Args:
+            v: The timestamp value to validate.
+
+        Returns:
+            The validated timestamp.
+
+        Raises:
+            ValueError: If timestamp is naive (no timezone info).
+        """
+        if v.tzinfo is None:
+            raise ValueError(
+                "timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            )
+        return v
 
     # Design Decision: This model is immutable (frozen=True) because:
     # 1. Introspection events are snapshots of node state at a point in time

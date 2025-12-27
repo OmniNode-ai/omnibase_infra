@@ -17,6 +17,7 @@ Related:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -71,6 +72,7 @@ class MockMessageDispatcher:
             status=EnumDispatchStatus.SUCCESS,
             topic="test.events",
             dispatcher_id=self._dispatcher_id,
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
 

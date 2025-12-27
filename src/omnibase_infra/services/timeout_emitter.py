@@ -14,8 +14,8 @@ The pattern is:
 
 This ensures restart-safe, exactly-once timeout event emission.
 
-Thread Safety:
-    This emitter is stateless and delegates thread safety to underlying
+Coroutine Safety:
+    This emitter is stateless and delegates coroutine safety to underlying
     components (event_bus, projector). Multiple coroutines may call
     process_timeouts concurrently as long as underlying components
     support concurrent access.
@@ -29,39 +29,23 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.projectors.projector_registration import ProjectorRegistration
-from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.services.timeout_scanner import TimeoutScanner
 
 if TYPE_CHECKING:
     # Import protocols inside TYPE_CHECKING to avoid circular imports.
     # ProtocolEventBus is used only for type annotations.
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
-
-    # Import models inside TYPE_CHECKING to avoid circular import.
-    # The circular import occurs because:
-    # 1. services/__init__.py imports timeout_emitter
-    # 2. timeout_emitter imports from node_registration_orchestrator.models
-    # 3. node_registration_orchestrator/__init__.py imports timeout_coordinator
-    # 4. timeout_coordinator imports from services (which is partially initialized)
-    #
-    # Using TYPE_CHECKING defers the import until type-checking time only.
-    # The actual model classes are imported at runtime inside the methods.
-    from omnibase_infra.nodes.node_registration_orchestrator.models.model_node_liveness_expired import (
-        ModelNodeLivenessExpired as ModelNodeLivenessExpiredType,
-    )
-    from omnibase_infra.nodes.node_registration_orchestrator.models.model_node_registration_ack_timed_out import (
-        ModelNodeRegistrationAckTimedOut as ModelNodeRegistrationAckTimedOutType,
-    )
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +82,10 @@ class ModelTimeoutEmissionResult(BaseModel):
         markers_updated: Number of projection markers successfully updated.
             Always equals ack_timeouts_emitted + liveness_expirations_emitted
             for successful operations.
-        errors: List of error messages for failed emissions. Each error
-            includes the node_id and reason for failure. Note: an error
-            may indicate the event was published but marker update failed.
+        errors: Tuple of error messages for failed emissions (immutable for
+            thread safety). Each error includes the node_id and reason for
+            failure. Note: an error may indicate the event was published but
+            marker update failed.
         processing_time_ms: Total processing time in milliseconds.
         tick_id: The RuntimeTick ID that triggered this processing.
         correlation_id: Correlation ID for distributed tracing.
@@ -132,10 +117,34 @@ class ModelTimeoutEmissionResult(BaseModel):
         ge=0,
         description="Number of projection markers successfully updated (equals sum of emitted counts)",
     )
-    errors: list[str] = Field(
-        default_factory=list,
-        description="Error messages for failed emissions",
+    errors: tuple[str, ...] = Field(
+        default=(),
+        description="Tuple of error messages for failed emissions (immutable for thread safety)",
     )
+
+    @field_validator("errors", mode="before")
+    @classmethod
+    def _coerce_errors_to_tuple(cls, v: object) -> tuple[str, ...]:
+        """Convert list/sequence to tuple for immutability.
+
+        Args:
+            v: The input value to coerce.
+
+        Returns:
+            A tuple of error strings.
+
+        Raises:
+            ValueError: If input is not a valid sequence type.
+        """
+        if isinstance(v, tuple):
+            return v  # type: ignore[return-value]
+        if isinstance(v, Sequence) and not isinstance(v, str | bytes):
+            return tuple(v)  # type: ignore[return-value]
+        raise ValueError(
+            f"errors must be a tuple or Sequence (excluding str/bytes), "
+            f"got {type(v).__name__}"
+        )
+
     processing_time_ms: float = Field(
         ...,
         ge=0.0,
@@ -620,6 +629,8 @@ class TimeoutEmitter:
         )
 
         # 1. Create event
+        # last_heartbeat_at: None if no heartbeats were ever received.
+        # The projection tracks this field explicitly.
         event = ModelNodeLivenessExpired(
             node_id=projection.entity_id,
             liveness_deadline=projection.liveness_deadline,

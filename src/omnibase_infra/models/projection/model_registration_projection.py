@@ -6,9 +6,11 @@ Provides the Pydantic model for registration projections stored in PostgreSQL.
 Used by orchestrators to query current registration state and make workflow
 decisions without scanning Kafka topics.
 
-Thread Safety:
+Concurrency Safety:
     This model is mutable (frozen=False) to allow updates during projection
-    persistence. Callers should ensure thread-safe access when updating.
+    persistence. Callers should ensure safe concurrent access when updating
+    (e.g., using asyncio.Lock for coroutine-safety or threading.Lock for
+    thread-safety, depending on the execution context).
 
 Related Tickets:
     - OMN-1006: Add last_heartbeat_at for liveness expired event reporting
@@ -22,9 +24,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from omnibase_core.enums import (
-    EnumNodeKind,
-)
+from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -63,7 +63,7 @@ class ModelRegistrationProjection(BaseModel):
         capabilities: Node capabilities snapshot at registration time
         ack_deadline: Deadline for node acknowledgment (nullable)
         liveness_deadline: Deadline for next heartbeat (nullable)
-        last_heartbeat_at: Timestamp of last received heartbeat (for liveness reporting)
+        last_heartbeat_at: Timestamp of last received heartbeat (None if never received, for liveness reporting)
         ack_timeout_emitted_at: Marker for ack timeout event deduplication (C2)
         liveness_timeout_emitted_at: Marker for liveness timeout deduplication (C2)
         last_applied_event_id: message_id of last applied event (idempotency)
@@ -146,7 +146,7 @@ class ModelRegistrationProjection(BaseModel):
     )
     last_heartbeat_at: datetime | None = Field(
         default=None,
-        description="Timestamp of last received heartbeat (for liveness reporting)",
+        description="Timestamp of last received heartbeat (None if never received, for liveness reporting)",
     )
 
     # Timeout Emission Markers (for C2 deduplication)

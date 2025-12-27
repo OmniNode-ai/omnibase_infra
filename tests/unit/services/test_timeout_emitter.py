@@ -267,7 +267,7 @@ class TestTimeoutEmitterProcessTimeouts:
         assert result.ack_timeouts_emitted == 0
         assert result.liveness_expirations_emitted == 0
         assert result.markers_updated == 0
-        assert result.errors == []
+        assert result.errors == ()
         assert result.tick_id == tick_id
         assert result.correlation_id == correlation_id
         assert result.processing_time_ms >= 0.0
@@ -313,7 +313,7 @@ class TestTimeoutEmitterProcessTimeouts:
         assert result.ack_timeouts_emitted == 1
         assert result.liveness_expirations_emitted == 0
         assert result.markers_updated == 1
-        assert result.errors == []
+        assert result.errors == ()
 
         # Verify publish and marker update via atomic update
         mock_event_bus.publish_envelope.assert_called_once()
@@ -355,7 +355,7 @@ class TestTimeoutEmitterProcessTimeouts:
         assert result.ack_timeouts_emitted == 0
         assert result.liveness_expirations_emitted == 1
         assert result.markers_updated == 1
-        assert result.errors == []
+        assert result.errors == ()
 
         # Verify publish and marker update via atomic update
         mock_event_bus.publish_envelope.assert_called_once()
@@ -408,7 +408,7 @@ class TestTimeoutEmitterProcessTimeouts:
         assert result.liveness_expirations_emitted == 2
         assert result.markers_updated == 3
         assert result.total_emitted == 3
-        assert result.errors == []
+        assert result.errors == ()
 
         # 3 publishes, 1 ack marker update, 2 liveness marker updates
         assert mock_event_bus.publish_envelope.call_count == 3
@@ -771,9 +771,9 @@ class TestTimeoutEmitterErrorHandling:
 
         # First failed, second succeeded
         assert result.ack_timeouts_emitted == 1
-        assert result.errors == [
-            f"ack_timeout failed for node {node1_id}: InfraConnectionError"
-        ]
+        assert result.errors == (
+            f"ack_timeout failed for node {node1_id}: InfraConnectionError",
+        )
         assert result.has_errors is True
 
     async def test_process_timeouts_marker_update_failure_not_counted(
@@ -1047,7 +1047,7 @@ class TestModelTimeoutEmissionResult:
         assert result.ack_timeouts_emitted == 0
         assert result.liveness_expirations_emitted == 0
         assert result.markers_updated == 0
-        assert result.errors == []
+        assert result.errors == ()
 
     def test_result_model_is_frozen(self) -> None:
         """Test result model is immutable."""

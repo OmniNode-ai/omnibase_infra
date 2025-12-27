@@ -28,9 +28,11 @@ Restart Safety:
     survives restarts. This enables orchestrators to detect scheduler restarts
     and handle any missed ticks appropriately.
 
-Thread Safety:
-    Implementations MUST be thread-safe. The scheduler may be accessed from
-    multiple coroutines for status checks while the tick loop runs.
+Concurrency Safety:
+    Implementations MUST be safe for concurrent coroutine access. The scheduler
+    may be accessed from multiple coroutines for status checks while the tick
+    loop runs. Use asyncio.Lock for shared mutable state (coroutine-safe, not
+    thread-safe).
 
 Example:
     .. code-block:: python
@@ -44,7 +46,9 @@ Example:
                 self._scheduler_id = "test-scheduler-001"
                 self._running = False
                 self._sequence = 0
+                self._total_ticks_emitted = 0
                 self._interval = interval_seconds
+                self._state_lock = asyncio.Lock()
 
             @property
             def scheduler_id(self) -> str:
@@ -67,15 +71,19 @@ Example:
 
             async def emit_tick(self, now: datetime | None = None) -> None:
                 self._sequence += 1
+                self._total_ticks_emitted += 1
                 tick_time = now or datetime.now(timezone.utc)
                 # Emit event to Kafka...
 
-            def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
-                return ModelRuntimeSchedulerMetrics(
-                    scheduler_id=self._scheduler_id,
-                    ticks_emitted=self._sequence,
-                    is_running=self._running,
-                )
+            async def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
+                # Lock ensures consistent snapshot of all metrics
+                from omnibase_infra.runtime.enums import EnumSchedulerStatus
+                async with self._state_lock:
+                    return ModelRuntimeSchedulerMetrics(
+                        scheduler_id=self._scheduler_id,
+                        status=EnumSchedulerStatus.RUNNING if self._running else EnumSchedulerStatus.STOPPED,
+                        ticks_emitted=self._total_ticks_emitted,
+                    )
 
         # Protocol conformance check via duck typing (per ONEX conventions)
         scheduler = InMemoryScheduler()
@@ -101,9 +109,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from omnibase_infra.models.scheduler.model_runtime_scheduler_metrics import (
-        ModelRuntimeSchedulerMetrics,
-    )
+    from omnibase_infra.runtime.models import ModelRuntimeSchedulerMetrics
 
 __all__: list[str] = [
     "ProtocolRuntimeScheduler",
@@ -136,13 +142,14 @@ class ProtocolRuntimeScheduler(Protocol):
         **Note**: For complete type safety, use static type checking (mypy)
         in addition to duck typing verification.
 
-    Thread Safety:
-        Implementations MUST be thread-safe. The scheduler may be:
+    Concurrency Safety:
+        Implementations MUST be safe for concurrent coroutine access. The scheduler
+        may be:
         - Started/stopped from the main coroutine
         - Queried for status from multiple coroutines
         - Emitting ticks in a background task
 
-        Use appropriate synchronization primitives (asyncio.Lock) for state access.
+        Use asyncio.Lock for state access (coroutine-safe, not OS thread-safe).
 
     Restart Safety:
         The ``current_sequence_number`` property returns a monotonically increasing
@@ -172,7 +179,7 @@ class ProtocolRuntimeScheduler(Protocol):
                         await asyncio.sleep(1.0)
                 finally:
                     await scheduler.stop()
-                    metrics = scheduler.get_metrics()
+                    metrics = await scheduler.get_metrics()
                     print(f"Scheduler stopped after {metrics.ticks_emitted} ticks")
 
     Attributes:
@@ -225,9 +232,9 @@ class ProtocolRuntimeScheduler(Protocol):
         - True: Scheduler is actively emitting ticks
         - False: Scheduler is stopped or not yet started
 
-        Thread Safety:
-            This property MUST be safe for concurrent access. It may be
-            called from different coroutines while the tick loop runs.
+        Concurrency Safety:
+            This property MUST be safe for concurrent coroutine access. It may
+            be called from different coroutines while the tick loop runs.
 
         Returns:
             bool: True if running and emitting ticks, False otherwise.
@@ -380,9 +387,9 @@ class ProtocolRuntimeScheduler(Protocol):
             - Publishes the tick to the configured event bus/topic
             - Updates internal metrics
 
-        Thread Safety:
-            This method MUST be safe for concurrent calls. Use appropriate
-            locking if internal state is modified.
+        Concurrency Safety:
+            This method MUST be safe for concurrent coroutine calls. Use
+            asyncio.Lock if internal state is modified.
 
         Example:
             .. code-block:: python
@@ -412,7 +419,7 @@ class ProtocolRuntimeScheduler(Protocol):
         """
         ...
 
-    def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
+    async def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
         """Get current scheduler metrics.
 
         Returns a snapshot of the scheduler's operational metrics for
@@ -420,38 +427,42 @@ class ProtocolRuntimeScheduler(Protocol):
 
         The metrics model typically includes:
             - scheduler_id: Scheduler identifier
-            - is_running: Current running state
+            - status: Current scheduler status (EnumSchedulerStatus)
             - ticks_emitted: Total ticks emitted since start
-            - current_sequence: Current sequence number
-            - last_tick_time: Timestamp of last tick (if any)
-            - interval_seconds: Configured tick interval
-            - errors_count: Number of tick emission errors
+            - ticks_failed: Number of failed tick emissions
+            - current_sequence_number: Current sequence number
+            - last_tick_at: Timestamp of last tick (if any)
+            - consecutive_failures: Number of consecutive tick failures
 
         Returns:
             ModelRuntimeSchedulerMetrics: Current metrics snapshot.
 
-        Thread Safety:
-            This method MUST be safe for concurrent calls. The returned
-            metrics object is a snapshot and SHOULD NOT reflect changes
-            after the call returns.
+        Concurrency Safety:
+            This method acquires the internal state lock (asyncio.Lock) to ensure
+            a consistent snapshot of all metrics. The returned metrics object is
+            immutable and safe to use after the call returns. All state variables
+            are read atomically within a single lock acquisition.
 
         Example:
             .. code-block:: python
 
-                def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
-                    return ModelRuntimeSchedulerMetrics(
-                        scheduler_id=self._scheduler_id,
-                        is_running=self._running,
-                        ticks_emitted=self._total_ticks_emitted,
-                        current_sequence=self._sequence_number,
-                        last_tick_time=self._last_tick_time,
-                        interval_seconds=self._interval,
-                        errors_count=self._error_count,
-                    )
+                from omnibase_infra.runtime.enums import EnumSchedulerStatus
+
+                async def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
+                    async with self._state_lock:
+                        return ModelRuntimeSchedulerMetrics(
+                            scheduler_id=self._scheduler_id,
+                            status=EnumSchedulerStatus.RUNNING if self._running else EnumSchedulerStatus.STOPPED,
+                            ticks_emitted=self._total_ticks_emitted,
+                            ticks_failed=self._ticks_failed,
+                            current_sequence_number=self._sequence_number,
+                            last_tick_at=self._last_tick_time,
+                            consecutive_failures=self._consecutive_failures,
+                        )
 
                 # Usage in monitoring
-                metrics = scheduler.get_metrics()
-                if not metrics.is_running:
+                metrics = await scheduler.get_metrics()
+                if metrics.status != EnumSchedulerStatus.RUNNING:
                     alert("Scheduler is not running!")
         """
         ...

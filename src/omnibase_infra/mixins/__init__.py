@@ -3,7 +3,7 @@
 """ONEX Infrastructure Mixins.
 
 Reusable mixin classes providing:
-- Thread-safe async operations
+- Coroutine-safe async operations (using asyncio.Lock)
 - Infrastructure error integration
 - Correlation ID propagation
 - Configurable behavior
@@ -26,12 +26,18 @@ from omnibase_infra.mixins.mixin_async_circuit_breaker import (
     ModelCircuitBreakerConfig,
 )
 from omnibase_infra.mixins.mixin_envelope_extraction import MixinEnvelopeExtraction
-from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
+from omnibase_infra.mixins.mixin_node_introspection import (
+    MixinNodeIntrospection,
+    PerformanceMetricsCacheDict,
+)
+from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
 
-__all__ = [
+__all__: list[str] = [
     "CircuitState",
     "MixinAsyncCircuitBreaker",
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
     "ModelCircuitBreakerConfig",
+    "PerformanceMetricsCacheDict",
+    "ProtocolEventBusLike",
 ]

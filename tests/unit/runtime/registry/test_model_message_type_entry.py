@@ -26,6 +26,7 @@ class TestModelMessageTypeEntry:
             handler_ids=("user-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         assert entry.message_type == "UserCreated"
         assert entry.handler_ids == ("user-handler",)
@@ -40,6 +41,7 @@ class TestModelMessageTypeEntry:
             handler_ids=("order-handler", "audit-handler", "notification-handler"),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="order"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         assert len(entry.handler_ids) == 3
         assert "order-handler" in entry.handler_ids
@@ -58,6 +60,7 @@ class TestModelMessageTypeEntry:
                 ]
             ),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         assert EnumMessageCategory.EVENT in entry.allowed_categories
         assert EnumMessageCategory.COMMAND in entry.allowed_categories
@@ -70,6 +73,7 @@ class TestModelMessageTypeEntry:
             handler_ids=("user-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         assert entry.supports_category(EnumMessageCategory.EVENT) is True
         assert entry.supports_category(EnumMessageCategory.COMMAND) is False
@@ -82,6 +86,7 @@ class TestModelMessageTypeEntry:
             handler_ids=("user-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         outcome = entry.validate_category(EnumMessageCategory.EVENT)
         assert outcome.is_valid is True
@@ -94,6 +99,7 @@ class TestModelMessageTypeEntry:
             handler_ids=("user-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         outcome = entry.validate_category(EnumMessageCategory.COMMAND)
         assert outcome.is_valid is False
@@ -109,6 +115,7 @@ class TestModelMessageTypeEntry:
             handler_ids=("user-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         updated = entry.with_additional_handler("audit-handler")
 
@@ -124,6 +131,7 @@ class TestModelMessageTypeEntry:
             handler_ids=("user-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         updated = entry.with_additional_handler("user-handler")
 
@@ -139,6 +147,7 @@ class TestModelMessageTypeEntry:
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
             enabled=True,
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         disabled = entry.with_enabled(False)
 
@@ -154,21 +163,22 @@ class TestModelMessageTypeEntry:
             handler_ids=("user-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         with pytest.raises(ValidationError):
             entry.message_type = "Modified"  # type: ignore[misc]
 
-    def test_registered_at_default(self) -> None:
-        """Test that registered_at defaults to current time."""
-        before = datetime.now(UTC)
+    def test_registered_at_required(self) -> None:
+        """Test that registered_at must be explicitly provided."""
+        test_timestamp = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
         entry = ModelMessageTypeEntry(
             message_type="UserCreated",
             handler_ids=("user-handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=test_timestamp,
         )
-        after = datetime.now(UTC)
-        assert before <= entry.registered_at <= after
+        assert entry.registered_at == test_timestamp
 
 
 class TestModelMessageTypeEntryValidation:
@@ -181,6 +191,7 @@ class TestModelMessageTypeEntryValidation:
                 handler_ids=("handler",),
                 allowed_categories=frozenset([EnumMessageCategory.EVENT]),
                 domain_constraint=ModelDomainConstraint(owning_domain="user"),
+                registered_at=datetime(2025, 1, 1, tzinfo=UTC),
             )  # type: ignore[call-arg]
 
     def test_handler_ids_required(self) -> None:
@@ -190,6 +201,7 @@ class TestModelMessageTypeEntryValidation:
                 message_type="UserCreated",
                 allowed_categories=frozenset([EnumMessageCategory.EVENT]),
                 domain_constraint=ModelDomainConstraint(owning_domain="user"),
+                registered_at=datetime(2025, 1, 1, tzinfo=UTC),
             )  # type: ignore[call-arg]
 
     def test_handler_ids_min_length(self) -> None:
@@ -200,6 +212,7 @@ class TestModelMessageTypeEntryValidation:
                 handler_ids=(),  # Empty tuple
                 allowed_categories=frozenset([EnumMessageCategory.EVENT]),
                 domain_constraint=ModelDomainConstraint(owning_domain="user"),
+                registered_at=datetime(2025, 1, 1, tzinfo=UTC),
             )
 
     def test_allowed_categories_required(self) -> None:
@@ -209,6 +222,7 @@ class TestModelMessageTypeEntryValidation:
                 message_type="UserCreated",
                 handler_ids=("handler",),
                 domain_constraint=ModelDomainConstraint(owning_domain="user"),
+                registered_at=datetime(2025, 1, 1, tzinfo=UTC),
             )  # type: ignore[call-arg]
 
     def test_domain_constraint_required(self) -> None:
@@ -218,6 +232,7 @@ class TestModelMessageTypeEntryValidation:
                 message_type="UserCreated",
                 handler_ids=("handler",),
                 allowed_categories=frozenset([EnumMessageCategory.EVENT]),
+                registered_at=datetime(2025, 1, 1, tzinfo=UTC),
             )  # type: ignore[call-arg]
 
     def test_message_type_max_length(self) -> None:
@@ -228,6 +243,7 @@ class TestModelMessageTypeEntryValidation:
             handler_ids=("handler",),
             allowed_categories=frozenset([EnumMessageCategory.EVENT]),
             domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            registered_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
         assert len(entry.message_type) == 200
 
@@ -238,6 +254,7 @@ class TestModelMessageTypeEntryValidation:
                 handler_ids=("handler",),
                 allowed_categories=frozenset([EnumMessageCategory.EVENT]),
                 domain_constraint=ModelDomainConstraint(owning_domain="user"),
+                registered_at=datetime(2025, 1, 1, tzinfo=UTC),
             )
 
     def test_allowed_categories_empty_raises_validation_error(self) -> None:
@@ -252,6 +269,7 @@ class TestModelMessageTypeEntryValidation:
                 handler_ids=("handler",),
                 allowed_categories=frozenset(),  # Empty frozenset - INVALID
                 domain_constraint=ModelDomainConstraint(owning_domain="user"),
+                registered_at=datetime(2025, 1, 1, tzinfo=UTC),
             )
 
         # Verify the error message is clear and actionable

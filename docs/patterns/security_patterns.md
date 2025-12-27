@@ -244,15 +244,14 @@ class ModelUserInput(BaseModel):
 ### SQL Injection Prevention
 
 ```python
-from typing import Any
 from uuid import UUID
 
 
 async def execute_query_safely(
-    db_connection: Any,
+    db_connection: object,
     user_id: UUID,
     correlation_id: UUID,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Execute parameterized query to prevent SQL injection.
 
     CRITICAL: Never use string formatting for SQL queries.
@@ -269,11 +268,11 @@ async def execute_query_safely(
 
 
 async def execute_dynamic_query_safely(
-    db_connection: Any,
+    db_connection: object,
     table_name: str,
     allowed_tables: frozenset[str],
     correlation_id: UUID,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Execute query with validated table name.
 
     For dynamic table names, use allowlist validation.
@@ -452,7 +451,7 @@ class ServiceAuthenticator:
     def __init__(
         self,
         service_id: str,
-        vault_client: Any,
+        vault_client: object,
     ) -> None:
         self._service_id = service_id
         self._vault = vault_client
@@ -631,7 +630,7 @@ class VaultSecretProvider:
         - Error sanitization
     """
 
-    def __init__(self, vault_client: Any) -> None:
+    def __init__(self, vault_client: object) -> None:
         self._vault = vault_client
         self._cache: dict[str, tuple[dict, float]] = {}
         self._cache_ttl = 300.0  # 5 minutes
@@ -743,7 +742,7 @@ class DatabaseCredentialRotator:
 
     def __init__(
         self,
-        vault_client: Any,
+        vault_client: object,
         rotation_interval: timedelta = timedelta(hours=1),
     ) -> None:
         self._vault = vault_client
@@ -1134,11 +1133,11 @@ def resource_limits(
 
 
 async def execute_policy_safely(
-    policy: Any,
-    context: dict,
+    policy: object,
+    context: dict[str, object],
     timeout_seconds: float = 1.0,
     max_memory_mb: int = 100,
-) -> Any:
+) -> object:
     """Execute policy with timeout and resource limits.
 
     Args:
@@ -1263,11 +1262,10 @@ kafka-acls.sh --add --deny-principal User:* \\
 
 ```python
 import structlog
-from typing import Any
 from uuid import UUID
 
 
-def sanitize_log_data(data: dict[str, Any]) -> dict[str, Any]:
+def sanitize_log_data(data: dict[str, object]) -> dict[str, object]:
     """Remove sensitive data from log context.
 
     CRITICAL: Call before logging any user-provided data.
@@ -1374,7 +1372,7 @@ class AuditLogger:
     All security-relevant events must be logged to the audit trail.
     """
 
-    def __init__(self, storage_backend: Any) -> None:
+    def __init__(self, storage_backend: object) -> None:
         self._storage = storage_backend
 
     async def log_event(

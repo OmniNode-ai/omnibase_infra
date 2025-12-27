@@ -20,10 +20,12 @@ Thread Safety:
 
 Example:
     >>> from datetime import datetime, timezone
+    >>> # Use explicit timestamps for deterministic behavior
+    >>> last_tick = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
     >>> metrics = ModelRuntimeSchedulerMetrics(
     ...     scheduler_id="scheduler-001",
     ...     ticks_emitted=100,
-    ...     last_tick_at=datetime.now(timezone.utc),
+    ...     last_tick_at=last_tick,
     ... )
     >>> print(metrics.tick_success_rate())
     1.0

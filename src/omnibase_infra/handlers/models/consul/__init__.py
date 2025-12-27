@@ -16,6 +16,10 @@ Payload Types:
 
 Union Type:
     ConsulPayload: Discriminated union of all payload types using operation_type field
+
+Registry-Based Alternative (OMN-1007):
+    - ModelPayloadConsul: Base model for all Consul handler payloads
+    - RegistryPayloadConsul: Decorator-based registry for payload type discovery
 """
 
 from omnibase_infra.handlers.models.consul.enum_consul_operation_type import (
@@ -46,6 +50,10 @@ from omnibase_infra.handlers.models.consul.model_consul_kv_put_payload import (
 from omnibase_infra.handlers.models.consul.model_consul_register_payload import (
     ModelConsulRegisterPayload,
 )
+from omnibase_infra.handlers.models.consul.model_payload_consul import (
+    ModelPayloadConsul,
+    RegistryPayloadConsul,
+)
 
 __all__: list[str] = [
     "EnumConsulOperationType",
@@ -58,4 +66,6 @@ __all__: list[str] = [
     "ModelConsulDeregisterPayload",
     "ConsulPayload",
     "ModelConsulHandlerPayload",
+    "ModelPayloadConsul",
+    "RegistryPayloadConsul",
 ]

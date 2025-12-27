@@ -18,8 +18,17 @@ from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
-# Create SEMVER_DEFAULT inline as the core module doesn't export it
-SEMVER_DEFAULT = ModelSemVer(major=1, minor=0, patch=0)
+
+# Module-level pytest fixture for SEMVER_DEFAULT
+# This constant represents the default semantic version (1.0.0) used across tests
+@pytest.fixture
+def semver_default() -> ModelSemVer:
+    """Provide the default semantic version (1.0.0) for tests.
+
+    Returns:
+        ModelSemVer with major=1, minor=0, patch=0.
+    """
+    return ModelSemVer(major=1, minor=0, patch=0)
 
 
 class TestModelSemVerBasics:
@@ -123,17 +132,17 @@ class TestModelSemVerComparison:
 
 
 class TestSemVerDefault:
-    """Test SEMVER_DEFAULT constant."""
+    """Test semver_default fixture (default version 1.0.0)."""
 
-    def test_default_version_value(self) -> None:
-        """Test SEMVER_DEFAULT has expected values."""
-        assert SEMVER_DEFAULT.major == 1
-        assert SEMVER_DEFAULT.minor == 0
-        assert SEMVER_DEFAULT.patch == 0
+    def test_default_version_value(self, semver_default: ModelSemVer) -> None:
+        """Test semver_default fixture has expected values."""
+        assert semver_default.major == 1
+        assert semver_default.minor == 0
+        assert semver_default.patch == 0
 
-    def test_default_version_string(self) -> None:
-        """Test SEMVER_DEFAULT string representation."""
-        assert str(SEMVER_DEFAULT) == "1.0.0"
+    def test_default_version_string(self, semver_default: ModelSemVer) -> None:
+        """Test semver_default fixture string representation."""
+        assert str(semver_default) == "1.0.0"
 
 
 class TestModelSemVerRoundtrip:

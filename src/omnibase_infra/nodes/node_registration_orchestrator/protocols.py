@@ -10,8 +10,8 @@ Protocol Responsibilities:
     ProtocolReducer: Pure function that computes intents from events
     ProtocolEffect: Side-effectful executor that performs infrastructure operations
 
-Thread Safety:
-    All protocol implementations MUST be thread-safe for concurrent async calls.
+Concurrency Safety:
+    All protocol implementations MUST be safe for concurrent async coroutine calls.
 
     ProtocolReducer:
     - Same reducer instance may process multiple events concurrently
@@ -19,8 +19,8 @@ Thread Safety:
     - Avoid instance-level caches that could cause race conditions
 
     ProtocolEffect:
-    - Multiple async tasks may invoke execute_intent() simultaneously
-    - Use asyncio.Lock for any shared mutable state
+    - Multiple coroutines may invoke execute_intent() simultaneously
+    - Use asyncio.Lock for any shared mutable state (coroutine-safe, not thread-safe)
     - Ensure underlying clients (Consul, PostgreSQL) are async-safe
 
 Error Handling and Sanitization:
@@ -78,6 +78,86 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_registrati
     ModelRegistrationIntent,
 )
 
+
+@runtime_checkable
+class ProtocolRegistrationIntent(Protocol):
+    """Protocol for registration intent models.
+
+    This protocol defines the structural interface that all registration intent
+    models must implement. Using a protocol instead of a union type:
+    - Eliminates duplicate union definitions across modules
+    - Allows future intent types to be added by simply implementing the protocol
+    - Follows ONEX duck typing principles
+    - Enables structural typing for type narrowing without import dependencies
+
+    Thread Safety:
+        Intent models implementing this protocol MUST be immutable (frozen=True
+        in Pydantic ConfigDict) to ensure safe concurrent access.
+
+    Implementers:
+        - ModelConsulRegistrationIntent: Consul service registration intents
+        - ModelPostgresUpsertIntent: PostgreSQL upsert intents
+        (future intent types are automatically supported via structural typing)
+
+    Example:
+        >>> def process_intent(intent: ProtocolRegistrationIntent) -> None:
+        ...     # Access common properties through the protocol
+        ...     print(f"Processing {intent.kind} intent for node {intent.node_id}")
+        ...     print(f"Operation: {intent.operation}")
+        ...     print(f"Correlation ID: {intent.correlation_id}")
+
+    Related:
+        - ModelRegistrationIntent: Annotated discriminated union for Pydantic parsing
+        - ProtocolEffect.execute_intent(): Uses this protocol for intent parameters
+
+    .. versionadded:: 0.7.0
+        Created as part of OMN-1007 to replace duplicated union type definitions.
+    """
+
+    @property
+    def kind(self) -> str:
+        """The intent kind identifier (e.g., 'consul', 'postgres').
+
+        This field is used as a discriminator for intent routing and type
+        narrowing. Each intent implementation MUST use a unique kind value.
+
+        Returns:
+            String identifier for the intent type.
+        """
+        ...
+
+    @property
+    def operation(self) -> str:
+        """The operation to perform (e.g., 'register', 'upsert', 'deregister').
+
+        Returns:
+            String identifier for the operation.
+        """
+        ...
+
+    @property
+    def node_id(self) -> UUID:
+        """The target node identifier.
+
+        Returns:
+            UUID of the node this intent operates on.
+        """
+        ...
+
+    @property
+    def correlation_id(self) -> UUID:
+        """Correlation ID for distributed tracing.
+
+        This ID enables tracing intent execution across services. It should
+        be propagated through all infrastructure operations triggered by
+        this intent.
+
+        Returns:
+            UUID for correlation/tracing.
+        """
+        ...
+
+
 if TYPE_CHECKING:
     from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
     from omnibase_infra.nodes.node_registration_orchestrator.models import (
@@ -93,8 +173,8 @@ class ProtocolReducer(Protocol):
     and an incoming event, it returns updated state plus a list of typed
     intents describing what infrastructure operations should occur.
 
-    Thread Safety:
-        Implementations MUST be thread-safe for concurrent async calls.
+    Concurrency Safety:
+        Implementations MUST be safe for concurrent async coroutine calls.
         The same reducer instance may process multiple events concurrently.
         Follow these guidelines:
         - Treat ModelReducerState as immutable (create new instances)
@@ -191,9 +271,9 @@ class ProtocolReducer(Protocol):
         1. Updated reducer state (for deduplication, rate limiting, etc.)
         2. A tuple of intents describing infrastructure operations to perform
 
-        Thread Safety:
+        Concurrency Safety:
             This method MUST be safe to call concurrently from multiple
-            async tasks. Implementations should:
+            coroutines. Implementations should:
             - Not modify the input state object
             - Return a new ModelReducerState instance
             - Avoid instance-level mutation
@@ -246,10 +326,10 @@ class ProtocolEffect(Protocol):
     The effect node performs the actual I/O operations (Consul registration,
     PostgreSQL upsert, etc.) based on typed intents from the reducer.
 
-    Thread Safety:
-        Implementations MUST be thread-safe for concurrent async calls.
-        Multiple async tasks may invoke execute_intent() simultaneously.
-        Use asyncio.Lock for any shared mutable state.
+    Concurrency Safety:
+        Implementations MUST be safe for concurrent async coroutine calls.
+        Multiple coroutines may invoke execute_intent() simultaneously.
+        Use asyncio.Lock for any shared mutable state (coroutine-safe).
 
     Error Handling:
         Implementations MUST follow error sanitization guidelines:
@@ -312,9 +392,9 @@ class ProtocolEffect(Protocol):
         Performs the infrastructure operation described by the intent and
         returns a result capturing success/failure and timing.
 
-        Thread Safety:
+        Concurrency Safety:
             This method MUST be safe to call concurrently from multiple
-            async tasks. Implementations should not rely on instance state
+            coroutines. Implementations should not rely on instance state
             that could be modified by concurrent calls.
 
         Error Sanitization:
@@ -355,4 +435,5 @@ class ProtocolEffect(Protocol):
 __all__ = [
     "ProtocolEffect",
     "ProtocolReducer",
+    "ProtocolRegistrationIntent",
 ]

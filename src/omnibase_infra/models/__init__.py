@@ -49,7 +49,7 @@ from omnibase_infra.models.validation import (
     ModelValidationOutcome,
 )
 
-__all__ = [
+__all__: list[str] = [
     # Dispatch models
     "EnumDispatchStatus",
     "EnumTopicStandard",

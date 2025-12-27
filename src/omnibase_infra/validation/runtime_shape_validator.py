@@ -153,7 +153,7 @@ from __future__ import annotations
 import functools
 import inspect
 from collections.abc import Callable
-from typing import TypeVar
+from typing import TypeVar, cast
 from uuid import UUID
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -854,7 +854,9 @@ def enforce_execution_shape(handler_type: EnumHandlerType) -> Callable[[F], F]:
 
             return result
 
-        return wrapper  # type: ignore[return-value]
+        # Cast wrapper to F - functools.wraps preserves the signature at runtime,
+        # and mypy cannot prove the equivalence, so we use an explicit cast.
+        return cast(F, wrapper)
 
     return decorator
 

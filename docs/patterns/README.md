@@ -4,12 +4,13 @@ This directory contains detailed implementation guides and best practices for ON
 
 ## Pattern Categories
 
-### Error Handling
+### Error Handling & Resilience
 - **[Error Handling Patterns](./error_handling_patterns.md)** - Error classification, context, and hierarchy
 - **[Error Sanitization Patterns](./error_sanitization_patterns.md)** - Data classification, sanitization rules, and secure error reporting
 - **[Error Recovery Patterns](./error_recovery_patterns.md)** - Exponential backoff, circuit breakers, graceful degradation, credential refresh
 - **[Retry, Backoff, and Compensation Strategy](./retry_backoff_compensation_strategy.md)** - Formal retry policies, backoff formulas, compensation for partial failures
 - **[Circuit Breaker Implementation](./circuit_breaker_implementation.md)** - Complete production-ready circuit breaker with state machine
+- **[Dispatcher Resilience](./dispatcher_resilience.md)** - Dispatcher-owned resilience pattern for message dispatch engine
 
 ### Observability
 - **[Correlation ID Tracking](./correlation_id_tracking.md)** - Request tracing, envelope pattern, distributed logging
@@ -46,6 +47,7 @@ This directory contains detailed implementation guides and best practices for ON
 | Configure per-effect retries | [Retry/Compensation](./retry_backoff_compensation_strategy.md#per-effect-type-configuration) | Effect-Specific Config |
 | Handle partial failures | [Retry/Compensation](./retry_backoff_compensation_strategy.md#compensation-strategy-for-partial-failures) | Compensation Patterns |
 | Prevent cascading failures | [Circuit Breaker](./circuit_breaker_implementation.md) | Complete Implementation |
+| Implement resilient dispatchers | [Dispatcher Resilience](./dispatcher_resilience.md) | Dispatcher Implementation Pattern |
 | Track requests across services | [Correlation ID](./correlation_id_tracking.md) | Correlation ID Flow |
 | Inject dependencies | [Container DI](./container_dependency_injection.md) | Constructor Injection |
 | Handle cache fallback | [Error Recovery](./error_recovery_patterns.md) | Graceful Degradation |
@@ -101,6 +103,11 @@ Circuit Breaker Implementation
     ├── Detailed state machine implementation
     ├── Depends on: Error Handling, Error Recovery
     └── References: Correlation ID, Metrics
+
+Dispatcher Resilience
+    ├── Pattern for dispatcher-owned resilience
+    ├── Depends on: Circuit Breaker, Error Handling
+    └── References: MixinAsyncCircuitBreaker, MessageDispatchEngine
 
 Correlation ID Tracking
     ├── Request tracing infrastructure

@@ -17,9 +17,9 @@ Design Decisions:
     - Uses tick_id as causation_id for emitted events
     - Delegates to TimeoutEmitter for actual emission logic
 
-Thread Safety:
-    This coordinator is stateless and thread-safe for concurrent calls.
-    Each call coordinates independently, delegating thread safety to
+Coroutine Safety:
+    This coordinator is stateless and coroutine-safe for concurrent calls.
+    Each call coordinates independently, delegating coroutine safety to
     the underlying services (TimeoutScanner, TimeoutEmitter).
 
 Related Tickets:
@@ -31,15 +31,14 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Sequence
 from datetime import datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.services import (
-    ModelTimeoutEmissionResult,
-    ModelTimeoutQueryResult,
     TimeoutEmitter,
     TimeoutScanner,
 )
@@ -66,7 +65,7 @@ class ModelTimeoutCoordinationResult(BaseModel):
         emission_time_ms: Time spent emitting events and updating markers.
         success: Whether coordination completed without errors.
         error: Error message if coordination failed.
-        errors: List of non-fatal errors encountered during coordination.
+        errors: Tuple of non-fatal errors encountered during coordination (immutable).
 
     Example:
         >>> result = await coordinator.coordinate(tick)
@@ -136,10 +135,33 @@ class ModelTimeoutCoordinationResult(BaseModel):
         default=None,
         description="Error message if coordination failed",
     )
-    errors: list[str] = Field(
-        default_factory=list,
-        description="List of non-fatal errors encountered",
+    errors: tuple[str, ...] = Field(
+        default=(),
+        description="Tuple of non-fatal errors encountered (immutable for thread safety)",
     )
+
+    @field_validator("errors", mode="before")
+    @classmethod
+    def _coerce_errors_to_tuple(cls, v: object) -> tuple[str, ...]:
+        """Convert list/sequence to tuple for immutability.
+
+        Args:
+            v: The input value to coerce.
+
+        Returns:
+            A tuple of error strings.
+
+        Raises:
+            ValueError: If input is not a valid sequence type.
+        """
+        if isinstance(v, tuple):
+            return v  # type: ignore[return-value]
+        if isinstance(v, Sequence) and not isinstance(v, str | bytes):
+            return tuple(v)  # type: ignore[return-value]
+        raise ValueError(
+            f"errors must be a tuple or Sequence (excluding str/bytes), "
+            f"got {type(v).__name__}"
+        )
 
     @property
     def total_found(self) -> int:

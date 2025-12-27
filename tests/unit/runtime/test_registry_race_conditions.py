@@ -770,9 +770,6 @@ class TestHandlerRegistryConcurrentOperations:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test concurrent registration of multiple handlers is thread-safe."""
-        handlers = [
-            (HANDLER_TYPE_HTTP, type(f"MockHttp{i}", (), {})) for i in range(20)
-        ]
         errors: list[Exception] = []
 
         def register_handler(protocol: str, cls: type) -> None:

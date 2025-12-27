@@ -179,7 +179,7 @@ from omnibase_infra.validation.topic_category_validator import (
     validate_topic_categories_in_file,
 )
 
-__all__ = [
+__all__: list[str] = [
     # Direct re-exports from omnibase_core
     "validate_architecture",
     "validate_contracts",
