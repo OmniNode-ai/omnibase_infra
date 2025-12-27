@@ -52,7 +52,7 @@ await adapter.initialize({
 
 ```python
 from pydantic import SecretStr
-from omnibase_infra.handlers.model_vault_handler_config import ModelVaultHandlerConfig
+from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
 config = ModelVaultHandlerConfig(
     url="https://vault.example.com:8200",
@@ -423,4 +423,4 @@ Total = Thread Memory + Queue Memory + Base Memory
 - [Validation Performance Notes](../validation/performance_notes.md)
 - [Circuit Breaker Comparison](../analysis/CIRCUIT_BREAKER_COMPARISON.md)
 - [VaultHandler Source](../../src/omnibase_infra/handlers/handler_vault.py)
-- [Configuration Model](../../src/omnibase_infra/handlers/model_vault_handler_config.py)
+- [Configuration Model](../../src/omnibase_infra/handlers/models/vault/model_vault_handler_config.py)

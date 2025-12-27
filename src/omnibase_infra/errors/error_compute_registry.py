@@ -5,8 +5,10 @@
 This module defines the ComputeRegistryError for compute registry operations.
 """
 
-from omnibase_infra.errors.infra_errors import RuntimeHostError
-from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
+from omnibase_infra.errors.error_infra import RuntimeHostError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 
 
 class ComputeRegistryError(RuntimeHostError):

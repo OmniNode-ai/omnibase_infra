@@ -314,6 +314,7 @@ class TestContractToIntrospectionIntegration:
 
         # Verify node metadata from contract
         # node_id is now a UUID (generated at initialization)
+
         assert isinstance(node._introspection_node_id, UUID)
         assert node._contract_node_name == "test-effect-node"
         assert node._introspection_node_type == EnumNodeKind.EFFECT
@@ -433,9 +434,12 @@ class TestEndToEndIntrospectionWorkflow:
         assert topic == "onex.workflow.introspection.published.v1"
 
         # Verify envelope content
+
         assert isinstance(envelope, ModelNodeIntrospectionEvent)
         # node_id is a UUID, verify it matches the node's internal ID
         assert envelope.node_id == node._introspection_node_id
+        # node_type is stored as EnumNodeKind (a StrEnum that inherits from str).
+        # Compare directly to the enum for type consistency with _introspection_node_type.
         assert envelope.node_type == EnumNodeKind.EFFECT
         assert envelope.version == "1.5.0"
         assert envelope.reason == "startup"
@@ -466,6 +470,7 @@ class TestEndToEndIntrospectionWorkflow:
 
         # Verify node identification
         # node_id is a UUID, verify it matches the node's internal ID
+
         assert data.node_id == node._introspection_node_id
         assert data.node_type == EnumNodeKind.EFFECT
         assert data.version == "1.0.0"

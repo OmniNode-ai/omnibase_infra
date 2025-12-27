@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import overload
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelDispatchOutcome(BaseModel):
@@ -49,6 +49,8 @@ class ModelDispatchOutcome(BaseModel):
 
     .. versionadded:: 0.6.0
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     topics: list[str] = Field(
         default_factory=list,

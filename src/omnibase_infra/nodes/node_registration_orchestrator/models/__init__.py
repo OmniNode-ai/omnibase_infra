@@ -36,16 +36,26 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_i
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_upsert_intent import (
     ModelPostgresUpsertIntent,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_execution_result import (
+    ModelReducerExecutionResult,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_state import (
     ModelReducerState,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_registration_intent import (
     IntentPayload,
     ModelRegistrationIntent,
+    get_union_intent_types,
+    validate_union_registry_sync,
+)
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_intent import (
+    IntentRegistry,
+    ModelRegistryIntent,
 )
 
 __all__ = [
     "IntentPayload",
+    "IntentRegistry",
     "ModelConsulIntentPayload",
     "ModelConsulRegistrationIntent",
     "ModelIntentExecutionResult",
@@ -56,6 +66,10 @@ __all__ = [
     "ModelOrchestratorOutput",
     "ModelPostgresIntentPayload",
     "ModelPostgresUpsertIntent",
+    "ModelReducerExecutionResult",
     "ModelReducerState",
     "ModelRegistrationIntent",
+    "ModelRegistryIntent",
+    "get_union_intent_types",
+    "validate_union_registry_sync",
 ]

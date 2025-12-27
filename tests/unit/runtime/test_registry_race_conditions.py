@@ -578,9 +578,13 @@ class TestSemverCacheClearOnReset:
         for i in range(50):
             PolicyRegistry._parse_semver(f"{i}.0.0")
 
-        # Get cache info before reset
-        parser = PolicyRegistry._get_semver_parser()
-        cache_info_before = parser.cache_info()
+        # Get cache info before reset using the proper accessor method
+        # Note: PolicyRegistry uses a two-level cache structure:
+        # - _semver_cache: outer wrapper function (normalizes input)
+        # - _semver_cache_inner: inner LRU-cached function (has cache_info())
+        # The _get_semver_cache_info() method accesses the inner function's cache_info()
+        cache_info_before = PolicyRegistry._get_semver_cache_info()
+        assert cache_info_before is not None, "Cache should be initialized"
         assert cache_info_before.currsize > 0, "Cache should have entries"
 
         # Reset the cache
@@ -590,8 +594,10 @@ class TestSemverCacheClearOnReset:
         assert PolicyRegistry._semver_cache is None
 
         # Create new cache and verify it's empty
-        new_parser = PolicyRegistry._get_semver_parser()
-        cache_info_after = new_parser.cache_info()
+        # Trigger cache initialization by parsing a version
+        PolicyRegistry._get_semver_parser()
+        cache_info_after = PolicyRegistry._get_semver_cache_info()
+        assert cache_info_after is not None, "Cache should be re-initialized"
         assert cache_info_after.currsize == 0, "New cache should be empty after reset"
 
     def test_compute_registry_cache_clear_on_reset(self) -> None:

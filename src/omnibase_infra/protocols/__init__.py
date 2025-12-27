@@ -48,15 +48,23 @@ from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLik
 from omnibase_infra.protocols.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
+from omnibase_infra.protocols.protocol_message_dispatcher import (
+    ProtocolMessageDispatcher,
+)
+from omnibase_infra.protocols.protocol_message_type_registry import (
+    ProtocolMessageTypeRegistry,
+)
 from omnibase_infra.protocols.protocol_plugin_compute import ProtocolPluginCompute
 from omnibase_infra.protocols.protocol_registry_metrics import ProtocolRegistryMetrics
 from omnibase_infra.protocols.protocol_snapshot_publisher import (
     ProtocolSnapshotPublisher,
 )
 
-__all__ = [
+__all__: list[str] = [
     "ProtocolEventBusLike",
     "ProtocolIdempotencyStore",
+    "ProtocolMessageDispatcher",
+    "ProtocolMessageTypeRegistry",
     "ProtocolPluginCompute",
     "ProtocolRegistryMetrics",
     "ProtocolSnapshotPublisher",

@@ -8,12 +8,10 @@ in the ONEX 2-way registration pattern.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID
 
-from omnibase_core.enums import (
-    EnumNodeKind,
-)
+from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.utils.util_semver import validate_semver as _validate_semver

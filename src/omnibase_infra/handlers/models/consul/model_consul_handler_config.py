@@ -17,7 +17,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from omnibase_infra.handlers.model_consul_retry_config import ModelConsulRetryConfig
+from omnibase_infra.handlers.models.consul.model_consul_retry_config import (
+    ModelConsulRetryConfig,
+)
 
 
 class ModelConsulHandlerConfig(BaseModel):

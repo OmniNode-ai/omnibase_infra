@@ -39,21 +39,21 @@ from omnibase_infra.models.registration.model_node_registration_record import (
 )
 
 __all__ = [
-    # Decision events (C1 Orchestrator output)
-    "ModelNodeBecameActive",
-    "ModelNodeLivenessExpired",
-    "ModelNodeRegistrationAccepted",
-    "ModelNodeRegistrationAckReceived",
-    "ModelNodeRegistrationAckTimedOut",
-    "ModelNodeRegistrationInitiated",
-    "ModelNodeRegistrationRejected",
     # Metrics
     "ModelIntrospectionMetrics",
+    # Decision events (C1 Orchestrator output)
+    "ModelNodeBecameActive",
     # Core registration models
     "ModelNodeCapabilities",
     "ModelNodeHeartbeatEvent",
     "ModelNodeIntrospectionEvent",
+    "ModelNodeLivenessExpired",
     "ModelNodeMetadata",
     "ModelNodeRegistration",
+    "ModelNodeRegistrationAccepted",
+    "ModelNodeRegistrationAckReceived",
+    "ModelNodeRegistrationAckTimedOut",
+    "ModelNodeRegistrationInitiated",
     "ModelNodeRegistrationRecord",
+    "ModelNodeRegistrationRejected",
 ]

@@ -96,6 +96,6 @@ class ModelVaultHandlerPayload(BaseModel):
 
 
 __all__: list[str] = [
-    "VaultPayload",
     "ModelVaultHandlerPayload",
+    "VaultPayload",
 ]

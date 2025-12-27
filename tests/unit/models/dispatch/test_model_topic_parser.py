@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import pytest
 from omnibase_core.enums.enum_topic_taxonomy import EnumTopicType
+from pydantic import ValidationError
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_topic_parser import (
@@ -125,8 +126,6 @@ class TestModelParsedTopicCanonicalBehaviors:
 
     def test_immutability_frozen_model(self) -> None:
         """Test that ModelParsedTopic is immutable (frozen=True)."""
-        from pydantic import ValidationError
-
         parsed = ModelParsedTopic(
             raw_topic="onex.user.events",
             standard=EnumTopicStandard.ONEX_KAFKA,
@@ -276,8 +275,6 @@ class TestModelParsedTopicCanonicalBehaviors:
 
     def test_extra_fields_forbidden(self) -> None:
         """Test that extra fields are rejected (extra='forbid')."""
-        from pydantic import ValidationError
-
         with pytest.raises(ValidationError) as exc_info:
             ModelParsedTopic(
                 raw_topic="onex.user.events",
@@ -291,8 +288,6 @@ class TestModelParsedTopicCanonicalBehaviors:
 
     def test_raw_topic_min_length_validation(self) -> None:
         """Test that raw_topic enforces min_length=1."""
-        from pydantic import ValidationError
-
         with pytest.raises(ValidationError) as exc_info:
             ModelParsedTopic(
                 raw_topic="",  # Empty string should fail

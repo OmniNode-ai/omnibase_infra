@@ -29,15 +29,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID, uuid4
 
-from omnibase_core.models.dispatch import ModelHandlerOutput
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
-T = TypeVar("T")
-
 import hvac
 from omnibase_core.enums.enum_handler_type import EnumHandlerType
+from omnibase_core.models.dispatch import ModelHandlerOutput
 from pydantic import SecretStr, ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -51,9 +45,14 @@ from omnibase_infra.errors import (
     RuntimeHostError,
     SecretResolutionError,
 )
-from omnibase_infra.handlers.model_vault_handler_config import ModelVaultHandlerConfig
 from omnibase_infra.handlers.models import ModelOperationContext, ModelRetryState
+from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
+
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 

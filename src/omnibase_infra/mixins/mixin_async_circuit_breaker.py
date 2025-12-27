@@ -592,4 +592,4 @@ class MixinAsyncCircuitBreaker:
         self._circuit_breaker_open_until = 0.0
 
 
-__all__ = ["MixinAsyncCircuitBreaker", "CircuitState", "ModelCircuitBreakerConfig"]
+__all__ = ["CircuitState", "MixinAsyncCircuitBreaker", "ModelCircuitBreakerConfig"]

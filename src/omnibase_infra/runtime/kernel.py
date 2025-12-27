@@ -53,9 +53,6 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
 import asyncpg
 import yaml
 from omnibase_core.container import ModelONEXContainer
@@ -85,6 +82,9 @@ from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.validation import validate_runtime_config
 from omnibase_infra.utils.correlation import generate_correlation_id
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -1363,4 +1363,4 @@ if __name__ == "__main__":
     main()
 
 
-__all__: list[str] = ["bootstrap", "main", "load_runtime_config"]
+__all__: list[str] = ["bootstrap", "load_runtime_config", "main"]

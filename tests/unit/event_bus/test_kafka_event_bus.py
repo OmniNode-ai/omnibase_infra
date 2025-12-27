@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from aiokafka.errors import KafkaError
+from pydantic import BaseModel
 
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -876,7 +877,6 @@ class TestKafkaEventBusPublishEnvelope:
         self, mock_producer: AsyncMock
     ) -> None:
         """Test publish_envelope with a Pydantic model."""
-        from pydantic import BaseModel
 
         class TestEnvelope(BaseModel):
             message: str

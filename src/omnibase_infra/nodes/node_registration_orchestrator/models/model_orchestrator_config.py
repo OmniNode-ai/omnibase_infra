@@ -25,6 +25,7 @@ class ModelOrchestratorConfig(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        strict=True,
     )
 
     timeout_seconds: float = Field(

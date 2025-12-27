@@ -2060,17 +2060,17 @@ class MixinNodeIntrospection:
 
 
 __all__ = [
-    "MixinNodeIntrospection",
-    "INTROSPECTION_TOPIC",
     "HEARTBEAT_TOPIC",
+    "INTROSPECTION_TOPIC",
+    "PERF_THRESHOLD_CACHE_HIT_MS",
+    "PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS",
+    "PERF_THRESHOLD_GET_CAPABILITIES_MS",
+    "PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS",
     "REQUEST_INTROSPECTION_TOPIC",
     "CapabilitiesDict",  # Backward-compatible alias for CapabilitiesTypedDict
     "CapabilitiesTypedDict",  # Re-export from model for convenience
     "IntrospectionCacheDict",
     "IntrospectionPerformanceMetrics",
+    "MixinNodeIntrospection",
     "PerformanceMetricsCacheDict",  # TypedDict for cached performance metrics
-    "PERF_THRESHOLD_GET_CAPABILITIES_MS",
-    "PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS",
-    "PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS",
-    "PERF_THRESHOLD_CACHE_HIT_MS",
 ]

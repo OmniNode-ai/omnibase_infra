@@ -53,6 +53,7 @@ class ModelCoverageMetrics(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        strict=True,
         from_attributes=True,
     )
 

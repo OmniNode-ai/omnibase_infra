@@ -3,22 +3,35 @@
 """PostgreSQL upsert intent model for registration orchestrator.
 
 This module provides the typed intent model for PostgreSQL upsert operations.
+Registered with IntentRegistry for dynamic type resolution.
+
+Related:
+    - ModelRegistryIntent: Base class for all registration intents
+    - IntentRegistry: Decorator-based registry for intent type discovery
+    - OMN-1007: Union reduction refactoring
 """
 
 from __future__ import annotations
 
 from typing import Literal
-from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_intent_payload import (
     ModelPostgresIntentPayload,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_intent import (
+    IntentRegistry,
+    ModelRegistryIntent,
+)
 
 
-class ModelPostgresUpsertIntent(BaseModel):
+@IntentRegistry.register("postgres")
+class ModelPostgresUpsertIntent(ModelRegistryIntent):
     """Intent to upsert node registration in PostgreSQL.
+
+    This model is registered with IntentRegistry for dynamic type resolution,
+    enabling Pydantic discriminated union validation without explicit union types.
 
     Attributes:
         kind: Literal discriminator, always "postgres".
@@ -31,6 +44,8 @@ class ModelPostgresUpsertIntent(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        strict=True,
+        from_attributes=True,
     )
 
     kind: Literal["postgres"] = Field(
@@ -41,14 +56,6 @@ class ModelPostgresUpsertIntent(BaseModel):
         ...,
         min_length=1,
         description="Operation to perform (e.g., 'upsert', 'delete')",
-    )
-    node_id: UUID = Field(
-        ...,
-        description="Target node ID for the operation",
-    )
-    correlation_id: UUID = Field(
-        ...,
-        description="Correlation ID for distributed tracing",
     )
     payload: ModelPostgresIntentPayload = Field(
         ...,

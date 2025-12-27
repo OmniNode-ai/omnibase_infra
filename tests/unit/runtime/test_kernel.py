@@ -12,6 +12,7 @@ Tests the contract-driven bootstrap entrypoint including:
 
 from __future__ import annotations
 
+from collections.abc import Coroutine
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -237,11 +238,24 @@ class TestBootstrap:
 
     @pytest.fixture
     def mock_runtime_host(self) -> Generator[MagicMock, None, None]:
-        """Create a mock RuntimeHostProcess."""
+        """Create a mock RuntimeHostProcess.
+
+        Uses side_effect with async no-op functions to ensure coroutines
+        created by AsyncMock are properly awaited and cleaned up, avoiding
+        'coroutine was never awaited' warnings when asyncio.wait_for wraps
+        the stop() call.
+        """
+
+        async def noop_start() -> None:
+            """Async no-op for start that completes immediately."""
+
+        async def noop_stop() -> None:
+            """Async no-op for stop that completes immediately."""
+
         with patch("omnibase_infra.runtime.kernel.RuntimeHostProcess") as mock_cls:
             mock_instance = MagicMock()
-            mock_instance.start = AsyncMock()
-            mock_instance.stop = AsyncMock()
+            mock_instance.start = AsyncMock(side_effect=noop_start)
+            mock_instance.stop = AsyncMock(side_effect=noop_stop)
             mock_instance.input_topic = "requests"
             mock_instance.output_topic = "responses"
             mock_cls.return_value = mock_instance
@@ -257,11 +271,22 @@ class TestBootstrap:
 
     @pytest.fixture
     def mock_health_server(self) -> Generator[MagicMock, None, None]:
-        """Create a mock HealthServer."""
+        """Create a mock HealthServer.
+
+        Uses side_effect with async no-op functions to ensure coroutines
+        are properly awaited and cleaned up.
+        """
+
+        async def noop_start() -> None:
+            """Async no-op for start that completes immediately."""
+
+        async def noop_stop() -> None:
+            """Async no-op for stop that completes immediately."""
+
         with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_cls:
             mock_instance = MagicMock()
-            mock_instance.start = AsyncMock()
-            mock_instance.stop = AsyncMock()
+            mock_instance.start = AsyncMock(side_effect=noop_start)
+            mock_instance.stop = AsyncMock(side_effect=noop_stop)
             mock_instance.is_running = True
             mock_cls.return_value = mock_instance
             yield mock_cls
@@ -499,9 +524,6 @@ class TestBootstrap:
         mock_health_server: MagicMock,
     ) -> None:
         """Test that bootstrap uses grace_period_seconds from config."""
-        mock_instance = mock_runtime_host.return_value
-        mock_instance.stop = AsyncMock()
-
         # Create config with custom grace period
         from omnibase_infra.runtime.models import (
             ModelRuntimeConfig,
@@ -511,6 +533,12 @@ class TestBootstrap:
         test_config = ModelRuntimeConfig(
             shutdown=ModelShutdownConfig(grace_period_seconds=45),  # Custom timeout
         )
+
+        async def mock_wait_for_impl(
+            coro: Coroutine[object, object, None], *, timeout: float
+        ) -> None:
+            """Mock wait_for that properly closes the coroutine argument."""
+            coro.close()  # Close the coroutine to prevent RuntimeWarning
 
         with patch(
             "omnibase_infra.runtime.kernel.load_runtime_config",
@@ -523,7 +551,7 @@ class TestBootstrap:
 
                 with patch(
                     "omnibase_infra.runtime.kernel.asyncio.wait_for",
-                    new_callable=AsyncMock,
+                    side_effect=mock_wait_for_impl,
                 ) as mock_wait_for:
                     exit_code = await bootstrap()
 
@@ -565,10 +593,17 @@ class TestMain:
 
     def test_main_calls_bootstrap(self) -> None:
         """Test that main runs bootstrap and exits with code."""
-        with patch("omnibase_infra.runtime.kernel.configure_logging"):
-            with patch("omnibase_infra.runtime.kernel.asyncio.run") as mock_run:
-                mock_run.return_value = 0
 
+        def mock_asyncio_run(coro: Coroutine[object, object, int]) -> int:
+            """Mock asyncio.run that properly closes the unawaited coroutine."""
+            coro.close()  # Close the coroutine to prevent RuntimeWarning
+            return 0
+
+        with patch("omnibase_infra.runtime.kernel.configure_logging"):
+            with patch(
+                "omnibase_infra.runtime.kernel.asyncio.run",
+                side_effect=mock_asyncio_run,
+            ):
                 with pytest.raises(SystemExit) as exc_info:
                     main()
 
@@ -576,10 +611,17 @@ class TestMain:
 
     def test_main_exits_with_error_code(self) -> None:
         """Test that main exits with error code from bootstrap."""
-        with patch("omnibase_infra.runtime.kernel.configure_logging"):
-            with patch("omnibase_infra.runtime.kernel.asyncio.run") as mock_run:
-                mock_run.return_value = 1
 
+        def mock_asyncio_run(coro: Coroutine[object, object, int]) -> int:
+            """Mock asyncio.run that properly closes the unawaited coroutine."""
+            coro.close()  # Close the coroutine to prevent RuntimeWarning
+            return 1
+
+        with patch("omnibase_infra.runtime.kernel.configure_logging"):
+            with patch(
+                "omnibase_infra.runtime.kernel.asyncio.run",
+                side_effect=mock_asyncio_run,
+            ):
                 with pytest.raises(SystemExit) as exc_info:
                     main()
 
@@ -622,11 +664,24 @@ class TestHttpPortValidation:
 
     @pytest.fixture
     def mock_runtime_host(self) -> Generator[MagicMock, None, None]:
-        """Create a mock RuntimeHostProcess."""
+        """Create a mock RuntimeHostProcess.
+
+        Uses side_effect with async no-op functions to ensure coroutines
+        created by AsyncMock are properly awaited and cleaned up, avoiding
+        'coroutine was never awaited' warnings when asyncio.wait_for wraps
+        the stop() call.
+        """
+
+        async def noop_start() -> None:
+            """Async no-op for start that completes immediately."""
+
+        async def noop_stop() -> None:
+            """Async no-op for stop that completes immediately."""
+
         with patch("omnibase_infra.runtime.kernel.RuntimeHostProcess") as mock_cls:
             mock_instance = MagicMock()
-            mock_instance.start = AsyncMock()
-            mock_instance.stop = AsyncMock()
+            mock_instance.start = AsyncMock(side_effect=noop_start)
+            mock_instance.stop = AsyncMock(side_effect=noop_stop)
             mock_instance.input_topic = "requests"
             mock_instance.output_topic = "responses"
             mock_cls.return_value = mock_instance
@@ -642,11 +697,22 @@ class TestHttpPortValidation:
 
     @pytest.fixture
     def mock_health_server(self) -> Generator[MagicMock, None, None]:
-        """Create a mock HealthServer."""
+        """Create a mock HealthServer.
+
+        Uses side_effect with async no-op functions to ensure coroutines
+        are properly awaited and cleaned up.
+        """
+
+        async def noop_start() -> None:
+            """Async no-op for start that completes immediately."""
+
+        async def noop_stop() -> None:
+            """Async no-op for stop that completes immediately."""
+
         with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_cls:
             mock_instance = MagicMock()
-            mock_instance.start = AsyncMock()
-            mock_instance.stop = AsyncMock()
+            mock_instance.start = AsyncMock(side_effect=noop_start)
+            mock_instance.stop = AsyncMock(side_effect=noop_stop)
             mock_instance.is_running = True
             mock_cls.return_value = mock_instance
             yield mock_cls

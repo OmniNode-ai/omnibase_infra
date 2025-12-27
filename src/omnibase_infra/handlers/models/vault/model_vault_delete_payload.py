@@ -9,14 +9,19 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
     EnumVaultOperationType,
 )
+from omnibase_infra.handlers.models.vault.model_payload_vault import (
+    ModelPayloadVault,
+    RegistryPayloadVault,
+)
 
 
-class ModelVaultDeletePayload(BaseModel):
+@RegistryPayloadVault.register("delete_secret")
+class ModelVaultDeletePayload(ModelPayloadVault):
     """Payload for vault.delete_secret operation result.
 
     Contains confirmation of secret deletion.

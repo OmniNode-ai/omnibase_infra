@@ -3,7 +3,7 @@
 """Event Bus Protocol for Introspection.
 
 This module provides the minimal protocol interface for event bus compatibility
-with infrastructure components like TimeoutEmitter and MixinNodeIntrospection.
+with infrastructure components like ServiceTimeoutEmitter and MixinNodeIntrospection.
 
 Thread Safety:
     Implementations of ProtocolEventBusLike MUST be thread-safe for concurrent

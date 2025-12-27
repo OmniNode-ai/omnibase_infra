@@ -26,9 +26,6 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID, uuid4
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
 import consul
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from pydantic import SecretStr, ValidationError
@@ -42,7 +39,6 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
 from omnibase_infra.handlers.models import (
     ModelOperationContext,
     ModelRetryState,
@@ -50,6 +46,7 @@ from omnibase_infra.handlers.models import (
 from omnibase_infra.handlers.models.consul import (
     ConsulPayload,
     ModelConsulDeregisterPayload,
+    ModelConsulHandlerConfig,
     ModelConsulHandlerPayload,
     ModelConsulKVGetFoundPayload,
     ModelConsulKVGetNotFoundPayload,
@@ -62,6 +59,9 @@ from omnibase_infra.handlers.models.model_consul_handler_response import (
     ModelConsulHandlerResponse,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 
 T = TypeVar("T")
 

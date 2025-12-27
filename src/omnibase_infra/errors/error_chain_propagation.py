@@ -11,8 +11,10 @@ from __future__ import annotations
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 
-from omnibase_infra.errors.infra_errors import RuntimeHostError
-from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
+from omnibase_infra.errors.error_infra import RuntimeHostError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.models.validation.model_chain_violation import ModelChainViolation
 
 

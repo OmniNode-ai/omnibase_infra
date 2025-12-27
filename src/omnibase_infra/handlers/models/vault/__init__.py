@@ -7,6 +7,8 @@ All models are strongly typed to eliminate Any usage.
 
 Exports:
     EnumVaultOperationType: Discriminator enum for Vault operation types
+    ModelPayloadVault: Base model for registry-managed Vault payloads
+    RegistryPayloadVault: Decorator-based registry for payload type discovery
     ModelVaultSecretPayload: Payload for vault.read_secret result
     ModelVaultWritePayload: Payload for vault.write_secret result
     ModelVaultDeletePayload: Payload for vault.delete_secret result
@@ -19,8 +21,15 @@ Exports:
 from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
     EnumVaultOperationType,
 )
+from omnibase_infra.handlers.models.vault.model_payload_vault import (
+    ModelPayloadVault,
+    RegistryPayloadVault,
+)
 from omnibase_infra.handlers.models.vault.model_vault_delete_payload import (
     ModelVaultDeletePayload,
+)
+from omnibase_infra.handlers.models.vault.model_vault_handler_config import (
+    ModelVaultHandlerConfig,
 )
 from omnibase_infra.handlers.models.vault.model_vault_handler_payload import (
     ModelVaultHandlerPayload,
@@ -32,6 +41,9 @@ from omnibase_infra.handlers.models.vault.model_vault_list_payload import (
 from omnibase_infra.handlers.models.vault.model_vault_renew_token_payload import (
     ModelVaultRenewTokenPayload,
 )
+from omnibase_infra.handlers.models.vault.model_vault_retry_config import (
+    ModelVaultRetryConfig,
+)
 from omnibase_infra.handlers.models.vault.model_vault_secret_payload import (
     ModelVaultSecretPayload,
 )
@@ -41,11 +53,15 @@ from omnibase_infra.handlers.models.vault.model_vault_write_payload import (
 
 __all__: list[str] = [
     "EnumVaultOperationType",
-    "ModelVaultSecretPayload",
-    "ModelVaultWritePayload",
+    "ModelPayloadVault",
     "ModelVaultDeletePayload",
+    "ModelVaultHandlerConfig",
+    "ModelVaultHandlerPayload",
     "ModelVaultListPayload",
     "ModelVaultRenewTokenPayload",
+    "ModelVaultRetryConfig",
+    "ModelVaultSecretPayload",
+    "ModelVaultWritePayload",
+    "RegistryPayloadVault",
     "VaultPayload",
-    "ModelVaultHandlerPayload",
 ]

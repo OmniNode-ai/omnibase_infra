@@ -25,16 +25,19 @@ Exemption System:
     4. Run tests to verify the exemption works
 """
 
+# Standard library imports
 import logging
 import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, TypedDict
 
+# Third-party imports
 import yaml
-
-# Module-level logger for validation operations
-logger = logging.getLogger(__name__)
+from omnibase_core.models.common.model_validation_metadata import (
+    ModelValidationMetadata,
+)
+from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
 from omnibase_core.validation import (
     CircularImportValidationResult,
     CircularImportValidator,
@@ -44,8 +47,11 @@ from omnibase_core.validation import (
     validate_architecture,
     validate_contracts,
     validate_patterns,
-    validate_union_usage,
+    validate_union_usage_file,
 )
+
+# Module-level initialization (AFTER all imports)
+logger = logging.getLogger(__name__)
 
 # Type alias for cleaner return types in infrastructure validators
 # Most validation results return None as the data payload (validation only)
@@ -352,33 +358,44 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # ============================================================================
 
 # Maximum allowed union count in infrastructure code.
-# This is a COUNT threshold, not a violation threshold. The validator counts all
-# unions including the ONEX-preferred `X | None` patterns, which are valid.
+# This threshold counts ONLY non-optional unions (excluding `X | None` patterns).
 #
-# Current baseline (~555 unions as of 2025-12-23):
-# - Most unions are legitimate `X | None` nullable patterns
-# - These are NOT flagged as violations, just counted
-# - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
+# Simple optional patterns (`X | None`) are excluded from this count because:
+# - `X | None` is the ONEX-preferred idiomatic Python pattern for nullable types
+# - Per PEP 604, this is the standard way to express optionality
+# - These are NOT problematic - only complex unions like `str | int | float` are flagged
 #
-# Threshold history:
-# - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
-# - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots (~24 unions added)
-# - 540 (2025-12-23): OMN-950 comprehensive reducer tests (~25 unions from type annotations)
-# - 544 (2025-12-23): OMN-954 effect idempotency and retry tests (PR #78) (~4 unions added)
-# - 580 (2025-12-23): OMN-888 + PR #57 + OMN-954 merge (~36 additional unions combined)
-# - 585 (2025-12-25): OMN-811 ComputeRegistry + node registration orchestrator unions (~5 added)
-# - 586 (2025-12-25): OMN-932 durable timeouts + introspection config migration (~1 added)
-# - 588 (2025-12-25): OMN-811 RegistryCompute merge (+2 unions)
-# - 589 (2025-12-25): OMN-881 PR review fixes - _EventBusType conditional alias (+1 union)
-# - 589 (2025-12-25): OMN-816 removed ProtocolEventBusLike (net zero change)
-# - 600 (2025-12-25): OMN-952 PR #79 merge with main (OMN-811 compute registry + models) (~11 added)
-# - 606 (2025-12-25): OMN-949 DLQ configuration merge (~17 unions from DLQ + topic validation)
-# - 610 (2025-12-25): OMN-952 declarative orchestrator refactor + container wiring (~3 unions added)
-# - 626 (2025-12-25): OMN-952 + OMN-949 + OMN-1006 merge (~6 unions from combined changes)
+# What IS counted (threshold applies to):
+# - Multi-type unions: `str | int`, `A | B | C`
+# - Complex patterns: `dict[str, str | int]` (nested unions)
+# - Unions with 3+ types (potential "primitive soup")
 #
-# Threshold: 630 (buffer above ~626 baseline for codebase growth)
-# Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
-INFRA_MAX_UNIONS = 630
+# What is NOT counted (excluded from threshold):
+# - Simple optionals: `str | None`, `int | None`, `ModelFoo | None`
+# - These are idiomatic Python nullable patterns, not complexity concerns
+#
+# Threshold history (after exclusion logic):
+# - 120 (2025-12-25): Initial threshold after excluding ~470 `X | None` patterns
+#   - ~568 total unions in codebase
+#   - ~468 are simple `X | None` optionals (82%)
+#   - ~100 non-optional unions remain
+#   - Buffer of 20 above baseline for codebase growth
+# - 121 (2025-12-25): OMN-881 introspection feature (+1 non-optional union)
+# - 121 (2025-12-25): OMN-949 DLQ, OMN-816, OMN-811, OMN-1006 merges (all used X | None patterns, excluded)
+# - 121 (2025-12-26): OMN-1007 registry pattern + merge with main (X | None patterns excluded)
+#
+# Soft ceiling guidance:
+# - 100-120: Healthy range, minor increments OK for legitimate features
+# - 120-140: Caution zone, consider refactoring before incrementing
+# - 140+: Refactor required - extract type aliases or use domain models from omnibase_core
+#
+# When incrementing threshold:
+# 1. Document the ticket/PR that added unions in threshold history above
+# 2. Verify new unions are not simple X | None (those should be excluded automatically)
+# 3. Consider if a domain-specific type from omnibase_core would be cleaner
+#
+# Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+INFRA_MAX_UNIONS = 121
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
@@ -703,6 +720,304 @@ def validate_infra_contract_deep(
 _contract_validator = ProtocolContractValidator()
 
 
+# ==============================================================================
+# Skip Directory Configuration
+# ==============================================================================
+#
+# Skip directories are loaded from validation_exemptions.yaml for configurability.
+# If the YAML file is missing or doesn't contain skip_directories, we fall back
+# to a hardcoded default set.
+#
+# This follows the same pattern as exemption loading to keep all validation
+# configuration in one place.
+
+
+@lru_cache(maxsize=1)
+def load_skip_directories_from_yaml() -> frozenset[str] | None:
+    """
+    Load skip directory configuration from YAML.
+
+    Returns:
+        frozenset of directory names to skip, or None if not configured in YAML.
+        Returns None (not empty set) to distinguish "not configured" from
+        "explicitly empty".
+    """
+    if not EXEMPTIONS_YAML_PATH.exists():
+        return None
+
+    try:
+        with EXEMPTIONS_YAML_PATH.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
+        if not isinstance(data, dict):
+            return None
+
+        skip_dirs = data.get("skip_directories")
+        if skip_dirs is None:
+            return None
+
+        # Handle both list and dict formats
+        if isinstance(skip_dirs, list):
+            # Simple list format: ["archive", "examples", ...]
+            return frozenset(str(d) for d in skip_dirs if d)
+        elif isinstance(skip_dirs, dict):
+            # Dict format with categories: {historical: [...], caches: [...]}
+            all_dirs: set[str] = set()
+            for category_dirs in skip_dirs.values():
+                if isinstance(category_dirs, list):
+                    all_dirs.update(str(d) for d in category_dirs if d)
+            return frozenset(all_dirs) if all_dirs else None
+
+        return None
+
+    except (yaml.YAMLError, OSError) as e:
+        logger.warning(
+            "Failed to load skip directories from %s: %s. Using defaults.",
+            EXEMPTIONS_YAML_PATH,
+            e,
+        )
+        return None
+
+
+def get_skip_directories() -> frozenset[str]:
+    """
+    Get the set of directory names to skip during validation.
+
+    Returns skip directories from YAML configuration if available,
+    otherwise falls back to the hardcoded SKIP_DIRECTORY_NAMES default.
+
+    Returns:
+        frozenset of directory names that should be excluded from validation.
+    """
+    yaml_dirs = load_skip_directories_from_yaml()
+    if yaml_dirs is not None:
+        return yaml_dirs
+    return SKIP_DIRECTORY_NAMES
+
+
+def is_simple_optional(pattern: ModelUnionPattern) -> bool:
+    """
+    Determine if a union pattern is a simple optional (`X | None`).
+
+    Simple optionals are the ONEX-preferred pattern for nullable types and should
+    NOT count toward the union complexity threshold. They represent:
+    - `str | None` - nullable string
+    - `int | None` - nullable integer
+    - `ModelFoo | None` - nullable model
+    - `list[str] | None` - nullable list
+
+    These are NOT considered complex unions because:
+    1. They are idiomatic Python (PEP 604)
+    2. They express optionality, not type ambiguity
+    3. They don't require complex type narrowing logic
+
+    Args:
+        pattern: The ModelUnionPattern to check.
+
+    Returns:
+        True if the pattern is a simple optional (`X | None`), False otherwise.
+
+    Examples:
+        >>> is_simple_optional(ModelUnionPattern(["str", "None"], 1, "test.py"))
+        True
+        >>> is_simple_optional(ModelUnionPattern(["int", "None"], 1, "test.py"))
+        True
+        >>> is_simple_optional(ModelUnionPattern(["str", "int"], 1, "test.py"))
+        False
+        >>> is_simple_optional(ModelUnionPattern(["str", "int", "None"], 1, "test.py"))
+        False
+    """
+    # Simple optional: exactly 2 types, one of which is None
+    return len(pattern.types) == 2 and "None" in pattern.types
+
+
+# ==============================================================================
+# Path Skipping Configuration
+# ==============================================================================
+#
+# These directories are excluded from validation because:
+# - archive/archived: Historical code not subject to current validation rules
+# - examples: Demo code that may intentionally show anti-patterns
+# - __pycache__: Compiled Python bytecode, not source code
+# - .git: Git repository metadata
+# - .venv/venv: Virtual environment directories
+# - .tox: Tox testing directory
+# - .mypy_cache: mypy type checking cache
+# - .pytest_cache: pytest cache directory
+# - build/dist: Build output directories
+# - .eggs: setuptools eggs directory
+# - node_modules: Node.js dependencies (if any JS in repo)
+#
+# The set is used for O(1) lookup when checking path components.
+#
+# Note: Matching is case-sensitive (Linux standard). On case-insensitive
+# filesystems (macOS, Windows), "Archive" would NOT match "archive".
+# This is intentional for portability and consistency.
+SKIP_DIRECTORY_NAMES: frozenset[str] = frozenset(
+    {
+        # Historical/demo code
+        "archive",
+        "archived",
+        "examples",
+        # Bytecode and caches
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        # Virtual environments
+        ".venv",
+        "venv",
+        # Build outputs
+        "build",
+        "dist",
+        ".eggs",
+        # Version control
+        ".git",
+        # Testing
+        ".tox",
+        # Node.js (if present)
+        "node_modules",
+    }
+)
+
+
+def is_skip_directory(component: str) -> bool:
+    """
+    Check if a path component is a directory that should be skipped.
+
+    This predicate is extracted for reuse and testability. It checks if the
+    given component matches one of the known skip directory names exactly.
+
+    Uses exact string matching (case-sensitive) via set membership for O(1) lookup.
+    This prevents false positives from substring matching.
+
+    Skip directories are loaded from validation_exemptions.yaml if configured,
+    otherwise falls back to the hardcoded SKIP_DIRECTORY_NAMES default.
+    See get_skip_directories() for the configuration loading logic.
+
+    Args:
+        component: A single path component (directory or file name).
+
+    Returns:
+        True if the component is a skip directory name, False otherwise.
+
+    Examples:
+        Exact matches (skipped):
+        >>> is_skip_directory("archived")
+        True
+        >>> is_skip_directory("archive")
+        True
+        >>> is_skip_directory("__pycache__")
+        True
+        >>> is_skip_directory(".venv")
+        True
+        >>> is_skip_directory(".git")
+        True
+
+        Partial/similar names (NOT skipped - prevents false positives):
+        >>> is_skip_directory("archived_feature")
+        False
+        >>> is_skip_directory("my_archive")
+        False
+        >>> is_skip_directory("Archive")  # Case-sensitive
+        False
+        >>> is_skip_directory(".git_backup")
+        False
+    """
+    return component in get_skip_directories()
+
+
+def should_skip_path(path: Path) -> bool:
+    """
+    Check if a path should be skipped for validation.
+
+    Uses exact path component matching to avoid false positives from substring
+    matching. A path is skipped if ANY of its PARENT directory components match
+    a known skip directory name exactly. The filename itself is NOT checked
+    to avoid false positives from files that happen to share names with skip
+    directories (e.g., `archive.py` should not be skipped).
+
+    This approach prevents false positives like:
+    - /foo/archived_feature/bar.py - NOT skipped ("archived_feature" != "archived")
+    - /foo/archive_manager.py - NOT skipped (only checks parent dirs, not filename)
+    - /foo/examples_utils.py - NOT skipped (only checks parent dirs, not filename)
+    - /foo/my_archive/bar.py - NOT skipped ("my_archive" != "archive")
+    - /foo/.git_backup/bar.py - NOT skipped (".git_backup" != ".git")
+
+    While correctly skipping:
+    - /foo/archived/bar.py - Skipped (has "archived" directory component)
+    - /foo/archive/bar.py - Skipped (has "archive" directory component)
+    - /foo/examples/bar.py - Skipped (has "examples" directory component)
+    - /foo/__pycache__/bar.pyc - Skipped (has "__pycache__" directory component)
+    - /foo/.venv/lib/bar.py - Skipped (has ".venv" directory component)
+    - /foo/.git/hooks/pre-commit - Skipped (has ".git" directory component)
+    - /foo/build/lib/bar.py - Skipped (has "build" directory component)
+
+    Args:
+        path: The file path to check.
+
+    Returns:
+        True if the path should be skipped, False otherwise.
+
+    Note:
+        Matching is case-sensitive (Linux standard). On case-insensitive
+        filesystems (macOS, Windows), directories like "Build" or "VENV"
+        would NOT be skipped. This is intentional for cross-platform
+        consistency - use lowercase directory names for skipped directories.
+    """
+    # Check PARENT directory components only (exclude the filename)
+    # This prevents false positives from files named like skip directories
+    # (e.g., archive.py, examples.py)
+    #
+    # path.parts includes all components including filename:
+    # "/foo/archived/bar.py" -> ('/', 'foo', 'archived', 'bar.py')
+    #
+    # path.parent.parts excludes the filename:
+    # "/foo/archived/bar.py" -> ('/', 'foo', 'archived')
+    #
+    # Using parent.parts ensures we only match DIRECTORY names, not filenames
+    return any(is_skip_directory(part) for part in path.parent.parts)
+
+
+def _count_non_optional_unions(directory: Path) -> tuple[int, int, list[str]]:
+    """
+    Count unions in a directory, excluding simple optional patterns (`X | None`).
+
+    This function provides accurate union counting for threshold checks by
+    excluding idiomatic `X | None` patterns that are valid ONEX style.
+
+    Args:
+        directory: Directory to scan for Python files.
+
+    Returns:
+        Tuple of (non_optional_count, total_count, issues):
+        - non_optional_count: Count of unions excluding `X | None` patterns
+        - total_count: Total count of all unions (for reporting)
+        - issues: List of validation issues found
+    """
+    total_unions = 0
+    non_optional_unions = 0
+    all_issues: list[str] = []
+
+    for py_file in directory.rglob("*.py"):
+        # Filter out archived files, examples, and __pycache__
+        if should_skip_path(py_file):
+            continue
+
+        union_count, issues, patterns = validate_union_usage_file(py_file)
+        total_unions += union_count
+
+        # Count non-optional patterns
+        for pattern in patterns:
+            if not is_simple_optional(pattern):
+                non_optional_unions += 1
+
+        # Prefix issues with file path
+        if issues:
+            all_issues.extend([f"{py_file}: {issue}" for issue in issues])
+
+    return non_optional_unions, total_unions, all_issues
+
+
 def validate_infra_union_usage(
     directory: str | Path = INFRA_SRC_PATH,
     max_unions: int = INFRA_MAX_UNIONS,
@@ -713,6 +1028,19 @@ def validate_infra_union_usage(
 
     Prevents overly complex union types that complicate infrastructure code.
 
+    This validator EXCLUDES simple optional patterns (`X | None`) from the count
+    because they are the ONEX-preferred idiomatic pattern for nullable types.
+    Only actual complex unions (like `str | int | float`) count toward the threshold.
+
+    What IS counted (threshold applies to):
+        - Multi-type unions: `str | int`, `A | B | C`
+        - Complex patterns: unions with 3+ types
+        - Non-optional unions: any union without `None` as one of exactly 2 types
+
+    What is NOT counted (excluded from threshold):
+        - Simple optionals: `X | None` where X is any single type
+        - These are idiomatic Python for nullable types, not complexity concerns
+
     Exemptions:
         Exemption patterns are loaded from validation_exemptions.yaml (union_exemptions section).
         See that file for the complete list of exemptions with rationale.
@@ -722,26 +1050,70 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum union count threshold. Defaults to INFRA_MAX_UNIONS.
+        max_unions: Maximum NON-OPTIONAL union count threshold. Defaults to INFRA_MAX_UNIONS.
+            Note: This threshold applies only to non-optional unions (`X | None` excluded).
         strict: Enable strict mode. Defaults to INFRA_UNIONS_STRICT (True).
 
     Returns:
         ModelValidationResult with validation status and any errors.
+        The metadata includes both total_unions (all unions) and non_optional_unions
+        (excluding `X | None` patterns) for transparency.
+
+    Metadata Extension Fields:
+        ModelValidationMetadata uses `extra="allow"` to support domain-specific fields.
+        The following extension fields are used by this validator and are properly typed:
+
+        - non_optional_unions (int): Count of unions excluding `X | None` patterns.
+          This is what the threshold check applies to.
+        - optional_unions_excluded (int): Count of simple `X | None` optionals that were
+          excluded from the threshold check for transparency.
+
+        These fields are additional to the base ModelValidationMetadata fields like
+        total_unions and max_unions which are formally defined on the model.
     """
-    # Run base validation
-    base_result = validate_union_usage(
-        str(directory), max_unions=max_unions, strict=strict
-    )
+    # Convert to Path if string
+    dir_path = Path(directory) if isinstance(directory, str) else directory
+
+    # Count unions with exclusion of simple optionals
+    non_optional_count, total_count, issues = _count_non_optional_unions(dir_path)
 
     # Load exemption patterns from YAML configuration
-    # See validation_exemptions.yaml for pattern definitions and rationale
     exempted_patterns = get_union_exemptions()
 
     # Filter errors using regex-based pattern matching
-    filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
+    filtered_issues = _filter_exempted_errors(issues, exempted_patterns)
 
-    # Create wrapper result (avoid mutation)
-    return _create_filtered_result(base_result, filtered_errors)
+    # Determine validity: non-optional count must be within threshold
+    # and no issues in strict mode
+    is_valid = (non_optional_count <= max_unions) and (
+        not filtered_issues or not strict
+    )
+
+    # Count Python files for metadata (excluding archive, examples, __pycache__)
+    python_files = list(dir_path.rglob("*.py"))
+    files_processed = len([f for f in python_files if not should_skip_path(f)])
+
+    # Create result with enhanced metadata showing both counts
+    # Note: ModelValidationMetadata uses extra="allow", so extension fields
+    # (non_optional_unions, optional_unions_excluded) are accepted as int values.
+    # See docstring "Metadata Extension Fields" section for field documentation.
+    return ModelValidationResult(
+        is_valid=is_valid,
+        errors=filtered_issues,
+        metadata=ModelValidationMetadata(
+            # Standard ModelValidationMetadata fields (formally defined)
+            validation_type="union_usage",
+            files_processed=files_processed,
+            violations_found=len(filtered_issues),
+            total_unions=total_count,  # Base field: all unions including X | None
+            max_unions=max_unions,  # Base field: configured threshold
+            strict_mode=strict,  # Base field: whether strict mode enabled
+            # Extension fields (via extra="allow", typed as int)
+            # These provide transparency into the exclusion logic:
+            non_optional_unions=non_optional_count,  # What threshold actually checks
+            optional_unions_excluded=total_count - non_optional_count,  # X | None count
+        ),
+    )
 
 
 def validate_infra_circular_imports(
@@ -857,30 +1229,39 @@ def get_validation_summary(
 
 
 __all__ = [
-    # Type aliases
-    "ValidationResult",
-    "ExemptionPattern",
-    # Re-exported types from omnibase_core.validation
-    "CircularImportValidationResult",
-    # Constants
-    "INFRA_SRC_PATH",
-    "INFRA_NODES_PATH",
+    "EXEMPTIONS_YAML_PATH",
     "INFRA_MAX_UNIONS",
     "INFRA_MAX_VIOLATIONS",
+    "INFRA_NODES_PATH",
     "INFRA_PATTERNS_STRICT",
+    # Constants
+    "INFRA_SRC_PATH",
     "INFRA_UNIONS_STRICT",
-    "EXEMPTIONS_YAML_PATH",
+    "SKIP_DIRECTORY_NAMES",
+    # Re-exported types from omnibase_core.validation
+    "CircularImportValidationResult",
+    "ExemptionPattern",
+    # Type aliases
+    "ValidationResult",
+    "get_architecture_exemptions",
     # Exemption loaders
     "get_pattern_exemptions",
+    # Path skip configuration
+    "get_skip_directories",
     "get_union_exemptions",
-    "get_architecture_exemptions",
+    "get_validation_summary",
+    # Union pattern utilities
+    "is_simple_optional",
+    # Path utilities
+    "is_skip_directory",
+    "load_skip_directories_from_yaml",
+    "should_skip_path",
+    "validate_infra_all",
     # Validators
     "validate_infra_architecture",
+    "validate_infra_circular_imports",
+    "validate_infra_contract_deep",
     "validate_infra_contracts",
     "validate_infra_patterns",
-    "validate_infra_contract_deep",
     "validate_infra_union_usage",
-    "validate_infra_circular_imports",
-    "validate_infra_all",
-    "get_validation_summary",
 ]
