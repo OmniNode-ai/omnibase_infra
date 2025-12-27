@@ -86,7 +86,7 @@ import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from omnibase_core.models.errors import ModelOnexError
+from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
