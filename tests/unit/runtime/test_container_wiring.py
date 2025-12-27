@@ -207,3 +207,122 @@ class TestContainerBasedPolicyUsage:
         assert registry1 is not registry2
         assert isinstance(registry1, PolicyRegistry)
         assert isinstance(registry2, PolicyRegistry)
+
+
+class TestAnalyzeAttributeError:
+    """Test _analyze_attribute_error() helper function."""
+
+    def test_service_registry_missing(self) -> None:
+        """Test detection of missing service_registry attribute."""
+        from omnibase_infra.runtime.container_wiring import _analyze_attribute_error
+
+        error_str = "'MockContainer' object has no attribute 'service_registry'"
+        _missing_attr, hint = _analyze_attribute_error(error_str)
+
+        assert "service_registry" in hint
+        assert "ModelONEXContainer" in hint
+
+    def test_register_instance_missing(self) -> None:
+        """Test detection of missing register_instance method."""
+        from omnibase_infra.runtime.container_wiring import _analyze_attribute_error
+
+        error_str = "'MockRegistry' object has no attribute 'register_instance'"
+        _missing_attr, hint = _analyze_attribute_error(error_str)
+
+        assert "register_instance" in hint
+        assert "v0.5.6" in hint
+
+    def test_unknown_attribute(self) -> None:
+        """Test handling of unknown missing attribute."""
+        from omnibase_infra.runtime.container_wiring import _analyze_attribute_error
+
+        error_str = "'MockContainer' object has no attribute 'unknown_attr'"
+        missing_attr, hint = _analyze_attribute_error(error_str)
+
+        assert missing_attr == "unknown_attr"
+        assert "unknown_attr" in hint
+
+    def test_no_quotes_in_error(self) -> None:
+        """Test handling of error without quotes."""
+        from omnibase_infra.runtime.container_wiring import _analyze_attribute_error
+
+        error_str = "Some attribute error without quotes"
+        missing_attr, _hint = _analyze_attribute_error(error_str)
+
+        assert missing_attr == "unknown"
+
+
+class TestAnalyzeTypeError:
+    """Test _analyze_type_error() helper function."""
+
+    def test_interface_argument_error(self) -> None:
+        """Test detection of interface argument issues."""
+        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+
+        error_str = "interface argument must be a type"
+        invalid_arg, hint = _analyze_type_error(error_str)
+
+        assert invalid_arg == "interface"
+        assert "type class" in hint
+
+    def test_instance_argument_error(self) -> None:
+        """Test detection of instance argument issues."""
+        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+
+        # Note: error string must not contain "interface" since that's checked first
+        error_str = "instance must be an object of the correct type"
+        invalid_arg, hint = _analyze_type_error(error_str)
+
+        assert invalid_arg == "instance"
+        assert "instance of the interface" in hint
+
+    def test_scope_argument_error(self) -> None:
+        """Test detection of scope argument issues."""
+        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+
+        error_str = "scope must be one of: global, request, transient"
+        invalid_arg, hint = _analyze_type_error(error_str)
+
+        assert invalid_arg == "scope"
+        assert "global" in hint
+
+    def test_metadata_argument_error(self) -> None:
+        """Test detection of metadata argument issues."""
+        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+
+        error_str = "metadata must be a dict"
+        invalid_arg, hint = _analyze_type_error(error_str)
+
+        assert invalid_arg == "metadata"
+        assert "dict" in hint
+
+    def test_positional_argument_error(self) -> None:
+        """Test detection of positional argument mismatch."""
+        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+
+        # Note: error string must not contain other keywords like 'instance'
+        error_str = "function() takes 2 positional args but 4 were given"
+        invalid_arg, hint = _analyze_type_error(error_str)
+
+        assert invalid_arg == "signature"
+        assert "mismatch" in hint.lower()
+
+    def test_argument_keyword_error(self) -> None:
+        """Test detection of argument keyword errors."""
+        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+
+        error_str = "got an unexpected keyword argument 'invalid_arg'"
+        invalid_arg, hint = _analyze_type_error(error_str)
+
+        assert invalid_arg == "signature"
+        assert "mismatch" in hint.lower()
+
+    def test_unknown_type_error(self) -> None:
+        """Test handling of unknown type errors."""
+        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+
+        error_str = "some unexpected type error"
+        invalid_arg, hint = _analyze_type_error(error_str)
+
+        assert invalid_arg == "unknown"
+        assert "compatibility" in hint

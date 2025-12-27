@@ -22,10 +22,12 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_http import HttpRestHandler
+from omnibase_infra.handlers.models.http import ModelHttpBodyContent
 from tests.helpers import (
     DeterministicClock,
     DeterministicIdGenerator,
@@ -1916,6 +1918,223 @@ class TestHttpRestHandlerLogWarnings:
         assert "Invalid Content-Length" in handler_warnings[0].message
 
 
+class TestHttpRestHandlerPrepareRequestContent:
+    """Test suite for _prepare_request_content helper method."""
+
+    @pytest.fixture
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
+
+    @pytest.fixture
+    def error_context(self) -> ModelInfraErrorContext:
+        """Create error context fixture."""
+        from omnibase_infra.enums import EnumInfraTransportType
+
+        return ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="http.post",
+            target_name="https://example.com",
+            correlation_id=uuid4(),
+        )
+
+    def test_get_method_returns_empty_content(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test GET method returns empty content regardless of body."""
+        body_content = ModelHttpBodyContent(
+            body={"data": "ignored"}, pre_serialized=None
+        )
+        content, json_body, headers = handler._prepare_request_content(
+            method="GET",
+            headers={"X-Custom": "value"},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content is None
+        assert json_body is None
+        assert headers == {"X-Custom": "value"}
+
+    def test_post_with_none_body_returns_empty_content(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with None body returns empty content."""
+        body_content = ModelHttpBodyContent(body=None, pre_serialized=None)
+        content, json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content is None
+        assert json_body is None
+        assert headers == {}
+
+    def test_post_with_pre_serialized_bytes(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with pre-serialized bytes uses them directly."""
+        pre_serialized = b'{"key": "value"}'
+        body_content = ModelHttpBodyContent(
+            body={"key": "value"},  # Body is ignored when pre_serialized is provided
+            pre_serialized=pre_serialized,
+        )
+
+        content, json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content == pre_serialized
+        assert json_body is None
+        assert headers == {"Content-Type": "application/json"}
+
+    def test_post_with_pre_serialized_preserves_existing_content_type(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with pre-serialized preserves existing Content-Type header."""
+        pre_serialized = b'{"key": "value"}'
+        body_content = ModelHttpBodyContent(
+            body={"key": "value"},
+            pre_serialized=pre_serialized,
+        )
+
+        content, json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content == pre_serialized
+        assert json_body is None
+        # Original Content-Type preserved (case-insensitive check)
+        assert headers == {"Content-Type": "application/json; charset=utf-8"}
+
+    def test_post_with_dict_body_fallback(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with dict body uses json parameter when no pre-serialized."""
+        body = {"key": "value", "number": 42}
+        body_content = ModelHttpBodyContent(body=body, pre_serialized=None)
+
+        content, json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content is None
+        assert json_body == body
+        assert headers == {}
+
+    def test_post_with_string_body(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with string body uses content parameter."""
+        body = "raw string content"
+        body_content = ModelHttpBodyContent(body=body, pre_serialized=None)
+
+        content, json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content == "raw string content"
+        assert json_body is None
+        assert headers == {}
+
+    def test_post_with_list_body_serializes_to_json(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with list body serializes to JSON string."""
+        body = [1, 2, 3, "four"]
+        body_content = ModelHttpBodyContent(body=body, pre_serialized=None)
+
+        content, json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content == '[1, 2, 3, "four"]'
+        assert json_body is None
+        assert headers == {}
+
+    def test_post_with_non_serializable_body_raises_error(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with non-JSON-serializable body raises ProtocolConfigurationError."""
+
+        class NonSerializable:
+            pass
+
+        body_content = ModelHttpBodyContent(body=NonSerializable(), pre_serialized=None)
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            handler._prepare_request_content(
+                method="POST",
+                headers={},
+                body_content=body_content,
+                ctx=error_context,
+            )
+
+        assert "not JSON-serializable" in str(exc_info.value)
+        assert "NonSerializable" in str(exc_info.value)
+
+    def test_headers_not_mutated(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test original headers dict is not mutated."""
+        original_headers = {"X-Custom": "value"}
+        pre_serialized = b'{"key": "value"}'
+        body_content = ModelHttpBodyContent(
+            body={"key": "value"},
+            pre_serialized=pre_serialized,
+        )
+
+        _content, _json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers=original_headers,
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        # Original headers should be unchanged
+        assert original_headers == {"X-Custom": "value"}
+        # Returned headers should have Content-Type added
+        assert headers == {"X-Custom": "value", "Content-Type": "application/json"}
+
+    def test_content_type_check_case_insensitive(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test Content-Type header check is case-insensitive."""
+        pre_serialized = b'{"key": "value"}'
+        body_content = ModelHttpBodyContent(
+            body={"key": "value"},
+            pre_serialized=pre_serialized,
+        )
+
+        # Lowercase content-type
+        _content, _json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={"content-type": "text/plain"},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        # Should not add another Content-Type since one exists (case-insensitive)
+        assert headers == {"content-type": "text/plain"}
+        assert "Content-Type" not in headers
+
+
 class TestHttpRestHandlerDeterministicIntegration:
     """Integration tests demonstrating deterministic test utilities (OMN-252).
 
@@ -2100,5 +2319,6 @@ __all__: list[str] = [
     "TestHttpRestHandlerResponseParsing",
     "TestHttpRestHandlerSizeLimits",
     "TestHttpRestHandlerLogWarnings",
+    "TestHttpRestHandlerPrepareRequestContent",
     "TestHttpRestHandlerDeterministicIntegration",
 ]
