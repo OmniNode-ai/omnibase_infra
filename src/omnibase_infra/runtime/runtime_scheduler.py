@@ -87,6 +87,7 @@ from omnibase_infra.runtime.models import (
     ModelRuntimeSchedulerMetrics,
     ModelRuntimeTick,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
@@ -710,21 +711,26 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
 
             except (RedisConnectionError, RedisTimeoutError, TimeoutError) as e:
                 if attempt < retries:
+                    # Calculate exponential backoff delay: 1s, 2s, 4s, 8s... max 60s
+                    backoff_delay = min(1.0 * (2**attempt), 60.0)
+
                     logger.warning(
-                        "Valkey connection attempt %d/%d failed, retrying",
+                        "Valkey connection attempt %d/%d failed, retrying in %.1fs",
                         attempt + 1,
                         retries + 1,
+                        backoff_delay,
                         extra={
                             "scheduler_id": self.scheduler_id,
                             "valkey_host": self._config.valkey_host,
                             "valkey_port": self._config.valkey_port,
-                            "error": str(e),
+                            # SECURITY: Sanitize error to prevent credential exposure
+                            "error": sanitize_error_string(str(e)),
                             "error_type": type(e).__name__,
                             "correlation_id": str(correlation_id),
+                            "backoff_delay_seconds": backoff_delay,
                         },
                     )
-                    # Brief delay before retry
-                    await asyncio.sleep(0.5 * (attempt + 1))
+                    await asyncio.sleep(backoff_delay)
                 else:
                     # All retries exhausted - mark as unavailable
                     self._valkey_available = False
@@ -737,7 +743,8 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                             "scheduler_id": self.scheduler_id,
                             "valkey_host": self._config.valkey_host,
                             "valkey_port": self._config.valkey_port,
-                            "error": str(e),
+                            # SECURITY: Sanitize error to prevent credential exposure
+                            "error": sanitize_error_string(str(e)),
                             "error_type": type(e).__name__,
                             "correlation_id": str(correlation_id),
                         },
@@ -755,7 +762,8 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                         "scheduler_id": self.scheduler_id,
                         "valkey_host": self._config.valkey_host,
                         "valkey_port": self._config.valkey_port,
-                        "error": str(e),
+                        # SECURITY: Sanitize error to prevent credential exposure
+                        "error": sanitize_error_string(str(e)),
                         "error_type": type(e).__name__,
                         "correlation_id": str(correlation_id),
                     },
@@ -769,10 +777,19 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
 
         This method gracefully closes the Valkey client connection if one exists.
         It is called during scheduler shutdown to ensure proper resource cleanup.
+
+        Idempotency:
+            This method is safe to call multiple times. It atomically swaps the
+            client reference to None before attempting close, preventing double-close
+            scenarios even with concurrent coroutine access.
         """
-        if self._valkey_client is not None:
+        # Atomically swap client reference to None to prevent double-close
+        client = self._valkey_client
+        self._valkey_client = None
+
+        if client is not None:
             try:
-                await self._valkey_client.aclose()
+                await client.aclose()
                 logger.debug(
                     "Valkey client closed",
                     extra={"scheduler_id": self.scheduler_id},
@@ -786,8 +803,6 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                         "error_type": type(e).__name__,
                     },
                 )
-            finally:
-                self._valkey_client = None
 
     async def _load_sequence_number(self) -> None:
         """Load persisted sequence number from Valkey for restart-safety.
@@ -895,7 +910,8 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                 extra={
                     "scheduler_id": self.scheduler_id,
                     "sequence_key": self._config.sequence_number_key,
-                    "error": str(e),
+                    # SECURITY: Sanitize error to prevent credential exposure
+                    "error": sanitize_error_string(str(e)),
                     "error_type": type(e).__name__,
                     "correlation_id": str(correlation_id),
                 },
@@ -907,7 +923,8 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                 extra={
                     "scheduler_id": self.scheduler_id,
                     "sequence_key": self._config.sequence_number_key,
-                    "error": str(e),
+                    # SECURITY: Sanitize error to prevent credential exposure
+                    "error": sanitize_error_string(str(e)),
                     "error_type": type(e).__name__,
                     "correlation_id": str(correlation_id),
                 },
@@ -936,6 +953,7 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
 
         if client is None:
             # Valkey unavailable - log but don't fail shutdown
+            # Note: _last_persisted_sequence is NOT updated because persistence failed
             logger.warning(
                 "Valkey unavailable for sequence persistence",
                 extra={
@@ -945,8 +963,6 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                     "correlation_id": str(correlation_id),
                 },
             )
-            # Still update last persisted for metrics tracking
-            self._last_persisted_sequence = self._sequence_number
             return
 
         try:
@@ -973,6 +989,7 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
 
         except (RedisConnectionError, RedisTimeoutError, TimeoutError) as e:
             # Connection failed during operation - log but don't fail shutdown
+            # Note: _last_persisted_sequence is NOT updated because persistence failed
             self._valkey_available = False
 
             logger.warning(
@@ -981,28 +998,27 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                     "scheduler_id": self.scheduler_id,
                     "sequence_number": self._sequence_number,
                     "sequence_key": self._config.sequence_number_key,
-                    "error": str(e),
+                    # SECURITY: Sanitize error to prevent credential exposure
+                    "error": sanitize_error_string(str(e)),
                     "error_type": type(e).__name__,
                     "correlation_id": str(correlation_id),
                 },
             )
-            # Still update last persisted for metrics tracking
-            self._last_persisted_sequence = self._sequence_number
 
         except RedisError as e:
+            # Note: _last_persisted_sequence is NOT updated because persistence failed
             logger.warning(
                 "Valkey error during sequence persistence",
                 extra={
                     "scheduler_id": self.scheduler_id,
                     "sequence_number": self._sequence_number,
                     "sequence_key": self._config.sequence_number_key,
-                    "error": str(e),
+                    # SECURITY: Sanitize error to prevent credential exposure
+                    "error": sanitize_error_string(str(e)),
                     "error_type": type(e).__name__,
                     "correlation_id": str(correlation_id),
                 },
             )
-            # Still update last persisted for metrics tracking
-            self._last_persisted_sequence = self._sequence_number
 
         finally:
             # Close the Valkey client during shutdown

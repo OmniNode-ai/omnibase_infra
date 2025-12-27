@@ -744,7 +744,21 @@ class TestRuntimeSchedulerRestartSafety:
         scheduler_config: ModelRuntimeSchedulerConfig,
         mock_event_bus: AsyncMock,
     ) -> None:
-        """Test that sequence number is marked for persistence on stop."""
+        """Test that sequence number is marked for persistence on stop.
+
+        This test mocks the Valkey client to verify that persistence logic
+        works correctly when Valkey is available. When stop() is called,
+        the current sequence number should be persisted to Valkey.
+        """
+        from unittest.mock import MagicMock
+
+        # Create mock Valkey client
+        mock_valkey_client = MagicMock()
+        mock_valkey_client.ping = AsyncMock(return_value=True)
+        mock_valkey_client.get = AsyncMock(return_value=None)  # No existing sequence
+        mock_valkey_client.set = AsyncMock(return_value=True)
+        mock_valkey_client.aclose = AsyncMock(return_value=None)
+
         # Create config with persistence enabled
         config_with_persistence = ModelRuntimeSchedulerConfig(
             tick_interval_ms=100,  # Minimum allowed
@@ -756,23 +770,32 @@ class TestRuntimeSchedulerRestartSafety:
             persist_sequence_number=True,  # Enable persistence
         )
 
-        scheduler = RuntimeScheduler(
-            config=config_with_persistence, event_bus=mock_event_bus
-        )
+        with patch(
+            "omnibase_infra.runtime.runtime_scheduler.redis.Redis",
+            return_value=mock_valkey_client,
+        ):
+            scheduler = RuntimeScheduler(
+                config=config_with_persistence, event_bus=mock_event_bus
+            )
 
-        await scheduler.start()
+            await scheduler.start()
 
-        # Emit some ticks
-        for _ in range(5):
-            await scheduler.emit_tick()
+            # Emit some ticks
+            for _ in range(5):
+                await scheduler.emit_tick()
 
-        await scheduler.stop()
+            await scheduler.stop()
 
-        # Check metrics show persistence was tracked
-        metrics = await scheduler.get_metrics()
-        assert metrics.current_sequence_number == 5
-        # last_persisted_sequence should be updated on stop
-        assert metrics.last_persisted_sequence == 5
+            # Check metrics show persistence was tracked
+            metrics = await scheduler.get_metrics()
+            assert metrics.current_sequence_number == 5
+            # last_persisted_sequence should be updated on stop
+            assert metrics.last_persisted_sequence == 5
+
+            # Verify Valkey was called with correct sequence
+            mock_valkey_client.set.assert_called_with(
+                config_with_persistence.sequence_number_key, "5"
+            )
 
     async def test_concurrent_tick_emission_sequence_safety(
         self, scheduler: RuntimeScheduler, mock_event_bus: AsyncMock

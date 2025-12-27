@@ -1292,6 +1292,10 @@ class MixinNodeIntrospection:
         Gracefully degrades if event bus is unavailable - logs warning
         and returns False instead of raising an exception.
 
+        This method uses ``track_operation()`` to track active operations
+        for heartbeat reporting, demonstrating the recommended pattern
+        for integrating operation tracking into node operations.
+
         Args:
             reason: Reason for the introspection event
                 (startup, shutdown, request, heartbeat)
@@ -1323,72 +1327,86 @@ class MixinNodeIntrospection:
             )
             return False
 
-        try:
-            # Get introspection data
-            event = await self.get_introspection_data()
+        # Track this operation for heartbeat reporting
+        async with self.track_operation("publish_introspection"):
+            try:
+                # Get introspection data
+                event = await self.get_introspection_data()
 
-            # Create publish event with updated reason and correlation_id
-            # Use model_copy for clean field updates (Pydantic v2)
-            final_correlation_id = correlation_id or uuid4()
-            publish_event = event.model_copy(
-                update={
-                    "reason": reason,
-                    "correlation_id": final_correlation_id,
-                }
-            )
-
-            # Publish to event bus using configured topic
-            # Type narrowing: we've already checked _introspection_event_bus is not None above
-            event_bus = self._introspection_event_bus
-            assert event_bus is not None  # Redundant but helps mypy
-            topic = self._introspection_topic
-            if hasattr(event_bus, "publish_envelope"):
-                await event_bus.publish_envelope(
-                    envelope=publish_event,
-                    topic=topic,
-                )
-            else:
-                # Fallback to publish method with raw bytes
-                event_data = publish_event.model_dump(mode="json")
-                value = json.dumps(event_data).encode("utf-8")
-                await event_bus.publish(
-                    topic=topic,
-                    key=str(self._introspection_node_id).encode("utf-8")
-                    if self._introspection_node_id is not None
-                    else None,
-                    value=value,
+                # Create publish event with updated reason and correlation_id
+                # Use model_copy for clean field updates (Pydantic v2)
+                final_correlation_id = correlation_id or uuid4()
+                publish_event = event.model_copy(
+                    update={
+                        "reason": reason,
+                        "correlation_id": final_correlation_id,
+                    }
                 )
 
-            logger.info(
-                f"Published introspection event for {self._introspection_node_id}",
-                extra={
-                    "node_id": self._introspection_node_id,
-                    "reason": reason,
-                    "correlation_id": str(final_correlation_id),
-                },
-            )
-            return True
+                # Publish to event bus using configured topic
+                # Type narrowing: we've already checked _introspection_event_bus is not None above
+                event_bus = self._introspection_event_bus
+                assert event_bus is not None  # Redundant but helps mypy
+                topic = self._introspection_topic
+                if hasattr(event_bus, "publish_envelope"):
+                    await event_bus.publish_envelope(
+                        envelope=publish_event,
+                        topic=topic,
+                    )
+                else:
+                    # Fallback to publish method with raw bytes
+                    event_data = publish_event.model_dump(mode="json")
+                    value = json.dumps(event_data).encode("utf-8")
+                    await event_bus.publish(
+                        topic=topic,
+                        key=str(self._introspection_node_id).encode("utf-8")
+                        if self._introspection_node_id is not None
+                        else None,
+                        value=value,
+                    )
 
-        except Exception as e:
-            # Use error() with exc_info=True instead of exception() to include
-            # structured error_type and error_message fields for log aggregation
-            logger.error(  # noqa: G201
-                f"Failed to publish introspection for {self._introspection_node_id}",
-                extra={
-                    "node_id": self._introspection_node_id,
-                    "reason": reason,
-                    "error_type": type(e).__name__,
-                    "error_message": str(e),
-                },
-                exc_info=True,
-            )
-            return False
+                logger.info(
+                    f"Published introspection event for {self._introspection_node_id}",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "reason": reason,
+                        "correlation_id": str(final_correlation_id),
+                    },
+                )
+                return True
+
+            except Exception as e:
+                # Use error() with exc_info=True instead of exception() to include
+                # structured error_type and error_message fields for log aggregation
+                logger.error(  # noqa: G201
+                    f"Failed to publish introspection for {self._introspection_node_id}",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "reason": reason,
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                    },
+                    exc_info=True,
+                )
+                return False
 
     async def _publish_heartbeat(self) -> bool:
         """Publish heartbeat event to the event bus.
 
         Internal method for heartbeat broadcasting. Calculates uptime
         and publishes heartbeat event.
+
+        Note:
+            This method intentionally does NOT use ``track_operation()``
+            because:
+            1. It's an internal background task, not a business operation
+            2. Tracking it would cause self-referential counting (the
+               heartbeat would count itself as an active operation)
+            3. The purpose of operation tracking is to report business
+               load, not infrastructure overhead
+
+            For business operations, use ``track_operation()`` as
+            demonstrated in ``publish_introspection()``.
 
         Returns:
             True if published successfully, False otherwise
@@ -2082,7 +2100,8 @@ class MixinNodeIntrospection:
         Concurrency Safety:
             Uses asyncio.Lock for coroutine-safe counter updates.
             The lock is held only during counter updates, not during
-            the operation itself.
+            the operation itself. Logging occurs AFTER lock release
+            to prevent blocking during I/O.
 
         Error Handling:
             Counter updates are protected with try/except to ensure
@@ -2120,19 +2139,14 @@ class MixinNodeIntrospection:
             the current number of active operations. This provides
             visibility into node load for monitoring and scaling.
         """
-        # Increment counter on entry
+        # Increment counter on entry - capture count inside lock, log outside
+        count_after_increment = 0
+        increment_succeeded = False
         try:
             async with self._operations_lock:
                 self._active_operations += 1
-                if operation_name:
-                    logger.debug(
-                        f"Operation started: {operation_name}",
-                        extra={
-                            "node_id": self._introspection_node_id,
-                            "operation": operation_name,
-                            "active_operations": self._active_operations,
-                        },
-                    )
+                count_after_increment = self._active_operations
+            increment_succeeded = True
         except Exception as e:
             # Log but don't fail the operation
             logger.warning(
@@ -2144,34 +2158,33 @@ class MixinNodeIntrospection:
                 },
             )
 
+        # Log AFTER releasing lock to prevent blocking during I/O
+        if increment_succeeded and operation_name:
+            logger.debug(
+                f"Operation started: {operation_name}",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "operation": operation_name,
+                    "active_operations": count_after_increment,
+                },
+            )
+
         try:
             yield
         finally:
-            # Decrement counter on exit (success or failure)
+            # Decrement counter on exit - capture state inside lock, log outside
+            count_after_decrement = 0
+            decrement_succeeded = False
+            counter_was_zero = False
             try:
                 async with self._operations_lock:
                     # Prevent negative counter (defensive check)
                     if self._active_operations > 0:
                         self._active_operations -= 1
                     else:
-                        # This should never happen, but log if it does
-                        logger.warning(
-                            "Active operations counter already at zero during decrement",
-                            extra={
-                                "node_id": self._introspection_node_id,
-                                "operation": operation_name,
-                            },
-                        )
-
-                    if operation_name:
-                        logger.debug(
-                            f"Operation completed: {operation_name}",
-                            extra={
-                                "node_id": self._introspection_node_id,
-                                "operation": operation_name,
-                                "active_operations": self._active_operations,
-                            },
-                        )
+                        counter_was_zero = True
+                    count_after_decrement = self._active_operations
+                decrement_succeeded = True
             except Exception as e:
                 # Log but don't fail the operation
                 logger.warning(
@@ -2182,6 +2195,27 @@ class MixinNodeIntrospection:
                         "error_type": type(e).__name__,
                     },
                 )
+
+            # Log AFTER releasing lock to prevent blocking during I/O
+            if decrement_succeeded:
+                if counter_was_zero:
+                    # This should never happen, but log if it does
+                    logger.warning(
+                        "Active operations counter already at zero during decrement",
+                        extra={
+                            "node_id": self._introspection_node_id,
+                            "operation": operation_name,
+                        },
+                    )
+                elif operation_name:
+                    logger.debug(
+                        f"Operation completed: {operation_name}",
+                        extra={
+                            "node_id": self._introspection_node_id,
+                            "operation": operation_name,
+                            "active_operations": count_after_decrement,
+                        },
+                    )
 
     async def get_active_operations_count(self) -> int:
         """Get the current count of active operations.

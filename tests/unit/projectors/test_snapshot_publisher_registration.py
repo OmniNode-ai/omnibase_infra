@@ -869,7 +869,123 @@ class TestGetLatestSnapshot:
         with pytest.raises(InfraConnectionError) as exc_info:
             await publisher.get_latest_snapshot("entity-123", "registration")
 
-        assert "bootstrap_servers not configured" in str(exc_info.value)
+        assert "bootstrap_servers not configured or empty" in str(exc_info.value)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestBootstrapServersValidation:
+    """Test bootstrap_servers validation in get_latest_snapshot."""
+
+    async def test_empty_string_bootstrap_servers(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test empty string bootstrap_servers raises InfraConnectionError."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, bootstrap_servers=""
+        )
+
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await publisher.get_latest_snapshot("entity-123", "registration")
+
+        assert "bootstrap_servers not configured or empty" in str(exc_info.value)
+
+    async def test_whitespace_only_bootstrap_servers(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test whitespace-only bootstrap_servers raises InfraConnectionError."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, bootstrap_servers="   "
+        )
+
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await publisher.get_latest_snapshot("entity-123", "registration")
+
+        assert "bootstrap_servers not configured or empty" in str(exc_info.value)
+
+    async def test_missing_port_in_bootstrap_servers(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test bootstrap_servers without port raises InfraConnectionError."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, bootstrap_servers="localhost"
+        )
+
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await publisher.get_latest_snapshot("entity-123", "registration")
+
+        assert "Invalid bootstrap server format" in str(exc_info.value)
+        assert "Expected 'host:port'" in str(exc_info.value)
+
+    async def test_invalid_port_in_bootstrap_servers(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test bootstrap_servers with invalid port raises InfraConnectionError."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, bootstrap_servers="localhost:notaport"
+        )
+
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await publisher.get_latest_snapshot("entity-123", "registration")
+
+        assert "Invalid port" in str(exc_info.value)
+        assert "Port must be a valid integer" in str(exc_info.value)
+
+    async def test_port_out_of_range_bootstrap_servers(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test bootstrap_servers with out-of-range port raises InfraConnectionError."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, bootstrap_servers="localhost:99999"
+        )
+
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await publisher.get_latest_snapshot("entity-123", "registration")
+
+        assert "Invalid port 99999" in str(exc_info.value)
+        assert "Port must be between 1 and 65535" in str(exc_info.value)
+
+    async def test_empty_host_in_bootstrap_servers(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test bootstrap_servers with empty host raises InfraConnectionError."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, bootstrap_servers=":9092"
+        )
+
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await publisher.get_latest_snapshot("entity-123", "registration")
+
+        assert "Host cannot be empty" in str(exc_info.value)
+
+    async def test_empty_entry_in_comma_separated_bootstrap_servers(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test bootstrap_servers with empty entry in list raises InfraConnectionError."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer,
+            snapshot_config,
+            bootstrap_servers="localhost:9092,,broker2:9092",
+        )
+
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await publisher.get_latest_snapshot("entity-123", "registration")
+
+        assert "contains empty entries" in str(exc_info.value)
 
 
 @pytest.mark.unit
