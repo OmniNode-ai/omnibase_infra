@@ -102,7 +102,7 @@ class ModelTimeoutQueryResult(BaseModel):
         return self.total_overdue_count > 0
 
 
-class TimeoutScanner:
+class ServiceTimeoutScanner:
     """Scanner for querying registration projections for timeout candidates.
 
     This scanner provides a high-level interface for the orchestrator to
@@ -387,4 +387,4 @@ class TimeoutScanner:
         )
 
 
-__all__: list[str] = ["ModelTimeoutQueryResult", "TimeoutScanner"]
+__all__: list[str] = ["ModelTimeoutQueryResult", "ServiceTimeoutScanner"]

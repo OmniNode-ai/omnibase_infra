@@ -7,20 +7,20 @@ It coordinates timeout detection and emission using the injected 'now' time.
 
 Pattern:
     1. Receive RuntimeTick with injected 'now'
-    2. Query for overdue entities using TimeoutScanner
-    3. Emit timeout events using TimeoutEmitter
+    2. Query for overdue entities using ServiceTimeoutScanner
+    3. Emit timeout events using ServiceTimeoutEmitter
     4. Return result for observability
 
 Design Decisions:
     - Uses tick.now for all time-based decisions (never system clock)
     - Propagates correlation_id from RuntimeTick for distributed tracing
     - Uses tick_id as causation_id for emitted events
-    - Delegates to TimeoutEmitter for actual emission logic
+    - Delegates to ServiceTimeoutEmitter for actual emission logic
 
 Coroutine Safety:
     This coordinator is stateless and coroutine-safe for concurrent calls.
     Each call coordinates independently, delegating coroutine safety to
-    the underlying services (TimeoutScanner, TimeoutEmitter).
+    the underlying services (ServiceTimeoutScanner, ServiceTimeoutEmitter).
 
 Related Tickets:
     - OMN-932 (C2): Durable Timeout Handling
@@ -39,8 +39,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.services import (
-    TimeoutEmitter,
-    TimeoutScanner,
+    ServiceTimeoutEmitter,
+    ServiceTimeoutScanner,
 )
 
 logger = logging.getLogger(__name__)
@@ -184,8 +184,8 @@ class TimeoutCoordinator:
 
     This coordinator:
     1. Uses injected 'now' from RuntimeTick (never system clock)
-    2. Queries for overdue entities via TimeoutScanner
-    3. Emits timeout events via TimeoutEmitter
+    2. Queries for overdue entities via ServiceTimeoutScanner
+    3. Emits timeout events via ServiceTimeoutEmitter
     4. Is restart-safe: only coordinates entities without emission markers
 
     The coordinator is designed to be invoked by the orchestrator when it
@@ -193,16 +193,16 @@ class TimeoutCoordinator:
 
     Design Note:
         The coordinator delegates all business logic to the underlying services:
-        - TimeoutScanner: Finds overdue entities
-        - TimeoutEmitter: Emits events and updates markers
+        - ServiceTimeoutScanner: Finds overdue entities
+        - ServiceTimeoutEmitter: Emits events and updates markers
 
         This separation ensures testability and allows the services to be
         reused independently.
 
     Usage in orchestrator:
         >>> # Wire dependencies
-        >>> timeout_query = TimeoutScanner(projection_reader)
-        >>> timeout_emission = TimeoutEmitter(
+        >>> timeout_query = ServiceTimeoutScanner(projection_reader)
+        >>> timeout_emission = ServiceTimeoutEmitter(
         ...     timeout_query=timeout_query,
         ...     event_bus=event_bus,
         ...     projector=projector,
@@ -222,8 +222,8 @@ class TimeoutCoordinator:
 
     def __init__(
         self,
-        timeout_query: TimeoutScanner,
-        timeout_emission: TimeoutEmitter,
+        timeout_query: ServiceTimeoutScanner,
+        timeout_emission: ServiceTimeoutEmitter,
     ) -> None:
         """Initialize with required service dependencies.
 
@@ -233,8 +233,8 @@ class TimeoutCoordinator:
 
         Example:
             >>> reader = ProjectionReaderRegistration(pool)
-            >>> query = TimeoutScanner(reader)
-            >>> emission = TimeoutEmitter(query, event_bus, projector)
+            >>> query = ServiceTimeoutScanner(reader)
+            >>> emission = ServiceTimeoutEmitter(query, event_bus, projector)
             >>> coordinator = TimeoutCoordinator(query, emission)
         """
         self._timeout_query = timeout_query

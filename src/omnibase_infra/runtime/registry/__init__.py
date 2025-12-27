@@ -35,13 +35,13 @@ Related:
 .. versionadded:: 0.5.0
 """
 
-from omnibase_infra.runtime.registry.model_domain_constraint import (
+from omnibase_infra.models.registry.model_domain_constraint import (
     ModelDomainConstraint,
 )
-from omnibase_infra.runtime.registry.model_message_type_entry import (
+from omnibase_infra.models.registry.model_message_type_entry import (
     ModelMessageTypeEntry,
 )
-from omnibase_infra.runtime.registry.protocol_message_type_registry import (
+from omnibase_infra.protocols.protocol_message_type_registry import (
     ProtocolMessageTypeRegistry,
 )
 from omnibase_infra.runtime.registry.registry_message_type import (

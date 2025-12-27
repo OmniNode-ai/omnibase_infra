@@ -352,7 +352,7 @@ pattern_exemptions:
   # ==========================================================================
   # DispatcherRegistry Exemptions (OMN-934)
   # ==========================================================================
-  - file_pattern: 'dispatcher_registry\.py'
+  - file_pattern: 'registry_dispatcher\.py'
     class_pattern: "Class 'DispatcherRegistry'"
     violation_pattern: 'has \d+ methods'
     reason: >
@@ -448,6 +448,29 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-953
+  # ==========================================================================
+  # ServiceTimeoutEmitter/Scanner Naming Exemptions (OMN-1055)
+  # ==========================================================================
+  # These service classes follow the CLAUDE.md Service<Name> naming convention.
+  # Service files use service_<name>.py with Service<Name> class names.
+  - file_pattern: 'service_timeout_emitter\.py'
+    class_pattern: "Class name 'ServiceTimeoutEmitter'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention for service classes. Service files use service_<name>.py with Service<Name> class names.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-1055
+  - file_pattern: 'service_timeout_scanner\.py'
+    class_pattern: "Class name 'ServiceTimeoutScanner'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention for service classes. Service files use service_<name>.py with Service<Name> class names.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-1055
   # ==========================================================================
   # Consul Service ID Exemptions (OMN-889)
   # ==========================================================================
@@ -803,16 +826,16 @@ architecture_exemptions:
       - docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
     ticket: OMN-888
   # ==========================================================================
-  # TimeoutEmitter Models Exemption (OMN-932)
+  # ServiceTimeoutEmitter Models Exemption (OMN-932)
   # ==========================================================================
-  # timeout_emitter.py contains domain-grouped models for timeout emission:
+  # service_timeout_emitter.py contains domain-grouped models for timeout emission:
   # - ModelTimeoutEmissionResult: Result of timeout emission processing
   # - ModelTimeoutEmissionConfig: Configuration for the emitter
   # These are tightly coupled and always used together.
-  - file_pattern: 'services/timeout_emitter\.py'
+  - file_pattern: 'services/service_timeout_emitter\.py'
     violation_pattern: '\d+ models in one file'
     reason: >
-      Domain-grouped models for timeout emission. ModelTimeoutEmissionResult and ModelTimeoutEmissionConfig define the complete interface for the TimeoutEmitter. Per CLAUDE.md domain-grouping convention for cohesive models that are always used together.
+      Domain-grouped models for timeout emission. ModelTimeoutEmissionResult and ModelTimeoutEmissionConfig define the complete interface for the ServiceTimeoutEmitter. Per CLAUDE.md domain-grouping convention for cohesive models that are always used together.
 
     ticket: OMN-932
 # Union usage validator exemptions

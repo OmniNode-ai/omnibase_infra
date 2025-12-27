@@ -130,7 +130,9 @@ from omnibase_core.models.events.model_event_envelope import (
 
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
-from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.models.validation.model_chain_violation import ModelChainViolation
 
 logger = logging.getLogger(__name__)

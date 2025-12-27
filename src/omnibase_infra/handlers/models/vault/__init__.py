@@ -28,6 +28,9 @@ from omnibase_infra.handlers.models.vault.model_payload_vault import (
 from omnibase_infra.handlers.models.vault.model_vault_delete_payload import (
     ModelVaultDeletePayload,
 )
+from omnibase_infra.handlers.models.vault.model_vault_handler_config import (
+    ModelVaultHandlerConfig,
+)
 from omnibase_infra.handlers.models.vault.model_vault_handler_payload import (
     ModelVaultHandlerPayload,
     VaultPayload,
@@ -37,6 +40,9 @@ from omnibase_infra.handlers.models.vault.model_vault_list_payload import (
 )
 from omnibase_infra.handlers.models.vault.model_vault_renew_token_payload import (
     ModelVaultRenewTokenPayload,
+)
+from omnibase_infra.handlers.models.vault.model_vault_retry_config import (
+    ModelVaultRetryConfig,
 )
 from omnibase_infra.handlers.models.vault.model_vault_secret_payload import (
     ModelVaultSecretPayload,
@@ -54,6 +60,8 @@ __all__: list[str] = [
     "ModelVaultDeletePayload",
     "ModelVaultListPayload",
     "ModelVaultRenewTokenPayload",
+    "ModelVaultHandlerConfig",
+    "ModelVaultRetryConfig",
     "VaultPayload",
     "ModelVaultHandlerPayload",
 ]

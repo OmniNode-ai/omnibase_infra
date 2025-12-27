@@ -46,8 +46,8 @@ from omnibase_infra.models.projection import (
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.services import (
     ModelTimeoutEmissionConfig,
-    TimeoutEmitter,
-    TimeoutScanner,
+    ServiceTimeoutEmitter,
+    ServiceTimeoutScanner,
 )
 
 if TYPE_CHECKING:
@@ -93,30 +93,30 @@ pytestmark = [
 def create_timeout_query_service(
     reader: InMemoryProjectionStore,
     batch_size: int = 100,
-) -> TimeoutScanner:
-    """Create TimeoutScanner with mock reader.
+) -> ServiceTimeoutScanner:
+    """Create ServiceTimeoutScanner with mock reader.
 
     Args:
         reader: In-memory projection store acting as reader
         batch_size: Maximum entities to return per query
 
     Returns:
-        TimeoutScanner configured with mock reader
+        ServiceTimeoutScanner configured with mock reader
     """
-    return TimeoutScanner(
+    return ServiceTimeoutScanner(
         projection_reader=reader,  # type: ignore[arg-type]
         batch_size=batch_size,
     )
 
 
 def create_timeout_emission_service(
-    query_service: TimeoutScanner,
+    query_service: ServiceTimeoutScanner,
     event_bus: MockEventBus,
     projector: MockProjector,
     environment: str = "test",
     namespace: str = "onex",
-) -> TimeoutEmitter:
-    """Create TimeoutEmitter with mock dependencies.
+) -> ServiceTimeoutEmitter:
+    """Create ServiceTimeoutEmitter with mock dependencies.
 
     Args:
         query_service: Timeout scanner
@@ -126,13 +126,13 @@ def create_timeout_emission_service(
         namespace: Namespace for topic routing
 
     Returns:
-        TimeoutEmitter configured with mocks
+        ServiceTimeoutEmitter configured with mocks
     """
     config = ModelTimeoutEmissionConfig(
         environment=environment,
         namespace=namespace,
     )
-    return TimeoutEmitter(
+    return ServiceTimeoutEmitter(
         timeout_query=query_service,
         event_bus=event_bus,  # type: ignore[arg-type]
         projector=projector,  # type: ignore[arg-type]
@@ -506,7 +506,7 @@ class TestRestartSafeTimeouts:
 
 
 class TestTimeoutQuery:
-    """Tests for TimeoutScanner behavior."""
+    """Tests for ServiceTimeoutScanner behavior."""
 
     async def test_query_returns_only_overdue_entities(
         self,

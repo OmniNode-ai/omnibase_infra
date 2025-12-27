@@ -28,6 +28,9 @@ from omnibase_infra.handlers.models.consul.enum_consul_operation_type import (
 from omnibase_infra.handlers.models.consul.model_consul_deregister_payload import (
     ModelConsulDeregisterPayload,
 )
+from omnibase_infra.handlers.models.consul.model_consul_handler_config import (
+    ModelConsulHandlerConfig,
+)
 from omnibase_infra.handlers.models.consul.model_consul_handler_payload import (
     ConsulPayload,
     ModelConsulHandlerPayload,
@@ -50,6 +53,9 @@ from omnibase_infra.handlers.models.consul.model_consul_kv_put_payload import (
 from omnibase_infra.handlers.models.consul.model_consul_register_payload import (
     ModelConsulRegisterPayload,
 )
+from omnibase_infra.handlers.models.consul.model_consul_retry_config import (
+    ModelConsulRetryConfig,
+)
 from omnibase_infra.handlers.models.consul.model_payload_consul import (
     ModelPayloadConsul,
     RegistryPayloadConsul,
@@ -66,6 +72,8 @@ __all__: list[str] = [
     "ModelConsulDeregisterPayload",
     "ConsulPayload",
     "ModelConsulHandlerPayload",
+    "ModelConsulHandlerConfig",
+    "ModelConsulRetryConfig",
     "ModelPayloadConsul",
     "RegistryPayloadConsul",
 ]

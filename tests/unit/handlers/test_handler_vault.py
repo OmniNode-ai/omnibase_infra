@@ -29,7 +29,7 @@ from omnibase_infra.errors import (
     SecretResolutionError,
 )
 from omnibase_infra.handlers.handler_vault import VaultHandler
-from omnibase_infra.handlers.model_vault_handler_config import ModelVaultHandlerConfig
+from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
 # Type alias for vault config dict values (str, int, float, bool, dict)
 VaultConfigValue = str | int | float | bool | dict[str, str | int | float | bool]
@@ -994,7 +994,7 @@ class TestVaultHandlerThreadPool:
     @pytest.mark.asyncio
     async def test_config_validates_thread_pool_bounds(self) -> None:
         """Test config validation enforces thread pool size bounds."""
-        from omnibase_infra.handlers.model_vault_handler_config import (
+        from omnibase_infra.handlers.models.vault import (
             ModelVaultHandlerConfig,
         )
 
@@ -1362,7 +1362,7 @@ class TestVaultHandlerCircuitBreaker:
     @pytest.mark.asyncio
     async def test_config_validates_circuit_breaker_bounds(self) -> None:
         """Test config validation enforces circuit breaker parameter bounds."""
-        from omnibase_infra.handlers.model_vault_handler_config import (
+        from omnibase_infra.handlers.models.vault import (
             ModelVaultHandlerConfig,
         )
 
@@ -1576,7 +1576,7 @@ class TestVaultHandlerBoundedQueue:
     @pytest.mark.asyncio
     async def test_config_validates_queue_multiplier_bounds(self) -> None:
         """Test config validation enforces queue multiplier bounds."""
-        from omnibase_infra.handlers.model_vault_handler_config import (
+        from omnibase_infra.handlers.models.vault import (
             ModelVaultHandlerConfig,
         )
 

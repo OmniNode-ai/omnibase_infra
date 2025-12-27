@@ -52,7 +52,7 @@ await adapter.initialize({
 
 ```python
 from pydantic import SecretStr
-from omnibase_infra.handlers.model_vault_handler_config import ModelVaultHandlerConfig
+from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
 config = ModelVaultHandlerConfig(
     url="https://vault.example.com:8200",
