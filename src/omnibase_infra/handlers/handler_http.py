@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -28,6 +27,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.utils import parse_env_float, parse_env_int
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
@@ -35,150 +35,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _parse_env_float(
-    env_var: str,
-    default: float,
-    *,
-    min_value: float | None = None,
-    max_value: float | None = None,
-) -> float:
-    """Safely parse a float environment variable with proper error handling.
-
-    Args:
-        env_var: Name of the environment variable to parse.
-        default: Default value to use if environment variable is not set.
-        min_value: Optional minimum valid value (inclusive).
-        max_value: Optional maximum valid value (inclusive).
-
-    Returns:
-        Parsed float value, or default if parsing fails or value is out of range.
-
-    Raises:
-        ProtocolConfigurationError: If environment variable contains an invalid
-            non-numeric value that cannot be parsed as a float.
-
-    Note:
-        Following ONEX security guidelines, the actual invalid value is never
-        exposed in error messages. Only the environment variable name and
-        expected type are included.
-    """
-    raw_value = os.environ.get(env_var)
-    if raw_value is None:
-        return default
-
-    try:
-        parsed = float(raw_value)
-    except ValueError:
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.HTTP,
-            operation="parse_env_config",
-            target_name="http_handler",
-            correlation_id=uuid4(),
-        )
-        raise ProtocolConfigurationError(
-            f"Invalid value for {env_var} environment variable: expected a numeric value",
-            context=context,
-        ) from None
-
-    # Range validation with fallback to default
-    if min_value is not None and parsed < min_value:
-        logger.warning(
-            "Environment variable %s value %f is below minimum %f, using default %f",
-            env_var,
-            parsed,
-            min_value,
-            default,
-        )
-        return default
-    if max_value is not None and parsed > max_value:
-        logger.warning(
-            "Environment variable %s value %f is above maximum %f, using default %f",
-            env_var,
-            parsed,
-            max_value,
-            default,
-        )
-        return default
-
-    return parsed
-
-
-def _parse_env_int(
-    env_var: str,
-    default: int,
-    *,
-    min_value: int | None = None,
-    max_value: int | None = None,
-) -> int:
-    """Safely parse an integer environment variable with proper error handling.
-
-    Args:
-        env_var: Name of the environment variable to parse.
-        default: Default value to use if environment variable is not set.
-        min_value: Optional minimum valid value (inclusive).
-        max_value: Optional maximum valid value (inclusive).
-
-    Returns:
-        Parsed integer value, or default if parsing fails or value is out of range.
-
-    Raises:
-        ProtocolConfigurationError: If environment variable contains an invalid
-            non-numeric value that cannot be parsed as an integer.
-
-    Note:
-        Following ONEX security guidelines, the actual invalid value is never
-        exposed in error messages. Only the environment variable name and
-        expected type are included.
-    """
-    raw_value = os.environ.get(env_var)
-    if raw_value is None:
-        return default
-
-    try:
-        parsed = int(raw_value)
-    except ValueError:
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.HTTP,
-            operation="parse_env_config",
-            target_name="http_handler",
-            correlation_id=uuid4(),
-        )
-        raise ProtocolConfigurationError(
-            f"Invalid value for {env_var} environment variable: expected an integer value",
-            context=context,
-        ) from None
-
-    # Range validation with fallback to default
-    if min_value is not None and parsed < min_value:
-        logger.warning(
-            "Environment variable %s value %d is below minimum %d, using default %d",
-            env_var,
-            parsed,
-            min_value,
-            default,
-        )
-        return default
-    if max_value is not None and parsed > max_value:
-        logger.warning(
-            "Environment variable %s value %d is above maximum %d, using default %d",
-            env_var,
-            parsed,
-            max_value,
-            default,
-        )
-        return default
-
-    return parsed
-
-
-_DEFAULT_TIMEOUT_SECONDS: float = _parse_env_float(
-    "ONEX_HTTP_TIMEOUT", 30.0, min_value=0.1, max_value=3600.0
+_DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
+    "ONEX_HTTP_TIMEOUT",
+    30.0,
+    min_value=0.1,
+    max_value=3600.0,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="http_handler",
 )
-_DEFAULT_MAX_REQUEST_SIZE: int = _parse_env_int(
-    "ONEX_HTTP_MAX_REQUEST_SIZE", 10 * 1024 * 1024, min_value=1, max_value=1073741824
+_DEFAULT_MAX_REQUEST_SIZE: int = parse_env_int(
+    "ONEX_HTTP_MAX_REQUEST_SIZE",
+    10 * 1024 * 1024,
+    min_value=1,
+    max_value=1073741824,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="http_handler",
 )  # 10 MB default, max 1 GB
-_DEFAULT_MAX_RESPONSE_SIZE: int = _parse_env_int(
-    "ONEX_HTTP_MAX_RESPONSE_SIZE", 50 * 1024 * 1024, min_value=1, max_value=1073741824
+_DEFAULT_MAX_RESPONSE_SIZE: int = parse_env_int(
+    "ONEX_HTTP_MAX_RESPONSE_SIZE",
+    50 * 1024 * 1024,
+    min_value=1,
+    max_value=1073741824,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="http_handler",
 )  # 50 MB default, max 1 GB
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 # Streaming chunk size for responses without Content-Length header

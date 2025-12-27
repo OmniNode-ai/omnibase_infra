@@ -165,23 +165,46 @@ def _get_compute_registry_cache_size() -> int:
     If not set, falls back to the legacy COMPUTE_REGISTRY_CACHE_SIZE for
     backward compatibility. Logs an info message when legacy variable is used.
 
+    Range validation: Cache size must be between 1 and 10000.
+    - Below 1: Uses default (logged as warning)
+    - Above 10000: Uses default (logged as warning)
+
     Returns:
         Cache size as an integer.
+
+    Raises:
+        ProtocolConfigurationError: If the environment variable contains
+            a non-integer value.
     """
+    from omnibase_infra.enums import EnumInfraTransportType
+    from omnibase_infra.utils.util_env_parsing import parse_env_int
+
     # Prefer ONEX_ prefix
-    onex_value = os.environ.get(ENV_COMPUTE_REGISTRY_CACHE_SIZE)
-    if onex_value:
-        return int(onex_value)
+    if os.environ.get(ENV_COMPUTE_REGISTRY_CACHE_SIZE) is not None:
+        return parse_env_int(
+            ENV_COMPUTE_REGISTRY_CACHE_SIZE,
+            _DEFAULT_SEMVER_CACHE_SIZE,
+            min_value=1,
+            max_value=10000,
+            transport_type=EnumInfraTransportType.HTTP,
+            service_name="compute_registry",
+        )
 
     # Fall back to legacy name for backward compatibility
-    legacy_value = os.environ.get(ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY)
-    if legacy_value:
+    if os.environ.get(ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY) is not None:
         logger.info(
             "Using legacy %s; consider migrating to %s",
             ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY,
             ENV_COMPUTE_REGISTRY_CACHE_SIZE,
         )
-        return int(legacy_value)
+        return parse_env_int(
+            ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY,
+            _DEFAULT_SEMVER_CACHE_SIZE,
+            min_value=1,
+            max_value=10000,
+            transport_type=EnumInfraTransportType.HTTP,
+            service_name="compute_registry",
+        )
 
     # Default
     return _DEFAULT_SEMVER_CACHE_SIZE
