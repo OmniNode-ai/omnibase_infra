@@ -49,9 +49,6 @@ from omnibase_infra.event_bus.models import ModelEventMessage
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
 KAFKA_AVAILABLE = KAFKA_BOOTSTRAP_SERVERS is not None
 
-# Module-level marker for integration tests
-pytestmark = [pytest.mark.integration]
-
 # Skip marker for tests that require Kafka
 requires_kafka = pytest.mark.skipif(
     not KAFKA_AVAILABLE,

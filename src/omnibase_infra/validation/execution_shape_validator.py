@@ -534,8 +534,18 @@ class ExecutionShapeValidator:
                     arg_str = self._get_name_from_expr(arg)
                     if arg_str is not None:
                         # Handle EnumHandlerType.EFFECT or just EFFECT
+                        # Use exact matching to avoid false positives from substring matches
+                        # (e.g., "side_effect" should not match "effect")
+                        arg_upper = arg_str.upper()
                         for handler_type in EnumHandlerType:
-                            if handler_type.value in arg_str.lower():
+                            # Match exact enum member name: "EFFECT", "COMPUTE", etc.
+                            if arg_upper == handler_type.name:
+                                return handler_type
+                            # Match qualified name: "EnumHandlerType.EFFECT"
+                            if arg_upper.endswith(f".{handler_type.name}"):
+                                return handler_type
+                            # Match quoted string value: "effect", "compute", etc.
+                            if arg_upper == handler_type.value.upper():
                                 return handler_type
 
             # Check @effect_handler, @reducer_handler patterns

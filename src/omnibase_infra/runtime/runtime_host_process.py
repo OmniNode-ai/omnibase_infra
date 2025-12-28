@@ -3,7 +3,7 @@
 """Runtime Host Process implementation for ONEX Infrastructure.
 
 This module implements the RuntimeHostProcess class, which is responsible for:
-- Owning and managing an InMemoryEventBus instance
+- Owning and managing an event bus instance (InMemoryEventBus or KafkaEventBus)
 - Registering handlers via the wiring module
 - Subscribing to event bus topics and routing envelopes to handlers
 - Handling errors by producing success=False response envelopes
@@ -12,6 +12,13 @@ This module implements the RuntimeHostProcess class, which is responsible for:
 
 The RuntimeHostProcess is the central coordinator for infrastructure runtime,
 bridging event-driven message routing with protocol handlers.
+
+Event Bus Support:
+    The RuntimeHostProcess supports two event bus implementations:
+    - InMemoryEventBus: For local development and testing
+    - KafkaEventBus: For production use with Kafka/Redpanda
+
+    The event bus can be injected via constructor or auto-created based on config.
 
 Example Usage:
     ```python
@@ -52,6 +59,7 @@ from omnibase_infra.errors import (
     UnknownHandlerTypeError,
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
 from omnibase_infra.runtime.envelope_validator import (
     normalize_correlation_id,
     validate_envelope,
@@ -113,8 +121,9 @@ class RuntimeHostProcess:
     """Runtime host process that owns event bus and coordinates handlers.
 
     The RuntimeHostProcess is the central coordinator for ONEX infrastructure
-    runtime. It owns an InMemoryEventBus instance, registers handlers via the
-    wiring module, and routes incoming envelopes to appropriate handlers.
+    runtime. It owns an event bus instance (InMemoryEventBus or KafkaEventBus),
+    registers handlers via the wiring module, and routes incoming envelopes to
+    appropriate handlers.
 
     Container Integration:
         RuntimeHostProcess now accepts a ModelONEXContainer parameter for
@@ -126,7 +135,7 @@ class RuntimeHostProcess:
         in favor of container resolution.
 
     Attributes:
-        event_bus: The owned InMemoryEventBus instance
+        event_bus: The owned event bus instance (InMemoryEventBus or KafkaEventBus)
         is_running: Whether the process is currently running
         input_topic: Topic to subscribe to for incoming envelopes
         output_topic: Topic to publish responses to
@@ -158,7 +167,7 @@ class RuntimeHostProcess:
 
     def __init__(
         self,
-        event_bus: InMemoryEventBus | None = None,
+        event_bus: InMemoryEventBus | KafkaEventBus | None = None,
         input_topic: str = DEFAULT_INPUT_TOPIC,
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
         config: JsonValue | None = None,
@@ -167,7 +176,8 @@ class RuntimeHostProcess:
         """Initialize the runtime host process.
 
         Args:
-            event_bus: Optional event bus instance. If None, creates InMemoryEventBus.
+            event_bus: Optional event bus instance (InMemoryEventBus or KafkaEventBus).
+                       If None, creates InMemoryEventBus.
             input_topic: Topic to subscribe to for incoming envelopes.
             output_topic: Topic to publish responses to.
             config: Optional configuration dict that can override topics and group_id.
@@ -214,7 +224,9 @@ class RuntimeHostProcess:
         self._handler_registry: ProtocolBindingRegistry | None = handler_registry
 
         # Create or use provided event bus
-        self._event_bus: InMemoryEventBus = event_bus or InMemoryEventBus()
+        self._event_bus: InMemoryEventBus | KafkaEventBus = (
+            event_bus or InMemoryEventBus()
+        )
 
         # Extract configuration with defaults
         config = config or {}
@@ -222,7 +234,17 @@ class RuntimeHostProcess:
         # Topic configuration (config overrides constructor args)
         self._input_topic: str = str(config.get("input_topic", input_topic))
         self._output_topic: str = str(config.get("output_topic", output_topic))
-        self._group_id: str = str(config.get("group_id", DEFAULT_GROUP_ID))
+        # Note: ModelRuntimeConfig uses field name "consumer_group" with alias "group_id".
+        # When config.model_dump() is called, it outputs "consumer_group" by default.
+        # We check both keys for backwards compatibility with existing configs.
+        # Empty strings and whitespace-only strings fall through to the next option.
+        consumer_group = config.get("consumer_group")
+        group_id = config.get("group_id")
+        self._group_id: str = str(
+            (consumer_group if consumer_group and str(consumer_group).strip() else None)
+            or (group_id if group_id and str(group_id).strip() else None)
+            or DEFAULT_GROUP_ID
+        )
 
         # Health check configuration (from lifecycle subcontract pattern)
         # Default: 5.0 seconds, valid range: 1-60 seconds per ModelLifecycleSubcontract
@@ -360,11 +382,11 @@ class RuntimeHostProcess:
         )
 
     @property
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> InMemoryEventBus | KafkaEventBus:
         """Return the owned event bus instance.
 
         Returns:
-            The InMemoryEventBus instance managed by this process.
+            The event bus instance managed by this process.
         """
         return self._event_bus
 
@@ -1174,6 +1196,10 @@ class RuntimeHostProcess:
 
         try:
             event_bus_health = await self._event_bus.health_check()
+            # Assert for type narrowing: health_check() returns dict per contract
+            assert isinstance(event_bus_health, dict), (
+                f"health_check() must return dict, got {type(event_bus_health).__name__}"
+            )
             event_bus_healthy = bool(event_bus_health.get("healthy", False))
         except Exception as e:
             # Create infrastructure error context for health check failure

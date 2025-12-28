@@ -80,7 +80,6 @@ DEFAULT_TEST_PARTITION = "0"
 
 # Test markers
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.asyncio,
 ]
 

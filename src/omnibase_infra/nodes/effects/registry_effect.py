@@ -367,7 +367,7 @@ class NodeRegistryEffect:
         retries = 0
 
         try:
-            service_id = f"node-{request.node_type}-{request.node_id}"
+            service_id = f"onex-{request.node_type}-{request.node_id}"
             service_name = request.service_name or f"onex-{request.node_type}"
 
             result = await self._consul_client.register_service(

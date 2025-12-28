@@ -96,12 +96,16 @@ Environment Variables (optional):
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
 import pytest
+
+# Module-level logger for test cleanup diagnostics
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
@@ -336,8 +340,12 @@ async def initialized_db_handler(
     # Idempotent: safe even if test already called shutdown()
     try:
         await handler.shutdown()
-    except Exception:
-        pass  # Ignore cleanup errors - handler may already be shut down
+    except Exception as e:
+        logger.warning(
+            "Cleanup failed for DbHandler shutdown: %s",
+            e,
+            exc_info=True,
+        )
 
 
 @pytest.fixture
@@ -386,8 +394,13 @@ async def cleanup_table(
                 },
             }
             await initialized_db_handler.execute(envelope)
-        except Exception:
-            pass  # Ignore cleanup errors - table may not exist or handler shut down
+        except Exception as e:
+            logger.warning(
+                "Cleanup failed for table %s: %s",
+                table,
+                e,
+                exc_info=True,
+            )
 
 
 # =============================================================================
@@ -557,8 +570,12 @@ async def vault_handler(
     # Idempotent: safe even if test already called shutdown()
     try:
         await handler.shutdown()
-    except Exception:
-        pass  # Ignore cleanup errors - handler may already be shut down
+    except Exception as e:
+        logger.warning(
+            "Cleanup failed for VaultHandler shutdown: %s",
+            e,
+            exc_info=True,
+        )
 
 
 # =============================================================================
@@ -715,5 +732,9 @@ async def initialized_consul_handler(
     # Idempotent: safe even if test already called shutdown()
     try:
         await handler.shutdown()
-    except Exception:
-        pass  # Ignore cleanup errors - handler may already be shut down
+    except Exception as e:
+        logger.warning(
+            "Cleanup failed for ConsulHandler shutdown: %s",
+            e,
+            exc_info=True,
+        )

@@ -84,7 +84,8 @@ python -c "from omnibase_spi.protocols import ProtocolEventBus; print('SPI OK')"
 ### 0.2 Backup Current Repository
 
 ```bash
-cd /Users/jonah/Code
+# Navigate to your workspace directory (adjust path as needed)
+cd "${WORKSPACE_ROOT:-$HOME/Code}"
 mv omnibase_infra omnibase_infra_bak
 ```
 

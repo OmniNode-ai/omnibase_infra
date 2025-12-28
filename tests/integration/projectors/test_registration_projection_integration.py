@@ -48,7 +48,6 @@ if TYPE_CHECKING:
 
 # Test markers
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.asyncio,
 ]
 

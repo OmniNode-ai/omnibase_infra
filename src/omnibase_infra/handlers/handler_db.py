@@ -149,6 +149,23 @@ class DbHandler(MixinEnvelopeExtraction):
         See CLAUDE.md "Error Sanitization Guidelines" for the full security policy
         on what information is safe vs unsafe to include in errors and logs.
 
+    Production Database Safety:
+        When connecting to production databases, ensure the following safeguards:
+
+        1. **Use read-only credentials** when possible to prevent accidental mutations
+        2. **Connection isolation**: Use separate DSNs for read and write operations
+        3. **Query timeouts**: Configure appropriate timeouts to prevent long-running
+           queries from exhausting connection pools (default: 30 seconds)
+        4. **Pool limits**: Production workloads should use 10-20 connections
+           (currently fixed at 5 for MVP - see Beta roadmap)
+        5. **SSL/TLS**: Always use encrypted connections (sslmode=require/verify-full)
+        6. **Audit logging**: Enable PostgreSQL statement logging for compliance
+        7. **Connection pooling**: Consider PgBouncer for high-traffic scenarios
+
+        WARNING: This handler executes arbitrary SQL. Ensure all queries use
+        parameterized statements to prevent SQL injection. Multi-statement SQL
+        is intentionally blocked for security.
+
     TODO(OMN-42): Consider implementing circuit breaker pattern for connection
     resilience. See CLAUDE.md "Error Recovery Patterns" for implementation guidance.
     """

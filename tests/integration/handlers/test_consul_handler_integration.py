@@ -65,7 +65,6 @@ if TYPE_CHECKING:
 
 # Module-level markers - skip all tests if Consul is not available
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.skipif(
         not CONSUL_AVAILABLE,
         reason="Consul not available (cannot connect to remote infrastructure)",

@@ -8,7 +8,7 @@ Pre-commit hooks were **not installed** in `.git/hooks/`, causing linting failur
 
 **Configuration existed** (`.pre-commit-config.yaml`) but hooks were **never installed** in the git repository.
 
-- ✅ Configuration: `/workspace/omnibase_infra2/.pre-commit-config.yaml` (mirrors omnibase_core)
+- ✅ Configuration: `.pre-commit-config.yaml` (mirrors omnibase_core)
 - ❌ Installation: `git/hooks/pre-commit` and `.git/hooks/pre-push` were NOT present
 - ❌ Result: No validation ran before commits/pushes
 

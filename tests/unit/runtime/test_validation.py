@@ -81,6 +81,8 @@ class TestTopicNameValidation:
             "topic-with-many-dashes",
             "topic_with_many_underscores",
             "mixed-topic_name123",
+            "topic.with.dots",  # Dots are valid per Kafka conventions
+            "dev.onex.evt.node-introspection.v1",  # ONEX topic naming
         ],
     )
     def test_valid_topic_names(self, topic_name: str) -> None:
@@ -93,7 +95,7 @@ class TestTopicNameValidation:
         ("topic_name", "expected_error_substring"),
         [
             ("topic with spaces", "must match pattern"),
-            ("topic.with.dots", "must match pattern"),
+            # Note: dots are VALID per pattern ^[a-zA-Z0-9._-]+$ (Kafka convention)
             ("topic:with:colons", "must match pattern"),
             ("topic/with/slashes", "must match pattern"),
             ("topic@special", "must match pattern"),
@@ -344,7 +346,7 @@ class TestLoadAndValidateConfig:
             "input_topic": "requests",
             "output_topic": "responses",
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         result = load_and_validate_config(config_file)
@@ -376,7 +378,7 @@ class TestLoadAndValidateConfig:
         config_data = {
             "input_topic": "invalid topic with spaces",
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -414,7 +416,9 @@ class TestConstants:
         assert len(VALID_EVENT_BUS_TYPES) == 2
 
     def test_grace_period_bounds(self) -> None:
-        """Test that grace period bounds are reasonable."""
+        """Test that grace period bounds match ModelShutdownConfig constraints."""
         assert MIN_GRACE_PERIOD_SECONDS == 0
-        assert MAX_GRACE_PERIOD_SECONDS == 300
+        assert (
+            MAX_GRACE_PERIOD_SECONDS == 3600
+        )  # 1 hour max to match ModelShutdownConfig
         assert MIN_GRACE_PERIOD_SECONDS < MAX_GRACE_PERIOD_SECONDS

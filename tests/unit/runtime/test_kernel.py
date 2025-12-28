@@ -54,7 +54,7 @@ class TestLoadRuntimeConfig:
             "output_topic": "test-responses",
             "group_id": "test-group",
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         # Load config
@@ -144,7 +144,7 @@ class TestLoadRuntimeConfig:
         test_config = {
             "input_topic": "invalid topic with spaces",
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -167,7 +167,7 @@ class TestLoadRuntimeConfig:
             "output_topic": "also invalid",
             "event_bus": {"type": "unknown-type"},
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -206,7 +206,7 @@ class TestLoadRuntimeConfig:
             "consumer_group": "bad group name",
             "event_bus": {"type": "unknown-type"},
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -369,6 +369,8 @@ class TestBootstrap:
     ) -> None:
         """Test that bootstrap creates event bus with correct environment."""
         monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
+        # Ensure InMemoryEventBus is used by unsetting KAFKA_BOOTSTRAP_SERVERS
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
         with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
@@ -379,6 +381,41 @@ class TestBootstrap:
         # Verify event bus was created with environment
         mock_event_bus.assert_called_once()
         call_kwargs = mock_event_bus.call_args[1]
+        assert call_kwargs["environment"] == "test-env"
+
+    async def test_bootstrap_creates_kafka_event_bus_when_configured(
+        self,
+        mock_runtime_host: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that bootstrap creates KafkaEventBus when KAFKA_BOOTSTRAP_SERVERS is set."""
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+
+        with (
+            patch("omnibase_infra.runtime.kernel.KafkaEventBus") as mock_kafka_bus,
+            patch(
+                "omnibase_infra.runtime.kernel.InMemoryEventBus"
+            ) as mock_inmemory_bus,
+            patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event,
+        ):
+            mock_kafka_instance = MagicMock()
+            mock_kafka_bus.return_value = mock_kafka_instance
+
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            await bootstrap()
+
+        # Verify KafkaEventBus was created, not InMemoryEventBus
+        mock_kafka_bus.assert_called_once()
+        mock_inmemory_bus.assert_not_called()
+
+        # Verify correct parameters were passed
+        call_kwargs = mock_kafka_bus.call_args[1]
+        assert call_kwargs["bootstrap_servers"] == "kafka:9092"
         assert call_kwargs["environment"] == "test-env"
 
     async def test_bootstrap_uses_contracts_dir_from_env(
@@ -521,10 +558,20 @@ class TestBootstrap:
                     exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify wait_for was called with correct timeout
-        mock_wait_for.assert_called_once()
-        call_kwargs = mock_wait_for.call_args[1]
-        assert call_kwargs["timeout"] == 45
+        # Verify wait_for was called with correct timeout for shutdown
+        # Note: wait_for may be called multiple times (once for producer start,
+        # once for shutdown), so we check that at least one call used our timeout
+        assert mock_wait_for.call_count >= 1
+        # Find the shutdown call that used our configured grace period
+        shutdown_calls = [
+            call
+            for call in mock_wait_for.call_args_list
+            if call[1].get("timeout") == 45
+        ]
+        assert len(shutdown_calls) >= 1, (
+            f"Expected at least one wait_for call with timeout=45, "
+            f"got calls: {mock_wait_for.call_args_list}"
+        )
 
 
 class TestConfigureLogging:

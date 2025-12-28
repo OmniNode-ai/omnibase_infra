@@ -88,6 +88,7 @@ def large_policy_registry() -> PolicyRegistry:
 # =============================================================================
 
 
+@pytest.mark.performance
 class TestPolicyRegistryPerformance:
     """Performance benchmarks for PolicyRegistry optimizations."""
 

@@ -239,7 +239,7 @@ class TestMissingRequiredFieldsScenarios:
         """Test that invalid input_topic format raises validation error."""
         config_file = tmp_path / "config.yaml"
         config_data = {"input_topic": "invalid topic with spaces"}
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -253,7 +253,7 @@ class TestMissingRequiredFieldsScenarios:
         """Test that non-string topic raises validation error."""
         config_file = tmp_path / "config.yaml"
         config_data = {"input_topic": 12345}  # Should be string
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -266,7 +266,7 @@ class TestMissingRequiredFieldsScenarios:
         """Test that invalid event_bus.type raises validation error."""
         config_file = tmp_path / "config.yaml"
         config_data = {"event_bus": {"type": "unknown_bus_type"}}
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -281,7 +281,7 @@ class TestMissingRequiredFieldsScenarios:
         """Test that negative grace_period_seconds raises validation error."""
         config_file = tmp_path / "config.yaml"
         config_data = {"shutdown": {"grace_period_seconds": -10}}
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -292,10 +292,10 @@ class TestMissingRequiredFieldsScenarios:
         assert ">=" in str(error)
 
     def test_invalid_grace_period_too_large_raises_error(self, tmp_path: Path) -> None:
-        """Test that grace_period_seconds > 300 raises validation error."""
+        """Test that grace_period_seconds > 3600 raises validation error."""
         config_file = tmp_path / "config.yaml"
-        config_data = {"shutdown": {"grace_period_seconds": 999}}
-        with open(config_file, "w", encoding="utf-8") as f:
+        config_data = {"shutdown": {"grace_period_seconds": 9999}}
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -314,7 +314,7 @@ class TestMissingRequiredFieldsScenarios:
             "event_bus": {"type": "nonexistent"},
             "shutdown": {"grace_period_seconds": -1},
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -337,7 +337,7 @@ class TestMissingRequiredFieldsScenarios:
         runtime_dir.mkdir(parents=True)
         config_file = runtime_dir / "runtime_config.yaml"
         config_data = {"input_topic": "spaces are bad"}
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -374,7 +374,7 @@ class TestErrorSanitization:
             "password": "super_secret_password_12345",
             "api_key": "sk_test_secret_key_xyz",
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         # This config is valid for topic validation, should not raise
@@ -416,7 +416,7 @@ class TestErrorSanitization:
         config_file = tmp_path / "config.yaml"
         # The topic name itself isn't secret, but testing sanitization pattern
         config_data = {"input_topic": "topic with spaces"}
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -472,7 +472,7 @@ class TestProperErrorTypesRaised:
         """Test that validation failures raise ProtocolConfigurationError."""
         config_file = tmp_path / "config.yaml"
         config_data = {"input_topic": "invalid topic"}
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -505,7 +505,7 @@ class TestProperErrorTypesRaised:
 
             # Try to open the file to see if permissions work in this environment
             try:
-                with open(config_file, encoding="utf-8") as f:
+                with config_file.open(encoding="utf-8") as f:
                     f.read()
                 # If we get here, permissions aren't enforced (e.g., some container setups)
                 pytest.skip("File permissions not enforced in this environment")
@@ -581,7 +581,7 @@ class TestErrorContextCompleteness:
             "input_topic": "bad topic",
             "output_topic": "also bad",
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -598,7 +598,7 @@ class TestErrorContextCompleteness:
         """Test that validation error includes full validation_errors list."""
         config_file = tmp_path / "config.yaml"
         config_data = {"input_topic": "spaces in topic"}
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -624,7 +624,7 @@ class TestKernelSpecificErrorPaths:
             "input_topic": "valid-topic",
             "shutdown": "not_a_dict",  # Should be dict with grace_period_seconds
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -640,7 +640,7 @@ class TestKernelSpecificErrorPaths:
         config_file = runtime_dir / "runtime_config.yaml"
         # Create config that fails contract validation (topic pattern)
         config_data = {"input_topic": "spaces in topic"}
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:

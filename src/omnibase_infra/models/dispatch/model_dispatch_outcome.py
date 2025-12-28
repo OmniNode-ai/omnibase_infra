@@ -12,9 +12,12 @@ we eliminate the 3-way union while preserving all functionality.
 
 from __future__ import annotations
 
-from typing import overload
+from typing import TYPE_CHECKING, overload
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 
 
 class ModelDispatchOutcome(BaseModel):
@@ -69,6 +72,12 @@ class ModelDispatchOutcome(BaseModel):
     @classmethod
     def from_legacy_output(cls, output: list[str]) -> ModelDispatchOutcome: ...
 
+    @overload
+    @classmethod
+    def from_legacy_output(
+        cls, output: ModelDispatchResult
+    ) -> ModelDispatchOutcome: ...
+
     @classmethod
     def from_legacy_output(cls, output: object) -> ModelDispatchOutcome:
         """Create from legacy dispatcher output format.
@@ -83,12 +92,13 @@ class ModelDispatchOutcome(BaseModel):
                 - str: Single output topic
                 - list[str]: Multiple output topics
                 - None: No output topics
+                - ModelDispatchResult: Protocol-based dispatcher result
 
         Returns:
             ModelDispatchOutcome with normalized topics list.
 
         Raises:
-            TypeError: If output is not str, list[str], or None.
+            TypeError: If output is not str, list[str], None, or ModelDispatchResult.
 
         Example:
             >>> ModelDispatchOutcome.from_legacy_output(None).topics
@@ -102,6 +112,9 @@ class ModelDispatchOutcome(BaseModel):
         .. versionchanged:: 0.6.1
             Changed implementation signature from union to ``object`` with
             overloads for type safety. This supports union reduction (OMN-1002).
+        .. versionchanged:: 0.6.2
+            Added support for ModelDispatchResult to allow protocol-based
+            dispatchers to be registered with MessageDispatchEngine.
         """
         if output is None:
             return cls(topics=[])
@@ -110,8 +123,16 @@ class ModelDispatchOutcome(BaseModel):
         elif isinstance(output, list):
             return cls(topics=list(output))
         else:
+            # Check for ModelDispatchResult by duck-typing (has 'outputs' attribute)
+            # to avoid circular import at runtime
+            if hasattr(output, "outputs"):
+                outputs_attr = getattr(output, "outputs", None)
+                if outputs_attr is not None and hasattr(outputs_attr, "topics"):
+                    return cls(topics=list(outputs_attr.topics))
+                return cls(topics=[])
             raise TypeError(
-                f"Expected str, list[str], or None, got {type(output).__name__}"
+                f"Expected str, list[str], None, or ModelDispatchResult, "
+                f"got {type(output).__name__}"
             )
 
     @classmethod

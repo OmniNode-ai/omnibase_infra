@@ -53,7 +53,6 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -381,15 +380,10 @@ def sample_message() -> ModelSampleMessage:
     )
 
 
-@pytest.fixture
-def correlation_id() -> UUID:
-    """Create a correlation ID for testing."""
-    return uuid4()
-
-
 # =============================================================================
 # Test Classes
 # =============================================================================
+# NOTE: correlation_id fixture is provided by chaos/conftest.py
 
 
 @pytest.mark.unit
