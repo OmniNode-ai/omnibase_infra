@@ -76,7 +76,7 @@ Both functions:
 
 ```python
 logger.warning(
-    "Environment variable %s value %d is below minimum %d, using default %d",
+    "Environment variable %s value %f is below minimum %f, using default %f",
     env_var, parsed, min_value, default,
 )
 ```
@@ -131,7 +131,7 @@ Log warning and use default for out-of-range values.
 - **Clear operator feedback**: Warning logs provide actionable information
 - **Safe defaults**: The system degrades gracefully to known-good values
 - **Type safety maintained**: Invalid types still fail fast with exceptions
-- **Security**: Invalid values are redacted in error messages to prevent credential exposure
+- **Security**: Type errors redact values in error messages (`value="[REDACTED]"`) to prevent credential exposure; range validation warnings do log the actual numeric value since it has already been successfully parsed as the expected type
 
 ### Negative
 
@@ -171,7 +171,14 @@ The behavior is verified in `tests/unit/handlers/test_handler_http_env.py`:
 def test_timeout_below_minimum_uses_default(self, caplog):
     """Test timeout below minimum (1.0s) uses default with warning logged."""
     with patch.dict(os.environ, {"ONEX_HTTP_TIMEOUT": "0.5"}):
-        result = parse_env_float("ONEX_HTTP_TIMEOUT", 30.0, min_value=1.0, max_value=300.0)
+        result = parse_env_float(
+            "ONEX_HTTP_TIMEOUT",
+            30.0,
+            min_value=1.0,
+            max_value=300.0,
+            transport_type=EnumInfraTransportType.HTTP,
+            service_name="http_handler",
+        )
     assert result == 30.0
     assert "below minimum" in caplog.text
 ```
