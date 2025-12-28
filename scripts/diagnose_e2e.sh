@@ -74,7 +74,8 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help)
-            head -n 30 "${BASH_SOURCE[0]}" | grep "^#" | sed 's/^# //' || true
+            # Note: Use grouped grep with || true inside pipeline to handle pipefail safely
+            head -n 30 "${BASH_SOURCE[0]}" | { grep "^#" || true; } | sed 's/^# //'
             exit 0
             ;;
         *)
@@ -161,7 +162,9 @@ else
 
     log_info "Checking if runtime container is running..."
     # Note: Docker Compose v1 uses "Up", v2 uses "running" - check both case-insensitively
-    if docker compose -f "$COMPOSE_FILE" ps runtime 2>/dev/null | grep -Eiq "(Up|running)"; then
+    # Note: Use grouped grep with || true to handle pipefail safely when no matches
+    container_status=$(docker compose -f "$COMPOSE_FILE" ps runtime 2>/dev/null || true)
+    if echo "$container_status" | { grep -Eiq "(Up|running)" || false; }; then
         log_success "Runtime container is running"
     else
         log_warning "Runtime container not running - use --rebuild to start it"
@@ -525,7 +528,7 @@ ${REPORT_CALLBACK_LOGS}
 
 ### Recent Projections
 \`\`\`
-$(docker exec omnibase-infra-postgres psql -U postgres -d omninode_bridge -c "SELECT entity_id, node_type, registration_phase, created_at FROM registration_projections ORDER BY created_at DESC LIMIT 10;" 2>/dev/null || echo "Unable to query database")
+$(docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d omninode_bridge -c "SELECT entity_id, node_type, registration_phase, created_at FROM registration_projections ORDER BY created_at DESC LIMIT 10;" 2>/dev/null || echo "Unable to query database")
 \`\`\`
 
 ---

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from omnibase_core.enums import EnumNodeKind
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection.model_registration_projection import (
@@ -377,7 +378,7 @@ async def wait_for_kafka_event(
                         type(e).__name__,
                         correlation_id,
                     )
-                except ValueError as e:
+                except ValidationError as e:
                     # Pydantic validation failed - message doesn't match expected schema
                     logger.debug(
                         "Failed to validate event envelope: %s (correlation_id=%s)",
@@ -485,7 +486,7 @@ async def collect_registration_events(
                                 collected.append(event)
                                 # Break after first match - avoid duplicates
                                 break
-                            except ValueError:
+                            except ValidationError:
                                 # Pydantic validation failed - skip this event
                                 pass
             except (json.JSONDecodeError, UnicodeDecodeError):

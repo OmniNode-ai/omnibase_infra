@@ -23,7 +23,6 @@ Related:
 from __future__ import annotations
 
 import warnings
-from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -39,7 +38,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_i
 
 
 @pytest.fixture
-def base_payload_kwargs() -> dict[str, Any]:
+def base_payload_kwargs() -> dict[str, object]:
     """Return base kwargs for ModelPostgresIntentPayload without endpoints.
 
     These are the minimum required fields for creating a valid payload.
@@ -70,7 +69,7 @@ class TestEndpointsValidatorEdgeCases:
     # ------------------------------------------------------------------------
 
     def test_none_input_raises_validation_error(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify that None input raises ValidationError, not silently ignored.
 
@@ -89,7 +88,7 @@ class TestEndpointsValidatorEdgeCases:
         assert "NoneType" in error_str or "tuple or Mapping" in error_str
 
     def test_none_input_error_message_is_descriptive(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify the error message for None input is descriptive."""
         with pytest.raises(ValidationError) as exc_info:
@@ -109,7 +108,7 @@ class TestEndpointsValidatorEdgeCases:
     # ------------------------------------------------------------------------
 
     def test_empty_dict_emits_warning(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify that empty dict {} emits a warning when coerced.
 
@@ -136,7 +135,7 @@ class TestEndpointsValidatorEdgeCases:
             assert payload.endpoints == ()
 
     def test_empty_dict_converts_to_empty_tuple(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify that empty dict {} is converted to empty tuple.
 
@@ -155,7 +154,7 @@ class TestEndpointsValidatorEdgeCases:
             assert isinstance(payload.endpoints, tuple)
 
     def test_empty_dict_warning_is_user_warning(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify the warning category is UserWarning."""
         with warnings.catch_warnings(record=True) as caught_warnings:
@@ -180,7 +179,7 @@ class TestEndpointsValidatorEdgeCases:
     # ------------------------------------------------------------------------
 
     def test_empty_tuple_passes_through_without_warning(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify that empty tuple () passes through without warning.
 
@@ -204,7 +203,7 @@ class TestEndpointsValidatorEdgeCases:
             assert payload.endpoints == ()
 
     def test_default_endpoints_is_empty_tuple(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify that not providing endpoints uses default empty tuple.
 
@@ -230,7 +229,7 @@ class TestEndpointsValidatorEdgeCases:
     # ------------------------------------------------------------------------
 
     def test_list_input_raises_validation_error(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify that list input raises ValidationError.
 
@@ -247,7 +246,7 @@ class TestEndpointsValidatorEdgeCases:
         assert "list" in error_str.lower()
 
     def test_empty_list_raises_validation_error(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify that empty list [] raises ValidationError.
 
@@ -264,7 +263,7 @@ class TestEndpointsValidatorEdgeCases:
         assert errors[0]["loc"] == ("endpoints",)
 
     def test_int_input_raises_validation_error(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify that int input raises ValidationError."""
         with pytest.raises(ValidationError) as exc_info:
@@ -278,7 +277,7 @@ class TestEndpointsValidatorEdgeCases:
         assert "int" in errors[0]["msg"]
 
     def test_string_input_raises_validation_error(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify that string input raises ValidationError."""
         with pytest.raises(ValidationError) as exc_info:
@@ -292,7 +291,7 @@ class TestEndpointsValidatorEdgeCases:
         assert "str" in errors[0]["msg"]
 
     def test_set_input_raises_validation_error(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify that set input raises ValidationError.
 
@@ -312,7 +311,7 @@ class TestEndpointsValidatorEdgeCases:
     # ------------------------------------------------------------------------
 
     def test_non_empty_dict_converts_without_warning(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify that non-empty dict converts to tuple without warning.
 
@@ -337,7 +336,7 @@ class TestEndpointsValidatorEdgeCases:
             assert payload.endpoints == (("health", "/health"), ("api", "/api/v1"))
 
     def test_single_endpoint_dict_converts_correctly(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify single-entry dict converts correctly."""
         payload = ModelPostgresIntentPayload(
@@ -349,7 +348,7 @@ class TestEndpointsValidatorEdgeCases:
         assert len(payload.endpoints) == 1
 
     def test_endpoints_dict_property_works_after_coercion(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify endpoints_dict property returns correct read-only view."""
         payload = ModelPostgresIntentPayload(
@@ -363,7 +362,7 @@ class TestEndpointsValidatorEdgeCases:
         assert len(endpoints_view) == 2
 
     def test_non_string_keys_raises_validation_error(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify non-string dict keys raise ValidationError in strict mode.
 
@@ -384,7 +383,7 @@ class TestEndpointsValidatorEdgeCases:
         assert "int" in error_str
 
     def test_non_string_values_raises_validation_error(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify non-string dict values raise ValidationError in strict mode.
 
@@ -409,7 +408,7 @@ class TestEndpointsValidatorEdgeCases:
     # ------------------------------------------------------------------------
 
     def test_tuple_of_pairs_passes_through(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify tuple of pairs passes through unchanged."""
         input_tuple = (("health", "/health"), ("api", "/api"))
@@ -423,7 +422,7 @@ class TestEndpointsValidatorEdgeCases:
         assert payload.endpoints is not input_tuple  # Pydantic creates copy
 
     def test_nested_tuple_with_single_pair(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify tuple with single pair works correctly."""
         payload = ModelPostgresIntentPayload(
@@ -445,7 +444,7 @@ class TestEndpointsImmutability:
     """Tests for immutability of the endpoints field after validation."""
 
     def test_endpoints_is_tuple_not_dict(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify endpoints is stored as tuple, not dict."""
         payload = ModelPostgresIntentPayload(
@@ -456,7 +455,7 @@ class TestEndpointsImmutability:
         assert isinstance(payload.endpoints, tuple)
         assert not isinstance(payload.endpoints, dict)
 
-    def test_model_is_frozen(self, base_payload_kwargs: dict[str, Any]) -> None:
+    def test_model_is_frozen(self, base_payload_kwargs: dict[str, object]) -> None:
         """Verify the model is frozen (immutable)."""
         payload = ModelPostgresIntentPayload(
             **base_payload_kwargs,
@@ -468,7 +467,7 @@ class TestEndpointsImmutability:
             payload.endpoints = ()  # type: ignore[misc]
 
     def test_endpoints_dict_returns_mapping_proxy(
-        self, base_payload_kwargs: dict[str, Any]
+        self, base_payload_kwargs: dict[str, object]
     ) -> None:
         """Verify endpoints_dict returns a MappingProxyType (read-only)."""
         from types import MappingProxyType
@@ -497,7 +496,7 @@ class TestEndpointsLogging:
 
     def test_empty_dict_logs_warning(
         self,
-        base_payload_kwargs: dict[str, Any],
+        base_payload_kwargs: dict[str, object],
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Verify that empty dict logs a warning message."""
@@ -519,7 +518,7 @@ class TestEndpointsLogging:
 
     def test_non_empty_dict_does_not_log_warning(
         self,
-        base_payload_kwargs: dict[str, Any],
+        base_payload_kwargs: dict[str, object],
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Verify that non-empty dict does not log any warning."""
@@ -539,7 +538,7 @@ class TestEndpointsLogging:
 
     def test_empty_tuple_does_not_log_warning(
         self,
-        base_payload_kwargs: dict[str, Any],
+        base_payload_kwargs: dict[str, object],
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Verify that empty tuple does not log any warning."""

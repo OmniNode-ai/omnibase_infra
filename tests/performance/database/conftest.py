@@ -40,6 +40,7 @@ Related:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 from collections.abc import AsyncGenerator
@@ -683,8 +684,6 @@ class ExplainResult:
 
     def __str__(self) -> str:
         """Format explain result for display."""
-        import json
-
         return json.dumps(self.raw_plan, indent=2)
 
 
@@ -705,6 +704,7 @@ def query_analyzer(
     """
     # Note: seeded_test_data is an ordering dependency, not used directly.
     # It ensures test data exists before running EXPLAIN ANALYZE queries.
+    _ = seeded_test_data  # Mark as intentionally unused (ordering dependency)
     return QueryAnalyzer(schema_initialized)
 
 

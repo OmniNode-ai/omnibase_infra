@@ -661,11 +661,12 @@ async def bootstrap() -> int:
                         await postgres_pool.close()
                     except Exception as cleanup_error:
                         # Sanitize cleanup errors to prevent credential leakage
+                        # NOTE: Do NOT use exc_info=True here - tracebacks may contain
+                        # connection strings with credentials from PostgreSQL errors
                         logger.warning(
                             "Cleanup failed for PostgreSQL pool close: %s (correlation_id=%s)",
                             sanitize_error_message(cleanup_error),
                             correlation_id,
-                            exc_info=True,
                         )
                     postgres_pool = None
                 projector = None

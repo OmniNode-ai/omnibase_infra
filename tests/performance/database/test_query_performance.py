@@ -140,8 +140,13 @@ class TestUpdatedAtIndexUsage:
             f"Expected index scan for time range query.\nQuery plan:\n{result}"
         )
 
+        exec_time = result.get_execution_time_ms()
         print("\nTime range audit query performance:")
-        print(f"  Execution time: {result.get_execution_time_ms():.2f}ms")
+        print(
+            f"  Execution time: {exec_time:.2f}ms"
+            if exec_time is not None
+            else "  Execution time: N/A"
+        )
         print(f"  Indexes used: {result.get_index_names()}")
 
     async def test_state_updated_at_composite_index(
@@ -181,12 +186,17 @@ class TestUpdatedAtIndexUsage:
 
         # It's acceptable if the query optimizer chooses a different path
         # as long as it's not doing a seq scan
+        exec_time = result.get_execution_time_ms()
         if composite_index_used:
             print("\nState+time query uses composite index:")
         else:
             print(f"\nState+time query uses alternative indexes: {indexes_used}")
 
-        print(f"  Execution time: {result.get_execution_time_ms():.2f}ms")
+        print(
+            f"  Execution time: {exec_time:.2f}ms"
+            if exec_time is not None
+            else "  Execution time: N/A"
+        )
         print(f"  Indexes used: {indexes_used}")
 
 
@@ -227,10 +237,15 @@ class TestExistingIndexUsage:
         # For partial indexes, the optimizer may choose different paths
         # depending on data distribution. We mainly verify it doesn't do
         # a full table scan when appropriate indexes exist.
+        exec_time = result.get_execution_time_ms()
         print("\nAck deadline query performance:")
         print(f"  Uses any index: {result.uses_any_index()}")
         print(f"  Uses seq scan: {result.uses_seq_scan()}")
-        print(f"  Execution time: {result.get_execution_time_ms():.2f}ms")
+        print(
+            f"  Execution time: {exec_time:.2f}ms"
+            if exec_time is not None
+            else "  Execution time: N/A"
+        )
         print(f"  Indexes used: {result.get_index_names()}")
 
     async def test_current_state_index_usage(
@@ -256,8 +271,13 @@ class TestExistingIndexUsage:
             f"Expected index scan for state filter query.\nQuery plan:\n{result}"
         )
 
+        exec_time = result.get_execution_time_ms()
         print("\nState filter query performance:")
-        print(f"  Execution time: {result.get_execution_time_ms():.2f}ms")
+        print(
+            f"  Execution time: {exec_time:.2f}ms"
+            if exec_time is not None
+            else "  Execution time: N/A"
+        )
         print(f"  Actual rows: {result.get_actual_rows()}")
         print(f"  Indexes used: {result.get_index_names()}")
 
@@ -286,8 +306,13 @@ class TestExistingIndexUsage:
         )
 
         indexes_used = result.get_index_names()
+        exec_time = result.get_execution_time_ms()
         print("\nDomain+state query performance:")
-        print(f"  Execution time: {result.get_execution_time_ms():.2f}ms")
+        print(
+            f"  Execution time: {exec_time:.2f}ms"
+            if exec_time is not None
+            else "  Execution time: N/A"
+        )
         print(f"  Indexes used: {indexes_used}")
 
 
@@ -481,10 +506,15 @@ class TestQueryPlanAnalysis:
             "EXPLAIN (without ANALYZE) should not have execution time"
         )
 
+        planning_time = result.get_planning_time_ms()
         print("\nEXPLAIN only result:")
         print(f"  Uses index: {result.uses_any_index()}")
         print(f"  Total cost estimate: {result.get_total_cost():.2f}")
-        print(f"  Planning time: {result.get_planning_time_ms():.2f}ms")
+        print(
+            f"  Planning time: {planning_time:.2f}ms"
+            if planning_time is not None
+            else "  Planning time: N/A"
+        )
 
 
 # =============================================================================
