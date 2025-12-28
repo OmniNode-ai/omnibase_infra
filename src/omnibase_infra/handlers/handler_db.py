@@ -52,6 +52,15 @@ This is a deliberate design choice for security and clarity:
 
 For multi-statement operations requiring atomicity, use the ``db.transaction``
 operation (planned for Beta release).
+
+Note:
+    Environment variable configuration (ONEX_DB_POOL_SIZE, ONEX_DB_TIMEOUT) is parsed
+    at module import time, not at handler instantiation. This means:
+
+    - Changes to environment variables require application restart to take effect
+    - Tests should use ``unittest.mock.patch.dict(os.environ, ...)`` before importing,
+      or use ``importlib.reload()`` to re-import the module after patching
+    - This is an intentional design choice for startup-time validation
 """
 
 from __future__ import annotations
