@@ -15,7 +15,8 @@ Test Organization:
     - TestParseEnvFloatRangeValidation: Min/max range validation for floats
     - TestParseEnvFloatSpecialFormats: Scientific notation and edge cases
     - TestParseEnvFloatErrorContext: Error context field validation
-    - TestDefaultTransportType: Default behavior when transport_type is None
+    - TestDefaultServiceName: Default behavior when service_name is not specified
+    - TestDifferentTransportTypes: Verification of all supported transport types
 
 Coverage Goals:
     - Full coverage of parse_env_int and parse_env_float functions
@@ -831,43 +832,6 @@ class TestParseEnvFloatErrorContext:
             assert secret_value not in str(error.model.context)
             # Secret should NOT appear in error message
             assert secret_value not in error.message
-
-
-@pytest.mark.unit
-class TestDefaultTransportType:
-    """Test suite for default transport type behavior.
-
-    Tests verify that when transport_type is not specified (None),
-    HTTP is used as the default transport type.
-    """
-
-    def test_parse_env_int_defaults_to_http_transport(self) -> None:
-        """Test parse_env_int uses HTTP as default transport type."""
-        with patch.dict(os.environ, {"TEST_INT_VAR": "invalid"}, clear=True):
-            with pytest.raises(ProtocolConfigurationError) as exc_info:
-                parse_env_int(
-                    "TEST_INT_VAR",
-                    default=42,
-                    # transport_type not specified, should default to HTTP
-                    service_name="test_service",
-                )
-
-            error = exc_info.value
-            assert error.model.context["transport_type"] == EnumInfraTransportType.HTTP
-
-    def test_parse_env_float_defaults_to_http_transport(self) -> None:
-        """Test parse_env_float uses HTTP as default transport type."""
-        with patch.dict(os.environ, {"TEST_FLOAT_VAR": "invalid"}, clear=True):
-            with pytest.raises(ProtocolConfigurationError) as exc_info:
-                parse_env_float(
-                    "TEST_FLOAT_VAR",
-                    default=3.14,
-                    # transport_type not specified, should default to HTTP
-                    service_name="test_service",
-                )
-
-            error = exc_info.value
-            assert error.model.context["transport_type"] == EnumInfraTransportType.HTTP
 
 
 @pytest.mark.unit

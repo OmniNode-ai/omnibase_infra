@@ -60,7 +60,7 @@ def parse_env_int(
     *,
     min_value: int | None = None,
     max_value: int | None = None,
-    transport_type: EnumInfraTransportType | None = None,
+    transport_type: EnumInfraTransportType,
     service_name: str = "unknown",
 ) -> int:
     """Parse an integer environment variable with validation and error handling.
@@ -75,8 +75,7 @@ def parse_env_int(
             is below this, default is returned with a warning.
         max_value: Optional maximum valid value (inclusive). If the parsed value
             is above this, default is returned with a warning.
-        transport_type: Infrastructure transport type for error context.
-            Defaults to HTTP if not specified.
+        transport_type: Required. Infrastructure transport type for error context.
         service_name: Service name for error context. Defaults to "unknown".
 
     Returns:
@@ -92,10 +91,17 @@ def parse_env_int(
 
     Example:
         >>> import os
+        >>> from omnibase_infra.enums import EnumInfraTransportType
         >>> os.environ["MY_POOL_SIZE"] = "10"
-        >>> parse_env_int("MY_POOL_SIZE", 5, min_value=1, max_value=100)
+        >>> parse_env_int(
+        ...     "MY_POOL_SIZE", 5, min_value=1, max_value=100,
+        ...     transport_type=EnumInfraTransportType.DATABASE,
+        ... )
         10
-        >>> parse_env_int("UNSET_VAR", 5)  # Returns default
+        >>> parse_env_int(
+        ...     "UNSET_VAR", 5,
+        ...     transport_type=EnumInfraTransportType.DATABASE,
+        ... )  # Returns default
         5
 
     Note:
@@ -104,11 +110,7 @@ def parse_env_int(
         expected type are included.
     """
     # Lazy imports to avoid circular dependency
-    from omnibase_infra.enums import EnumInfraTransportType
     from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-
-    if transport_type is None:
-        transport_type = EnumInfraTransportType.HTTP
 
     raw_value = os.environ.get(env_var)
     if raw_value is None:
@@ -160,7 +162,7 @@ def parse_env_float(
     *,
     min_value: float | None = None,
     max_value: float | None = None,
-    transport_type: EnumInfraTransportType | None = None,
+    transport_type: EnumInfraTransportType,
     service_name: str = "unknown",
 ) -> float:
     """Parse a float environment variable with validation and error handling.
@@ -175,8 +177,7 @@ def parse_env_float(
             is below this, default is returned with a warning.
         max_value: Optional maximum valid value (inclusive). If the parsed value
             is above this, default is returned with a warning.
-        transport_type: Infrastructure transport type for error context.
-            Defaults to HTTP if not specified.
+        transport_type: Required. Infrastructure transport type for error context.
         service_name: Service name for error context. Defaults to "unknown".
 
     Returns:
@@ -192,10 +193,17 @@ def parse_env_float(
 
     Example:
         >>> import os
+        >>> from omnibase_infra.enums import EnumInfraTransportType
         >>> os.environ["MY_TIMEOUT"] = "30.5"
-        >>> parse_env_float("MY_TIMEOUT", 10.0, min_value=0.1, max_value=3600.0)
+        >>> parse_env_float(
+        ...     "MY_TIMEOUT", 10.0, min_value=0.1, max_value=3600.0,
+        ...     transport_type=EnumInfraTransportType.HTTP,
+        ... )
         30.5
-        >>> parse_env_float("UNSET_VAR", 10.0)  # Returns default
+        >>> parse_env_float(
+        ...     "UNSET_VAR", 10.0,
+        ...     transport_type=EnumInfraTransportType.HTTP,
+        ... )  # Returns default
         10.0
 
     Note:
@@ -204,11 +212,7 @@ def parse_env_float(
         expected type are included.
     """
     # Lazy imports to avoid circular dependency
-    from omnibase_infra.enums import EnumInfraTransportType
     from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-
-    if transport_type is None:
-        transport_type = EnumInfraTransportType.HTTP
 
     raw_value = os.environ.get(env_var)
     if raw_value is None:
