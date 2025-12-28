@@ -263,69 +263,40 @@ class IntrospectionEventRouter:
                 callback_correlation_id,
             )
 
-            # First, parse as envelope to extract payload and metadata
-            try:
-                raw_envelope = ModelEventEnvelope[dict].model_validate(payload_dict)
-            except Exception as envelope_error:
-                # For backwards compatibility, try parsing as raw event
-                logger.warning(
-                    "Failed to parse as envelope, trying raw event format "
-                    "(correlation_id=%s): %s",
-                    callback_correlation_id,
-                    str(envelope_error),
-                )
-                # Wrap raw event in envelope for processing
-                introspection_event = ModelNodeIntrospectionEvent.model_validate(
-                    payload_dict
-                )
-                # Use the event's original timestamp for envelope (prefer event time
-                # over processing time for better traceability and replay support)
-                event_envelope = ModelEventEnvelope(
-                    payload=introspection_event,
-                    correlation_id=introspection_event.correlation_id
-                    or callback_correlation_id,
-                    envelope_timestamp=introspection_event.timestamp,
-                )
-                logger.info(
-                    "Raw event wrapped in envelope (correlation_id=%s)",
-                    callback_correlation_id,
-                    extra={
-                        "node_id": str(introspection_event.node_id),
-                        "node_type": introspection_event.node_type,
-                    },
-                )
-            else:
-                # Validate payload as ModelNodeIntrospectionEvent
-                introspection_event = ModelNodeIntrospectionEvent.model_validate(
-                    raw_envelope.payload
-                )
-                # Create typed envelope with validated payload
-                # Note: Defensively normalize metadata to handle bytes values from Kafka
-                event_envelope = ModelEventEnvelope[ModelNodeIntrospectionEvent](
-                    payload=introspection_event,
-                    envelope_id=raw_envelope.envelope_id,
-                    envelope_timestamp=raw_envelope.envelope_timestamp,
-                    correlation_id=raw_envelope.correlation_id
-                    or introspection_event.correlation_id
-                    or callback_correlation_id,
-                    source_tool=raw_envelope.source_tool,
-                    target_tool=raw_envelope.target_tool,
-                    metadata=_normalize_metadata(raw_envelope.metadata),
-                    priority=raw_envelope.priority,
-                    timeout_seconds=raw_envelope.timeout_seconds,
-                    trace_id=raw_envelope.trace_id,
-                    span_id=raw_envelope.span_id,
-                )
-                logger.info(
-                    "Envelope parsed successfully (correlation_id=%s)",
-                    callback_correlation_id,
-                    extra={
-                        "envelope_id": str(event_envelope.envelope_id),
-                        "node_id": str(introspection_event.node_id),
-                        "node_type": introspection_event.node_type,
-                        "event_version": introspection_event.node_version,
-                    },
-                )
+            # Parse as envelope - raw events are not supported (no backwards compat)
+            raw_envelope = ModelEventEnvelope[dict].model_validate(payload_dict)
+
+            # Validate payload as ModelNodeIntrospectionEvent
+            introspection_event = ModelNodeIntrospectionEvent.model_validate(
+                raw_envelope.payload
+            )
+            # Create typed envelope with validated payload
+            # Note: Defensively normalize metadata to handle bytes values from Kafka
+            event_envelope = ModelEventEnvelope[ModelNodeIntrospectionEvent](
+                payload=introspection_event,
+                envelope_id=raw_envelope.envelope_id,
+                envelope_timestamp=raw_envelope.envelope_timestamp,
+                correlation_id=raw_envelope.correlation_id
+                or introspection_event.correlation_id
+                or callback_correlation_id,
+                source_tool=raw_envelope.source_tool,
+                target_tool=raw_envelope.target_tool,
+                metadata=_normalize_metadata(raw_envelope.metadata),
+                priority=raw_envelope.priority,
+                timeout_seconds=raw_envelope.timeout_seconds,
+                trace_id=raw_envelope.trace_id,
+                span_id=raw_envelope.span_id,
+            )
+            logger.info(
+                "Envelope parsed successfully (correlation_id=%s)",
+                callback_correlation_id,
+                extra={
+                    "envelope_id": str(event_envelope.envelope_id),
+                    "node_id": str(introspection_event.node_id),
+                    "node_type": introspection_event.node_type,
+                    "event_version": introspection_event.node_version,
+                },
+            )
 
             # Route to dispatcher
             logger.info(

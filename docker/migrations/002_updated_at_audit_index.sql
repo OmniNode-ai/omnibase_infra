@@ -5,8 +5,10 @@
 -- Design Notes:
 --   - Adds index on updated_at for efficient audit trail queries
 --   - Supports time-range filtering for compliance and debugging
---   - Standard B-tree indexes (no WHERE clause, unlike partial indexes in 001)
---   - Full coverage: indexes all rows since audit queries need complete history
+--   - Standard B-tree indexes covering ALL rows (no WHERE clause)
+--   - Contrast with partial indexes: partial indexes use WHERE clauses to index
+--     only a subset of rows (e.g., WHERE ack_deadline IS NOT NULL). These audit
+--     indexes cover ALL rows because audit queries need complete history.
 --   - Composite index with current_state enables efficient audit-by-state queries
 --
 -- Query Patterns Optimized:

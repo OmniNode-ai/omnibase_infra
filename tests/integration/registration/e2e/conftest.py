@@ -319,7 +319,7 @@ async def wired_container(
     # Yield container for proper fixture teardown semantics.
     # ModelONEXContainer doesn't have explicit cleanup methods currently,
     # but using yield allows for future cleanup needs and ensures proper
-    # pytest fixture lifecycle management.
+    # pytest async fixture lifecycle management.
     return container
 
 

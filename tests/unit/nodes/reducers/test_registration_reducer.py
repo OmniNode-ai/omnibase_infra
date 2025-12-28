@@ -982,7 +982,8 @@ class TestConsulIntentBuilding:
         )
         assert consul_intent is not None
 
-        expected_service_id = f"node-effect-{node_id}"
+        # Service ID follows ONEX convention: onex-{node_type}-{node_id}
+        expected_service_id = f"onex-effect-{node_id}"
         assert consul_intent.payload["service_id"] == expected_service_id
 
     def test_consul_intent_has_correct_tags(

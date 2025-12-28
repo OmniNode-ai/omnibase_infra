@@ -183,7 +183,7 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
             correlation_id,
         )
         try:
-            with open(config_path, encoding="utf-8") as f:
+            with config_path.open(encoding="utf-8") as f:
                 raw_config = yaml.safe_load(f) or {}
 
             # Contract validation: validate against schema before Pydantic
@@ -539,9 +539,10 @@ async def bootstrap() -> int:
                         )
                     except Exception as consul_error:
                         # Log warning but continue without Consul (PostgreSQL is source of truth)
+                        # Use sanitize_error_message to prevent credential leakage in logs
                         logger.warning(
                             "Failed to initialize ConsulHandler, proceeding without Consul: %s (correlation_id=%s)",
-                            consul_error,
+                            sanitize_error_message(consul_error),
                             correlation_id,
                             extra={
                                 "error_type": type(consul_error).__name__,
@@ -608,9 +609,11 @@ async def bootstrap() -> int:
 
             except Exception as pool_error:
                 # Log warning but continue without registration support
+                # Use sanitize_error_message to prevent credential leakage in logs
+                # (PostgreSQL connection errors may include DSN with password)
                 logger.warning(
                     "Failed to initialize PostgreSQL pool for registration: %s (correlation_id=%s)",
-                    pool_error,
+                    sanitize_error_message(pool_error),
                     correlation_id,
                     extra={
                         "error_type": type(pool_error).__name__,
@@ -620,9 +623,10 @@ async def bootstrap() -> int:
                     try:
                         await postgres_pool.close()
                     except Exception as cleanup_error:
+                        # Sanitize cleanup errors to prevent credential leakage
                         logger.warning(
                             "Cleanup failed for PostgreSQL pool close: %s (correlation_id=%s)",
-                            cleanup_error,
+                            sanitize_error_message(cleanup_error),
                             correlation_id,
                             exc_info=True,
                         )
@@ -944,9 +948,10 @@ async def bootstrap() -> int:
                     correlation_id,
                 )
             except Exception as pool_close_error:
+                # Sanitize to prevent credential leakage
                 logger.warning(
                     "Failed to close PostgreSQL pool: %s (correlation_id=%s)",
-                    pool_close_error,
+                    sanitize_error_message(pool_close_error),
                     correlation_id,
                 )
             postgres_pool = None
@@ -989,9 +994,10 @@ async def bootstrap() -> int:
     except Exception as e:
         # Unexpected errors: log with full context and return error code
         # (consistent with ProtocolConfigurationError and RuntimeHostError handlers)
+        # Sanitize error message to prevent credential leakage
         logger.exception(
             "ONEX runtime failed with unexpected error: %s (correlation_id=%s)",
-            e,
+            sanitize_error_message(e),
             correlation_id,
             extra={
                 "error_type": type(e).__name__,
@@ -1038,9 +1044,10 @@ async def bootstrap() -> int:
             try:
                 await postgres_pool.close()
             except Exception as cleanup_error:
+                # Sanitize to prevent credential leakage from PostgreSQL errors
                 logger.warning(
                     "Failed to close PostgreSQL pool during cleanup: %s (correlation_id=%s)",
-                    cleanup_error,
+                    sanitize_error_message(cleanup_error),
                     correlation_id,
                 )
 

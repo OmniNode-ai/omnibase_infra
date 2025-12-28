@@ -124,8 +124,8 @@ class HandlerNodeIntrospected:
         discovery via Consul while maintaining PostgreSQL as source of truth.
 
         Service naming convention:
-            - service_name: `node-{first 8 hex chars of node_id}`
-            - service_id: `node-{node_type}-{node_id}`
+            - service_name: `onex-{node_type}` (matches ONEX convention)
+            - service_id: `onex-{node_type}-{node_id}` (unique identifier)
 
         If Consul registration fails, the handler logs the error but continues
         (PostgreSQL persistence is the source of truth).
@@ -389,8 +389,8 @@ class HandlerNodeIntrospected:
         """Register node with Consul for service discovery.
 
         Registers the node as a Consul service with:
-        - service_name: `node-{first 8 hex chars of node_id}` (for E2E test compatibility)
-        - service_id: `node-{node_type}-{node_id}` (unique identifier)
+        - service_name: `onex-{node_type}` (ONEX convention for service discovery)
+        - service_id: `onex-{node_type}-{node_id}` (unique identifier)
         - tags: [`onex`, `node-type:{node_type}`]
         - address/port: Extracted from endpoints if available
 
@@ -413,10 +413,10 @@ class HandlerNodeIntrospected:
             )
             return
 
-        # Build service name to match E2E test expectations
-        # E2E test looks for: f"node-{unique_node_id.hex[:8]}"
-        service_name = f"node-{node_id.hex[:8]}"
-        service_id = f"node-{node_type}-{node_id}"
+        # Build service name following ONEX convention
+        # Format: onex-{node_type} (e.g., onex-effect, onex-compute)
+        service_name = f"onex-{node_type}"
+        service_id = f"onex-{node_type}-{node_id}"
 
         # Extract address and port from endpoints if available
         address: str | None = None

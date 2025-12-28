@@ -793,8 +793,9 @@ class TestHandlerNodeIntrospectedConsulRegistration:
         assert "payload" in call_args
 
         payload = call_args["payload"]
-        assert payload["name"] == f"node-{node_id.hex[:8]}"
-        assert payload["service_id"] == f"node-effect-{node_id}"
+        # Service name follows ONEX convention: onex-{node_type}
+        assert payload["name"] == "onex-effect"
+        assert payload["service_id"] == f"onex-effect-{node_id}"
         assert "onex" in payload["tags"]
 
     @pytest.mark.asyncio
@@ -852,7 +853,7 @@ class TestHandlerNodeIntrospectedConsulRegistration:
 
     @pytest.mark.asyncio
     async def test_consul_registration_uses_correct_service_name_format(self) -> None:
-        """Test service name follows expected format for E2E test compatibility."""
+        """Test service name follows ONEX convention: onex-{node_type}."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
@@ -863,9 +864,10 @@ class TestHandlerNodeIntrospectedConsulRegistration:
             consul_handler=mock_consul,
         )
 
-        # Create a node_id where we know the expected hex prefix
         node_id = uuid4()
-        expected_service_name = f"node-{node_id.hex[:8]}"
+        # Service name follows ONEX convention: onex-{node_type}
+        # create_introspection_event uses node_type="effect" by default
+        expected_service_name = "onex-effect"
 
         introspection_event = create_introspection_event(node_id=node_id)
 
@@ -878,7 +880,7 @@ class TestHandlerNodeIntrospectedConsulRegistration:
         call_args = mock_consul.execute.call_args[0][0]
         payload = call_args["payload"]
 
-        # Service name should match E2E test expectations
+        # Service name should match ONEX convention
         assert payload["name"] == expected_service_name
 
     @pytest.mark.asyncio

@@ -1165,7 +1165,7 @@ class TestWorkflowExecutionWithMocks:
                         node_id=self._node_id,
                         correlation_id=self._correlation_id,
                         payload=ModelConsulIntentPayload(
-                            service_name=f"node-{event.node_type}",
+                            service_name=f"onex-{event.node_type}",
                         ),
                     ),
                     ModelPostgresUpsertIntent(

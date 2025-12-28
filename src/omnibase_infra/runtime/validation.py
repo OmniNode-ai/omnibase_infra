@@ -262,7 +262,7 @@ def load_and_validate_config(
 
     # Load YAML file
     try:
-        with open(config_path, encoding="utf-8") as f:
+        with config_path.open(encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
     except FileNotFoundError as e:
         raise ProtocolConfigurationError(

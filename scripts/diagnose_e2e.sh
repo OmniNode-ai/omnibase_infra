@@ -210,7 +210,8 @@ check_required_log "$STARTUP_LOG" "ONEX Runtime Kernel" "Kernel banner displayed
 #   - Metric names: *_error_count, errors_total (prometheus metrics)
 #   - Method references: record_error (logging method)
 #   - Zero counts: error_count=0, "error_count": 0 (no actual errors)
-startup_errors=$(grep -i "error\|exception" "$STARTUP_LOG" | grep -Ev "WARNING|_error_count|errors_total|record_error|\"error_count\":[[:space:]]*0|error_count=0" || true)
+# Note: Use -E (ERE) for portability across GNU and BSD grep (macOS)
+startup_errors=$(grep -Ei "error|exception" "$STARTUP_LOG" | grep -Ev "WARNING|_error_count|errors_total|record_error|\"error_count\":[[:space:]]*0|error_count=0" || true)
 if [ -n "$startup_errors" ]; then
     log_warning "Startup errors detected:"
     echo "$startup_errors" | head -10
@@ -376,7 +377,8 @@ log_info "Recommended Fix: ${RECOMMENDED_FIX}"
 section_header "Step 8: Error Summary"
 
 log_info "Extracting errors from logs..."
-if grep -i "error\|exception\|failed" "$FULL_LOG" | grep -Ev "WARNING|_error_count|errors_total|record_error|\"error_count\":[[:space:]]*0|error_count=0" > /tmp/errors.txt; then
+# Note: Use -E (ERE) for portability across GNU and BSD grep (macOS)
+if grep -Ei "error|exception|failed" "$FULL_LOG" | grep -Ev "WARNING|_error_count|errors_total|record_error|\"error_count\":[[:space:]]*0|error_count=0" > /tmp/errors.txt 2>/dev/null && [ -s /tmp/errors.txt ]; then
     ERROR_COUNT=$(wc -l < /tmp/errors.txt)
     log_warning "Found $ERROR_COUNT error lines:"
     head -20 /tmp/errors.txt
@@ -395,6 +397,23 @@ if [ "$FULL_REPORT" = true ]; then
     section_header "Step 9: Generating Comprehensive Report"
 
     log_info "Creating diagnostic report at $REPORT_FILE..."
+
+    # Pre-compute values to avoid subshell failures with set -e pipefail
+    # Note: Use -E (ERE) for portability across GNU and BSD grep (macOS)
+    REPORT_STARTUP_ERRORS=$(grep -Ei "error|exception" "$STARTUP_LOG" | grep -Ev "WARNING|_error_count|errors_total|record_error|\"error_count\":[[:space:]]*0|error_count=0" | head -20 || true)
+    [ -z "$REPORT_STARTUP_ERRORS" ] && REPORT_STARTUP_ERRORS="No errors found"
+
+    REPORT_PROCESSING_ERRORS=$(grep -Ei "error|exception|failed" "$FULL_LOG" | grep -Ev "WARNING|_error_count|errors_total|record_error|\"error_count\":[[:space:]]*0|error_count=0" | head -30 || true)
+    [ -z "$REPORT_PROCESSING_ERRORS" ] && REPORT_PROCESSING_ERRORS="No errors found"
+
+    REPORT_CORRELATION_IDS=$(grep -E "correlation_id=[a-f0-9-]+" "$FULL_LOG" 2>/dev/null | sed 's/.*correlation_id=\([a-f0-9-]*\).*/\1/' | sort -u | head -20 || true)
+    [ -z "$REPORT_CORRELATION_IDS" ] && REPORT_CORRELATION_IDS="No correlation IDs found"
+
+    REPORT_ASSERTION_DETAILS=$(grep -E -A 10 "PASSED|FAILED|AssertionError" "$TEST_LOG" || true)
+    [ -z "$REPORT_ASSERTION_DETAILS" ] && REPORT_ASSERTION_DETAILS="No assertion details found"
+
+    REPORT_CALLBACK_LOGS=$(grep -E -A 5 "callback invoked|parsed successfully|processed successfully" "$FULL_LOG" | head -50 || true)
+    [ -z "$REPORT_CALLBACK_LOGS" ] && REPORT_CALLBACK_LOGS="No callback logs found"
 
     cat > "$REPORT_FILE" << EOF
 # E2E Test Diagnostic Report
@@ -423,7 +442,7 @@ if [ "$FULL_REPORT" = true ]; then
 
 ### Startup Errors
 \`\`\`
-$(grep -i "error\|exception" "$STARTUP_LOG" | grep -Ev "WARNING|_error_count|errors_total|record_error|\"error_count\":[[:space:]]*0|error_count=0" | head -20 || echo "No errors found")
+${REPORT_STARTUP_ERRORS}
 \`\`\`
 
 ---
@@ -441,14 +460,14 @@ $(grep -i "error\|exception" "$STARTUP_LOG" | grep -Ev "WARNING|_error_count|err
 
 ### Processing Errors
 \`\`\`
-$(grep -i "error\|exception\|failed" "$FULL_LOG" | grep -Ev "WARNING|_error_count|errors_total|record_error|\"error_count\":[[:space:]]*0|error_count=0" | head -30 || echo "No errors found")
+${REPORT_PROCESSING_ERRORS}
 \`\`\`
 
 ---
 
 ## Correlation IDs
 \`\`\`
-$(grep -E "correlation_id=[a-f0-9-]+" "$FULL_LOG" 2>/dev/null | sed 's/.*correlation_id=\([a-f0-9-]*\).*/\1/' | sort -u | head -20 || echo "No correlation IDs found")
+${REPORT_CORRELATION_IDS}
 \`\`\`
 
 ---
@@ -462,12 +481,12 @@ $(tail -50 "$STARTUP_LOG")
 
 ### Test Output (Assertion Details)
 \`\`\`
-$(grep -A 10 "PASSED\|FAILED\|AssertionError" "$TEST_LOG" || echo "No assertion details found")
+${REPORT_ASSERTION_DETAILS}
 \`\`\`
 
 ### Event Processing Logs (Callback Execution)
 \`\`\`
-$(grep -A 5 "callback invoked\|parsed successfully\|processed successfully" "$FULL_LOG" | head -50 || echo "No callback logs found")
+${REPORT_CALLBACK_LOGS}
 \`\`\`
 
 ---

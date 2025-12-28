@@ -199,7 +199,8 @@ class TestA3OrchestratedDualRegistration:
         # Consul registration recorded
         assert len(consul_client.registrations) == 1
         consul_reg = consul_client.registrations[0]
-        assert f"node-{event.node_type}-{event.node_id}" == consul_reg.service_id
+        # Service ID follows ONEX convention: onex-{node_type}-{node_id}
+        assert f"onex-{event.node_type}-{event.node_id}" == consul_reg.service_id
 
         # PostgreSQL registration recorded
         assert len(postgres_adapter.registrations) == 1

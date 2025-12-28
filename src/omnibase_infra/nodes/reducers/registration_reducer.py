@@ -847,7 +847,7 @@ class RegistrationReducer:
         Returns:
             ModelIntent with intent_type="consul.register" and Consul payload.
         """
-        service_id = f"node-{event.node_type}-{event.node_id}"
+        service_id = f"onex-{event.node_type}-{event.node_id}"
         service_name = f"onex-{event.node_type}"
         tags = [
             f"node_type:{event.node_type}",
