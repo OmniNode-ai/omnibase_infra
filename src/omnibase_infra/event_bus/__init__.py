@@ -2,9 +2,14 @@
 # Copyright (c) 2025 OmniNode Team
 """Event bus implementations for omnibase_infra.
 
-This module provides event bus implementations for local testing and development.
-The primary implementation is InMemoryEventBus for unit testing and local development
-without requiring external message broker infrastructure.
+This module provides event bus implementations for the ONEX infrastructure.
+Two implementations are supported:
+- InMemoryEventBus: For unit testing and local development without external dependencies
+- KafkaEventBus: For production use with Kafka/Redpanda (see kafka_event_bus.py)
+
+Event bus selection is handled by kernel.py at bootstrap time based on:
+- KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses KafkaEventBus)
+- config.event_bus.type field in runtime_config.yaml
 
 Exports:
     InMemoryEventBus: In-memory event bus for local testing and development

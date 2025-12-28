@@ -885,7 +885,7 @@ async def bootstrap() -> int:
             except Exception as consumer_stop_error:
                 logger.warning(
                     "Failed to stop introspection consumer: %s (correlation_id=%s)",
-                    consumer_stop_error,
+                    sanitize_error_message(consumer_stop_error),
                     correlation_id,
                 )
             introspection_unsubscribe = None
@@ -1015,7 +1015,7 @@ async def bootstrap() -> int:
             except Exception as cleanup_error:
                 logger.warning(
                     "Failed to stop introspection consumer during cleanup: %s (correlation_id=%s)",
-                    cleanup_error,
+                    sanitize_error_message(cleanup_error),
                     correlation_id,
                 )
 
@@ -1025,7 +1025,7 @@ async def bootstrap() -> int:
             except Exception as cleanup_error:
                 logger.warning(
                     "Failed to stop health server during cleanup: %s (correlation_id=%s)",
-                    cleanup_error,
+                    sanitize_error_message(cleanup_error),
                     correlation_id,
                 )
 
@@ -1034,9 +1034,10 @@ async def bootstrap() -> int:
                 await runtime.stop()
             except Exception as cleanup_error:
                 # Log cleanup failures with context instead of suppressing them
+                # Sanitize to prevent potential credential leakage from runtime errors
                 logger.warning(
                     "Failed to stop runtime during cleanup: %s (correlation_id=%s)",
-                    cleanup_error,
+                    sanitize_error_message(cleanup_error),
                     correlation_id,
                 )
 

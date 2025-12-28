@@ -613,21 +613,21 @@ async def cleanup_consul_test_services():
                             service_id,
                         )
                     except Exception as e:
+                        # Note: exc_info omitted to prevent potential info leakage
                         logger.warning(
                             "Cleanup failed for Consul service %s: %s",
                             service_id,
-                            e,
-                            exc_info=True,
+                            sanitize_error_message(e),
                         )
 
         finally:
             await handler.shutdown()
 
     except Exception as e:
+        # Note: exc_info omitted for consistency with other cleanup handlers
         logger.warning(
             "Consul test cleanup failed: %s",
-            e,
-            exc_info=True,
+            sanitize_error_message(e),
         )
 
 
@@ -805,20 +805,20 @@ async def cleanup_kafka_test_consumer_groups():
                 try:
                     await admin_client.delete_consumer_groups(test_groups)
                 except KafkaError as e:
+                    # Note: exc_info omitted for consistency with other cleanup handlers
                     logger.warning(
                         "Kafka consumer group cleanup failed: %s",
-                        e,
-                        exc_info=True,
+                        sanitize_error_message(e),
                     )
 
         finally:
             await admin_client.close()
 
     except Exception as e:
+        # Note: exc_info omitted for consistency with other cleanup handlers
         logger.warning(
             "Kafka test cleanup failed: %s",
-            e,
-            exc_info=True,
+            sanitize_error_message(e),
         )
 
 

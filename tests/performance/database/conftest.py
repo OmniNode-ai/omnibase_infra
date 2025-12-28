@@ -90,7 +90,6 @@ POSTGRES_AVAILABLE = bool(POSTGRES_HOST and POSTGRES_PASSWORD)
 # =============================================================================
 
 pytestmark = [
-    pytest.mark.performance,
     pytest.mark.database,
     pytest.mark.skipif(
         not POSTGRES_AVAILABLE,

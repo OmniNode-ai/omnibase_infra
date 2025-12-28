@@ -65,8 +65,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Topic identifier used in dispatch results for tracing and observability.
-# Note: This is an internal identifier for logging/metrics, NOT the actual Kafka topic name.
-# The actual Kafka topic is configured via ModelDispatchRoute.topic_pattern in container_wiring.py.
+# Note: Internal identifier for logging/metrics, NOT the actual Kafka topic.
+# Actual topic is configured via ModelDispatchRoute.topic_pattern.
 TOPIC_ID_NODE_INTROSPECTION = "node.introspection"
 
 
@@ -76,7 +76,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
     This dispatcher wraps HandlerNodeIntrospected to integrate it with
     MessageDispatchEngine's category-based routing. It handles:
 
-    - Deserialization: Validates and casts envelope payload to ModelNodeIntrospectionEvent
+    - Deserialization: Validates and casts payload to ModelNodeIntrospectionEvent
     - Time injection: Uses current time from dispatch context
     - Correlation tracking: Extracts or generates correlation_id
     - Error handling: Returns structured ModelDispatchResult on failure
@@ -302,7 +302,9 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("handle", correlation_id)
 
-            logger.exception(
+            # Use logger.error instead of logger.exception to avoid leaking
+            # potentially sensitive data in stack traces (credentials, PII, etc.)
+            logger.error(  # noqa: TRY400
                 "DispatcherNodeIntrospected failed: %s",
                 sanitized_error,
                 extra={

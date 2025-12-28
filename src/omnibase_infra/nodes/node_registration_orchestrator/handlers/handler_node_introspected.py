@@ -488,16 +488,19 @@ class HandlerNodeIntrospected:
             # Log error but don't propagate - PostgreSQL is source of truth
             # Consul registration is best-effort for service discovery
             # Use sanitize_error_message to avoid logging sensitive data
+            # NOTE: Do NOT use exc_info=True here - stack traces may contain
+            # connection strings, credentials, or other sensitive information
             sanitized_error = sanitize_error_message(e)
             logger.warning(
-                "Consul registration failed (non-fatal): %s",
+                "Consul registration failed (non-fatal): %s (error_type=%s)",
                 sanitized_error,
+                type(e).__name__,
                 extra={
                     "node_id": str(node_id),
                     "service_name": service_name,
                     "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
                 },
-                exc_info=True,
             )
 
 

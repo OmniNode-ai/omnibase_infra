@@ -51,7 +51,7 @@ import socket
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID, uuid4
 
 import pytest
@@ -60,6 +60,8 @@ import pytest
 logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+
+from omnibase_infra.utils import sanitize_error_message
 
 # Load environment configuration with priority:
 # 1. .env.docker in this directory (for Docker compose infrastructure)
@@ -468,11 +470,11 @@ async def cleanup_consul_services(
             }
             await real_consul_handler.execute(envelope)
         except Exception as e:
+            # Note: exc_info omitted to prevent potential info leakage
             logger.warning(
                 "Cleanup failed for Consul service %s: %s",
                 service_id,
-                e,
-                exc_info=True,
+                sanitize_error_message(e),
             )
 
 
@@ -705,17 +707,46 @@ async def introspectable_test_node(
     )
 
 
-# Export the IntrospectableTestNode class for type hints
-class IntrospectableTestNode:
-    """Type stub for IntrospectableTestNode fixture.
+# Protocol for type hints - the actual implementation is defined inside the fixture
+class ProtocolIntrospectableTestNode(Protocol):
+    """Protocol defining the IntrospectableTestNode interface.
 
-    The actual implementation is defined inside the fixture to have
-    access to the event bus. This class is exported for type hints.
+    The actual implementation is created inside the introspectable_test_node fixture
+    because it needs access to the real_kafka_event_bus fixture. This Protocol
+    defines the interface for type hints and static type checking.
+
+    The fixture-internal class implements MixinNodeIntrospection and provides:
+    - Node identity (node_id, node_type, version)
+    - Sample operations for capability discovery
+    - Introspection event publishing via Kafka
     """
 
-    node_id: UUID
-    node_type: EnumNodeKind
-    version: str
+    @property
+    def node_id(self) -> UUID:
+        """Get unique node identifier."""
+        ...
+
+    @property
+    def node_type(self) -> EnumNodeKind:
+        """Get ONEX node type classification."""
+        ...
+
+    @property
+    def version(self) -> str:
+        """Get node version string."""
+        ...
+
+    async def execute_operation(self, data: dict[str, object]) -> dict[str, object]:
+        """Execute a sample operation."""
+        ...
+
+    async def handle_request(self, request: object) -> object:
+        """Handle a sample request."""
+        ...
+
+
+# Alias for backwards compatibility with existing test type annotations
+IntrospectableTestNode = ProtocolIntrospectableTestNode
 
 
 # =============================================================================
@@ -869,11 +900,11 @@ async def cleanup_projections(
                 unique_node_id,
             )
     except Exception as e:
+        # Note: exc_info omitted to prevent potential info leakage in tracebacks
         logger.warning(
             "Cleanup failed for projection entity_id %s: %s",
             unique_node_id,
-            e,
-            exc_info=True,
+            sanitize_error_message(e),
         )
 
 
@@ -921,11 +952,11 @@ async def cleanup_node_ids(
                     node_ids_to_cleanup,
                 )
         except Exception as e:
+            # Note: exc_info omitted to prevent potential info leakage in tracebacks
             logger.warning(
                 "Cleanup failed for %d projection entity_ids: %s",
                 len(node_ids_to_cleanup),
-                e,
-                exc_info=True,
+                sanitize_error_message(e),
             )
 
 
@@ -961,7 +992,8 @@ __all__ = [
     "unique_node_id",
     "unique_correlation_id",
     "introspectable_test_node",
-    "IntrospectableTestNode",
+    "ProtocolIntrospectableTestNode",
+    "IntrospectableTestNode",  # Alias for ProtocolIntrospectableTestNode
     # Event factory fixtures
     "introspection_event_factory",
     "runtime_tick_factory",

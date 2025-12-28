@@ -36,6 +36,7 @@ from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
 
 # Fixed timestamp for deterministic tests
 TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
@@ -125,7 +126,7 @@ class TestContractIntegration:
 
     def test_node_type_is_orchestrator(self, contract_data: dict) -> None:
         """Test that node_type is ORCHESTRATOR."""
-        assert contract_data["node_type"] == "ORCHESTRATOR"
+        assert contract_data["node_type"] == EnumNodeKind.ORCHESTRATOR.name
 
     def test_input_model_importable(self, contract_data: dict) -> None:
         """Test that input model specified in contract is importable and valid.

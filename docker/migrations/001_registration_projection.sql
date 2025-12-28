@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS registration_projections (
     --   2. INSERT with invalid node_type is rejected by this constraint
     --   3. Constraint values match EnumNodeKind enum values from omnibase_core
     -- Suggested test location: tests/integration/registration/test_projection_constraints.py
+    -- Deferred: Integration tests require full E2E infrastructure; schema migration ships first.
     CONSTRAINT valid_node_type CHECK (node_type IN ('effect', 'compute', 'reducer', 'orchestrator'))
 );
 

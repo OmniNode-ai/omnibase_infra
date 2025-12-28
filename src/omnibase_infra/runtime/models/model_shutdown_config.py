@@ -22,8 +22,8 @@ class ModelShutdownConfig(BaseModel):
 
     Edge Cases:
         - 0: Immediate shutdown, no waiting for in-flight operations
-        - Very large values (>3600): May cause delayed shutdowns; consider using
-          reasonable timeouts (30-120 seconds recommended for most use cases)
+        - Values > 3600: Rejected by Pydantic validation (le=3600 constraint);
+          consider using reasonable timeouts (30-120 seconds recommended)
         - Negative values: Rejected by Pydantic validation (ge=0 constraint)
 
     Production Recommendation:

@@ -38,14 +38,6 @@ from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
 # -----------------------------------------------------------------------------
-# Module-Level Markers
-# -----------------------------------------------------------------------------
-
-pytestmark = [
-    pytest.mark.performance,
-]
-
-# -----------------------------------------------------------------------------
 # Event Bus Fixtures
 # -----------------------------------------------------------------------------
 

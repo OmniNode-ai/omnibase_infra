@@ -60,17 +60,6 @@ if TYPE_CHECKING:
 
 
 # -----------------------------------------------------------------------------
-# Module-Level Markers
-# -----------------------------------------------------------------------------
-# These markers enable selective test execution:
-#   pytest -m "performance" - run only performance tests
-#   pytest -m "not performance" - skip performance tests
-
-pytestmark = [
-    pytest.mark.performance,
-]
-
-# -----------------------------------------------------------------------------
 # Simulated Effect Executor for Load Testing
 # -----------------------------------------------------------------------------
 
@@ -153,8 +142,6 @@ class SimulatedEffectExecutor:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestHighVolumeSequential:
     """Test high volume sequential request processing."""
 
@@ -246,8 +233,6 @@ class TestHighVolumeSequential:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestConcurrentLoad:
     """Test concurrent request processing."""
 
@@ -373,8 +358,6 @@ class TestConcurrentLoad:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestIdempotencyCacheStress:
     """Test idempotency store under stress conditions."""
 
@@ -485,8 +468,6 @@ class TestIdempotencyCacheStress:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestMemoryBounds:
     """Test that memory usage stays bounded."""
 
@@ -548,8 +529,6 @@ class TestMemoryBounds:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestLatencyDistribution:
     """Test operation latency characteristics."""
 
@@ -655,8 +634,6 @@ class TestLatencyDistribution:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestThroughput:
     """Test operation throughput characteristics."""
 

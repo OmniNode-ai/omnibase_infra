@@ -430,12 +430,12 @@ if [ "$FULL_REPORT" = true ]; then
     [ -z "$REPORT_CORRELATION_IDS" ] && REPORT_CORRELATION_IDS="No correlation IDs found"
 
     # Assertion details - grep with context, || true for empty results
-    # Note: -A (after context) is POSIX-compliant and portable to macOS
+    # Note: -A (after context) is supported by GNU and BSD grep (including macOS)
     REPORT_ASSERTION_DETAILS=$(grep -E -A 10 "PASSED|FAILED|AssertionError" "$TEST_LOG" 2>/dev/null | head -50 || true)
     [ -z "$REPORT_ASSERTION_DETAILS" ] && REPORT_ASSERTION_DETAILS="No assertion details found"
 
     # Callback logs - grep with context, || true for empty results
-    # Note: -A (after context) is POSIX-compliant and portable to macOS
+    # Note: -A (after context) is supported by GNU and BSD grep (including macOS)
     REPORT_CALLBACK_LOGS=$(grep -E -A 5 "callback invoked|parsed successfully|processed successfully" "$FULL_LOG" 2>/dev/null | head -50 || true)
     [ -z "$REPORT_CALLBACK_LOGS" ] && REPORT_CALLBACK_LOGS="No callback logs found"
 

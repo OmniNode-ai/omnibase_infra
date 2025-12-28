@@ -80,7 +80,7 @@ def contract_data(contract_path: Path) -> dict:
     if not contract_path.exists():
         pytest.skip(f"Contract file not found: {contract_path}")
 
-    with open(contract_path, encoding="utf-8") as f:
+    with contract_path.open(encoding="utf-8") as f:
         try:
             return yaml.safe_load(f)
         except yaml.YAMLError as e:

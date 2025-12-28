@@ -43,13 +43,11 @@ from tests.performance.database.conftest import QueryAnalyzer
 # =============================================================================
 # Module-Level Markers
 # =============================================================================
-# These markers enable selective test execution:
-#   pytest -m "performance" - run only performance tests
-#   pytest -m "database" - run only database tests
-#   pytest -m "not performance" - skip performance tests
+# NOTE: The 'performance' marker is automatically applied by
+# tests/performance/conftest.py via pytest_collection_modifyitems hook.
+# Only additional markers (like 'database') need to be specified here.
 
 pytestmark = [
-    pytest.mark.performance,
     pytest.mark.database,
 ]
 

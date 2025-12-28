@@ -275,9 +275,7 @@ class IntrospectionEventRouter:
                 payload=introspection_event,
                 envelope_id=raw_envelope.envelope_id,
                 envelope_timestamp=raw_envelope.envelope_timestamp,
-                correlation_id=raw_envelope.correlation_id
-                or introspection_event.correlation_id
-                or callback_correlation_id,
+                correlation_id=raw_envelope.correlation_id or callback_correlation_id,
                 source_tool=raw_envelope.source_tool,
                 target_tool=raw_envelope.target_tool,
                 metadata=_normalize_metadata(raw_envelope.metadata),
@@ -400,7 +398,7 @@ class IntrospectionEventRouter:
         except json.JSONDecodeError as json_error:
             logger.warning(
                 "Failed to decode JSON from message: %s (correlation_id=%s)",
-                json_error,
+                sanitize_error_message(json_error),
                 callback_correlation_id,
                 extra={
                     "error_type": type(json_error).__name__,

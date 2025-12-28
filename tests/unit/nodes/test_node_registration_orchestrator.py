@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
 
 from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
@@ -197,7 +198,7 @@ class TestContractValidation:
         assert contract_data is not None
         assert "name" in contract_data
         assert "node_type" in contract_data
-        assert contract_data["node_type"] == "ORCHESTRATOR"
+        assert contract_data["node_type"] == EnumNodeKind.ORCHESTRATOR.name
 
     def test_contract_has_required_metadata(self, contract_data: dict) -> None:
         """Test that contract has required metadata fields."""

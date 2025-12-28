@@ -64,6 +64,8 @@ async def verify_consul_registration(
     consul_handler: ConsulHandler,
     service_id: str,
     timeout_seconds: float = 5.0,
+    *,
+    correlation_id: UUID | None = None,
 ) -> dict[str, object] | None:
     """Verify a service is registered in Consul.
 
@@ -75,6 +77,7 @@ async def verify_consul_registration(
         consul_handler: Initialized ConsulHandler instance.
         service_id: The service ID to verify.
         timeout_seconds: Maximum time to wait for registration.
+        correlation_id: Optional correlation ID for tracing.
 
     Returns:
         Service registration dict if found, None otherwise.
@@ -105,15 +108,23 @@ async def verify_consul_registration(
             logger.debug(
                 "Consul KV lookup failed (retrying): %s",
                 type(e).__name__,
-                extra={"service_id": service_id},
+                extra={
+                    "service_id": service_id,
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                },
             )
         except Exception as e:
             # Unexpected errors - log with more detail but still retry
             logger.warning(
-                "Unexpected error during Consul lookup (retrying): %s: %s",
+                "Unexpected error during Consul lookup (retrying): %s: %s "
+                "(correlation_id=%s)",
                 type(e).__name__,
                 str(e),
-                extra={"service_id": service_id},
+                correlation_id,
+                extra={
+                    "service_id": service_id,
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                },
             )
 
         await asyncio.sleep(0.2)
@@ -126,6 +137,8 @@ async def wait_for_consul_registration(
     service_id: str,
     timeout_seconds: float = 10.0,
     poll_interval: float = 0.5,
+    *,
+    correlation_id: UUID | None = None,
 ) -> dict[str, object]:
     """Wait for a service to appear in Consul.
 
@@ -136,6 +149,7 @@ async def wait_for_consul_registration(
         service_id: The service ID to wait for.
         timeout_seconds: Maximum time to wait.
         poll_interval: Time between poll attempts.
+        correlation_id: Optional correlation ID for tracing.
 
     Returns:
         Service registration dict when found.
@@ -149,7 +163,10 @@ async def wait_for_consul_registration(
     while asyncio.get_running_loop().time() - start_time < timeout_seconds:
         try:
             result = await verify_consul_registration(
-                consul_handler, service_id, timeout_seconds=poll_interval
+                consul_handler,
+                service_id,
+                timeout_seconds=poll_interval,
+                correlation_id=correlation_id,
             )
             if result is not None:
                 return result
@@ -159,21 +176,31 @@ async def wait_for_consul_registration(
             logger.debug(
                 "Consul wait poll failed: %s",
                 type(e).__name__,
-                extra={"service_id": service_id},
+                extra={
+                    "service_id": service_id,
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                },
             )
         except Exception as e:
             # Unexpected errors - log with more detail
             last_error = e
             logger.warning(
-                "Unexpected error during Consul poll: %s: %s",
+                "Unexpected error during Consul poll: %s: %s (correlation_id=%s)",
                 type(e).__name__,
                 str(e),
-                extra={"service_id": service_id},
+                correlation_id,
+                extra={
+                    "service_id": service_id,
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                },
             )
 
         await asyncio.sleep(poll_interval)
 
-    error_msg = f"Service '{service_id}' not found in Consul within {timeout_seconds}s"
+    error_msg = (
+        f"Service '{service_id}' not found in Consul within {timeout_seconds}s "
+        f"(correlation_id={correlation_id})"
+    )
     if last_error:
         error_msg += f" (last error: {last_error})"
     raise TimeoutError(error_msg)
@@ -188,6 +215,8 @@ async def verify_postgres_registration(
     projection_reader: ProjectionReaderRegistration,
     node_id: UUID,
     domain: str = "registration",
+    *,
+    correlation_id: UUID | None = None,
 ) -> ModelRegistrationProjection | None:
     """Verify a node registration exists in PostgreSQL via projection reader.
 
@@ -199,6 +228,7 @@ async def verify_postgres_registration(
         projection_reader: Initialized ProjectionReaderRegistration instance.
         node_id: UUID of the node to verify.
         domain: Domain namespace (default: "registration").
+        correlation_id: Optional correlation ID for tracing.
 
     Returns:
         ModelRegistrationProjection if found, None otherwise.
@@ -210,7 +240,11 @@ async def verify_postgres_registration(
         logger.debug(
             "Projection reader lookup failed: %s",
             type(e).__name__,
-            extra={"node_id": str(node_id), "domain": domain},
+            extra={
+                "node_id": str(node_id),
+                "domain": domain,
+                "correlation_id": str(correlation_id) if correlation_id else None,
+            },
         )
         return None
     except KeyError:
@@ -219,10 +253,15 @@ async def verify_postgres_registration(
     except Exception as e:
         # Unexpected errors - log with more detail
         logger.warning(
-            "Unexpected error during projection lookup: %s: %s",
+            "Unexpected error during projection lookup: %s: %s (correlation_id=%s)",
             type(e).__name__,
             str(e),
-            extra={"node_id": str(node_id), "domain": domain},
+            correlation_id,
+            extra={
+                "node_id": str(node_id),
+                "domain": domain,
+                "correlation_id": str(correlation_id) if correlation_id else None,
+            },
         )
         return None
 
@@ -233,6 +272,8 @@ async def wait_for_postgres_registration(
     expected_state: EnumRegistrationState | None = None,
     timeout_seconds: float = 10.0,
     poll_interval: float = 0.5,
+    *,
+    correlation_id: UUID | None = None,
 ) -> ModelRegistrationProjection:
     """Wait for registration to appear in PostgreSQL with expected state.
 
@@ -245,6 +286,7 @@ async def wait_for_postgres_registration(
         expected_state: Optional state to wait for. If None, any state is accepted.
         timeout_seconds: Maximum time to wait.
         poll_interval: Time between poll attempts.
+        correlation_id: Optional correlation ID for tracing.
 
     Returns:
         ModelRegistrationProjection when found with matching state.
@@ -256,7 +298,9 @@ async def wait_for_postgres_registration(
     last_projection: ModelRegistrationProjection | None = None
 
     while asyncio.get_running_loop().time() - start_time < timeout_seconds:
-        projection = await verify_postgres_registration(projection_reader, node_id)
+        projection = await verify_postgres_registration(
+            projection_reader, node_id, correlation_id=correlation_id
+        )
         if projection is not None:
             last_projection = projection
             if expected_state is None or projection.current_state == expected_state:
@@ -268,12 +312,12 @@ async def wait_for_postgres_registration(
         raise TimeoutError(
             f"Registration for node '{node_id}' found but state "
             f"'{last_projection.current_state}' != expected '{expected_state}' "
-            f"within {timeout_seconds}s"
+            f"within {timeout_seconds}s (correlation_id={correlation_id})"
         )
 
     raise TimeoutError(
         f"Registration for node '{node_id}' not found in PostgreSQL "
-        f"within {timeout_seconds}s"
+        f"within {timeout_seconds}s (correlation_id={correlation_id})"
     )
 
 
@@ -495,6 +539,8 @@ async def verify_dual_registration(
     node_id: UUID,
     service_id: str,
     timeout_seconds: float = 10.0,
+    *,
+    correlation_id: UUID | None = None,
 ) -> tuple[dict[str, object], ModelRegistrationProjection]:
     """Verify node is registered in BOTH Consul and PostgreSQL.
 
@@ -507,6 +553,7 @@ async def verify_dual_registration(
         node_id: UUID of the node.
         service_id: Consul service ID.
         timeout_seconds: Maximum time to wait for both registrations.
+        correlation_id: Optional correlation ID for tracing.
 
     Returns:
         Tuple of (Consul registration dict, PostgreSQL projection).
@@ -522,13 +569,16 @@ async def verify_dual_registration(
         # Check Consul
         if consul_result is None:
             consul_result = await verify_consul_registration(
-                consul_handler, service_id, timeout_seconds=1.0
+                consul_handler,
+                service_id,
+                timeout_seconds=1.0,
+                correlation_id=correlation_id,
             )
 
         # Check PostgreSQL
         if postgres_result is None:
             postgres_result = await verify_postgres_registration(
-                projection_reader, node_id
+                projection_reader, node_id, correlation_id=correlation_id
             )
 
         # Both found
@@ -545,7 +595,8 @@ async def verify_dual_registration(
 
     raise TimeoutError(
         f"Dual registration incomplete - missing in: {', '.join(missing)} "
-        f"(node_id={node_id}, service_id={service_id}, timeout={timeout_seconds}s)"
+        f"(node_id={node_id}, service_id={service_id}, timeout={timeout_seconds}s, "
+        f"correlation_id={correlation_id})"
     )
 
 
@@ -560,6 +611,8 @@ async def verify_state_transition(
     from_state: EnumRegistrationState,
     to_state: EnumRegistrationState,
     timeout_seconds: float = 10.0,
+    *,
+    correlation_id: UUID | None = None,
 ) -> ModelRegistrationProjection:
     """Wait for a state transition to occur.
 
@@ -572,6 +625,7 @@ async def verify_state_transition(
         from_state: Expected starting state.
         to_state: Expected ending state.
         timeout_seconds: Maximum time to wait for transition.
+        correlation_id: Optional correlation ID for tracing.
 
     Returns:
         ModelRegistrationProjection in the target state.
@@ -586,7 +640,9 @@ async def verify_state_transition(
     # Wait for from_state first (might not be there yet)
     initial_projection: ModelRegistrationProjection | None = None
     while asyncio.get_running_loop().time() - start_time < timeout_seconds / 2:
-        projection = await verify_postgres_registration(projection_reader, node_id)
+        projection = await verify_postgres_registration(
+            projection_reader, node_id, correlation_id=correlation_id
+        )
         if projection is not None:
             initial_projection = projection
             if projection.current_state == from_state:
@@ -603,7 +659,7 @@ async def verify_state_transition(
     if initial_projection is None:
         raise TimeoutError(
             f"Node '{node_id}' not found while waiting for state transition "
-            f"from '{from_state}' to '{to_state}'"
+            f"from '{from_state}' to '{to_state}' (correlation_id={correlation_id})"
         )
 
     # Now wait for to_state
@@ -611,7 +667,8 @@ async def verify_state_transition(
     if remaining_time <= 0:
         raise TimeoutError(
             f"Timeout waiting for state transition from '{from_state}' to '{to_state}' "
-            f"for node '{node_id}' (current state: {initial_projection.current_state})"
+            f"for node '{node_id}' (current state: {initial_projection.current_state}, "
+            f"correlation_id={correlation_id})"
         )
 
     return await wait_for_postgres_registration(
@@ -620,6 +677,7 @@ async def verify_state_transition(
         expected_state=to_state,
         timeout_seconds=remaining_time,
         poll_interval=0.2,
+        correlation_id=correlation_id,
     )
 
 
@@ -677,6 +735,8 @@ async def wait_for_heartbeat_update(
     node_id: UUID,
     min_heartbeat_time: datetime,
     timeout_seconds: float = 35.0,
+    *,
+    correlation_id: UUID | None = None,
 ) -> ModelRegistrationProjection:
     """Wait for heartbeat to be updated after min time.
 
@@ -688,6 +748,7 @@ async def wait_for_heartbeat_update(
         node_id: UUID of the node.
         min_heartbeat_time: Minimum heartbeat timestamp to wait for.
         timeout_seconds: Maximum time to wait (default 35s > 30s heartbeat interval).
+        correlation_id: Optional correlation ID for tracing.
 
     Returns:
         ModelRegistrationProjection with updated heartbeat.
@@ -698,7 +759,9 @@ async def wait_for_heartbeat_update(
     start_time = asyncio.get_running_loop().time()
 
     while asyncio.get_running_loop().time() - start_time < timeout_seconds:
-        projection = await verify_postgres_registration(projection_reader, node_id)
+        projection = await verify_postgres_registration(
+            projection_reader, node_id, correlation_id=correlation_id
+        )
         if (
             projection is not None
             and projection.last_heartbeat_at is not None
@@ -708,15 +771,19 @@ async def wait_for_heartbeat_update(
 
         await asyncio.sleep(1.0)
 
-    projection = await verify_postgres_registration(projection_reader, node_id)
+    projection = await verify_postgres_registration(
+        projection_reader, node_id, correlation_id=correlation_id
+    )
     if projection is None:
         raise TimeoutError(
-            f"Node '{node_id}' not found while waiting for heartbeat update"
+            f"Node '{node_id}' not found while waiting for heartbeat update "
+            f"(correlation_id={correlation_id})"
         )
 
     raise TimeoutError(
         f"Heartbeat not updated after {min_heartbeat_time} within {timeout_seconds}s "
-        f"for node '{node_id}'. Last heartbeat: {projection.last_heartbeat_at}"
+        f"for node '{node_id}'. Last heartbeat: {projection.last_heartbeat_at} "
+        f"(correlation_id={correlation_id})"
     )
 
 

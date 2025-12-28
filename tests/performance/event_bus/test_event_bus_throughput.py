@@ -45,8 +45,6 @@ from tests.performance.event_bus.conftest import generate_unique_topic
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestSinglePublisherThroughput:
     """Test single publisher throughput characteristics."""
 
@@ -169,8 +167,6 @@ class TestSinglePublisherThroughput:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestBatchPublishing:
     """Test batch publishing performance."""
 
@@ -280,8 +276,6 @@ class TestBatchPublishing:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestConcurrentPublishers:
     """Test concurrent publisher throughput."""
 
@@ -436,8 +430,6 @@ class TestConcurrentPublishers:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestPublishWithSubscribers:
     """Test publishing throughput with active subscribers."""
 

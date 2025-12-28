@@ -78,7 +78,7 @@ def exemptions_yaml_path() -> Path:
 @pytest.fixture
 def exemptions_yaml(exemptions_yaml_path: Path) -> dict[str, Any]:
     """Load the exemptions YAML file."""
-    with open(exemptions_yaml_path) as f:
+    with exemptions_yaml_path.open(encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -118,7 +118,7 @@ class TestValidationExemptionsRegex:
 
     def test_yaml_file_is_valid_yaml(self, exemptions_yaml_path: Path) -> None:
         """Verify the exemptions file is valid YAML."""
-        with open(exemptions_yaml_path) as f:
+        with exemptions_yaml_path.open(encoding="utf-8") as f:
             try:
                 yaml.safe_load(f)
             except yaml.YAMLError as e:
