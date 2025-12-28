@@ -65,6 +65,7 @@ from omnibase_infra.handlers.models.consul import (
 from omnibase_infra.handlers.models.http import (
     EnumHttpOperationType,
     HttpPayload,
+    ModelHttpBodyContent,
     ModelHttpGetPayload,
     ModelHttpHandlerPayload,
     ModelHttpPostPayload,
@@ -120,20 +121,23 @@ __all__: list[str] = [
     "ModelConsulKVItem",
     "ModelConsulKVPutPayload",
     "ModelConsulRegisterPayload",
-    "ModelDbDescribeResponse",
     # Database models
     "ModelDbQueryPayload",
     "ModelDbQueryResponse",
+    "ModelDbDescribeResponse",
     # Generic response model
     "ModelHandlerResponse",
+    # HTTP models
+    "ModelHttpBodyContent",
     "ModelHttpGetPayload",
     # HTTP wrapper models
     "ModelHttpHandlerPayload",
     "ModelHttpHandlerResponse",
     "ModelHttpPostPayload",
-    "ModelOperationContext",
     # Common models for retry and operation tracking
+    "ModelOperationContext",
     "ModelRetryState",
+    # Vault models
     "ModelVaultDeletePayload",
     # Vault wrapper models
     "ModelVaultHandlerPayload",

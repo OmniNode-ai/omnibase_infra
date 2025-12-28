@@ -84,9 +84,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Module-level markers - inherited from conftest.py but explicit here for clarity
+# Module-level markers
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.e2e,
 ]
 
@@ -413,6 +412,8 @@ async def orchestrator_pipeline(
     projection_reader: ProjectionReaderRegistration,
     real_projector: ProjectorRegistration,
     registry_effect_node: NodeRegistryEffect,
+    mock_consul_client: AsyncMock,  # Explicit dep ensures pytest shares instances
+    mock_postgres_adapter: AsyncMock,  # Explicit dep ensures pytest shares instances
 ) -> OrchestratorPipeline:
     """Create the full orchestrator pipeline.
 
@@ -420,10 +421,25 @@ async def orchestrator_pipeline(
         projection_reader: Projection reader fixture.
         real_projector: Projector fixture.
         registry_effect_node: Registry effect fixture.
+        mock_consul_client: Mock Consul client (explicit dep for fixture sharing).
+        mock_postgres_adapter: Mock PostgreSQL adapter (explicit dep for fixture sharing).
 
     Returns:
         OrchestratorPipeline: Configured pipeline.
+
+    Note:
+        The mock_consul_client and mock_postgres_adapter parameters are explicitly
+        listed here (even though registry_effect_node already uses them) to ensure
+        pytest resolves them first and shares the same instances. Without this
+        explicit dependency, pytest's fixture resolution order could vary, potentially
+        causing different mock instances to be used in tests vs the pipeline.
     """
+    # Note: mock_consul_client and mock_postgres_adapter are not used directly here
+    # but are declared as dependencies to ensure pytest fixture sharing works correctly.
+    # The registry_effect_node already has these mocks injected.
+    _ = mock_consul_client  # Referenced to avoid unused parameter warning
+    _ = mock_postgres_adapter  # Referenced to avoid unused parameter warning
+
     reducer = RegistrationReducer()
     return OrchestratorPipeline(
         projection_reader=projection_reader,

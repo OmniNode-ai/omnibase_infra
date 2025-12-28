@@ -45,7 +45,6 @@ from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 # Module-level markers
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.asyncio,
 ]
 

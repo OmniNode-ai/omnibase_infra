@@ -70,8 +70,19 @@ import time
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+import redis.asyncio as redis
+from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import RedisError
+from redis.exceptions import TimeoutError as RedisTimeoutError
+
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraTimeoutError,
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+)
 from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
@@ -81,6 +92,7 @@ from omnibase_infra.runtime.models import (
     ModelRuntimeSchedulerMetrics,
     ModelRuntimeTick,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +188,11 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
         self._state_lock = asyncio.Lock()
         self._shutdown_event = asyncio.Event()
         self._tick_task: asyncio.Task[None] | None = None
+
+        # Valkey client for sequence number persistence
+        # Created lazily on first use to avoid blocking __init__
+        self._valkey_client: Redis | None = None
+        self._valkey_available: bool = True  # Assume available until proven otherwise
 
     # =========================================================================
     # Properties (ProtocolRuntimeScheduler interface)
@@ -335,6 +352,9 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             },
         )
 
+        # Always close Valkey client if it exists (idempotent)
+        await self._close_valkey_client()
+
     # =========================================================================
     # Core Methods
     # =========================================================================
@@ -397,6 +417,14 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
         # Serialize tick to JSON bytes
         tick_bytes = tick.model_dump_json().encode("utf-8")
 
+        # Prepare error context for ONEX error types
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="emit_tick",
+            target_name=self._config.tick_topic,
+            correlation_id=correlation_id,
+        )
+
         try:
             # Publish tick event
             await self._event_bus.publish(
@@ -422,8 +450,8 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                 },
             )
 
-        except Exception as e:
-            # Record failure
+        except TimeoutError as e:
+            # Record failure for timeout
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
                     operation="emit_tick",
@@ -432,17 +460,25 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
 
             await self._record_tick_failure(correlation_id)
 
-            logger.exception(
-                "Failed to emit tick",
-                extra={
-                    "scheduler_id": self.scheduler_id,
-                    "sequence_number": current_sequence,
-                    "correlation_id": str(correlation_id),
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                },
-            )
-            raise
+            raise InfraTimeoutError(
+                f"Timeout emitting tick to topic {self._config.tick_topic}",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            # Record failure for other errors
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="emit_tick",
+                    correlation_id=correlation_id,
+                )
+
+            await self._record_tick_failure(correlation_id)
+
+            raise InfraConnectionError(
+                f"Failed to emit tick to topic {self._config.tick_topic}",
+                context=ctx,
+            ) from e
 
     async def get_metrics(self) -> ModelRuntimeSchedulerMetrics:
         """Get current scheduler metrics.
@@ -633,15 +669,174 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             self._consecutive_failures += 1
 
     # =========================================================================
-    # Persistence Stubs (for restart-safety)
+    # Valkey Persistence (for restart-safety)
     # =========================================================================
 
-    async def _load_sequence_number(self) -> None:
-        """Load persisted sequence number for restart-safety.
+    async def _get_valkey_client(self) -> Redis | None:
+        """Get or create the Valkey client for sequence number persistence.
 
-        This is a stub for Valkey/Redis persistence. Currently initializes
-        to 0. Future implementation will load from Valkey using the
-        configured `sequence_number_key`.
+        This method lazily creates a Valkey client on first use. If the client
+        has been marked as unavailable (due to connection failures), it returns
+        None without attempting to reconnect.
+
+        Returns:
+            Redis client instance if available, None if unavailable or disabled.
+
+        Note:
+            The client is created with the configured host, port, password, and
+            timeout settings. Connection failures are handled gracefully with
+            retry logic.
+        """
+        # Skip if persistence is disabled or Valkey was marked unavailable
+        if not self._config.persist_sequence_number:
+            return None
+
+        if not self._valkey_available:
+            return None
+
+        # Return existing client if already created
+        if self._valkey_client is not None:
+            return self._valkey_client
+
+        # Create new client with retry logic
+        correlation_id = uuid4()
+        retries = self._config.valkey_connection_retries
+
+        for attempt in range(retries + 1):
+            try:
+                self._valkey_client = redis.Redis(
+                    host=self._config.valkey_host,
+                    port=self._config.valkey_port,
+                    password=self._config.valkey_password,
+                    socket_timeout=self._config.valkey_timeout_seconds,
+                    socket_connect_timeout=self._config.valkey_timeout_seconds,
+                    decode_responses=True,
+                )
+
+                # Test connection with a ping
+                await asyncio.wait_for(
+                    self._valkey_client.ping(),
+                    timeout=self._config.valkey_timeout_seconds,
+                )
+
+                logger.info(
+                    "Valkey client connected for sequence persistence",
+                    extra={
+                        "scheduler_id": self.scheduler_id,
+                        "valkey_host": self._config.valkey_host,
+                        "valkey_port": self._config.valkey_port,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return self._valkey_client
+
+            except (RedisConnectionError, RedisTimeoutError, TimeoutError) as e:
+                if attempt < retries:
+                    # Calculate exponential backoff delay: 1s, 2s, 4s, 8s... max 60s
+                    backoff_delay = min(1.0 * (2**attempt), 60.0)
+
+                    logger.warning(
+                        "Valkey connection attempt %d/%d failed, retrying in %.1fs",
+                        attempt + 1,
+                        retries + 1,
+                        backoff_delay,
+                        extra={
+                            "scheduler_id": self.scheduler_id,
+                            "valkey_host": self._config.valkey_host,
+                            "valkey_port": self._config.valkey_port,
+                            # SECURITY: Sanitize error to prevent credential exposure
+                            "error": sanitize_error_string(str(e)),
+                            "error_type": type(e).__name__,
+                            "correlation_id": str(correlation_id),
+                            "backoff_delay_seconds": backoff_delay,
+                        },
+                    )
+                    await asyncio.sleep(backoff_delay)
+                else:
+                    # All retries exhausted - mark as unavailable
+                    self._valkey_available = False
+                    self._valkey_client = None
+
+                    logger.warning(
+                        "Valkey unavailable after %d attempts, using in-memory",
+                        retries + 1,
+                        extra={
+                            "scheduler_id": self.scheduler_id,
+                            "valkey_host": self._config.valkey_host,
+                            "valkey_port": self._config.valkey_port,
+                            # SECURITY: Sanitize error to prevent credential exposure
+                            "error": sanitize_error_string(str(e)),
+                            "error_type": type(e).__name__,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+                    return None
+
+            except RedisError as e:
+                # Unexpected Redis error - mark as unavailable
+                self._valkey_available = False
+                self._valkey_client = None
+
+                logger.warning(
+                    "Valkey error during connection, using in-memory fallback",
+                    extra={
+                        "scheduler_id": self.scheduler_id,
+                        "valkey_host": self._config.valkey_host,
+                        "valkey_port": self._config.valkey_port,
+                        # SECURITY: Sanitize error to prevent credential exposure
+                        "error": sanitize_error_string(str(e)),
+                        "error_type": type(e).__name__,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return None
+
+        return None
+
+    async def _close_valkey_client(self) -> None:
+        """Close the Valkey client connection.
+
+        This method gracefully closes the Valkey client connection if one exists.
+        It is called during scheduler shutdown to ensure proper resource cleanup.
+
+        Idempotency:
+            This method is safe to call multiple times. It atomically swaps the
+            client reference to None before attempting close, preventing double-close
+            scenarios even with concurrent coroutine access.
+        """
+        # Atomically swap client reference to None to prevent double-close
+        client = self._valkey_client
+        self._valkey_client = None
+
+        if client is not None:
+            try:
+                await client.aclose()
+                logger.debug(
+                    "Valkey client closed",
+                    extra={"scheduler_id": self.scheduler_id},
+                )
+            except Exception as e:
+                logger.warning(
+                    "Error closing Valkey client",
+                    extra={
+                        "scheduler_id": self.scheduler_id,
+                        # SECURITY: Sanitize error to prevent credential exposure
+                        "error": sanitize_error_string(str(e)),
+                        "error_type": type(e).__name__,
+                    },
+                )
+
+    async def _load_sequence_number(self) -> None:
+        """Load persisted sequence number from Valkey for restart-safety.
+
+        Attempts to read the sequence number from Valkey using the configured
+        `sequence_number_key`. If Valkey is unavailable or the key doesn't exist,
+        gracefully falls back to starting from 0.
+
+        Graceful Fallback:
+            - If Valkey is unavailable: Logs warning and starts from 0
+            - If key doesn't exist: Logs debug and starts from 0
+            - If value is not a valid integer: Logs warning and starts from 0
 
         Note:
             This method is called during start() if `persist_sequence_number`
@@ -654,22 +849,119 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             )
             return
 
-        # TODO: Implement Valkey persistence
-        # For now, initialize to 0
-        logger.debug(
-            "Sequence number persistence not yet implemented, starting from 0",
-            extra={
-                "scheduler_id": self.scheduler_id,
-                "sequence_key": self._config.sequence_number_key,
-            },
-        )
+        correlation_id = uuid4()
+        client = await self._get_valkey_client()
+
+        if client is None:
+            logger.warning(
+                "Valkey unavailable for sequence load, starting from 0",
+                extra={
+                    "scheduler_id": self.scheduler_id,
+                    "sequence_key": self._config.sequence_number_key,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return
+
+        try:
+            # Read sequence number from Valkey
+            value = await asyncio.wait_for(
+                client.get(self._config.sequence_number_key),
+                timeout=self._config.valkey_timeout_seconds,
+            )
+
+            if value is None:
+                # Key doesn't exist - this is a fresh start
+                logger.debug(
+                    "No persisted sequence number found, starting from 0",
+                    extra={
+                        "scheduler_id": self.scheduler_id,
+                        "sequence_key": self._config.sequence_number_key,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return
+
+            # Parse the sequence number
+            try:
+                loaded_sequence = int(value)
+                if loaded_sequence < 0:
+                    logger.warning(
+                        "Persisted sequence number is negative, starting from 0",
+                        extra={
+                            "scheduler_id": self.scheduler_id,
+                            "sequence_key": self._config.sequence_number_key,
+                            "persisted_value": value,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+                    return
+
+                # Successfully loaded - update state
+                async with self._state_lock:
+                    self._sequence_number = loaded_sequence
+                    self._last_persisted_sequence = loaded_sequence
+
+                logger.info(
+                    "Loaded persisted sequence number",
+                    extra={
+                        "scheduler_id": self.scheduler_id,
+                        "sequence_number": loaded_sequence,
+                        "sequence_key": self._config.sequence_number_key,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+            except ValueError:
+                logger.warning(
+                    "Persisted sequence number is not a valid integer, starting from 0",
+                    extra={
+                        "scheduler_id": self.scheduler_id,
+                        "sequence_key": self._config.sequence_number_key,
+                        "persisted_value": value,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+        except (RedisConnectionError, RedisTimeoutError, TimeoutError) as e:
+            # Connection failed during operation - mark unavailable
+            self._valkey_available = False
+
+            logger.warning(
+                "Valkey connection failed during sequence load, starting from 0",
+                extra={
+                    "scheduler_id": self.scheduler_id,
+                    "sequence_key": self._config.sequence_number_key,
+                    # SECURITY: Sanitize error to prevent credential exposure
+                    "error": sanitize_error_string(str(e)),
+                    "error_type": type(e).__name__,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        except RedisError as e:
+            logger.warning(
+                "Valkey error during sequence load, starting from 0",
+                extra={
+                    "scheduler_id": self.scheduler_id,
+                    "sequence_key": self._config.sequence_number_key,
+                    # SECURITY: Sanitize error to prevent credential exposure
+                    "error": sanitize_error_string(str(e)),
+                    "error_type": type(e).__name__,
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
     async def _persist_sequence_number(self) -> None:
-        """Persist current sequence number for restart-safety.
+        """Persist current sequence number to Valkey for restart-safety.
 
-        This is a stub for Valkey/Redis persistence. Currently a no-op.
-        Future implementation will persist to Valkey using the configured
-        `sequence_number_key`.
+        Writes the current sequence number to Valkey using the configured
+        `sequence_number_key`. If Valkey is unavailable, gracefully logs a
+        warning and continues without persistence.
+
+        Graceful Fallback:
+            - If Valkey is unavailable: Logs warning and skips persistence
+            - If write fails: Logs warning with error details
 
         Note:
             This method is called during stop() if `persist_sequence_number`
@@ -678,18 +970,81 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
         if not self._config.persist_sequence_number:
             return
 
-        # TODO: Implement Valkey persistence
-        # For now, just record what we would have persisted
-        self._last_persisted_sequence = self._sequence_number
+        correlation_id = uuid4()
+        client = await self._get_valkey_client()
 
-        logger.debug(
-            "Sequence number persistence not yet implemented",
-            extra={
-                "scheduler_id": self.scheduler_id,
-                "sequence_number": self._sequence_number,
-                "sequence_key": self._config.sequence_number_key,
-            },
-        )
+        if client is None:
+            # Valkey unavailable - log but don't fail shutdown
+            # Note: _last_persisted_sequence is NOT updated because persistence failed
+            logger.warning(
+                "Valkey unavailable for sequence persistence",
+                extra={
+                    "scheduler_id": self.scheduler_id,
+                    "sequence_number": self._sequence_number,
+                    "sequence_key": self._config.sequence_number_key,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return
+
+        try:
+            # Write sequence number to Valkey
+            await asyncio.wait_for(
+                client.set(
+                    self._config.sequence_number_key,
+                    str(self._sequence_number),
+                ),
+                timeout=self._config.valkey_timeout_seconds,
+            )
+
+            self._last_persisted_sequence = self._sequence_number
+
+            logger.info(
+                "Persisted sequence number to Valkey",
+                extra={
+                    "scheduler_id": self.scheduler_id,
+                    "sequence_number": self._sequence_number,
+                    "sequence_key": self._config.sequence_number_key,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        except (RedisConnectionError, RedisTimeoutError, TimeoutError) as e:
+            # Connection failed during operation - log but don't fail shutdown
+            # Note: _last_persisted_sequence is NOT updated because persistence failed
+            self._valkey_available = False
+
+            logger.warning(
+                "Valkey connection failed during sequence persistence",
+                extra={
+                    "scheduler_id": self.scheduler_id,
+                    "sequence_number": self._sequence_number,
+                    "sequence_key": self._config.sequence_number_key,
+                    # SECURITY: Sanitize error to prevent credential exposure
+                    "error": sanitize_error_string(str(e)),
+                    "error_type": type(e).__name__,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        except RedisError as e:
+            # Note: _last_persisted_sequence is NOT updated because persistence failed
+            logger.warning(
+                "Valkey error during sequence persistence",
+                extra={
+                    "scheduler_id": self.scheduler_id,
+                    "sequence_number": self._sequence_number,
+                    "sequence_key": self._config.sequence_number_key,
+                    # SECURITY: Sanitize error to prevent credential exposure
+                    "error": sanitize_error_string(str(e)),
+                    "error_type": type(e).__name__,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        finally:
+            # Close the Valkey client during shutdown
+            await self._close_valkey_client()
 
 
 __all__: list[str] = ["RuntimeScheduler"]

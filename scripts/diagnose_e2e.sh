@@ -160,7 +160,8 @@ else
     section_header "Step 1: Verifying Existing Container"
 
     log_info "Checking if runtime container is running..."
-    if docker compose -f "$COMPOSE_FILE" ps runtime | grep -q "Up"; then
+    # Note: Docker Compose v1 uses "Up", v2 uses "running" - check both case-insensitively
+    if docker compose -f "$COMPOSE_FILE" ps runtime 2>/dev/null | grep -Eiq "(Up|running)"; then
         log_success "Runtime container is running"
     else
         log_warning "Runtime container not running - use --rebuild to start it"
@@ -205,16 +206,17 @@ check_required_log "$STARTUP_LOG" "consumer started successfully" "Consumer star
 check_required_log "$STARTUP_LOG" "ONEX Runtime Kernel" "Kernel banner displayed"
 
 # Check for startup errors (store in variable to handle empty results safely)
-# Exclude false positives:
+# Exclude false positives (case-insensitive to match the case-insensitive search):
 #   - WARNING lines (not errors)
 #   - Metric names: *_error_count, errors_total (prometheus metrics)
 #   - Method references: record_error (logging method)
 #   - Zero counts: error_count=0, "error_count": 0 (no actual errors)
+# Note: Use -Eiv (case-insensitive exclusion) to match -Ei search pattern
 # Note: Use -E (ERE) for portability across GNU and BSD grep (macOS)
 # Note: Use intermediate file to avoid pipefail issues with empty grep results
 startup_errors=""
 if grep -Ei "error|exception" "$STARTUP_LOG" > /tmp/startup_errors_raw.txt 2>/dev/null; then
-    startup_errors=$(grep -Ev 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/startup_errors_raw.txt 2>/dev/null || true)
+    startup_errors=$(grep -Eiv 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/startup_errors_raw.txt 2>/dev/null || true)
 fi
 if [ -n "$startup_errors" ]; then
     log_warning "Startup errors detected:"
@@ -381,11 +383,12 @@ log_info "Recommended Fix: ${RECOMMENDED_FIX}"
 section_header "Step 8: Error Summary"
 
 log_info "Extracting errors from logs..."
+# Note: Use -Eiv (case-insensitive exclusion) to match -Ei search pattern
 # Note: Use -E (ERE) for portability across GNU and BSD grep (macOS)
 # Note: Use intermediate file to avoid pipefail issues with empty grep results
 : > /tmp/errors.txt  # Create empty file
 if grep -Ei "error|exception|failed" "$FULL_LOG" > /tmp/errors_raw.txt 2>/dev/null; then
-    grep -Ev 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/errors_raw.txt > /tmp/errors.txt 2>/dev/null || true
+    grep -Eiv 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/errors_raw.txt > /tmp/errors.txt 2>/dev/null || true
 fi
 if [ -s /tmp/errors.txt ]; then
     ERROR_COUNT=$(wc -l < /tmp/errors.txt)
@@ -414,19 +417,22 @@ if [ "$FULL_REPORT" = true ]; then
     # Startup errors - two-stage grep to avoid pipefail with empty results
     REPORT_STARTUP_ERRORS=""
     if grep -Ei "error|exception" "$STARTUP_LOG" > /tmp/report_startup_raw.txt 2>/dev/null; then
-        REPORT_STARTUP_ERRORS=$(grep -Ev 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/report_startup_raw.txt 2>/dev/null | head -20 || true)
+        REPORT_STARTUP_ERRORS=$(grep -Eiv 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/report_startup_raw.txt 2>/dev/null | head -20 || true)
     fi
     [ -z "$REPORT_STARTUP_ERRORS" ] && REPORT_STARTUP_ERRORS="No errors found"
 
     # Processing errors - two-stage grep to avoid pipefail with empty results
     REPORT_PROCESSING_ERRORS=""
     if grep -Ei "error|exception|failed" "$FULL_LOG" > /tmp/report_processing_raw.txt 2>/dev/null; then
-        REPORT_PROCESSING_ERRORS=$(grep -Ev 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/report_processing_raw.txt 2>/dev/null | head -30 || true)
+        REPORT_PROCESSING_ERRORS=$(grep -Eiv 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/report_processing_raw.txt 2>/dev/null | head -30 || true)
     fi
     [ -z "$REPORT_PROCESSING_ERRORS" ] && REPORT_PROCESSING_ERRORS="No errors found"
 
-    # Correlation IDs - single grep with || true fallback
-    REPORT_CORRELATION_IDS=$(grep -E "correlation_id=[a-f0-9-]+" "$FULL_LOG" 2>/dev/null | sed 's/.*correlation_id=\([a-f0-9-]*\).*/\1/' | sort -u | head -20 || true)
+    # Correlation IDs - two-stage grep to avoid pipefail issues with empty results
+    REPORT_CORRELATION_IDS=""
+    if grep -E "correlation_id=[a-f0-9-]+" "$FULL_LOG" > /tmp/report_correlation_raw.txt 2>/dev/null; then
+        REPORT_CORRELATION_IDS=$(sed 's/.*correlation_id=\([a-f0-9-]*\).*/\1/' /tmp/report_correlation_raw.txt | sort -u | head -20 || true)
+    fi
     [ -z "$REPORT_CORRELATION_IDS" ] && REPORT_CORRELATION_IDS="No correlation IDs found"
 
     # Assertion details - grep with context, || true for empty results

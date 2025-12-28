@@ -432,8 +432,38 @@ class HandlerNodeIntrospected:
                     parsed = urlparse(health_url)
                     if parsed.hostname:
                         address = parsed.hostname
+                    else:
+                        # URL parsed but no hostname extracted - log for troubleshooting
+                        # NOTE: Don't log raw URL - may contain credentials
+                        endpoint_type = "health" if endpoints.get("health") else "api"
+                        logger.debug(
+                            "URL parsed but no hostname extracted from %s endpoint",
+                            endpoint_type,
+                            extra={
+                                "node_id": str(node_id),
+                                "endpoint_type": endpoint_type,
+                                "has_scheme": bool(parsed.scheme),
+                                "has_netloc": bool(parsed.netloc),
+                                "correlation_id": str(correlation_id),
+                            },
+                        )
                     if parsed.port:
                         port = parsed.port
+                    else:
+                        # URL parsed but no port extracted - log for troubleshooting
+                        # This is common for URLs using default ports (80/443)
+                        endpoint_type = "health" if endpoints.get("health") else "api"
+                        logger.debug(
+                            "URL parsed but no port extracted from %s endpoint "
+                            "(may use default port)",
+                            endpoint_type,
+                            extra={
+                                "node_id": str(node_id),
+                                "endpoint_type": endpoint_type,
+                                "hostname_extracted": address is not None,
+                                "correlation_id": str(correlation_id),
+                            },
+                        )
                 except ValueError as e:
                     # urlparse raises ValueError for malformed URLs
                     # If parsing fails, continue without address/port

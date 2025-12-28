@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.kafka,
 ]
 

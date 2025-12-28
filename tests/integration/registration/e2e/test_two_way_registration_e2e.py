@@ -96,9 +96,8 @@ if TYPE_CHECKING:
     from .conftest import IntrospectableTestNode
 
 
-# Module-level markers - inherited from conftest.py but explicit here for clarity
+# Module-level markers
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.e2e,
 ]
 

@@ -28,7 +28,11 @@ from omnibase_infra.handlers.models.consul import ModelConsulHandlerConfig
 
 @pytest.fixture
 def consul_config() -> dict[str, object]:
-    """Provide test Consul configuration."""
+    """Provide test Consul configuration.
+
+    Returns:
+        Configuration dictionary with all Consul handler settings.
+    """
     return {
         "host": "consul.example.com",
         "port": 8500,

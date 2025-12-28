@@ -8,6 +8,10 @@ Reusable mixin classes providing:
 - Correlation ID propagation
 - Configurable behavior
 
+Protocols:
+    - ProtocolCircuitBreakerAware: Interface for circuit breaker capability
+      (tightly coupled to MixinAsyncCircuitBreaker)
+
 Note:
     TypedDicts and model types used by mixins (e.g., CapabilitiesTypedDict,
     ModelIntrospectionPerformanceMetrics) should be imported from their
@@ -18,6 +22,9 @@ Note:
     - ModelCircuitBreakerConfig: from omnibase_infra.models.resilience
     - ModelIntrospectionConfig: from omnibase_infra.models.discovery
     - ModelIntrospectionTaskConfig: from omnibase_infra.models.discovery
+
+    ProtocolEventBusLike is defined in omnibase_infra.protocols (general-purpose
+    event bus abstraction). Import it from there, not from this package.
 """
 
 from omnibase_infra.mixins.mixin_async_circuit_breaker import (
@@ -30,14 +37,24 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     MixinNodeIntrospection,
     PerformanceMetricsCacheDict,
 )
-from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
+from omnibase_infra.mixins.mixin_retry_execution import (
+    EnumRetryErrorCategory,
+    MixinRetryExecution,
+    RetryErrorClassification,
+)
+from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
+    ProtocolCircuitBreakerAware,
+)
 
 __all__: list[str] = [
     "CircuitState",
+    "EnumRetryErrorCategory",
     "MixinAsyncCircuitBreaker",
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
+    "MixinRetryExecution",
     "ModelCircuitBreakerConfig",
     "PerformanceMetricsCacheDict",
-    "ProtocolEventBusLike",
+    "ProtocolCircuitBreakerAware",
+    "RetryErrorClassification",
 ]

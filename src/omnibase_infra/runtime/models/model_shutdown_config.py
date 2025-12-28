@@ -7,7 +7,39 @@ This module provides the Pydantic model for shutdown configuration.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated
+
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+
+
+def _coerce_grace_period(v: object) -> int:
+    """Coerce float values to int before strict validation.
+
+    This pre-validator handles the case where a float value like 30.0
+    is passed. With strict=True, Pydantic would reject floats, but
+    this validator ensures whole-number floats are accepted.
+
+    Args:
+        v: The input value (may be int, float, or other).
+
+    Returns:
+        Integer value if input is a valid whole number.
+
+    Raises:
+        ValueError: If float has a fractional part.
+        TypeError: If input is not numeric.
+    """
+    if isinstance(v, float):
+        if v != int(v):
+            raise ValueError(f"grace_period_seconds must be a whole number, got {v}")
+        return int(v)
+    if isinstance(v, int):
+        return v
+    raise TypeError(f"grace_period_seconds must be an integer, got {type(v).__name__}")
+
+
+# Type alias for grace period with pre-validation coercion
+_GracePeriodSeconds = Annotated[int, BeforeValidator(_coerce_grace_period)]
 
 
 class ModelShutdownConfig(BaseModel):
@@ -39,7 +71,7 @@ class ModelShutdownConfig(BaseModel):
         from_attributes=True,  # Support pytest-xdist compatibility
     )
 
-    grace_period_seconds: int = Field(
+    grace_period_seconds: _GracePeriodSeconds = Field(
         default=30,
         ge=0,
         le=3600,  # Max 1 hour to prevent accidental excessive delays

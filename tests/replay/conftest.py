@@ -38,12 +38,38 @@ from tests.helpers.replay_utils import (
 )
 
 # =============================================================================
-# Module-Level Markers
+# Pytest Hooks
 # =============================================================================
 
-pytestmark = [
-    pytest.mark.replay,
-]
+
+def pytest_collection_modifyitems(
+    config: pytest.Config,
+    items: list[pytest.Item],
+) -> None:
+    """Dynamically add replay marker to all tests in the replay directory.
+
+    This hook runs after test collection and adds the 'replay' marker to any
+    test whose file path contains 'tests/replay'. This is necessary because
+    pytestmark defined in conftest.py does NOT automatically apply to tests
+    in other files within the same directory.
+
+    Args:
+        config: Pytest configuration object.
+        items: List of collected test items.
+
+    Usage:
+        Run only replay tests: pytest -m replay
+        Exclude replay tests: pytest -m "not replay"
+    """
+    replay_marker = pytest.mark.replay
+
+    for item in items:
+        # Check if the test file is in the replay directory
+        if "tests/replay" in str(item.fspath):
+            # Only add marker if not already present
+            if not any(marker.name == "replay" for marker in item.iter_markers()):
+                item.add_marker(replay_marker)
+
 
 # =============================================================================
 # Fixtures

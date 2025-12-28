@@ -60,12 +60,6 @@ from tests.conftest import (
     assert_reducer_protocol_interface,
 )
 
-# Module-level markers - all tests in this file are integration tests
-pytestmark = [
-    pytest.mark.integration,
-]
-
-
 # =============================================================================
 # Fixtures
 # =============================================================================

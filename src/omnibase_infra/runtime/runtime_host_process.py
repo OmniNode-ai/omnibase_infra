@@ -68,6 +68,7 @@ from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.models import ModelDuplicateResponse
 from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
 from omnibase_infra.runtime.wiring import wire_default_handlers
+from omnibase_infra.utils.util_env_parsing import parse_env_float
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
@@ -93,13 +94,27 @@ DEFAULT_GROUP_ID = "runtime-host"
 # Health check timeout bounds (per ModelLifecycleSubcontract)
 MIN_HEALTH_CHECK_TIMEOUT = 1.0
 MAX_HEALTH_CHECK_TIMEOUT = 60.0
-DEFAULT_HEALTH_CHECK_TIMEOUT = 5.0
+DEFAULT_HEALTH_CHECK_TIMEOUT: float = parse_env_float(
+    "ONEX_HEALTH_CHECK_TIMEOUT",
+    5.0,
+    min_value=MIN_HEALTH_CHECK_TIMEOUT,
+    max_value=MAX_HEALTH_CHECK_TIMEOUT,
+    transport_type=EnumInfraTransportType.RUNTIME,
+    service_name="runtime_host_process",
+)
 
 # Drain timeout bounds for graceful shutdown (OMN-756)
 # Controls how long to wait for in-flight messages to complete before shutdown
 MIN_DRAIN_TIMEOUT_SECONDS = 1.0
 MAX_DRAIN_TIMEOUT_SECONDS = 300.0
-DEFAULT_DRAIN_TIMEOUT_SECONDS = 30.0
+DEFAULT_DRAIN_TIMEOUT_SECONDS: float = parse_env_float(
+    "ONEX_DRAIN_TIMEOUT",
+    30.0,
+    min_value=MIN_DRAIN_TIMEOUT_SECONDS,
+    max_value=MAX_DRAIN_TIMEOUT_SECONDS,
+    transport_type=EnumInfraTransportType.RUNTIME,
+    service_name="runtime_host_process",
+)
 
 
 class RuntimeHostProcess:

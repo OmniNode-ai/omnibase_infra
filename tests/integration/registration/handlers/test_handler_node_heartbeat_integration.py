@@ -59,9 +59,8 @@ if TYPE_CHECKING:
         ProjectorRegistration,
     )
 
-# Test markers - skip all tests if Docker is not available
+# Test markers
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.asyncio,
 ]
 

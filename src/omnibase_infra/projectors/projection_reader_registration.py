@@ -42,6 +42,7 @@ from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
+from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -101,12 +102,11 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                   Pool should be created by the caller (e.g., from DbHandler).
         """
         self._pool = pool
-        self._init_circuit_breaker(
-            threshold=5,
-            reset_timeout=60.0,
+        config = ModelCircuitBreakerConfig.from_env(
             service_name="projection_reader.registration",
             transport_type=EnumInfraTransportType.DATABASE,
         )
+        self._init_circuit_breaker_from_config(config)
 
     def _row_to_projection(self, row: asyncpg.Record) -> ModelRegistrationProjection:
         """Convert database row to projection model.

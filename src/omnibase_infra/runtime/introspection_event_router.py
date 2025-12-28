@@ -360,9 +360,9 @@ class IntrospectionEventRouter:
                     # No output events after successful processing - this may indicate
                     # the handler didn't produce expected completion events
                     logger.warning(
-                        "Introspection event processed successfully but no output events "
-                        "were produced. This may indicate the handler did not emit "
-                        "expected completion events (correlation_id=%s)",
+                        "Introspection event processed but no output events produced. "
+                        "Handler may not have emitted completion events "
+                        "(correlation_id=%s)",
                         callback_correlation_id,
                         extra={
                             "node_id": str(introspection_event.node_id),

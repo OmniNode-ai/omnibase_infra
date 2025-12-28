@@ -3470,3 +3470,451 @@ class TestHeartbeatEventCounting:
                 assert envelope.node_id == TEST_NODE_UUID_1
         finally:
             await node.stop_introspection_tasks()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestHelperMethods:
+    """Tests for extracted helper methods from refactoring.
+
+    These tests validate the helper methods extracted to reduce complexity in:
+    - get_current_state (complexity reduced from 11 to <10)
+    - _registry_listener_loop (complexity reduced from 22 to <10)
+    """
+
+    async def test_extract_state_value_with_plain_string(self) -> None:
+        """Test _extract_state_value with plain string state."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = node._extract_state_value("active")
+        assert result == "active"
+
+    async def test_extract_state_value_with_enum_style(self) -> None:
+        """Test _extract_state_value with enum-style state object."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        class MockEnum:
+            value = "processing"
+
+        result = node._extract_state_value(MockEnum())
+        assert result == "processing"
+
+    async def test_extract_state_value_with_integer(self) -> None:
+        """Test _extract_state_value with integer state."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = node._extract_state_value(42)
+        assert result == "42"
+
+    async def test_get_state_from_attribute_found(self) -> None:
+        """Test _get_state_from_attribute when attribute exists."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = node._get_state_from_attribute("_state")
+        assert result == "idle"
+
+    async def test_get_state_from_attribute_not_found(self) -> None:
+        """Test _get_state_from_attribute when attribute doesn't exist."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = node._get_state_from_attribute("nonexistent")
+        assert result is None
+
+    async def test_get_state_from_attribute_none_value(self) -> None:
+        """Test _get_state_from_attribute when attribute is None."""
+        node = MockNode()
+        node._state = None  # type: ignore[assignment]
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = node._get_state_from_attribute("_state")
+        assert result is None
+
+    async def test_get_state_from_method_not_present(self) -> None:
+        """Test _get_state_from_method when get_state method doesn't exist."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = await node._get_state_from_method()
+        assert result is None
+
+    async def test_get_state_from_method_sync(self) -> None:
+        """Test _get_state_from_method with sync method."""
+
+        class NodeWithSyncGetState(MixinNodeIntrospection):
+            def get_state(self) -> str:
+                return "running"
+
+        node = NodeWithSyncGetState()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = await node._get_state_from_method()
+        assert result == "running"
+
+    async def test_get_state_from_method_async(self) -> None:
+        """Test _get_state_from_method with async method."""
+
+        class NodeWithAsyncGetState(MixinNodeIntrospection):
+            async def get_state(self) -> str:
+                return "processing"
+
+        node = NodeWithAsyncGetState()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = await node._get_state_from_method()
+        assert result == "processing"
+
+    async def test_get_state_from_method_returns_none(self) -> None:
+        """Test _get_state_from_method when method returns None."""
+
+        class NodeWithNullGetState(MixinNodeIntrospection):
+            def get_state(self) -> None:
+                return None
+
+        node = NodeWithNullGetState()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = await node._get_state_from_method()
+        assert result is None
+
+    async def test_get_state_from_method_with_exception(self) -> None:
+        """Test _get_state_from_method handles exceptions gracefully."""
+
+        class NodeWithFailingGetState(MixinNodeIntrospection):
+            def get_state(self) -> str:
+                raise RuntimeError("State unavailable")
+
+        node = NodeWithFailingGetState()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        # Should return None on exception, not raise
+        result = await node._get_state_from_method()
+        assert result is None
+
+    async def test_parse_correlation_id_valid_uuid(self) -> None:
+        """Test _parse_correlation_id with valid UUID string."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        test_uuid = "12345678-1234-5678-1234-567812345678"
+        result = node._parse_correlation_id(test_uuid)
+        assert result == UUID(test_uuid)
+
+    async def test_parse_correlation_id_none(self) -> None:
+        """Test _parse_correlation_id with None."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = node._parse_correlation_id(None)
+        assert result is None
+
+    async def test_parse_correlation_id_empty_string(self) -> None:
+        """Test _parse_correlation_id with empty string."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = node._parse_correlation_id("")
+        assert result is None
+
+    async def test_parse_correlation_id_invalid_uuid(self) -> None:
+        """Test _parse_correlation_id with invalid UUID format."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = node._parse_correlation_id("not-a-uuid")
+        assert result is None
+
+    def test_should_log_failure_first_failure(self) -> None:
+        """Test _should_log_failure returns True for first failure."""
+        assert MixinNodeIntrospection._should_log_failure(1, 5) is True
+
+    def test_should_log_failure_at_threshold(self) -> None:
+        """Test _should_log_failure returns True at threshold multiples."""
+        assert MixinNodeIntrospection._should_log_failure(5, 5) is True
+        assert MixinNodeIntrospection._should_log_failure(10, 5) is True
+        assert MixinNodeIntrospection._should_log_failure(15, 5) is True
+
+    def test_should_log_failure_between_thresholds(self) -> None:
+        """Test _should_log_failure returns False between thresholds."""
+        assert MixinNodeIntrospection._should_log_failure(2, 5) is False
+        assert MixinNodeIntrospection._should_log_failure(3, 5) is False
+        assert MixinNodeIntrospection._should_log_failure(4, 5) is False
+        assert MixinNodeIntrospection._should_log_failure(7, 5) is False
+
+    async def test_cleanup_registry_subscription_no_subscription(self) -> None:
+        """Test _cleanup_registry_subscription when no subscription exists."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        # Should not raise
+        await node._cleanup_registry_subscription()
+        assert node._registry_unsubscribe is None
+
+    async def test_cleanup_registry_subscription_with_sync_unsubscribe(self) -> None:
+        """Test _cleanup_registry_subscription with sync unsubscribe function."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        called = []
+
+        def mock_unsubscribe() -> None:
+            called.append(True)
+
+        node._registry_unsubscribe = mock_unsubscribe
+
+        await node._cleanup_registry_subscription()
+        assert len(called) == 1
+        assert node._registry_unsubscribe is None
+
+    async def test_cleanup_registry_subscription_with_async_unsubscribe(self) -> None:
+        """Test _cleanup_registry_subscription with async unsubscribe function."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        called = []
+
+        async def mock_async_unsubscribe() -> None:
+            called.append(True)
+
+        node._registry_unsubscribe = mock_async_unsubscribe
+
+        await node._cleanup_registry_subscription()
+        assert len(called) == 1
+        assert node._registry_unsubscribe is None
+
+    async def test_cleanup_registry_subscription_with_failing_unsubscribe(
+        self,
+    ) -> None:
+        """Test _cleanup_registry_subscription handles exceptions gracefully."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        def mock_failing_unsubscribe() -> None:
+            raise RuntimeError("Unsubscribe failed")
+
+        node._registry_unsubscribe = mock_failing_unsubscribe
+
+        # Should not raise
+        await node._cleanup_registry_subscription()
+        assert node._registry_unsubscribe is None
+
+    async def test_wait_for_backoff_or_stop_timeout(self) -> None:
+        """Test _wait_for_backoff_or_stop returns False on timeout."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        # Very short backoff for test
+        result = await node._wait_for_backoff_or_stop(0.01)
+        assert result is False
+
+    async def test_wait_for_backoff_or_stop_signal_received(self) -> None:
+        """Test _wait_for_backoff_or_stop returns True when stop signal received."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        # Set the stop event before calling
+        node._introspection_stop_event.set()
+
+        result = await node._wait_for_backoff_or_stop(10.0)
+        assert result is True
+
+    async def test_wait_for_backoff_or_stop_no_event(self) -> None:
+        """Test _wait_for_backoff_or_stop returns False if stop_event is None."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+        node._introspection_stop_event = None
+
+        result = await node._wait_for_backoff_or_stop(0.01)
+        assert result is False
+
+    async def test_handle_request_error_increments_failure_count(self) -> None:
+        """Test _handle_request_error increments consecutive failure count."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        assert node._registry_callback_consecutive_failures == 0
+
+        node._handle_request_error(RuntimeError("Test error"))
+        assert node._registry_callback_consecutive_failures == 1
+
+        node._handle_request_error(RuntimeError("Test error 2"))
+        assert node._registry_callback_consecutive_failures == 2
+
+    async def test_attempt_subscription_no_event_bus(self) -> None:
+        """Test _attempt_subscription returns False when event bus is None."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = await node._attempt_subscription()
+        assert result is False
+
+    async def test_attempt_subscription_no_subscribe_method(self) -> None:
+        """Test _attempt_subscription returns False when event bus lacks subscribe."""
+        node = MockNode()
+
+        class MinimalEventBus:
+            """Event bus without subscribe method."""
+
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+            event_bus=MinimalEventBus(),  # type: ignore[arg-type]
+        )
+        node.initialize_introspection(config)
+
+        result = await node._attempt_subscription()
+        assert result is False
+
+    async def test_handle_subscription_error_exhausted_retries(self) -> None:
+        """Test _handle_subscription_error returns False when retries exhausted."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = await node._handle_subscription_error(
+            RuntimeError("Test error"),
+            retry_count=3,
+            max_retries=3,
+            base_backoff_seconds=0.01,
+        )
+        assert result is False
+
+    async def test_handle_subscription_error_can_retry(self) -> None:
+        """Test _handle_subscription_error returns True when can still retry."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        result = await node._handle_subscription_error(
+            RuntimeError("Test error"),
+            retry_count=1,
+            max_retries=3,
+            base_backoff_seconds=0.01,
+        )
+        assert result is True
+
+    async def test_handle_subscription_error_stop_during_backoff(self) -> None:
+        """Test _handle_subscription_error returns False when stop signal during backoff."""
+        node = MockNode()
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
+            node_type="EFFECT",
+        )
+        node.initialize_introspection(config)
+
+        # Set stop event before calling
+        node._introspection_stop_event.set()
+
+        result = await node._handle_subscription_error(
+            RuntimeError("Test error"),
+            retry_count=1,
+            max_retries=3,
+            base_backoff_seconds=10.0,  # Long backoff - should be interrupted
+        )
+        assert result is False

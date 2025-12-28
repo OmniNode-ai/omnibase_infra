@@ -52,12 +52,20 @@ This is a deliberate design choice for security and clarity:
 
 For multi-statement operations requiring atomicity, use the ``db.transaction``
 operation (planned for Beta release).
+
+Note:
+    Environment variable configuration (ONEX_DB_POOL_SIZE, ONEX_DB_TIMEOUT) is parsed
+    at module import time, not at handler instantiation. This means:
+
+    - Changes to environment variables require application restart to take effect
+    - Tests should use ``unittest.mock.patch.dict(os.environ, ...)`` before importing,
+      or use ``importlib.reload()`` to re-import the module after patching
+    - This is an intentional design choice for startup-time validation
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -79,6 +87,7 @@ from omnibase_infra.handlers.models import (
     ModelDbQueryResponse,
 )
 from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
@@ -88,12 +97,38 @@ logger = logging.getLogger(__name__)
 # MVP pool size fixed at 5 connections.
 # Note: Recommended range is 10-20 for production workloads.
 # Configurable pool size deferred to Beta release.
-_DEFAULT_POOL_SIZE: int = 5
+_DEFAULT_POOL_SIZE: int = parse_env_int(
+    "ONEX_DB_POOL_SIZE",
+    5,
+    min_value=1,
+    max_value=100,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="db_handler",
+)
 
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_DB: str = "db-handler"
-_DEFAULT_TIMEOUT_SECONDS: float = 30.0
+_DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
+    "ONEX_DB_TIMEOUT",
+    30.0,
+    min_value=0.1,
+    max_value=3600.0,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="db_handler",
+)
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
+
+# Error message prefixes for PostgreSQL errors
+# Used by _map_postgres_error to build descriptive error messages
+_POSTGRES_ERROR_PREFIXES: dict[type[asyncpg.PostgresError], str] = {
+    asyncpg.PostgresSyntaxError: "SQL syntax error",
+    asyncpg.UndefinedTableError: "Table not found",
+    asyncpg.UndefinedColumnError: "Column not found",
+    asyncpg.UniqueViolationError: "Unique constraint violation",
+    asyncpg.ForeignKeyViolationError: "Foreign key constraint violation",
+    asyncpg.NotNullViolationError: "Not null constraint violation",
+    asyncpg.CheckViolationError: "Check constraint violation",
+}
 
 
 class DbHandler(MixinEnvelopeExtraction):
@@ -361,8 +396,8 @@ class DbHandler(MixinEnvelopeExtraction):
         connection information may be helpful, while ensuring credentials
         are never exposed. The raw DSN should NEVER be logged directly.
 
-        Replaces the password portion of the DSN with asterisks. Handles
-        standard PostgreSQL DSN formats.
+        Uses urllib.parse for robust parsing instead of regex, handling
+        edge cases like IPv6 addresses and URL-encoded passwords.
 
         Args:
             dsn: Raw PostgreSQL connection string containing credentials.
@@ -374,13 +409,17 @@ class DbHandler(MixinEnvelopeExtraction):
             >>> handler._sanitize_dsn("postgresql://user:secret@host:5432/db")
             'postgresql://user:***@host:5432/db'
 
+            >>> handler._sanitize_dsn("postgresql://user:p%40ss@[::1]:5432/db")
+            'postgresql://user:***@[::1]:5432/db'
+
         Note:
             This method is intentionally NOT used in production error paths.
             It exists as a utility for development/debugging only. See class
             docstring "Security Policy - DSN Handling" for full policy.
         """
-        # Match password in DSN formats: user:password@ or :password@
-        return re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", dsn)
+        from omnibase_infra.utils.util_dsn_validation import sanitize_dsn
+
+        return sanitize_dsn(dsn)
 
     def _extract_parameters(
         self, payload: dict[str, JsonValue], operation: str, correlation_id: UUID
@@ -491,42 +530,8 @@ class DbHandler(MixinEnvelopeExtraction):
                 return self._build_response(
                     [], row_count, correlation_id, input_envelope_id
                 )
-        except asyncpg.QueryCanceledError as e:
-            raise InfraTimeoutError(
-                f"Statement timed out after {self._timeout}s",
-                context=ctx,
-                timeout_seconds=self._timeout,
-            ) from e
-        except asyncpg.PostgresConnectionError as e:
-            raise InfraConnectionError(
-                "Database connection lost during statement execution", context=ctx
-            ) from e
-        except asyncpg.PostgresSyntaxError as e:
-            raise RuntimeHostError(f"SQL syntax error: {e.message}", context=ctx) from e
-        except asyncpg.UndefinedTableError as e:
-            raise RuntimeHostError(f"Table not found: {e.message}", context=ctx) from e
-        except asyncpg.UndefinedColumnError as e:
-            raise RuntimeHostError(f"Column not found: {e.message}", context=ctx) from e
-        except asyncpg.UniqueViolationError as e:
-            raise RuntimeHostError(
-                f"Unique constraint violation: {e.message}", context=ctx
-            ) from e
-        except asyncpg.ForeignKeyViolationError as e:
-            raise RuntimeHostError(
-                f"Foreign key constraint violation: {e.message}", context=ctx
-            ) from e
-        except asyncpg.NotNullViolationError as e:
-            raise RuntimeHostError(
-                f"Not null constraint violation: {e.message}", context=ctx
-            ) from e
-        except asyncpg.CheckViolationError as e:
-            raise RuntimeHostError(
-                f"Check constraint violation: {e.message}", context=ctx
-            ) from e
         except asyncpg.PostgresError as e:
-            raise RuntimeHostError(
-                f"Database error: {type(e).__name__}", context=ctx
-            ) from e
+            raise self._map_postgres_error(e, ctx) from e
 
     def _parse_row_count(self, result: str) -> int:
         """Parse row count from asyncpg execute result string.
@@ -543,6 +548,45 @@ class DbHandler(MixinEnvelopeExtraction):
         except (ValueError, IndexError):
             pass
         return 0
+
+    def _map_postgres_error(
+        self,
+        exc: asyncpg.PostgresError,
+        ctx: ModelInfraErrorContext,
+    ) -> RuntimeHostError | InfraTimeoutError | InfraConnectionError:
+        """Map asyncpg exception to ONEX infrastructure error.
+
+        This helper reduces complexity of _execute_statement and _execute_query
+        by centralizing exception-to-error mapping logic.
+
+        Args:
+            exc: The asyncpg exception that was raised.
+            ctx: Error context with transport type, operation, and correlation ID.
+
+        Returns:
+            Appropriate ONEX infrastructure error based on exception type.
+        """
+        exc_type = type(exc)
+
+        # Special cases requiring specific error types or additional arguments
+        if exc_type is asyncpg.QueryCanceledError:
+            return InfraTimeoutError(
+                f"Statement timed out after {self._timeout}s",
+                context=ctx,
+                timeout_seconds=self._timeout,
+            )
+
+        if exc_type is asyncpg.PostgresConnectionError:
+            return InfraConnectionError(
+                "Database connection lost during statement execution",
+                context=ctx,
+            )
+
+        # All other errors map to RuntimeHostError with descriptive message
+        prefix = _POSTGRES_ERROR_PREFIXES.get(exc_type, "Database error")
+        # Use message attribute if available and non-empty, else use type name
+        message = getattr(exc, "message", None) or type(exc).__name__
+        return RuntimeHostError(f"{prefix}: {message}", context=ctx)
 
     def _build_response(
         self,

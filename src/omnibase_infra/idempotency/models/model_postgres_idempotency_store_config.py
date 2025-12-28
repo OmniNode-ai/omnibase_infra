@@ -8,6 +8,16 @@ idempotency store, including connection pooling, TTL, and cleanup settings.
 Security Note:
     The dsn field may contain credentials. Use environment variables for
     sensitive values and ensure connection strings are not logged.
+
+Environment Variables:
+    ONEX_IDEMPOTENCY_TTL_SECONDS: TTL for idempotency records (default: 86400)
+    ONEX_IDEMPOTENCY_CLEANUP_INTERVAL: Cleanup interval in seconds (default: 3600)
+    ONEX_IDEMPOTENCY_BATCH_SIZE: Records per cleanup batch (default: 10000)
+    ONEX_IDEMPOTENCY_POOL_MIN_SIZE: Minimum pool connections (default: 1)
+    ONEX_IDEMPOTENCY_POOL_MAX_SIZE: Maximum pool connections (default: 5)
+    ONEX_IDEMPOTENCY_COMMAND_TIMEOUT: Command timeout in seconds (default: 30.0)
+    ONEX_IDEMPOTENCY_CLOCK_SKEW_TOLERANCE: Clock skew tolerance in seconds (default: 60)
+    ONEX_IDEMPOTENCY_CLEANUP_MAX_ITERATIONS: Max cleanup iterations (default: 100)
 """
 
 from __future__ import annotations
@@ -18,6 +28,75 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
+
+# Module-level defaults from environment variables
+# These allow runtime configuration without code changes
+
+_DEFAULT_TTL_SECONDS = parse_env_int(
+    "ONEX_IDEMPOTENCY_TTL_SECONDS",
+    86400,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="postgres_idempotency_store",
+    min_value=60,  # Minimum 1 minute
+    max_value=2592000,  # Maximum 30 days
+)
+_DEFAULT_CLEANUP_INTERVAL = parse_env_int(
+    "ONEX_IDEMPOTENCY_CLEANUP_INTERVAL",
+    3600,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="postgres_idempotency_store",
+    min_value=60,  # Minimum 1 minute
+    max_value=86400,  # Maximum 24 hours
+)
+_DEFAULT_BATCH_SIZE = parse_env_int(
+    "ONEX_IDEMPOTENCY_BATCH_SIZE",
+    10000,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="postgres_idempotency_store",
+    min_value=100,  # Minimum batch size
+    max_value=100000,  # Maximum batch size
+)
+_DEFAULT_POOL_MIN_SIZE = parse_env_int(
+    "ONEX_IDEMPOTENCY_POOL_MIN_SIZE",
+    1,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="postgres_idempotency_store",
+    min_value=1,  # Minimum 1 connection
+    max_value=100,  # Maximum pool size
+)
+_DEFAULT_POOL_MAX_SIZE = parse_env_int(
+    "ONEX_IDEMPOTENCY_POOL_MAX_SIZE",
+    5,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="postgres_idempotency_store",
+    min_value=1,  # Minimum 1 connection
+    max_value=100,  # Maximum pool size
+)
+_DEFAULT_COMMAND_TIMEOUT = parse_env_float(
+    "ONEX_IDEMPOTENCY_COMMAND_TIMEOUT",
+    30.0,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="postgres_idempotency_store",
+    min_value=1.0,  # Minimum 1 second
+    max_value=300.0,  # Maximum 5 minutes
+)
+_DEFAULT_CLOCK_SKEW_TOLERANCE = parse_env_int(
+    "ONEX_IDEMPOTENCY_CLOCK_SKEW_TOLERANCE",
+    60,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="postgres_idempotency_store",
+    min_value=0,  # Can disable tolerance
+    max_value=3600,  # Maximum 1 hour
+)
+_DEFAULT_CLEANUP_MAX_ITERATIONS = parse_env_int(
+    "ONEX_IDEMPOTENCY_CLEANUP_MAX_ITERATIONS",
+    100,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="postgres_idempotency_store",
+    min_value=1,  # Minimum 1 iteration
+    max_value=1000,  # Maximum iterations
+)
 
 
 class ModelPostgresIdempotencyStoreConfig(BaseModel):
@@ -82,7 +161,17 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
     @field_validator("dsn", mode="before")
     @classmethod
     def validate_dsn(cls, v: object) -> str:
-        """Validate PostgreSQL DSN format.
+        """Validate PostgreSQL DSN format using robust parser.
+
+        This validator uses urllib.parse for comprehensive DSN validation,
+        handling edge cases like IPv6 addresses, URL-encoded passwords,
+        and query parameters.
+
+        Edge cases validated:
+            - IPv6 addresses: postgresql://user:pass@[::1]:5432/db
+            - URL-encoded passwords: user:p%40ssword@host (p@ssword)
+            - Query parameters: postgresql://host/db?sslmode=require
+            - Missing components: postgresql://localhost/db (no user/pass/port)
 
         Args:
             v: DSN value (any type before Pydantic conversion)
@@ -93,51 +182,14 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
         Raises:
             ProtocolConfigurationError: If DSN format is invalid
         """
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="validate_config",
-            target_name="postgres_idempotency_store",
-            correlation_id=uuid4(),
-        )
+        from omnibase_infra.utils.util_dsn_validation import parse_and_validate_dsn
 
-        if v is None:
-            raise ProtocolConfigurationError(
-                "dsn cannot be None",
-                context=context,
-                parameter="dsn",
-                value=None,
-            )
-        if not isinstance(v, str):
-            raise ProtocolConfigurationError(
-                f"dsn must be a string, got {type(v).__name__}",
-                context=context,
-                parameter="dsn",
-                value=type(v).__name__,
-            )
-        if not v.strip():
-            raise ProtocolConfigurationError(
-                "dsn cannot be empty",
-                context=context,
-                parameter="dsn",
-                value="",
-            )
+        # parse_and_validate_dsn handles all validation and error context
+        # It will raise ProtocolConfigurationError with proper context if invalid
+        parse_and_validate_dsn(v)
 
-        dsn = v.strip()
-
-        # Basic PostgreSQL DSN validation
-        # Note: Only standard PostgreSQL prefixes are allowed. The "postgresql+asyncpg://"
-        # prefix is a SQLAlchemy convention, not an asyncpg convention. asyncpg uses
-        # standard "postgresql://" or "postgres://" prefixes directly.
-        valid_prefixes = ("postgresql://", "postgres://")
-        if not dsn.startswith(valid_prefixes):
-            raise ProtocolConfigurationError(
-                f"dsn must start with one of {valid_prefixes}",
-                context=context,
-                parameter="dsn",
-                value="[REDACTED]",  # Never log DSN contents
-            )
-
-        return dsn
+        # If validation passes, return the stripped string
+        return v.strip() if isinstance(v, str) else str(v)
 
     table_name: str = Field(
         default="idempotency_records",
@@ -147,26 +199,38 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
         pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
     )
     pool_min_size: int = Field(
-        default=1,
-        description="Minimum number of connections in the pool",
+        default=_DEFAULT_POOL_MIN_SIZE,
+        description=(
+            "Minimum number of connections in the pool "
+            "(env: ONEX_IDEMPOTENCY_POOL_MIN_SIZE)"
+        ),
         ge=1,
         le=100,
     )
     pool_max_size: int = Field(
-        default=5,
-        description="Maximum number of connections in the pool",
+        default=_DEFAULT_POOL_MAX_SIZE,
+        description=(
+            "Maximum number of connections in the pool "
+            "(env: ONEX_IDEMPOTENCY_POOL_MAX_SIZE)"
+        ),
         ge=1,
         le=100,
     )
     command_timeout: float = Field(
-        default=30.0,
-        description="Timeout for database commands in seconds",
+        default=_DEFAULT_COMMAND_TIMEOUT,
+        description=(
+            "Timeout for database commands in seconds "
+            "(env: ONEX_IDEMPOTENCY_COMMAND_TIMEOUT)"
+        ),
         ge=1.0,
         le=300.0,
     )
     ttl_seconds: int = Field(
-        default=86400,  # 24 hours
-        description="Time-to-live for idempotency records in seconds",
+        default=_DEFAULT_TTL_SECONDS,
+        description=(
+            "Time-to-live for idempotency records in seconds "
+            "(env: ONEX_IDEMPOTENCY_TTL_SECONDS)"
+        ),
         ge=60,  # Minimum 1 minute
         le=2592000,  # Maximum 30 days
     )
@@ -175,28 +239,31 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
         description="Whether to automatically clean up expired records",
     )
     cleanup_interval_seconds: int = Field(
-        default=3600,  # 1 hour
-        description="Interval between cleanup runs in seconds",
+        default=_DEFAULT_CLEANUP_INTERVAL,
+        description=(
+            "Interval between cleanup runs in seconds "
+            "(env: ONEX_IDEMPOTENCY_CLEANUP_INTERVAL)"
+        ),
         ge=60,  # Minimum 1 minute
         le=86400,  # Maximum 24 hours
     )
     clock_skew_tolerance_seconds: int = Field(
-        default=60,  # 1 minute tolerance
+        default=_DEFAULT_CLOCK_SKEW_TOLERANCE,
         description=(
             "Buffer added to TTL during cleanup to prevent premature deletion due to "
-            "clock skew between distributed nodes. In distributed systems, nodes may "
-            "have slightly different system times. This tolerance ensures records are "
-            "not cleaned up before all nodes consider them expired. "
-            "Recommended: Use NTP synchronization in production and set this to at "
-            "least the maximum expected clock drift between nodes."
+            "clock skew between distributed nodes (env: ONEX_IDEMPOTENCY_CLOCK_SKEW_TOLERANCE). "
+            "In distributed systems, nodes may have slightly different system times. "
+            "This tolerance ensures records are not cleaned up before all nodes "
+            "consider them expired. Recommended: Use NTP synchronization in production "
+            "and set this to at least the maximum expected clock drift between nodes."
         ),
         ge=0,  # Can be 0 to disable tolerance
         le=3600,  # Maximum 1 hour tolerance
     )
     cleanup_batch_size: int = Field(
-        default=10000,
+        default=_DEFAULT_BATCH_SIZE,
         description=(
-            "Number of records to delete per batch during cleanup. "
+            "Number of records to delete per batch during cleanup (env: ONEX_IDEMPOTENCY_BATCH_SIZE). "
             "Batched deletion reduces lock contention on high-volume tables by "
             "breaking large deletes into smaller transactions, allowing other "
             "operations to interleave and preventing long-running locks."
@@ -205,9 +272,10 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
         le=100000,  # Maximum batch size
     )
     cleanup_max_iterations: int = Field(
-        default=100,
+        default=_DEFAULT_CLEANUP_MAX_ITERATIONS,
         description=(
-            "Maximum number of batch iterations during cleanup. "
+            "Maximum number of batch iterations during cleanup "
+            "(env: ONEX_IDEMPOTENCY_CLEANUP_MAX_ITERATIONS). "
             "Prevents runaway cleanup loops in extreme cases. "
             "Total max records deleted = cleanup_batch_size * cleanup_max_iterations."
         ),

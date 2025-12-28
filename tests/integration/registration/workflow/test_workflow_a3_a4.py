@@ -63,7 +63,7 @@ from .conftest import (
 )
 
 # Module-level pytest markers applied to all tests
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.asyncio]
 
 
 def _convert_intents_to_request(

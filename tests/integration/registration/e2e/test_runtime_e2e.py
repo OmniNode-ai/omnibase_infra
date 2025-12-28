@@ -110,7 +110,6 @@ RUNTIME_AVAILABLE = _check_runtime_available()
 
 # Skip all tests in this module if runtime is not available
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.runtime,
     pytest.mark.skipif(

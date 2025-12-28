@@ -191,10 +191,9 @@ ALL_INFRA_AVAILABLE = KAFKA_AVAILABLE and CONSUL_AVAILABLE and POSTGRES_AVAILABL
 # Module-Level Markers
 # =============================================================================
 # All tests in this module require full infrastructure availability.
-# This pytestmark applies to all test functions in files that import this conftest.
+# Note: integration marker is auto-applied by tests/integration/conftest.py
 
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.skipif(
         not ALL_INFRA_AVAILABLE,

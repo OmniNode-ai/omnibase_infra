@@ -95,7 +95,6 @@ DB_HANDLER_VERSION = "0.1.0-mvp"
 
 # Module-level markers - skip all tests if PostgreSQL is not available
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.database,
     pytest.mark.postgres,
     pytest.mark.skipif(

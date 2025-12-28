@@ -4,6 +4,16 @@
 
 Supports GET and POST operations with 30-second fixed timeout.
 PUT, DELETE, PATCH deferred to Beta. Retry logic and rate limiting deferred to Beta.
+
+Note:
+    Environment variable configuration (ONEX_HTTP_TIMEOUT, ONEX_HTTP_MAX_REQUEST_SIZE,
+    ONEX_HTTP_MAX_RESPONSE_SIZE) is parsed at module import time, not at handler
+    instantiation. This means:
+
+    - Changes to environment variables require application restart to take effect
+    - Tests should use ``unittest.mock.patch.dict(os.environ, ...)`` before importing,
+      or use ``importlib.reload()`` to re-import the module after patching
+    - This is an intentional design choice for startup-time validation
 """
 
 from __future__ import annotations
@@ -26,16 +36,40 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.handlers.models.http import ModelHttpBodyContent
 from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.utils import parse_env_float, parse_env_int
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TIMEOUT_SECONDS: float = 30.0
-_DEFAULT_MAX_REQUEST_SIZE: int = 10 * 1024 * 1024  # 10 MB
-_DEFAULT_MAX_RESPONSE_SIZE: int = 50 * 1024 * 1024  # 50 MB
+
+_DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
+    "ONEX_HTTP_TIMEOUT",
+    30.0,
+    min_value=1.0,
+    max_value=300.0,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="http_handler",
+)
+_DEFAULT_MAX_REQUEST_SIZE: int = parse_env_int(
+    "ONEX_HTTP_MAX_REQUEST_SIZE",
+    10 * 1024 * 1024,
+    min_value=1024,
+    max_value=104857600,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="http_handler",
+)  # 10 MB default, min 1 KB, max 100 MB
+_DEFAULT_MAX_RESPONSE_SIZE: int = parse_env_int(
+    "ONEX_HTTP_MAX_RESPONSE_SIZE",
+    50 * 1024 * 1024,
+    min_value=1024,
+    max_value=104857600,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="http_handler",
+)  # 50 MB default, min 1 KB, max 100 MB
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 # Streaming chunk size for responses without Content-Length header
 _STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks
@@ -528,6 +562,67 @@ class HttpRestHandler(MixinEnvelopeExtraction):
 
         return b"".join(chunks)
 
+    def _prepare_request_content(
+        self,
+        method: str,
+        headers: dict[str, str],
+        body_content: ModelHttpBodyContent,
+        ctx: ModelInfraErrorContext,
+    ) -> tuple[bytes | str | None, dict[str, JsonValue] | None, dict[str, str]]:
+        """Prepare request content for HTTP request.
+
+        Handles body serialization for POST requests, managing pre-serialized bytes
+        from size validation and various body types (dict, str, other JSON-serializable).
+
+        Args:
+            method: HTTP method (GET, POST)
+            headers: Request headers (will be copied, not mutated)
+            body_content: Model containing body and optional pre-serialized bytes
+            ctx: Error context for exceptions
+
+        Returns:
+            Tuple of (request_content, request_json, request_headers):
+                - request_content: bytes or str content for the request
+                - request_json: dict for httpx json= parameter (mutually exclusive with content)
+                - request_headers: Headers dict (possibly with Content-Type added)
+
+        Raises:
+            ProtocolConfigurationError: If body is not JSON-serializable.
+        """
+        request_content: bytes | str | None = None
+        request_json: dict[str, JsonValue] | None = None
+        request_headers = dict(headers)  # Copy to avoid mutating caller's headers
+
+        body = body_content.body
+        pre_serialized = body_content.pre_serialized
+
+        if method != "POST" or body is None:
+            return request_content, request_json, request_headers
+
+        if pre_serialized is not None:
+            # Use pre-serialized bytes from _validate_request_size to avoid
+            # double serialization. Set Content-Type header since we're using
+            # content= instead of json= parameter.
+            request_content = pre_serialized
+            if "content-type" not in {k.lower() for k in request_headers}:
+                request_headers["Content-Type"] = "application/json"
+        elif isinstance(body, dict):
+            # Fallback for dict bodies without pre-serialized content
+            # (shouldn't happen in normal flow, but handles edge cases)
+            request_json = body
+        elif isinstance(body, str):
+            request_content = body
+        else:
+            try:
+                request_content = json.dumps(body)
+            except TypeError as e:
+                raise ProtocolConfigurationError(
+                    f"Body is not JSON-serializable: {type(body).__name__}",
+                    context=ctx,
+                ) from e
+
+        return request_content, request_json, request_headers
+
     async def _execute_request(
         self,
         method: str,
@@ -576,32 +671,10 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         )
 
         # Prepare request content for POST
-        request_content: bytes | str | None = None
-        request_json: dict[str, JsonValue] | None = None
-        request_headers = dict(headers)  # Copy to avoid mutating caller's headers
-
-        if method == "POST" and body is not None:
-            if pre_serialized is not None:
-                # Use pre-serialized bytes from _validate_request_size to avoid
-                # double serialization. Set Content-Type header since we're using
-                # content= instead of json= parameter.
-                request_content = pre_serialized
-                if "content-type" not in {k.lower() for k in request_headers}:
-                    request_headers["Content-Type"] = "application/json"
-            elif isinstance(body, dict):
-                # Fallback for dict bodies without pre-serialized content
-                # (shouldn't happen in normal flow, but handles edge cases)
-                request_json = body
-            elif isinstance(body, str):
-                request_content = body
-            else:
-                try:
-                    request_content = json.dumps(body)
-                except TypeError as e:
-                    raise ProtocolConfigurationError(
-                        f"Body is not JSON-serializable: {type(body).__name__}",
-                        context=ctx,
-                    ) from e
+        body_content = ModelHttpBodyContent(body=body, pre_serialized=pre_serialized)
+        request_content, request_json, request_headers = self._prepare_request_content(
+            method, headers, body_content, ctx
+        )
 
         try:
             # Use streaming request to get response headers before reading body

@@ -53,9 +53,6 @@ if TYPE_CHECKING:
         TrackedRegistrationReducer,
     )
 
-# Module-level marker: all tests in this module are integration tests
-pytestmark = pytest.mark.integration
-
 # =============================================================================
 # Test Constants
 # =============================================================================

@@ -371,11 +371,19 @@ async def wait_for_kafka_event(
                     result = ModelEventEnvelope.model_validate(data)
                     event_found.set()
                 except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    # Malformed message data - skip silently (expected in test scenarios)
-                    logger.debug("Failed to decode Kafka message: %s", type(e).__name__)
+                    # Malformed message data - skip silently (expected in tests)
+                    logger.debug(
+                        "Failed to decode Kafka message: %s (correlation_id=%s)",
+                        type(e).__name__,
+                        correlation_id,
+                    )
                 except ValueError as e:
                     # Pydantic validation failed - message doesn't match expected schema
-                    logger.debug("Failed to validate event envelope: %s", e)
+                    logger.debug(
+                        "Failed to validate event envelope: %s (correlation_id=%s)",
+                        e,
+                        correlation_id,
+                    )
 
     group_id = f"e2e-test-{correlation_id.hex[:8]}"
     unsubscribe = await event_bus.subscribe(topic, group_id, handler)
@@ -475,7 +483,7 @@ async def collect_registration_events(
                             try:
                                 event = model_class.model_validate(payload)
                                 collected.append(event)
-                                # Break after first match to prevent duplicate collection
+                                # Break after first match - avoid duplicates
                                 break
                             except ValueError:
                                 # Pydantic validation failed - skip this event
@@ -502,14 +510,20 @@ async def collect_registration_events(
             unsubscribers.append(unsub)
         except (TimeoutError, ConnectionError, OSError) as e:
             # Network errors during subscription - skip this topic
-            logger.debug("Failed to subscribe to topic %s: %s", topic, type(e).__name__)
+            logger.debug(
+                "Failed to subscribe to topic %s: %s (node_id=%s)",
+                topic,
+                type(e).__name__,
+                node_id,
+            )
         except Exception as e:
             # Unexpected errors - log but continue with other topics
             logger.warning(
-                "Unexpected error subscribing to topic %s: %s: %s",
+                "Unexpected error subscribing to topic %s: %s: %s (node_id=%s)",
                 topic,
                 type(e).__name__,
                 str(e),
+                node_id,
             )
 
     await asyncio.sleep(timeout_seconds)
@@ -523,7 +537,11 @@ async def collect_registration_events(
             pass
         except Exception as e:
             # Unexpected errors during cleanup - log but continue
-            logger.debug("Error during subscription cleanup: %s", type(e).__name__)
+            logger.debug(
+                "Error during subscription cleanup: %s (node_id=%s)",
+                type(e).__name__,
+                node_id,
+            )
 
     return collected
 

@@ -4,6 +4,8 @@
 
 This package provides common utilities used across the infrastructure:
     - correlation: Correlation ID generation and propagation for distributed tracing
+    - util_dsn_validation: PostgreSQL DSN validation and sanitization
+    - util_env_parsing: Type-safe environment variable parsing with validation
     - util_error_sanitization: Error message sanitization for secure logging and DLQ
     - util_semver: Semantic versioning validation utilities
 """
@@ -14,6 +16,14 @@ from omnibase_infra.utils.correlation import (
     generate_correlation_id,
     get_correlation_id,
     set_correlation_id,
+)
+from omnibase_infra.utils.util_dsn_validation import (
+    parse_and_validate_dsn,
+    sanitize_dsn,
+)
+from omnibase_infra.utils.util_env_parsing import (
+    parse_env_float,
+    parse_env_int,
 )
 from omnibase_infra.utils.util_error_sanitization import (
     SENSITIVE_PATTERNS,
@@ -26,12 +36,16 @@ from omnibase_infra.utils.util_semver import (
 )
 
 __all__: list[str] = [
+    "CorrelationContext",
     "SEMVER_PATTERN",
     "SENSITIVE_PATTERNS",
-    "CorrelationContext",
     "clear_correlation_id",
     "generate_correlation_id",
     "get_correlation_id",
+    "parse_and_validate_dsn",
+    "parse_env_float",
+    "parse_env_int",
+    "sanitize_dsn",
     "sanitize_error_message",
     "set_correlation_id",
     "validate_semver",
