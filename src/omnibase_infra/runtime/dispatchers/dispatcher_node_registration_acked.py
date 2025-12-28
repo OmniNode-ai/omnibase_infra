@@ -39,7 +39,7 @@ __all__ = ["DispatcherNodeRegistrationAcked"]
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -167,6 +167,7 @@ class DispatcherNodeRegistrationAcked:
                         error_message=f"Expected ModelNodeRegistrationAcked payload, "
                         f"got {type(payload).__name__}",
                         correlation_id=correlation_id,
+                        output_events=[],
                     )
 
             # Assert helps type narrowing after isinstance/model_validate
@@ -233,4 +234,5 @@ class DispatcherNodeRegistrationAcked:
                 duration_ms=duration_ms,
                 error_message=sanitized_error,
                 correlation_id=correlation_id,
+                output_events=[],
             )

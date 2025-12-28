@@ -74,7 +74,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help)
-            head -n 30 "${BASH_SOURCE[0]}" | grep "^#" | sed 's/^# //'
+            head -n 30 "${BASH_SOURCE[0]}" | grep "^#" | sed 's/^# //' || true
             exit 0
             ;;
         *)
@@ -211,7 +211,11 @@ check_required_log "$STARTUP_LOG" "ONEX Runtime Kernel" "Kernel banner displayed
 #   - Method references: record_error (logging method)
 #   - Zero counts: error_count=0, "error_count": 0 (no actual errors)
 # Note: Use -E (ERE) for portability across GNU and BSD grep (macOS)
-startup_errors=$(grep -Ei "error|exception" "$STARTUP_LOG" | grep -Ev "WARNING|_error_count|errors_total|record_error|\"error_count\":[[:space:]]*0|error_count=0" || true)
+# Note: Use intermediate file to avoid pipefail issues with empty grep results
+startup_errors=""
+if grep -Ei "error|exception" "$STARTUP_LOG" > /tmp/startup_errors_raw.txt 2>/dev/null; then
+    startup_errors=$(grep -Ev 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/startup_errors_raw.txt 2>/dev/null || true)
+fi
 if [ -n "$startup_errors" ]; then
     log_warning "Startup errors detected:"
     echo "$startup_errors" | head -10
@@ -378,7 +382,12 @@ section_header "Step 8: Error Summary"
 
 log_info "Extracting errors from logs..."
 # Note: Use -E (ERE) for portability across GNU and BSD grep (macOS)
-if grep -Ei "error|exception|failed" "$FULL_LOG" | grep -Ev "WARNING|_error_count|errors_total|record_error|\"error_count\":[[:space:]]*0|error_count=0" > /tmp/errors.txt 2>/dev/null && [ -s /tmp/errors.txt ]; then
+# Note: Use intermediate file to avoid pipefail issues with empty grep results
+: > /tmp/errors.txt  # Create empty file
+if grep -Ei "error|exception|failed" "$FULL_LOG" > /tmp/errors_raw.txt 2>/dev/null; then
+    grep -Ev 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/errors_raw.txt > /tmp/errors.txt 2>/dev/null || true
+fi
+if [ -s /tmp/errors.txt ]; then
     ERROR_COUNT=$(wc -l < /tmp/errors.txt)
     log_warning "Found $ERROR_COUNT error lines:"
     head -20 /tmp/errors.txt
@@ -400,19 +409,34 @@ if [ "$FULL_REPORT" = true ]; then
 
     # Pre-compute values to avoid subshell failures with set -e pipefail
     # Note: Use -E (ERE) for portability across GNU and BSD grep (macOS)
-    REPORT_STARTUP_ERRORS=$(grep -Ei "error|exception" "$STARTUP_LOG" | grep -Ev "WARNING|_error_count|errors_total|record_error|\"error_count\":[[:space:]]*0|error_count=0" | head -20 || true)
+    # Note: Use intermediate files and explicit || true to handle pipefail safely
+
+    # Startup errors - two-stage grep to avoid pipefail with empty results
+    REPORT_STARTUP_ERRORS=""
+    if grep -Ei "error|exception" "$STARTUP_LOG" > /tmp/report_startup_raw.txt 2>/dev/null; then
+        REPORT_STARTUP_ERRORS=$(grep -Ev 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/report_startup_raw.txt 2>/dev/null | head -20 || true)
+    fi
     [ -z "$REPORT_STARTUP_ERRORS" ] && REPORT_STARTUP_ERRORS="No errors found"
 
-    REPORT_PROCESSING_ERRORS=$(grep -Ei "error|exception|failed" "$FULL_LOG" | grep -Ev "WARNING|_error_count|errors_total|record_error|\"error_count\":[[:space:]]*0|error_count=0" | head -30 || true)
+    # Processing errors - two-stage grep to avoid pipefail with empty results
+    REPORT_PROCESSING_ERRORS=""
+    if grep -Ei "error|exception|failed" "$FULL_LOG" > /tmp/report_processing_raw.txt 2>/dev/null; then
+        REPORT_PROCESSING_ERRORS=$(grep -Ev 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/report_processing_raw.txt 2>/dev/null | head -30 || true)
+    fi
     [ -z "$REPORT_PROCESSING_ERRORS" ] && REPORT_PROCESSING_ERRORS="No errors found"
 
+    # Correlation IDs - single grep with || true fallback
     REPORT_CORRELATION_IDS=$(grep -E "correlation_id=[a-f0-9-]+" "$FULL_LOG" 2>/dev/null | sed 's/.*correlation_id=\([a-f0-9-]*\).*/\1/' | sort -u | head -20 || true)
     [ -z "$REPORT_CORRELATION_IDS" ] && REPORT_CORRELATION_IDS="No correlation IDs found"
 
-    REPORT_ASSERTION_DETAILS=$(grep -E -A 10 "PASSED|FAILED|AssertionError" "$TEST_LOG" || true)
+    # Assertion details - grep with context, || true for empty results
+    # Note: -A (after context) is POSIX-compliant and portable to macOS
+    REPORT_ASSERTION_DETAILS=$(grep -E -A 10 "PASSED|FAILED|AssertionError" "$TEST_LOG" 2>/dev/null | head -50 || true)
     [ -z "$REPORT_ASSERTION_DETAILS" ] && REPORT_ASSERTION_DETAILS="No assertion details found"
 
-    REPORT_CALLBACK_LOGS=$(grep -E -A 5 "callback invoked|parsed successfully|processed successfully" "$FULL_LOG" | head -50 || true)
+    # Callback logs - grep with context, || true for empty results
+    # Note: -A (after context) is POSIX-compliant and portable to macOS
+    REPORT_CALLBACK_LOGS=$(grep -E -A 5 "callback invoked|parsed successfully|processed successfully" "$FULL_LOG" 2>/dev/null | head -50 || true)
     [ -z "$REPORT_CALLBACK_LOGS" ] && REPORT_CALLBACK_LOGS="No callback logs found"
 
     cat > "$REPORT_FILE" << EOF

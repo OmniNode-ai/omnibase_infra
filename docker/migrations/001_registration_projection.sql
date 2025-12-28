@@ -150,10 +150,20 @@ CREATE INDEX IF NOT EXISTS idx_registration_capabilities
 
 -- Composite index for deadline + emission marker scans
 -- Optimizes the most common timeout check query
+--
+-- NOTE ON COLUMN REDUNDANCY:
+-- The ack_timeout_emitted_at column is included for documentation clarity even though
+-- the WHERE clause filters to IS NULL. PostgreSQL optimizer handles this efficiently.
+-- Alternative: (ack_deadline) only, but keeping both columns documents the query intent.
 CREATE INDEX IF NOT EXISTS idx_registration_ack_timeout_scan
     ON registration_projections (ack_deadline, ack_timeout_emitted_at)
     WHERE ack_deadline IS NOT NULL AND ack_timeout_emitted_at IS NULL;
 
+-- NOTE ON COLUMN REDUNDANCY:
+-- current_state and liveness_timeout_emitted_at have constant values due to WHERE clause.
+-- They are included for: (1) documentation of query intent, and (2) potential index-only
+-- scans if query planner can satisfy SELECT columns from the index alone.
+-- Alternative: (liveness_deadline) only, but keeping all columns documents the query intent.
 CREATE INDEX IF NOT EXISTS idx_registration_liveness_timeout_scan
     ON registration_projections (current_state, liveness_deadline, liveness_timeout_emitted_at)
     WHERE current_state = 'active' AND liveness_deadline IS NOT NULL AND liveness_timeout_emitted_at IS NULL;
@@ -223,6 +233,8 @@ COMMENT ON COLUMN registration_projections.last_applied_partition IS
 --    - Use case: Timeout scanner queries that need un-emitted timeouts only
 --    - Example: SELECT * FROM registration_projections
 --               WHERE ack_deadline < :now AND ack_timeout_emitted_at IS NULL
+--    - Note: ack_timeout_emitted_at is always NULL in this index (per WHERE clause).
+--      Including it documents query intent and may enable index-only scans.
 --
 -- WHY BOTH INDEXES EXIST:
 -- The partial WHERE clauses differ significantly:
@@ -239,6 +251,9 @@ COMMENT ON COLUMN registration_projections.last_applied_partition IS
 -- Similar rationale applies to liveness indexes:
 --   - idx_registration_liveness_deadline: All rows with liveness deadlines
 --   - idx_registration_liveness_timeout_scan: Only active nodes awaiting emission
+--    - Note: current_state is always 'active' and liveness_timeout_emitted_at is
+--      always NULL in this index (per WHERE clause). Including them documents
+--      query intent and may enable index-only scans for covering queries.
 --
 -- =============================================================================
 -- UPSERT ORDERING ENFORCEMENT PATTERN

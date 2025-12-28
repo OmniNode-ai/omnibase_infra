@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from omnibase_infra.utils import sanitize_error_message
+
 # Module-level logger for test cleanup diagnostics
 logger = logging.getLogger(__name__)
 
@@ -712,9 +714,10 @@ async def cleanup_postgres_test_projections():
             pass  # Table doesn't exist, nothing to cleanup
         except Exception as e:
             # Note: exc_info omitted to prevent credential exposure in tracebacks
+            # Exception is sanitized to prevent DSN/credential leakage
             logger.warning(
                 "PostgreSQL projection cleanup query failed: %s",
-                e,
+                sanitize_error_message(e),
             )
 
         finally:
@@ -723,9 +726,10 @@ async def cleanup_postgres_test_projections():
     except Exception as e:
         # Note: exc_info omitted to prevent credential exposure in tracebacks
         # (DSN contains password and would be visible in exception traceback)
+        # Exception is sanitized to prevent DSN/credential leakage
         logger.warning(
             "PostgreSQL test cleanup failed: %s",
-            e,
+            sanitize_error_message(e),
         )
 
 

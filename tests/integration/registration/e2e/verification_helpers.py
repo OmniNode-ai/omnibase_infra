@@ -396,8 +396,15 @@ async def collect_registration_events(
                         # Skip events without explicit event_type field
                         return
 
-                    # Convert to string and validate non-empty
-                    event_type_str = str(event_type_name).strip()
+                    # Strict type check: event_type MUST be a string
+                    # This prevents false positives from non-string types
+                    # being coerced via str() (e.g., int, dict, list)
+                    if not isinstance(event_type_name, str):
+                        # Skip events with non-string event_type
+                        return
+
+                    # Validate non-empty after stripping whitespace
+                    event_type_str = event_type_name.strip()
                     if not event_type_str:
                         # Skip events with empty event_type
                         return
@@ -430,10 +437,11 @@ async def collect_registration_events(
                                 # Pydantic validation failed - skip this event
                                 pass
             except (json.JSONDecodeError, UnicodeDecodeError):
-                # Malformed message - skip silently
+                # Malformed JSON or encoding - skip silently
                 pass
-            except (KeyError, TypeError):
-                # Missing expected fields in message structure
+            except (KeyError, TypeError, AttributeError):
+                # Missing expected fields or unexpected structure
+                # (e.g., payload is not a dict, missing required keys)
                 pass
 
     # Subscribe to registration event topics

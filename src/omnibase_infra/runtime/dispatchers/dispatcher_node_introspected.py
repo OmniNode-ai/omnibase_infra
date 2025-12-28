@@ -40,10 +40,11 @@ __all__ = ["DispatcherNodeIntrospected"]
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
@@ -211,6 +212,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                         error_message=f"Expected ModelNodeIntrospectionEvent payload, "
                         f"got {type(payload).__name__}",
                         correlation_id=correlation_id,
+                        output_events=[],
                     )
 
             # Assert helps type narrowing after isinstance/model_validate
@@ -256,6 +258,36 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                 correlation_id=correlation_id,
             )
 
+        except ValidationError as e:
+            # ValidationError indicates malformed message payload - not a handler error
+            # Return INVALID_MESSAGE to route to DLQ without retry
+            completed_at = datetime.now(UTC)
+            duration_ms = (completed_at - started_at).total_seconds() * 1000
+            sanitized_error = sanitize_error_message(e)
+
+            logger.warning(
+                "DispatcherNodeIntrospected received invalid message: %s",
+                sanitized_error,
+                extra={
+                    "duration_ms": duration_ms,
+                    "correlation_id": str(correlation_id),
+                    "error_type": "ValidationError",
+                },
+            )
+
+            return ModelDispatchResult(
+                dispatch_id=uuid4(),
+                status=EnumDispatchStatus.INVALID_MESSAGE,
+                topic=TOPIC_ID_NODE_INTROSPECTION,
+                dispatcher_id=self.dispatcher_id,
+                started_at=started_at,
+                completed_at=completed_at,
+                duration_ms=duration_ms,
+                error_message=sanitized_error,
+                correlation_id=correlation_id,
+                output_events=[],
+            )
+
         except InfraUnavailableError:
             # Circuit breaker errors should propagate for engine-level handling
             # (e.g., routing to DLQ)
@@ -290,4 +322,5 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                 duration_ms=duration_ms,
                 error_message=sanitized_error,
                 correlation_id=correlation_id,
+                output_events=[],
             )

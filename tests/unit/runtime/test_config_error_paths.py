@@ -292,9 +292,9 @@ class TestMissingRequiredFieldsScenarios:
         assert ">=" in str(error)
 
     def test_invalid_grace_period_too_large_raises_error(self, tmp_path: Path) -> None:
-        """Test that grace_period_seconds > 300 raises validation error."""
+        """Test that grace_period_seconds > 3600 raises validation error."""
         config_file = tmp_path / "config.yaml"
-        config_data = {"shutdown": {"grace_period_seconds": 999}}
+        config_data = {"shutdown": {"grace_period_seconds": 9999}}
         with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(config_data, f)
 

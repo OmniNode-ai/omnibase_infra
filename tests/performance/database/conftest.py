@@ -51,6 +51,8 @@ from uuid import uuid4
 import pytest
 from dotenv import load_dotenv
 
+from omnibase_infra.utils import sanitize_error_message
+
 _logger = logging.getLogger(__name__)
 
 # Load environment configuration
@@ -232,9 +234,15 @@ async def schema_initialized(
                 _logger.info("Migration %s applied successfully", filename)
 
             except Exception as e:
-                _logger.exception("Migration %s failed", filename)
+                # Use warning instead of exception to avoid credential exposure
+                # in tracebacks (DSN may contain password in connection errors)
+                _logger.warning(
+                    "Migration %s failed: %s",
+                    filename,
+                    sanitize_error_message(e),
+                )
                 raise RuntimeError(
-                    f"Migration {filename} failed: {type(e).__name__}: {e}"
+                    f"Migration {filename} failed: {sanitize_error_message(e)}"
                 ) from e
 
     return postgres_pool

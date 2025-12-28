@@ -7,7 +7,7 @@ events in the ONEX kernel. Extracted from kernel.py for better testability
 and separation of concerns.
 
 The router:
-    - Parses incoming Kafka messages as ModelEventEnvelope or raw events
+    - Parses incoming Kafka messages as ModelEventEnvelope
     - Validates payload as ModelNodeIntrospectionEvent
     - Routes to the introspection dispatcher
     - Publishes output events to the configured output topic
@@ -42,6 +42,7 @@ from omnibase_infra.event_bus.models.model_event_message import ModelEventMessag
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
+from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
@@ -83,7 +84,7 @@ class IntrospectionEventRouter:
     """Router for introspection event messages from Kafka.
 
     This router handles incoming Kafka messages, parses them as
-    ModelNodeIntrospectionEvent payloads (wrapped in envelopes or raw),
+    ModelNodeIntrospectionEvent payloads wrapped in ModelEventEnvelope,
     and routes them to the introspection dispatcher for registration
     orchestration.
 
@@ -257,13 +258,11 @@ class IntrospectionEventRouter:
                 return
 
             # Parse as ModelEventEnvelope containing ModelNodeIntrospectionEvent
-            # Events MUST be wrapped in envelopes on the wire
             logger.debug(
                 "Validating payload as ModelEventEnvelope (correlation_id=%s)",
                 callback_correlation_id,
             )
 
-            # Parse as envelope - raw events are not supported (no backwards compat)
             raw_envelope = ModelEventEnvelope[dict].model_validate(payload_dict)
 
             # Validate payload as ModelNodeIntrospectionEvent
@@ -410,9 +409,11 @@ class IntrospectionEventRouter:
             )
 
         except Exception as msg_error:
-            logger.exception(
+            # Use warning instead of exception to avoid credential exposure
+            # in tracebacks (connection errors may contain DSN with password)
+            logger.warning(
                 "Failed to process introspection message: %s (correlation_id=%s)",
-                msg_error,
+                sanitize_error_message(msg_error),
                 callback_correlation_id,
                 extra={
                     "error_type": type(msg_error).__name__,

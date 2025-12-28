@@ -954,6 +954,7 @@ class MessageDispatchEngine:
                 "Topic must contain .events, .commands, .intents, or .projections segment.",
                 error_code=EnumCoreErrorCode.VALIDATION_ERROR,
                 correlation_id=correlation_id,
+                output_events=[],
             )
 
         # Log dispatch start at INFO level
@@ -1053,6 +1054,7 @@ class MessageDispatchEngine:
                 f"and message type '{message_type}' matching topic '{topic}'.",
                 error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
                 correlation_id=correlation_id,
+                output_events=[],
             )
 
         # Step 5: Execute dispatchers and collect outputs
@@ -1402,6 +1404,7 @@ class MessageDispatchEngine:
                 error_message=f"Internal error constructing dispatch result: {sanitized_result_error}",
                 error_code=EnumCoreErrorCode.INTERNAL_ERROR,
                 correlation_id=correlation_id,
+                output_events=[],
             )
 
     def _find_matching_dispatchers(

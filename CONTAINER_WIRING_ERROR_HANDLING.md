@@ -8,7 +8,7 @@ Enhanced error handling has been added to provide clear, actionable feedback whe
 
 ## New Error Classes
 
-All error classes are located in `/workspace/omnibase_infra/src/omnibase_infra/errors/error_container_wiring.py`
+All error classes are located in `src/omnibase_infra/errors/error_container_wiring.py`
 
 ### Error Hierarchy
 
@@ -324,7 +324,7 @@ registry = await get_or_create_policy_registry(container)
 
 ## Testing
 
-Comprehensive tests are provided in `/workspace/omnibase_infra/tests/unit/errors/test_container_wiring_errors.py`
+Comprehensive tests are provided in `tests/unit/errors/test_container_wiring_errors.py`
 
 ### Test Coverage
 
@@ -387,11 +387,11 @@ except AttributeError as e:
 
 ## Related Files
 
-- `/workspace/omnibase_infra/src/omnibase_infra/errors/error_container_wiring.py` - Error classes
-- `/workspace/omnibase_infra/src/omnibase_infra/errors/__init__.py` - Error exports
-- `/workspace/omnibase_infra/src/omnibase_infra/runtime/container_wiring.py` - Container wiring implementation
-- `/workspace/omnibase_infra/tests/unit/errors/test_container_wiring_errors.py` - Error tests
-- `/workspace/omnibase_infra/tests/unit/runtime/test_container_wiring.py` - Container wiring tests
+- `src/omnibase_infra/errors/error_container_wiring.py` - Error classes
+- `src/omnibase_infra/errors/__init__.py` - Error exports
+- `src/omnibase_infra/runtime/container_wiring.py` - Container wiring implementation
+- `tests/unit/errors/test_container_wiring_errors.py` - Error tests
+- `tests/unit/runtime/test_container_wiring.py` - Container wiring tests
 
 ## References
 

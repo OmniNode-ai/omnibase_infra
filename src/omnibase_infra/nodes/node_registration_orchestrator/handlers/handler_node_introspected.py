@@ -75,6 +75,7 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
+from omnibase_infra.utils import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -436,14 +437,17 @@ class HandlerNodeIntrospected:
                 except ValueError as e:
                     # urlparse raises ValueError for malformed URLs
                     # If parsing fails, continue without address/port
-                    # Include error message in main log line for easier debugging
+                    # NOTE: Don't log raw URL - may contain credentials (e.g., user:pass@host)
+                    # Use sanitize_error_message to safely log error details
+                    sanitized_error = sanitize_error_message(e)
+                    endpoint_type = "health" if endpoints.get("health") else "api"
                     logger.debug(
-                        "URL parsing failed for endpoint '%s': %s",
-                        health_url[:50] + "..." if len(health_url) > 50 else health_url,
-                        str(e),
+                        "URL parsing failed for %s endpoint: %s",
+                        endpoint_type,
+                        sanitized_error,
                         extra={
                             "node_id": str(node_id),
-                            "error_type": type(e).__name__,
+                            "endpoint_type": endpoint_type,
                             "correlation_id": str(correlation_id),
                         },
                     )
@@ -483,13 +487,14 @@ class HandlerNodeIntrospected:
         except Exception as e:
             # Log error but don't propagate - PostgreSQL is source of truth
             # Consul registration is best-effort for service discovery
+            # Use sanitize_error_message to avoid logging sensitive data
+            sanitized_error = sanitize_error_message(e)
             logger.warning(
                 "Consul registration failed (non-fatal): %s",
-                str(e),
+                sanitized_error,
                 extra={
                     "node_id": str(node_id),
                     "service_name": service_name,
-                    "error_type": type(e).__name__,
                     "correlation_id": str(correlation_id),
                 },
                 exc_info=True,
