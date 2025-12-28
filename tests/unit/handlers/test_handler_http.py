@@ -2308,6 +2308,560 @@ class TestHttpRestHandlerDeterministicIntegration:
         await handler.shutdown()
 
 
+class TestHttpRestHandlerEnvVarParsing:
+    """Test suite for environment variable parsing error handling.
+
+    These tests verify that invalid environment variable values produce
+    ProtocolConfigurationError with proper context instead of raw ValueError.
+
+    Note: These tests use the centralized parse_env_* utilities from
+    omnibase_infra.utils.util_env_parsing.
+    """
+
+    def test_parse_env_float_with_default(self) -> None:
+        """Test parse_env_float returns default when env var is not set."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        # Ensure env var is not set
+        os.environ.pop("TEST_FLOAT_VAR", None)
+
+        result = parse_env_float(
+            "TEST_FLOAT_VAR",
+            42.5,
+            transport_type=EnumInfraTransportType.HTTP,
+            service_name="test_handler",
+        )
+        assert result == 42.5
+
+    def test_parse_env_float_with_valid_value(self) -> None:
+        """Test parse_env_float parses valid float string."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_FLOAT_VAR"] = "123.456"
+        try:
+            result = parse_env_float(
+                "TEST_FLOAT_VAR",
+                0.0,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 123.456
+        finally:
+            os.environ.pop("TEST_FLOAT_VAR", None)
+
+    def test_parse_env_float_with_invalid_value_raises_protocol_error(self) -> None:
+        """Test parse_env_float raises ProtocolConfigurationError for invalid value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_FLOAT_VAR"] = "not_a_number"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                parse_env_float(
+                    "TEST_FLOAT_VAR",
+                    0.0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+
+            error_msg = str(exc_info.value)
+            assert "TEST_FLOAT_VAR" in error_msg
+            assert "expected numeric value" in error_msg
+        finally:
+            os.environ.pop("TEST_FLOAT_VAR", None)
+
+    def test_parse_env_int_with_default(self) -> None:
+        """Test parse_env_int returns default when env var is not set."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        # Ensure env var is not set
+        os.environ.pop("TEST_INT_VAR", None)
+
+        result = parse_env_int(
+            "TEST_INT_VAR",
+            100,
+            transport_type=EnumInfraTransportType.HTTP,
+            service_name="test_handler",
+        )
+        assert result == 100
+
+    def test_parse_env_int_with_valid_value(self) -> None:
+        """Test parse_env_int parses valid integer string."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_INT_VAR"] = "12345"
+        try:
+            result = parse_env_int(
+                "TEST_INT_VAR",
+                0,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 12345
+        finally:
+            os.environ.pop("TEST_INT_VAR", None)
+
+    def test_parse_env_int_with_invalid_value_raises_protocol_error(self) -> None:
+        """Test parse_env_int raises ProtocolConfigurationError for invalid value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_INT_VAR"] = "abc123"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                parse_env_int(
+                    "TEST_INT_VAR",
+                    0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+
+            error_msg = str(exc_info.value)
+            assert "TEST_INT_VAR" in error_msg
+            assert "expected integer" in error_msg
+        finally:
+            os.environ.pop("TEST_INT_VAR", None)
+
+    def test_parse_env_int_with_float_string_raises_protocol_error(self) -> None:
+        """Test parse_env_int raises ProtocolConfigurationError for float string."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        # "123.456" is a valid float but not a valid integer
+        os.environ["TEST_INT_VAR"] = "123.456"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                parse_env_int(
+                    "TEST_INT_VAR",
+                    0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+
+            error_msg = str(exc_info.value)
+            assert "TEST_INT_VAR" in error_msg
+            assert "expected integer" in error_msg
+        finally:
+            os.environ.pop("TEST_INT_VAR", None)
+
+    def test_parse_env_float_error_includes_context(self) -> None:
+        """Test parse_env_float error includes proper ModelInfraErrorContext."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_FLOAT_VAR"] = "invalid"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                parse_env_float(
+                    "TEST_FLOAT_VAR",
+                    0.0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+
+            # Verify context is properly set
+            # Note: RuntimeHostError extracts context fields into additional_context dict
+            error = exc_info.value
+            assert error.context is not None
+            additional = error.context.get("additional_context", {})
+            assert additional.get("operation") == "parse_env_config"
+            assert additional.get("target_name") == "test_handler"
+        finally:
+            os.environ.pop("TEST_FLOAT_VAR", None)
+
+    def test_parse_env_int_error_includes_context(self) -> None:
+        """Test parse_env_int error includes proper ModelInfraErrorContext."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_INT_VAR"] = "invalid"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                parse_env_int(
+                    "TEST_INT_VAR",
+                    0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+
+            # Verify context is properly set
+            # Note: RuntimeHostError extracts context fields into additional_context dict
+            error = exc_info.value
+            assert error.context is not None
+            additional = error.context.get("additional_context", {})
+            assert additional.get("operation") == "parse_env_config"
+            assert additional.get("target_name") == "test_handler"
+        finally:
+            os.environ.pop("TEST_INT_VAR", None)
+
+
+@pytest.mark.unit
+class TestHttpRestHandlerEnvVarRangeValidation:
+    """Test suite for environment variable range validation.
+
+    These tests verify that parse_env_float and parse_env_int correctly
+    handle min_value and max_value constraints, returning defaults and
+    logging warnings when values are outside the valid range.
+
+    Note: These tests use the centralized parse_env_* utilities from
+    omnibase_infra.utils.util_env_parsing.
+    """
+
+    def test_parse_env_float_below_min_uses_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test parse_env_float returns default when value is below minimum."""
+        import logging
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "0.05"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_float(
+                    "TEST_RANGE_FLOAT",
+                    1.0,
+                    min_value=0.1,
+                    max_value=100.0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+            assert result == 1.0  # Default
+            assert "below minimum" in caplog.text
+            assert "TEST_RANGE_FLOAT" in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_float_above_max_uses_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test parse_env_float returns default when value is above maximum."""
+        import logging
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "150.0"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_float(
+                    "TEST_RANGE_FLOAT",
+                    1.0,
+                    min_value=0.1,
+                    max_value=100.0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+            assert result == 1.0  # Default
+            assert "above maximum" in caplog.text
+            assert "TEST_RANGE_FLOAT" in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_float_within_range_returns_value(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test parse_env_float returns parsed value when within range."""
+        import logging
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "50.5"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_float(
+                    "TEST_RANGE_FLOAT",
+                    1.0,
+                    min_value=0.1,
+                    max_value=100.0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+            assert result == 50.5  # Parsed value
+            # No warnings should be logged
+            assert "below minimum" not in caplog.text
+            assert "above maximum" not in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_int_below_min_uses_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test parse_env_int returns default when value is below minimum."""
+        import logging
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "-5"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_int(
+                    "TEST_RANGE_INT",
+                    100,
+                    min_value=1,
+                    max_value=1000,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+            assert result == 100  # Default
+            assert "below minimum" in caplog.text
+            assert "TEST_RANGE_INT" in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_int_above_max_uses_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test parse_env_int returns default when value is above maximum."""
+        import logging
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "5000"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_int(
+                    "TEST_RANGE_INT",
+                    100,
+                    min_value=1,
+                    max_value=1000,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+            assert result == 100  # Default
+            assert "above maximum" in caplog.text
+            assert "TEST_RANGE_INT" in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_int_within_range_returns_value(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test parse_env_int returns parsed value when within range."""
+        import logging
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "500"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_int(
+                    "TEST_RANGE_INT",
+                    100,
+                    min_value=1,
+                    max_value=1000,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+            assert result == 500  # Parsed value
+            # No warnings should be logged
+            assert "below minimum" not in caplog.text
+            assert "above maximum" not in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_float_with_none_min_allows_any_low_value(self) -> None:
+        """Test parse_env_float with None min_value allows any low value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "-1000000.0"
+        try:
+            result = parse_env_float(
+                "TEST_RANGE_FLOAT",
+                1.0,
+                min_value=None,
+                max_value=100.0,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == -1000000.0  # Very low value allowed
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_float_with_none_max_allows_any_high_value(self) -> None:
+        """Test parse_env_float with None max_value allows any high value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "1000000.0"
+        try:
+            result = parse_env_float(
+                "TEST_RANGE_FLOAT",
+                1.0,
+                min_value=0.1,
+                max_value=None,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 1000000.0  # Very high value allowed
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_int_with_none_min_allows_any_low_value(self) -> None:
+        """Test parse_env_int with None min_value allows any low value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "-999999"
+        try:
+            result = parse_env_int(
+                "TEST_RANGE_INT",
+                100,
+                min_value=None,
+                max_value=1000,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == -999999  # Very low value allowed
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_int_with_none_max_allows_any_high_value(self) -> None:
+        """Test parse_env_int with None max_value allows any high value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "999999999"
+        try:
+            result = parse_env_int(
+                "TEST_RANGE_INT",
+                100,
+                min_value=1,
+                max_value=None,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 999999999  # Very high value allowed
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_float_at_exact_min_boundary(self) -> None:
+        """Test parse_env_float at exact minimum boundary returns value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "0.1"
+        try:
+            result = parse_env_float(
+                "TEST_RANGE_FLOAT",
+                1.0,
+                min_value=0.1,
+                max_value=100.0,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 0.1  # Exact boundary is valid
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_float_at_exact_max_boundary(self) -> None:
+        """Test parse_env_float at exact maximum boundary returns value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "100.0"
+        try:
+            result = parse_env_float(
+                "TEST_RANGE_FLOAT",
+                1.0,
+                min_value=0.1,
+                max_value=100.0,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 100.0  # Exact boundary is valid
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_int_at_exact_min_boundary(self) -> None:
+        """Test parse_env_int at exact minimum boundary returns value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "1"
+        try:
+            result = parse_env_int(
+                "TEST_RANGE_INT",
+                100,
+                min_value=1,
+                max_value=1000,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 1  # Exact boundary is valid
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_int_at_exact_max_boundary(self) -> None:
+        """Test parse_env_int at exact maximum boundary returns value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "1000"
+        try:
+            result = parse_env_int(
+                "TEST_RANGE_INT",
+                100,
+                min_value=1,
+                max_value=1000,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 1000  # Exact boundary is valid
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+
 __all__: list[str] = [
     "TestHttpRestHandlerInitialization",
     "TestHttpRestHandlerGetOperations",
@@ -2321,4 +2875,6 @@ __all__: list[str] = [
     "TestHttpRestHandlerLogWarnings",
     "TestHttpRestHandlerPrepareRequestContent",
     "TestHttpRestHandlerDeterministicIntegration",
+    "TestHttpRestHandlerEnvVarParsing",
+    "TestHttpRestHandlerEnvVarRangeValidation",
 ]

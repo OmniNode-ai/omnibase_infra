@@ -121,6 +121,7 @@ from omnibase_infra.models.projection import (
     ModelRegistrationSnapshot,
     ModelSnapshotTopicConfig,
 )
+from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 
 if TYPE_CHECKING:
     from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
@@ -259,12 +260,11 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         self._cache_warming_in_progress = False
 
         # Initialize circuit breaker with Kafka-appropriate settings
-        self._init_circuit_breaker(
-            threshold=5,
-            reset_timeout=60.0,
+        cb_config = ModelCircuitBreakerConfig.from_env(
             service_name=f"snapshot-publisher.{config.topic}",
             transport_type=EnumInfraTransportType.KAFKA,
         )
+        self._init_circuit_breaker_from_config(cb_config)
 
     @property
     def topic(self) -> str:

@@ -4,6 +4,16 @@
 
 Supports GET and POST operations with 30-second fixed timeout.
 PUT, DELETE, PATCH deferred to Beta. Retry logic and rate limiting deferred to Beta.
+
+Note:
+    Environment variable configuration (ONEX_HTTP_TIMEOUT, ONEX_HTTP_MAX_REQUEST_SIZE,
+    ONEX_HTTP_MAX_RESPONSE_SIZE) is parsed at module import time, not at handler
+    instantiation. This means:
+
+    - Changes to environment variables require application restart to take effect
+    - Tests should use ``unittest.mock.patch.dict(os.environ, ...)`` before importing,
+      or use ``importlib.reload()`` to re-import the module after patching
+    - This is an intentional design choice for startup-time validation
 """
 
 from __future__ import annotations
@@ -28,15 +38,38 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.models.http import ModelHttpBodyContent
 from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.utils import parse_env_float, parse_env_int
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TIMEOUT_SECONDS: float = 30.0
-_DEFAULT_MAX_REQUEST_SIZE: int = 10 * 1024 * 1024  # 10 MB
-_DEFAULT_MAX_RESPONSE_SIZE: int = 50 * 1024 * 1024  # 50 MB
+
+_DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
+    "ONEX_HTTP_TIMEOUT",
+    30.0,
+    min_value=1.0,
+    max_value=300.0,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="http_handler",
+)
+_DEFAULT_MAX_REQUEST_SIZE: int = parse_env_int(
+    "ONEX_HTTP_MAX_REQUEST_SIZE",
+    10 * 1024 * 1024,
+    min_value=1024,
+    max_value=104857600,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="http_handler",
+)  # 10 MB default, min 1 KB, max 100 MB
+_DEFAULT_MAX_RESPONSE_SIZE: int = parse_env_int(
+    "ONEX_HTTP_MAX_RESPONSE_SIZE",
+    50 * 1024 * 1024,
+    min_value=1024,
+    max_value=104857600,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="http_handler",
+)  # 50 MB default, min 1 KB, max 100 MB
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 # Streaming chunk size for responses without Content-Length header
 _STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks

@@ -8,6 +8,11 @@ DLQ replay tracking service, including connection pooling and table settings.
 Security Note:
     The dsn field may contain credentials. Use environment variables for
     sensitive values and ensure connection strings are not logged.
+
+Environment Variables:
+    ONEX_DLQ_POOL_MIN_SIZE: Minimum pool connections (default: 1, range: 1-100)
+    ONEX_DLQ_POOL_MAX_SIZE: Maximum pool connections (default: 5, range: 1-100)
+    ONEX_DLQ_COMMAND_TIMEOUT: Command timeout in seconds (default: 30.0, range: 1.0-300.0)
 """
 
 from __future__ import annotations
@@ -19,6 +24,37 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 from omnibase_infra.dlq.constants_dlq import PATTERN_TABLE_NAME
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
+
+# Module-level defaults from environment variables
+# These allow runtime configuration without code changes
+# Invalid type values raise ProtocolConfigurationError
+# Out-of-range values log a warning and use default (soft validation pattern)
+
+_DEFAULT_POOL_MIN_SIZE = parse_env_int(
+    "ONEX_DLQ_POOL_MIN_SIZE",
+    1,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="dlq_tracking_service",
+    min_value=1,  # Minimum 1 connection
+    max_value=100,  # Maximum pool size
+)
+_DEFAULT_POOL_MAX_SIZE = parse_env_int(
+    "ONEX_DLQ_POOL_MAX_SIZE",
+    5,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="dlq_tracking_service",
+    min_value=1,  # Minimum 1 connection
+    max_value=100,  # Maximum pool size
+)
+_DEFAULT_COMMAND_TIMEOUT = parse_env_float(
+    "ONEX_DLQ_COMMAND_TIMEOUT",
+    30.0,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="dlq_tracking_service",
+    min_value=1.0,  # Minimum 1 second
+    max_value=300.0,  # Maximum 5 minutes
+)
 
 
 class ModelDlqTrackingConfig(BaseModel):
@@ -108,20 +144,26 @@ class ModelDlqTrackingConfig(BaseModel):
         pattern=PATTERN_TABLE_NAME,
     )
     pool_min_size: int = Field(
-        default=1,
-        description="Minimum number of connections in the pool",
+        default=_DEFAULT_POOL_MIN_SIZE,
+        description=(
+            "Minimum number of connections in the pool (env: ONEX_DLQ_POOL_MIN_SIZE)"
+        ),
         ge=1,
         le=100,
     )
     pool_max_size: int = Field(
-        default=5,
-        description="Maximum number of connections in the pool",
+        default=_DEFAULT_POOL_MAX_SIZE,
+        description=(
+            "Maximum number of connections in the pool (env: ONEX_DLQ_POOL_MAX_SIZE)"
+        ),
         ge=1,
         le=100,
     )
     command_timeout: float = Field(
-        default=30.0,
-        description="Timeout for database commands in seconds",
+        default=_DEFAULT_COMMAND_TIMEOUT,
+        description=(
+            "Timeout for database commands in seconds (env: ONEX_DLQ_COMMAND_TIMEOUT)"
+        ),
         ge=1.0,
         le=300.0,
     )

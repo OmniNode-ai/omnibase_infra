@@ -330,14 +330,14 @@ class TestModelRuntimeSchedulerConfig:
         """Test that environment variables override configuration."""
         # Set environment variables
         env_vars = {
-            "RUNTIME_SCHEDULER_TICK_INTERVAL_MS": "5000",
-            "RUNTIME_SCHEDULER_ID": "env-scheduler",
-            "RUNTIME_SCHEDULER_TICK_TOPIC": "env.runtime.tick.v1",
-            "RUNTIME_SCHEDULER_PERSIST_SEQUENCE": "false",
-            "RUNTIME_SCHEDULER_MAX_JITTER_MS": "50",
-            "RUNTIME_SCHEDULER_CB_THRESHOLD": "10",
-            "RUNTIME_SCHEDULER_CB_RESET_TIMEOUT": "120.0",
-            "RUNTIME_SCHEDULER_ENABLE_METRICS": "false",
+            "ONEX_RUNTIME_SCHEDULER_TICK_INTERVAL_MS": "5000",
+            "ONEX_RUNTIME_SCHEDULER_ID": "env-scheduler",
+            "ONEX_RUNTIME_SCHEDULER_TICK_TOPIC": "env.runtime.tick.v1",
+            "ONEX_RUNTIME_SCHEDULER_PERSIST_SEQUENCE": "false",
+            "ONEX_RUNTIME_SCHEDULER_MAX_JITTER_MS": "50",
+            "ONEX_RUNTIME_SCHEDULER_CB_THRESHOLD": "10",
+            "ONEX_RUNTIME_SCHEDULER_CB_RESET_TIMEOUT": "120.0",
+            "ONEX_RUNTIME_SCHEDULER_ENABLE_METRICS": "false",
         }
 
         with patch.dict(os.environ, env_vars, clear=False):
@@ -356,7 +356,7 @@ class TestModelRuntimeSchedulerConfig:
         """Test that invalid integer env var uses default with warning."""
         with patch.dict(
             os.environ,
-            {"RUNTIME_SCHEDULER_TICK_INTERVAL_MS": "not-a-number"},
+            {"ONEX_RUNTIME_SCHEDULER_TICK_INTERVAL_MS": "not-a-number"},
             clear=False,
         ):
             config = ModelRuntimeSchedulerConfig.default()
@@ -370,14 +370,18 @@ class TestModelRuntimeSchedulerConfig:
 
         for val in true_values:
             with patch.dict(
-                os.environ, {"RUNTIME_SCHEDULER_PERSIST_SEQUENCE": val}, clear=False
+                os.environ,
+                {"ONEX_RUNTIME_SCHEDULER_PERSIST_SEQUENCE": val},
+                clear=False,
             ):
                 config = ModelRuntimeSchedulerConfig.default()
                 assert config.persist_sequence_number is True, f"Failed for '{val}'"
 
         for val in false_values:
             with patch.dict(
-                os.environ, {"RUNTIME_SCHEDULER_PERSIST_SEQUENCE": val}, clear=False
+                os.environ,
+                {"ONEX_RUNTIME_SCHEDULER_PERSIST_SEQUENCE": val},
+                clear=False,
             ):
                 config = ModelRuntimeSchedulerConfig.default()
                 assert config.persist_sequence_number is False, f"Failed for '{val}'"

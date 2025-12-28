@@ -31,6 +31,7 @@ Coverage Goals:
 
 import asyncio
 import time
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
@@ -41,6 +42,9 @@ from omnibase_infra.mixins.mixin_async_circuit_breaker import (
     CircuitState,
     MixinAsyncCircuitBreaker,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 
 
 class CircuitBreakerServiceStub(MixinAsyncCircuitBreaker):
@@ -593,3 +597,161 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
         # Check after timeout - should succeed (auto-reset)
         await service.check_circuit("test_operation")
         assert service.get_failure_count() == 0
+
+
+class CircuitBreakerConfigServiceStub(MixinAsyncCircuitBreaker):
+    """Test service that uses _init_circuit_breaker_from_config for testing."""
+
+    def __init__(
+        self,
+        config: "ModelCircuitBreakerConfig",
+    ) -> None:
+        """Initialize test service with circuit breaker from config.
+
+        Args:
+            config: Circuit breaker configuration model
+        """
+        self._init_circuit_breaker_from_config(config)
+
+    async def check_circuit(
+        self, operation: str = "test_operation", correlation_id: UUID | None = None
+    ) -> None:
+        """Check circuit breaker state (thread-safe wrapper for testing)."""
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(operation, correlation_id)
+
+    async def record_failure(
+        self, operation: str = "test_operation", correlation_id: UUID | None = None
+    ) -> None:
+        """Record circuit failure (thread-safe wrapper for testing)."""
+        async with self._circuit_breaker_lock:
+            await self._record_circuit_failure(operation, correlation_id)
+
+    def get_state(self) -> CircuitState:
+        """Get current circuit state (for testing assertions)."""
+        if self._circuit_breaker_open:
+            return CircuitState.OPEN
+        return CircuitState.CLOSED
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestMixinAsyncCircuitBreakerFromConfig:
+    """Test _init_circuit_breaker_from_config method.
+
+    This test class validates that the config-based initialization correctly
+    delegates to _init_circuit_breaker with the config values.
+    """
+
+    async def test_init_from_config_with_defaults(self) -> None:
+        """Test initialization from config with default values."""
+        from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+
+        config = ModelCircuitBreakerConfig()
+        service = CircuitBreakerConfigServiceStub(config)
+
+        # Verify default values were applied
+        assert service.circuit_breaker_threshold == 5
+        assert service.circuit_breaker_reset_timeout == 60.0
+        assert service.service_name == "unknown"
+        assert service.transport_type == EnumInfraTransportType.HTTP
+
+    async def test_init_from_config_with_custom_values(self) -> None:
+        """Test initialization from config with custom values."""
+        from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+
+        config = ModelCircuitBreakerConfig(
+            threshold=10,
+            reset_timeout_seconds=120.0,
+            service_name="kafka.production",
+            transport_type=EnumInfraTransportType.KAFKA,
+        )
+        service = CircuitBreakerConfigServiceStub(config)
+
+        # Verify custom values were applied
+        assert service.circuit_breaker_threshold == 10
+        assert service.circuit_breaker_reset_timeout == 120.0
+        assert service.service_name == "kafka.production"
+        assert service.transport_type == EnumInfraTransportType.KAFKA
+
+    async def test_init_from_config_circuit_functions_correctly(self) -> None:
+        """Test that circuit breaker initialized from config functions correctly."""
+        from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+
+        config = ModelCircuitBreakerConfig(
+            threshold=2,
+            reset_timeout_seconds=60.0,
+            service_name="test-service",
+            transport_type=EnumInfraTransportType.DATABASE,
+        )
+        service = CircuitBreakerConfigServiceStub(config)
+
+        # Circuit should start closed
+        assert service.get_state() == CircuitState.CLOSED
+
+        # Record failures to open circuit
+        await service.record_failure("test_operation")
+        await service.record_failure("test_operation")
+
+        # Circuit should now be open
+        assert service.get_state() == CircuitState.OPEN
+
+        # Check should raise with correct transport type in error context
+        with pytest.raises(InfraUnavailableError) as exc_info:
+            await service.check_circuit("test_operation")
+
+        error = exc_info.value
+        assert error.model.context["transport_type"] == EnumInfraTransportType.DATABASE
+        assert error.model.context["target_name"] == "test-service"
+
+    async def test_init_from_config_from_env(self) -> None:
+        """Test initialization from config created via from_env()."""
+        import os
+        from unittest.mock import patch
+
+        from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+
+        env_vars = {
+            "TEST_CB_THRESHOLD": "3",
+            "TEST_CB_RESET_TIMEOUT": "30.0",
+        }
+        with patch.dict(os.environ, env_vars, clear=True):
+            config = ModelCircuitBreakerConfig.from_env(
+                service_name="consul.dev",
+                transport_type=EnumInfraTransportType.CONSUL,
+                prefix="TEST_CB",
+            )
+            service = CircuitBreakerConfigServiceStub(config)
+
+            # Verify values from environment were applied
+            assert service.circuit_breaker_threshold == 3
+            assert service.circuit_breaker_reset_timeout == 30.0
+            assert service.service_name == "consul.dev"
+            assert service.transport_type == EnumInfraTransportType.CONSUL
+
+    async def test_init_from_config_all_transport_types(self) -> None:
+        """Test initialization from config with all transport types."""
+        from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+
+        transport_types = [
+            EnumInfraTransportType.HTTP,
+            EnumInfraTransportType.DATABASE,
+            EnumInfraTransportType.KAFKA,
+            EnumInfraTransportType.CONSUL,
+            EnumInfraTransportType.VAULT,
+            EnumInfraTransportType.VALKEY,
+            EnumInfraTransportType.GRPC,
+            EnumInfraTransportType.RUNTIME,
+        ]
+
+        for transport_type in transport_types:
+            config = ModelCircuitBreakerConfig(
+                threshold=5,
+                reset_timeout_seconds=60.0,
+                service_name=f"service.{transport_type.value}",
+                transport_type=transport_type,
+            )
+            service = CircuitBreakerConfigServiceStub(config)
+
+            assert service.transport_type == transport_type
+            assert service.service_name == f"service.{transport_type.value}"

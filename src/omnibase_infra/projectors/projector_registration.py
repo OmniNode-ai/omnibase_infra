@@ -41,6 +41,7 @@ from omnibase_infra.models.projection import (
     ModelRegistrationProjection,
     ModelSequenceInfo,
 )
+from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -92,12 +93,11 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                   Pool should be created by the caller (e.g., from DbHandler).
         """
         self._pool = pool
-        self._init_circuit_breaker(
-            threshold=5,
-            reset_timeout=60.0,
+        config = ModelCircuitBreakerConfig.from_env(
             service_name="projector.registration",
             transport_type=EnumInfraTransportType.DATABASE,
         )
+        self._init_circuit_breaker_from_config(config)
 
     async def initialize_schema(self, correlation_id: UUID | None = None) -> None:
         """Initialize projection schema (create table if not exists).

@@ -52,6 +52,15 @@ This is a deliberate design choice for security and clarity:
 
 For multi-statement operations requiring atomicity, use the ``db.transaction``
 operation (planned for Beta release).
+
+Note:
+    Environment variable configuration (ONEX_DB_POOL_SIZE, ONEX_DB_TIMEOUT) is parsed
+    at module import time, not at handler instantiation. This means:
+
+    - Changes to environment variables require application restart to take effect
+    - Tests should use ``unittest.mock.patch.dict(os.environ, ...)`` before importing,
+      or use ``importlib.reload()`` to re-import the module after patching
+    - This is an intentional design choice for startup-time validation
 """
 
 from __future__ import annotations
@@ -78,6 +87,7 @@ from omnibase_infra.handlers.models import (
     ModelDbQueryResponse,
 )
 from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
@@ -87,11 +97,25 @@ logger = logging.getLogger(__name__)
 # MVP pool size fixed at 5 connections.
 # Note: Recommended range is 10-20 for production workloads.
 # Configurable pool size deferred to Beta release.
-_DEFAULT_POOL_SIZE: int = 5
+_DEFAULT_POOL_SIZE: int = parse_env_int(
+    "ONEX_DB_POOL_SIZE",
+    5,
+    min_value=1,
+    max_value=100,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="db_handler",
+)
 
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_DB: str = "db-handler"
-_DEFAULT_TIMEOUT_SECONDS: float = 30.0
+_DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
+    "ONEX_DB_TIMEOUT",
+    30.0,
+    min_value=0.1,
+    max_value=3600.0,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="db_handler",
+)
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
 
 # Error message prefixes for PostgreSQL errors
