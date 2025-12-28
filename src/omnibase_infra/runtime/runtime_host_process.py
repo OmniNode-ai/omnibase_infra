@@ -91,7 +91,7 @@ DEFAULT_HEALTH_CHECK_TIMEOUT: float = parse_env_float(
     5.0,
     min_value=MIN_HEALTH_CHECK_TIMEOUT,
     max_value=MAX_HEALTH_CHECK_TIMEOUT,
-    transport_type=EnumInfraTransportType.HTTP,
+    transport_type=EnumInfraTransportType.RUNTIME,
     service_name="runtime_host_process",
 )
 
@@ -104,7 +104,7 @@ DEFAULT_DRAIN_TIMEOUT_SECONDS: float = parse_env_float(
     30.0,
     min_value=MIN_DRAIN_TIMEOUT_SECONDS,
     max_value=MAX_DRAIN_TIMEOUT_SECONDS,
-    transport_type=EnumInfraTransportType.HTTP,
+    transport_type=EnumInfraTransportType.RUNTIME,
     service_name="runtime_host_process",
 )
 
