@@ -389,7 +389,9 @@ class TestRuntimeE2EFlow:
         # Wait for Consul registration via HTTP API
         consul_host = os.getenv("CONSUL_HOST", "host.docker.internal")
         consul_port = int(os.getenv("CONSUL_PORT", "8500"))
-        service_name = f"node-{unique_node_id.hex[:8]}"
+        # Consul service name follows ONEX convention: onex-{node_type}
+        # This matches the service_name format used in NodeRegistryEffect._register_consul
+        service_name = f"onex-{introspection_event.node_type}"
 
         max_wait_seconds = 30.0
         start_time = datetime.now(UTC)

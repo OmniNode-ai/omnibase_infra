@@ -26,6 +26,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from omnibase_core.enums import EnumNodeKind
+
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection.model_registration_projection import (
     ModelRegistrationProjection,
@@ -384,8 +386,8 @@ async def collect_registration_events(
                 # Safely parse UUID - malformed UUIDs are skipped
                 try:
                     parsed_node_id = UUID(event_node_id) if event_node_id else None
-                except (ValueError, AttributeError):
-                    # Invalid UUID format - skip this event
+                except (ValueError, TypeError, AttributeError):
+                    # Invalid UUID format or non-string type - skip this event
                     return
                 if parsed_node_id == node_id:
                     # Extract event type for exact matching
@@ -394,15 +396,30 @@ async def collect_registration_events(
                         # Skip events without explicit event_type field
                         return
 
+                    # Convert to string and validate non-empty
+                    event_type_str = str(event_type_name).strip()
+                    if not event_type_str:
+                        # Skip events with empty event_type
+                        return
+
                     # Extract the final component of namespaced event types
                     # e.g., "dev.registration.ModelNodeRegistrationInitiated"
                     #       -> "ModelNodeRegistrationInitiated"
                     # This uses rsplit to handle both namespaced and simple types
-                    event_type_class_name = str(event_type_name).rsplit(".", 1)[-1]
+                    event_type_class_name = event_type_str.rsplit(".", 1)[-1]
+
+                    # Validate extracted class name is non-empty and follows
+                    # ONEX Model naming convention (prevents false positives)
+                    if (
+                        not event_type_class_name
+                        or not event_type_class_name.startswith("Model")
+                    ):
+                        # Skip events that don't follow expected naming pattern
+                        return
 
                     for type_name, model_class in type_map.items():
                         # Exact match only: event type class name must exactly
-                        # equal the expected model class name
+                        # equal the expected model class name (case-sensitive)
                         if event_type_class_name == type_name:
                             try:
                                 event = model_class.model_validate(payload)
@@ -714,12 +731,14 @@ def assert_introspection_event_complete(event: ModelNodeIntrospectionEvent) -> N
     """
     assert event.node_id is not None, "node_id is required"
     assert event.node_type is not None, "node_type is required"
-    assert event.node_type in (
-        "effect",
-        "compute",
-        "reducer",
-        "orchestrator",
-    ), f"Invalid node_type: {event.node_type}"
+    # Use EnumNodeKind values for type-safe validation (excluding RUNTIME_HOST)
+    valid_node_types = {
+        EnumNodeKind.EFFECT.value,
+        EnumNodeKind.COMPUTE.value,
+        EnumNodeKind.REDUCER.value,
+        EnumNodeKind.ORCHESTRATOR.value,
+    }
+    assert event.node_type in valid_node_types, f"Invalid node_type: {event.node_type}"
     assert event.node_version is not None, "node_version is required"
     assert event.correlation_id is not None, "correlation_id is required"
     assert event.timestamp is not None, "timestamp is required"

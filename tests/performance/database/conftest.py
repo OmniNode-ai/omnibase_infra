@@ -689,12 +689,15 @@ def query_analyzer(
     """Create QueryAnalyzer for running EXPLAIN ANALYZE tests.
 
     Args:
-        seeded_test_data: Fixture ensuring test data exists.
+        seeded_test_data: Ordering dependency - ensures test data is seeded
+            before QueryAnalyzer is created. Value not used directly.
         schema_initialized: Pool with schema initialized.
 
     Returns:
         QueryAnalyzer instance for test use.
     """
+    # Note: seeded_test_data is an ordering dependency, not used directly.
+    # It ensures test data exists before running EXPLAIN ANALYZE queries.
     return QueryAnalyzer(schema_initialized)
 
 

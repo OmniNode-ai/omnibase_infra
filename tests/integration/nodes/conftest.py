@@ -7,9 +7,12 @@ integration test files, extracted to reduce duplication and ensure
 consistency.
 
 Fixtures Provided:
-    - simple_mock_container: Basic mock container for orchestrator tests
     - contract_path: Path to orchestrator contract.yaml
     - contract_data: Parsed YAML content from contract.yaml
+
+Note:
+    simple_mock_container is now provided by tests/conftest.py.
+    Use it for basic orchestrator tests that only need container.config.
 
 Usage:
     These fixtures are automatically discovered by pytest. Import is not needed.
@@ -28,14 +31,9 @@ Related:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 import yaml
-
-if TYPE_CHECKING:
-    from unittest.mock import MagicMock
-
 
 # =============================================================================
 # Path Constants
@@ -43,38 +41,6 @@ if TYPE_CHECKING:
 
 ORCHESTRATOR_NODE_DIR = Path("src/omnibase_infra/nodes/node_registration_orchestrator")
 ORCHESTRATOR_CONTRACT_PATH = ORCHESTRATOR_NODE_DIR / "contract.yaml"
-
-
-# =============================================================================
-# Container Fixtures
-# =============================================================================
-
-
-@pytest.fixture
-def simple_mock_container() -> MagicMock:
-    """Create a simple mock ONEX container for orchestrator integration tests.
-
-    This provides a minimal mock container with just the basic
-    container.config attribute needed for NodeOrchestrator initialization.
-
-    For integration tests requiring real container behavior, use
-    the container_with_registries fixture from tests/conftest.py.
-
-    Returns:
-        MagicMock configured with minimal container.config attribute.
-
-    Example::
-
-        def test_orchestrator_creates(simple_mock_container: MagicMock) -> None:
-            orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
-            assert orchestrator is not None
-
-    """
-    from unittest.mock import MagicMock
-
-    container = MagicMock()
-    container.config = MagicMock()
-    return container
 
 
 # =============================================================================
@@ -128,5 +94,4 @@ def contract_data(contract_path: Path) -> dict:
 __all__ = [
     "contract_data",
     "contract_path",
-    "simple_mock_container",
 ]

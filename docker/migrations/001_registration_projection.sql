@@ -280,6 +280,26 @@ COMMENT ON COLUMN registration_projections.last_applied_partition IS
 -- See projector_registration.py for the complete upsert SQL implementation.
 
 -- =============================================================================
+-- PRODUCTION DATABASE SAFETY
+-- =============================================================================
+-- CAUTION: This migration modifies database schema. Before running in production:
+--
+-- 1. BACKUP: Always backup your database before applying migrations
+--    pg_dump -h $HOST -p $PORT -U $USER -d $DB > backup_$(date +%Y%m%d_%H%M%S).sql
+--
+-- 2. TEST FIRST: Apply migration to a staging environment before production
+--
+-- 3. MONITOR: Watch for lock contention during schema changes
+--    SELECT * FROM pg_stat_activity WHERE state = 'active';
+--
+-- 4. MAINTENANCE WINDOW: For production systems with high traffic, consider
+--    applying during a maintenance window to minimize impact
+--
+-- 5. VERIFY: After migration, verify table exists and indexes are created:
+--    \d registration_projections
+--    \di idx_registration_*
+
+-- =============================================================================
 -- ROLLBACK MIGRATION
 -- =============================================================================
 -- CAUTION: Rollback will DROP DATA. Only use if migration was applied in error.

@@ -7,7 +7,7 @@ import inspect
 import logging
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -297,8 +297,6 @@ def mock_container() -> MagicMock:
         ...     # Mock container is ready to use (async methods)
         ...     mock_container.service_registry.resolve_service.return_value = some_service
     """
-    from unittest.mock import AsyncMock
-
     container = MagicMock()
 
     # Mock legacy methods for backwards compatibility
@@ -315,6 +313,33 @@ def mock_container() -> MagicMock:
         return_value="mock-uuid"
     )  # Async for wire functions
 
+    return container
+
+
+@pytest.fixture
+def simple_mock_container() -> MagicMock:
+    """Create a simple mock ONEX container for basic node tests.
+
+    This provides a minimal mock container with just the basic
+    container.config attribute needed for NodeOrchestrator initialization.
+    Use this for unit tests that don't need full container wiring.
+
+    For tests requiring service_registry or async methods, use mock_container.
+    For integration tests requiring real container behavior, use
+    container_with_registries.
+
+    Returns:
+        MagicMock configured with minimal container.config attribute.
+
+    Example::
+
+        def test_orchestrator_creates(simple_mock_container: MagicMock) -> None:
+            orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
+            assert orchestrator is not None
+
+    """
+    container = MagicMock()
+    container.config = MagicMock()
     return container
 
 
@@ -686,20 +711,21 @@ async def cleanup_postgres_test_projections():
         except asyncpg.UndefinedTableError:
             pass  # Table doesn't exist, nothing to cleanup
         except Exception as e:
+            # Note: exc_info omitted to prevent credential exposure in tracebacks
             logger.warning(
                 "PostgreSQL projection cleanup query failed: %s",
                 e,
-                exc_info=True,
             )
 
         finally:
             await conn.close()
 
     except Exception as e:
+        # Note: exc_info omitted to prevent credential exposure in tracebacks
+        # (DSN contains password and would be visible in exception traceback)
         logger.warning(
             "PostgreSQL test cleanup failed: %s",
             e,
-            exc_info=True,
         )
 
 

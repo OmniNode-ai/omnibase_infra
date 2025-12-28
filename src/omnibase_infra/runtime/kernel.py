@@ -94,6 +94,7 @@ from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.validation import validate_runtime_config
 from omnibase_infra.utils.correlation import generate_correlation_id
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
@@ -419,7 +420,7 @@ async def bootstrap() -> int:
                     target_name=kafka_bootstrap_servers or "localhost:9092",
                 )
                 raise RuntimeHostError(
-                    f"Failed to start KafkaEventBus: {e}",
+                    f"Failed to start KafkaEventBus: {sanitize_error_message(e)}",
                     context=context,
                 ) from e
 

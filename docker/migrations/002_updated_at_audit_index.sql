@@ -97,6 +97,26 @@ COMMENT ON INDEX idx_registration_state_updated_at IS
 --    GROUP BY current_state;
 
 -- =============================================================================
+-- PRODUCTION DATABASE SAFETY
+-- =============================================================================
+-- CAUTION: Index creation can impact production database performance.
+--
+-- 1. INDEX CREATION TIME: CREATE INDEX IF NOT EXISTS is safe but may take time
+--    on large tables. PostgreSQL 11+ creates indexes without blocking writes,
+--    but CPU/IO overhead may impact query performance.
+--
+-- 2. CONCURRENT OPTION: For zero-downtime index creation on large tables, consider:
+--    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_registration_updated_at ...
+--    Note: CONCURRENTLY cannot be used in a transaction block.
+--
+-- 3. DISK SPACE: Indexes consume disk space. Monitor disk usage after creation:
+--    SELECT pg_size_pretty(pg_relation_size('idx_registration_updated_at'));
+--
+-- 4. VERIFY: After migration, verify indexes exist and are being used:
+--    \di idx_registration_updated_at
+--    EXPLAIN ANALYZE SELECT * FROM registration_projections WHERE updated_at > NOW() - INTERVAL '1 hour';
+
+-- =============================================================================
 -- ROLLBACK MIGRATION
 -- =============================================================================
 -- To rollback this migration, execute the following:

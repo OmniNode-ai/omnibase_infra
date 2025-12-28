@@ -53,7 +53,7 @@ VALID_EVENT_BUS_TYPES = frozenset({"inmemory", "kafka"})
 
 # Shutdown grace period bounds (matches ModelShutdownConfig constraints)
 MIN_GRACE_PERIOD_SECONDS = 0
-MAX_GRACE_PERIOD_SECONDS = 300
+MAX_GRACE_PERIOD_SECONDS = 3600  # Max 1 hour to match ModelShutdownConfig
 
 
 def validate_runtime_config(
@@ -70,7 +70,7 @@ def validate_runtime_config(
         - output_topic: Must be string matching ^[a-zA-Z0-9._-]+$
         - consumer_group/group_id: Must be string matching ^[a-zA-Z0-9._-]+$
         - event_bus.type: Must be "inmemory" or "kafka"
-        - shutdown.grace_period_seconds: Must be integer 0-300
+        - shutdown.grace_period_seconds: Must be integer 0-3600
 
     Args:
         config: Configuration dictionary to validate. Can be the raw dict

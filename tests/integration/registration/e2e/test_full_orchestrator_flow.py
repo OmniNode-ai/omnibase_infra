@@ -39,7 +39,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
@@ -437,20 +437,33 @@ async def orchestrator_pipeline(
 async def running_orchestrator_consumer(
     real_kafka_event_bus: KafkaEventBus,
     orchestrator_pipeline: OrchestratorPipeline,
-) -> tuple[OrchestratorPipeline, Callable[[], Awaitable[None]]]:
+    mock_consul_client: AsyncMock,
+    mock_postgres_adapter: AsyncMock,
+) -> AsyncGenerator[
+    tuple[OrchestratorPipeline, Callable[[], Awaitable[None]], AsyncMock, AsyncMock],
+    None,
+]:
     """Start a Kafka consumer that routes messages through the pipeline.
 
     This fixture creates a real Kafka subscription that:
     - Subscribes to the test introspection topic
     - Routes incoming messages to the OrchestratorPipeline.process_message callback
-    - Returns the pipeline and an unsubscribe function
+    - Returns the pipeline, unsubscribe function, and mock clients
 
     Args:
         real_kafka_event_bus: Real Kafka event bus.
         orchestrator_pipeline: The orchestrator pipeline.
+        mock_consul_client: Mock Consul client (shared with registry_effect_node).
+        mock_postgres_adapter: Mock PostgreSQL adapter (shared with registry_effect_node).
 
     Yields:
-        Tuple of (pipeline, unsubscribe function).
+        Tuple of (pipeline, unsubscribe function, mock_consul_client, mock_postgres_adapter).
+
+    Note:
+        The mock fixtures are explicitly included in this fixture's dependencies
+        to ensure pytest resolves them first and shares the same instances with
+        the registry_effect_node used by the pipeline. This prevents assertion
+        failures when tests verify mock method calls.
     """
     # Use unique group ID per test run to avoid cross-test coupling
     unique_group_id = f"e2e-orchestrator-test-{uuid4().hex[:8]}"
@@ -464,7 +477,7 @@ async def running_orchestrator_consumer(
     # Give consumer time to start
     await asyncio.sleep(0.5)
 
-    yield orchestrator_pipeline, unsubscribe
+    yield orchestrator_pipeline, unsubscribe, mock_consul_client, mock_postgres_adapter
 
     # Cleanup
     await unsubscribe()
@@ -489,7 +502,10 @@ class TestFullOrchestratorFlow:
         self,
         real_kafka_event_bus: KafkaEventBus,
         running_orchestrator_consumer: tuple[
-            OrchestratorPipeline, Callable[[], Awaitable[None]]
+            OrchestratorPipeline,
+            Callable[[], Awaitable[None]],
+            AsyncMock,
+            AsyncMock,
         ],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
@@ -504,7 +520,7 @@ class TestFullOrchestratorFlow:
 
         This validates the ACTUAL Kafka consumption, not mocked handler calls.
         """
-        pipeline, _ = running_orchestrator_consumer
+        pipeline, _, _, _ = running_orchestrator_consumer
 
         # Create introspection event
         event = ModelNodeIntrospectionEvent(
@@ -557,10 +573,11 @@ class TestFullOrchestratorFlow:
         self,
         real_kafka_event_bus: KafkaEventBus,
         running_orchestrator_consumer: tuple[
-            OrchestratorPipeline, Callable[[], Awaitable[None]]
+            OrchestratorPipeline,
+            Callable[[], Awaitable[None]],
+            AsyncMock,
+            AsyncMock,
         ],
-        mock_consul_client: AsyncMock,
-        mock_postgres_adapter: AsyncMock,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
     ) -> None:
@@ -571,7 +588,11 @@ class TestFullOrchestratorFlow:
         - Reducer generates intents
         - Effect executes Consul and PostgreSQL registration
         """
-        pipeline, _ = running_orchestrator_consumer
+        # Unpack fixture tuple: mocks are included to ensure same instances
+        # used by the pipeline are available for assertion
+        pipeline, _, mock_consul_client, mock_postgres_adapter = (
+            running_orchestrator_consumer
+        )
 
         # Create introspection event
         event = ModelNodeIntrospectionEvent(
@@ -630,14 +651,17 @@ class TestFullOrchestratorFlow:
         self,
         real_kafka_event_bus: KafkaEventBus,
         running_orchestrator_consumer: tuple[
-            OrchestratorPipeline, Callable[[], Awaitable[None]]
+            OrchestratorPipeline,
+            Callable[[], Awaitable[None]],
+            AsyncMock,
+            AsyncMock,
         ],
     ) -> None:
         """Test that multiple introspection events are processed.
 
         Publishes multiple events and verifies all are processed.
         """
-        pipeline, _ = running_orchestrator_consumer
+        pipeline, _, _, _ = running_orchestrator_consumer
 
         # Create multiple events
         node_ids = [uuid4() for _ in range(3)]
@@ -696,7 +720,10 @@ class TestFullOrchestratorFlow:
         self,
         real_kafka_event_bus: KafkaEventBus,
         running_orchestrator_consumer: tuple[
-            OrchestratorPipeline, Callable[[], Awaitable[None]]
+            OrchestratorPipeline,
+            Callable[[], Awaitable[None]],
+            AsyncMock,
+            AsyncMock,
         ],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
@@ -706,7 +733,7 @@ class TestFullOrchestratorFlow:
         The pipeline should log a warning but not crash when receiving
         invalid JSON or non-conforming messages.
         """
-        pipeline, _ = running_orchestrator_consumer
+        pipeline, _, _, _ = running_orchestrator_consumer
 
         # Publish malformed message
         headers = ModelEventHeaders(

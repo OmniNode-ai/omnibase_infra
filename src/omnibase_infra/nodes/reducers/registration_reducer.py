@@ -346,7 +346,7 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from omnibase_core.enums import EnumReductionType, EnumStreamingMode
+from omnibase_core.enums import EnumNodeKind, EnumReductionType, EnumStreamingMode
 from omnibase_core.models.intents import (
     ModelConsulRegisterIntent,
     ModelPostgresUpsertRegistrationIntent,
@@ -766,7 +766,13 @@ class RegistrationReducer:
             )
 
         # Validate node_type value is valid ONEX type
-        valid_node_types = {"effect", "compute", "reducer", "orchestrator"}
+        # Use EnumNodeKind values (excluding RUNTIME_HOST which is not a registration type)
+        valid_node_types = {
+            EnumNodeKind.EFFECT.value,
+            EnumNodeKind.COMPUTE.value,
+            EnumNodeKind.REDUCER.value,
+            EnumNodeKind.ORCHESTRATOR.value,
+        }
         if event.node_type not in valid_node_types:
             return ValidationResult.failure(
                 error_code="invalid_node_type",

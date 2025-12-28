@@ -433,7 +433,8 @@ class HandlerNodeIntrospected:
                         address = parsed.hostname
                     if parsed.port:
                         port = parsed.port
-                except Exception as e:
+                except ValueError as e:
+                    # urlparse raises ValueError for malformed URLs
                     # If parsing fails, continue without address/port
                     # Include error message in main log line for easier debugging
                     logger.debug(

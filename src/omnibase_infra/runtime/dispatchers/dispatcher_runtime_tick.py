@@ -158,15 +158,16 @@ class DispatcherRuntimeTick:
                 if isinstance(payload, dict):
                     payload = ModelRuntimeTick.model_validate(payload)
                 else:
-                    completed_at = datetime.now(UTC)
+                    # Reuse started_at timestamp for INVALID_MESSAGE - processing
+                    # is minimal (just a type check) so duration is effectively 0
                     return ModelDispatchResult(
                         dispatch_id=uuid4(),
                         status=EnumDispatchStatus.INVALID_MESSAGE,
                         topic=TOPIC_ID_RUNTIME_TICK,
                         dispatcher_id=self.dispatcher_id,
                         started_at=started_at,
-                        completed_at=completed_at,
-                        duration_ms=(completed_at - started_at).total_seconds() * 1000,
+                        completed_at=started_at,
+                        duration_ms=0.0,
                         error_message=f"Expected ModelRuntimeTick payload, "
                         f"got {type(payload).__name__}",
                         correlation_id=correlation_id,

@@ -416,7 +416,9 @@ class TestConstants:
         assert len(VALID_EVENT_BUS_TYPES) == 2
 
     def test_grace_period_bounds(self) -> None:
-        """Test that grace period bounds are reasonable."""
+        """Test that grace period bounds match ModelShutdownConfig constraints."""
         assert MIN_GRACE_PERIOD_SECONDS == 0
-        assert MAX_GRACE_PERIOD_SECONDS == 300
+        assert (
+            MAX_GRACE_PERIOD_SECONDS == 3600
+        )  # 1 hour max to match ModelShutdownConfig
         assert MIN_GRACE_PERIOD_SECONDS < MAX_GRACE_PERIOD_SECONDS

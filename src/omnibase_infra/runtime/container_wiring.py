@@ -1069,19 +1069,33 @@ async def wire_registration_dispatchers(
     Prerequisites:
         - wire_registration_handlers() must be called first to register
           the underlying handlers in the container.
-        - MessageDispatchEngine must not be frozen yet.
+        - MessageDispatchEngine must not be frozen yet. If the engine is already
+          frozen, dispatcher registration will fail with a RuntimeError from the
+          engine's register_dispatcher() method.
 
     Args:
         container: ONEX container with registered handlers.
         engine: MessageDispatchEngine instance to register dispatchers with.
 
     Returns:
-        Summary dict with:
-            - dispatchers: List of registered dispatcher IDs
-            - routes: List of registered route IDs
+        Summary dict with diagnostic information:
+            - dispatchers: List of registered dispatcher IDs (e.g.,
+              ['dispatcher.node-introspected', 'dispatcher.runtime-tick',
+               'dispatcher.node-registration-acked'])
+            - routes: List of registered route IDs (e.g.,
+              ['route.registration.node-introspection', 'route.registration.runtime-tick',
+               'route.registration.node-registration-acked'])
+
+        This diagnostic output can be logged or used to verify correct wiring.
 
     Raises:
-        RuntimeError: If required handlers are not registered in the container.
+        RuntimeError: If required handlers are not registered in the container,
+            or if the engine is already frozen (cannot register new dispatchers).
+
+    Engine Frozen Behavior:
+        If engine.freeze() has been called before this function, the engine
+        will reject new dispatcher registrations. Ensure this function is called
+        during the wiring phase before engine.freeze() is invoked.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer

@@ -64,24 +64,19 @@ __all__ = [
 # =============================================================================
 # Fixtures
 # =============================================================================
+# Note: Core fixtures (reducer, initial_state, clock) are provided by
+# tests/replay/conftest.py. Only override here when intentionally different.
 
 
 @pytest.fixture
 def id_generator() -> DeterministicIdGenerator:
-    """Create a deterministic ID generator for reproducible tests."""
+    """Create a deterministic ID generator with isolated seed.
+
+    Uses seed=300 (different from conftest's seed=100) to ensure this test
+    module's UUIDs don't accidentally match those from other replay tests.
+    This provides better isolation for purity verification tests.
+    """
     return DeterministicIdGenerator(seed=300)
-
-
-@pytest.fixture
-def clock() -> DeterministicClock:
-    """Create a deterministic clock for reproducible timestamps."""
-    return DeterministicClock()
-
-
-@pytest.fixture
-def reducer() -> RegistrationReducer:
-    """Create a fresh RegistrationReducer instance."""
-    return RegistrationReducer()
 
 
 # =============================================================================

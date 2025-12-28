@@ -914,7 +914,9 @@ class MessageDispatchEngine:
         # Step 1: Parse topic to get category
         topic_category = EnumMessageCategory.from_topic(topic)
         if topic_category is None:
+            # Capture duration and completed_at together for consistency
             duration_ms = (time.perf_counter() - start_time) * 1000
+            completed_at = datetime.now(UTC)
 
             # Update metrics (protected by lock for thread safety)
             with self._metrics_lock:
@@ -946,7 +948,7 @@ class MessageDispatchEngine:
                 status=EnumDispatchStatus.INVALID_MESSAGE,
                 topic=topic,
                 started_at=started_at,
-                completed_at=datetime.now(UTC),
+                completed_at=completed_at,
                 duration_ms=duration_ms,
                 error_message=f"Cannot infer message category from topic '{topic}'. "
                 "Topic must contain .events, .commands, .intents, or .projections segment.",
@@ -1004,7 +1006,9 @@ class MessageDispatchEngine:
         )
 
         if not matching_dispatchers:
+            # Capture duration and completed_at together for consistency
             duration_ms = (time.perf_counter() - start_time) * 1000
+            completed_at = datetime.now(UTC)
 
             # Update metrics (protected by lock for thread safety)
             with self._metrics_lock:
@@ -1043,7 +1047,7 @@ class MessageDispatchEngine:
                 message_category=topic_category,
                 message_type=message_type,
                 started_at=started_at,
-                completed_at=datetime.now(UTC),
+                completed_at=completed_at,
                 duration_ms=duration_ms,
                 error_message=f"No dispatcher registered for category '{topic_category}' "
                 f"and message type '{message_type}' matching topic '{topic}'.",
@@ -1231,7 +1235,9 @@ class MessageDispatchEngine:
                 )
 
         # Step 6: Build result
+        # Capture duration and completed_at together for consistency
         duration_ms = (time.perf_counter() - start_time) * 1000
+        completed_at = datetime.now(UTC)
 
         # Determine final status
         if dispatcher_errors:
@@ -1355,7 +1361,7 @@ class MessageDispatchEngine:
                 message_type=message_type,
                 duration_ms=duration_ms,
                 started_at=started_at,
-                completed_at=datetime.now(UTC),
+                completed_at=completed_at,
                 outputs=dispatch_outputs,
                 output_count=len(outputs),
                 error_message="; ".join(dispatcher_errors)
