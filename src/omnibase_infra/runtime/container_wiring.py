@@ -728,6 +728,10 @@ async def wire_registration_handlers(
         >>> # Resolve handlers from container
         >>> handler = await container.service_registry.resolve_service(HandlerNodeIntrospected)
     """
+    # Deferred imports: These imports are placed inside the function to avoid circular
+    # import issues and to delay loading registration infrastructure until this function
+    # is actually called (which requires a PostgreSQL pool). This follows the pattern
+    # of lazy-loading optional dependencies to reduce import-time overhead.
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
@@ -1077,7 +1081,7 @@ async def wire_registration_dispatchers(
             - routes: List of registered route IDs
 
     Raises:
-        RuntimeError: If handlers not registered or engine is frozen.
+        RuntimeError: If required handlers are not registered in the container.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer

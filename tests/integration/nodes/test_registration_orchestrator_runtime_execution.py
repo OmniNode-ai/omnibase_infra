@@ -240,18 +240,8 @@ class MockEffectImpl:
 # =============================================================================
 # Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def simple_mock_container() -> MagicMock:
-    """Create a simple mock ONEX container for runtime execution tests.
-
-    This is a simpler version than the conftest.py mock_container, providing
-    just the basic container.config attribute needed for NodeOrchestrator.
-    """
-    container = MagicMock()
-    container.config = MagicMock()
-    return container
+# Note: simple_mock_container fixture is provided by
+# tests/integration/nodes/conftest.py - no local definition needed.
 
 
 @pytest.fixture

@@ -1174,11 +1174,15 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         correlation_id = uuid4()
         sanitized_servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
 
+        # Normalize empty string to default group (treats "" same as None)
+        # This ensures consistent behavior when group_id is unset or empty
+        effective_group_id = group_id.strip() if group_id else self._group
+
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(
             topic,
             bootstrap_servers=self._bootstrap_servers,
-            group_id=f"{self._environment}.{group_id}",
+            group_id=f"{self._environment}.{effective_group_id}",
             auto_offset_reset=self._config.auto_offset_reset,
             enable_auto_commit=self._config.enable_auto_commit,
         )
@@ -1199,7 +1203,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 f"Started consumer for topic {topic}",
                 extra={
                     "topic": topic,
-                    "group_id": group_id,
+                    "group_id": effective_group_id,
                     "correlation_id": str(correlation_id),
                     "servers": sanitized_servers,
                 },

@@ -5,6 +5,21 @@
 This module provides fixtures for testing PostgreSQL query performance
 using EXPLAIN ANALYZE to verify index usage and query efficiency.
 
+PRODUCTION SAFETY WARNING:
+    This module uses EXPLAIN ANALYZE which EXECUTES the query to get actual
+    timing and row counts. While this is safe for SELECT queries (no mutations),
+    running performance tests against production databases is NOT recommended:
+
+    1. EXPLAIN ANALYZE can add load to production databases
+    2. Test data seeding modifies the database (creates/deletes test records)
+    3. Query statistics may differ from production due to test data patterns
+    4. Index usage decisions depend on table statistics (ANALYZE freshness)
+
+    For production monitoring, consider:
+    - Using EXPLAIN (without ANALYZE) for plan inspection only
+    - Using pg_stat_statements for real query performance metrics
+    - Running tests against a staging replica with production-like data
+
 Fixture Dependency Graph:
     postgres_pool (session-scoped)
         -> schema_initialized
@@ -372,6 +387,20 @@ class QueryAnalyzer:
     Provides methods to execute EXPLAIN ANALYZE and parse the results
     to verify index usage and query efficiency.
 
+    SQL Injection Safety:
+        Query parameters are passed separately to asyncpg which uses PostgreSQL's
+        prepared statement protocol. This means:
+
+        1. The query string is sent to PostgreSQL as a parameterized query template
+        2. Parameter values are sent separately and bound by the database engine
+        3. Parameter values CANNOT modify the query structure (injection-proof)
+
+        The EXPLAIN prefix is safe because:
+        - _validate_query_for_explain() only allows SELECT/WITH queries
+        - The original query is validated BEFORE adding the EXPLAIN prefix
+        - f-string interpolation only adds the fixed "EXPLAIN (...) " prefix
+        - User input NEVER goes into the f-string - only into asyncpg params
+
     Attributes:
         pool: Database connection pool.
 
@@ -510,19 +539,50 @@ class ExplainResult:
 
         Returns:
             List of matching plan nodes.
+
+        Note:
+            This method handles malformed plan structures defensively:
+            - Missing "Plan" key returns empty list
+            - Non-dict nodes are skipped
+            - Missing "Plans" key is treated as no children
+            - Non-list "Plans" values are skipped
         """
         if node is None:
-            node = self.plan.get("Plan", {})
+            plan_node = self.plan.get("Plan")
+            if not isinstance(plan_node, dict):
+                _logger.warning(
+                    "EXPLAIN plan missing 'Plan' key or has unexpected type: %s",
+                    type(plan_node).__name__ if plan_node is not None else "None",
+                )
+                return []
+            node = plan_node
 
         results = []
+
+        # Defensive: ensure node is a dict before accessing
+        if not isinstance(node, dict):
+            _logger.warning(
+                "Unexpected node type in plan tree: %s",
+                type(node).__name__,
+            )
+            return results
 
         current_type = node.get("Node Type", "")
         if node_type is None or current_type == node_type:
             results.append(node)
 
-        # Recurse into child nodes
-        for child in node.get("Plans", []):
-            results.extend(self._find_nodes(child, node_type))
+        # Recurse into child nodes - defensive handling for malformed Plans
+        plans = node.get("Plans", [])
+        if not isinstance(plans, list):
+            _logger.warning(
+                "EXPLAIN plan 'Plans' has unexpected type: %s",
+                type(plans).__name__,
+            )
+            return results
+
+        for child in plans:
+            if isinstance(child, dict):
+                results.extend(self._find_nodes(child, node_type))
 
         return results
 

@@ -52,9 +52,10 @@ from omnibase_infra.idempotency import InMemoryIdempotencyStore
 # Module-Level Markers
 # =============================================================================
 
-pytestmark = [
-    pytest.mark.chaos,
-]
+# NOTE: pytestmark at module-level in conftest.py does NOT automatically apply
+# to tests in other files. We use pytest_collection_modifyitems hook instead
+# to dynamically mark all tests in the chaos directory. See the hook at the
+# bottom of this file.
 
 # =============================================================================
 # Chaos Injection Models
@@ -1322,3 +1323,32 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "slow: mark test as slow (deferred for performance)",
     )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config,
+    items: list[pytest.Item],
+) -> None:
+    """Dynamically add chaos marker to all tests in the chaos directory.
+
+    This hook runs after test collection and adds the 'chaos' marker to any
+    test whose file path contains 'chaos'. This is necessary because pytestmark
+    defined in conftest.py does NOT automatically apply to tests in other files
+    within the same directory.
+
+    Args:
+        config: Pytest configuration object.
+        items: List of collected test items.
+
+    Usage:
+        Run only chaos tests: pytest -m chaos
+        Exclude chaos tests: pytest -m "not chaos"
+    """
+    chaos_marker = pytest.mark.chaos
+
+    for item in items:
+        # Check if the test file is in the chaos directory
+        if "chaos" in str(item.fspath):
+            # Only add marker if not already present
+            if not any(marker.name == "chaos" for marker in item.iter_markers()):
+                item.add_marker(chaos_marker)

@@ -58,6 +58,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Topic identifier used in dispatch results for tracing and observability.
+# Note: This is an internal identifier for logging/metrics, NOT the actual Kafka topic name.
+# The actual Kafka topic is configured via ModelDispatchRoute.topic_pattern in container_wiring.py.
+TOPIC_ID_RUNTIME_TICK = "runtime.tick"
+
 
 class DispatcherRuntimeTick:
     """Dispatcher adapter for HandlerRuntimeTick.
@@ -153,19 +158,22 @@ class DispatcherRuntimeTick:
                 if isinstance(payload, dict):
                     payload = ModelRuntimeTick.model_validate(payload)
                 else:
+                    completed_at = datetime.now(UTC)
                     return ModelDispatchResult(
                         dispatch_id=uuid4(),
                         status=EnumDispatchStatus.INVALID_MESSAGE,
-                        topic="runtime.tick",
+                        topic=TOPIC_ID_RUNTIME_TICK,
                         dispatcher_id=self.dispatcher_id,
                         started_at=started_at,
-                        completed_at=datetime.now(UTC),
-                        duration_ms=(datetime.now(UTC) - started_at).total_seconds()
-                        * 1000,
+                        completed_at=completed_at,
+                        duration_ms=(completed_at - started_at).total_seconds() * 1000,
                         error_message=f"Expected ModelRuntimeTick payload, "
                         f"got {type(payload).__name__}",
                         correlation_id=correlation_id,
                     )
+
+            # Assert helps type narrowing after isinstance/model_validate
+            assert isinstance(payload, ModelRuntimeTick)
 
             # Get current time for handler
             now = datetime.now(UTC)
@@ -193,7 +201,7 @@ class DispatcherRuntimeTick:
             return ModelDispatchResult(
                 dispatch_id=uuid4(),
                 status=EnumDispatchStatus.SUCCESS,
-                topic="runtime.tick",
+                topic=TOPIC_ID_RUNTIME_TICK,
                 dispatcher_id=self.dispatcher_id,
                 started_at=started_at,
                 completed_at=completed_at,
@@ -221,7 +229,7 @@ class DispatcherRuntimeTick:
             return ModelDispatchResult(
                 dispatch_id=uuid4(),
                 status=EnumDispatchStatus.HANDLER_ERROR,
-                topic="runtime.tick",
+                topic=TOPIC_ID_RUNTIME_TICK,
                 dispatcher_id=self.dispatcher_id,
                 started_at=started_at,
                 completed_at=completed_at,

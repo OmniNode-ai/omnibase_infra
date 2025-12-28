@@ -548,8 +548,17 @@ class MessageDispatchEngine:
             )
 
     # --- @overload stubs for static type safety ---
-    # These overloads enable type checkers to validate dispatcher signatures
-    # based on the presence/absence of node_kind parameter.
+    #
+    # NOTE: These are TYPE STUBS only - they provide no runtime behavior.
+    # The actual implementation is in the non-overloaded register_dispatcher() below.
+    #
+    # Purpose: Enable type checkers (mypy, pyright) to validate that:
+    #   - When node_kind=None (or omitted): dispatcher must be DispatcherFunc
+    #   - When node_kind=EnumNodeKind: dispatcher must be ContextAwareDispatcherFunc
+    #
+    # This pattern enforces compile-time type safety for the relationship between
+    # node_kind presence and expected dispatcher signature.
+    #
     # See ADR_DISPATCHER_TYPE_SAFETY.md Option 4 for design rationale.
 
     @overload
@@ -560,7 +569,7 @@ class MessageDispatchEngine:
         category: EnumMessageCategory,
         message_types: set[str] | None = None,
         node_kind: None = None,
-    ) -> None: ...
+    ) -> None: ...  # Stub: no node_kind -> DispatcherFunc (no context)
 
     @overload
     def register_dispatcher(
@@ -571,7 +580,7 @@ class MessageDispatchEngine:
         message_types: set[str] | None = None,
         *,
         node_kind: EnumNodeKind,
-    ) -> None: ...
+    ) -> None: ...  # Stub: with node_kind -> ContextAwareDispatcherFunc (gets context)
 
     def register_dispatcher(
         self,

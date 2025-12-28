@@ -7,12 +7,21 @@ bootstrap that wires configuration into the existing RuntimeHostProcess.
 
 The kernel is responsible for:
     1. Loading runtime configuration from contracts or environment
-    2. Creating and starting the InMemoryEventBus
+    2. Creating and starting the event bus (InMemoryEventBus or KafkaEventBus)
     3. Building the dependency container (event_bus, config)
     4. Instantiating RuntimeHostProcess with contract-driven configuration
     5. Starting the HTTP health server for Docker/K8s probes
     6. Setting up graceful shutdown signal handlers
     7. Running the runtime until shutdown is requested
+
+Event Bus Selection:
+    The kernel supports two event bus implementations:
+    - InMemoryEventBus: For local development and testing (default)
+    - KafkaEventBus: For production use with Kafka/Redpanda
+
+    Selection is determined by:
+    - KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses Kafka)
+    - config.event_bus.type field in runtime_config.yaml
 
 Usage:
     # Run with default contracts directory (./contracts)
@@ -284,7 +293,7 @@ async def bootstrap() -> int:
     Bootstrap Sequence:
         1. Determine contracts directory from CONTRACTS_DIR environment variable
         2. Load and validate runtime configuration from contracts or environment
-        3. Create and initialize InMemoryEventBus for event-driven architecture
+        3. Create and initialize event bus (InMemoryEventBus or KafkaEventBus based on config)
         4. Create ModelONEXContainer and wire infrastructure services (async)
         5. Resolve ProtocolBindingRegistry from container (async)
         6. Instantiate RuntimeHostProcess with validated configuration and pre-resolved registry
@@ -507,6 +516,9 @@ async def bootstrap() -> int:
                 if consul_host:
                     consul_port = int(os.getenv("CONSUL_PORT", "8500"))
                     try:
+                        # Deferred import: Only load ConsulHandler when Consul is configured.
+                        # This avoids loading the consul dependency (and its transitive deps)
+                        # when Consul integration is disabled, reducing startup time.
                         from omnibase_infra.handlers import ConsulHandler
 
                         consul_handler = ConsulHandler()
@@ -557,6 +569,9 @@ async def bootstrap() -> int:
                 )
 
                 # 4.8. Create introspection dispatcher for routing events
+                # Deferred import: HandlerNodeIntrospected depends on PostgreSQL and
+                # registration infrastructure. Only loaded after PostgreSQL pool is
+                # successfully created and registration handlers are wired.
                 from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
                     HandlerNodeIntrospected,
                 )

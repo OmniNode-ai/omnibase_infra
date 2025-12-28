@@ -272,11 +272,12 @@ class TestRuntimeE2EFlow:
 
         while (datetime.now(UTC) - start_time).total_seconds() < max_wait_seconds:
             all_found = True
-            for node_id in node_ids:
+            for i, node_id in enumerate(node_ids):
+                # Preserve original event's correlation_id for tracing
                 projection = await projection_reader.get_entity_state(
                     entity_id=node_id,
                     domain="registration",
-                    correlation_id=uuid4(),
+                    correlation_id=events[i].correlation_id,
                 )
                 if projection is None:
                     all_found = False
@@ -289,10 +290,11 @@ class TestRuntimeE2EFlow:
 
         # Verify all projections exist
         for i, node_id in enumerate(node_ids):
+            # Preserve original event's correlation_id for tracing
             projection = await projection_reader.get_entity_state(
                 entity_id=node_id,
                 domain="registration",
-                correlation_id=uuid4(),
+                correlation_id=events[i].correlation_id,
             )
             assert projection is not None, (
                 f"Projection for node {i} ({node_id}) not found after {max_wait_seconds}s"
@@ -508,10 +510,11 @@ class TestRuntimePerformance:
             if elapsed > sla_seconds:
                 pytest.fail(f"Runtime exceeded {sla_seconds}s SLA for event processing")
 
+            # Preserve original event's correlation_id for tracing
             projection = await projection_reader.get_entity_state(
                 entity_id=unique_node_id,
                 domain="registration",
-                correlation_id=uuid4(),
+                correlation_id=introspection_event.correlation_id,
             )
 
             if projection is not None:

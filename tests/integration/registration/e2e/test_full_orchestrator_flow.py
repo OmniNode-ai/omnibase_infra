@@ -452,10 +452,12 @@ async def running_orchestrator_consumer(
     Yields:
         Tuple of (pipeline, unsubscribe function).
     """
+    # Use unique group ID per test run to avoid cross-test coupling
+    unique_group_id = f"e2e-orchestrator-test-{uuid4().hex[:8]}"
     # Subscribe to the introspection topic
     unsubscribe = await real_kafka_event_bus.subscribe(
         topic=TEST_INTROSPECTION_TOPIC,
-        group_id="e2e-orchestrator-test",
+        group_id=unique_group_id,
         on_message=orchestrator_pipeline.process_message,
     )
 

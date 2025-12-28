@@ -342,8 +342,7 @@ async def timed_operation(
         end = time.perf_counter()
         result.end_time = end
         # Update elapsed time - convert to milliseconds
-        # Using object.__setattr__ because dataclass might be frozen in future
-        object.__setattr__(result, "elapsed_ms", (end - start) * 1000)
+        result.elapsed_ms = (end - start) * 1000
 
 
 def assert_performance(

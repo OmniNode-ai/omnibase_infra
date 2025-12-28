@@ -435,12 +435,14 @@ class HandlerNodeIntrospected:
                         port = parsed.port
                 except Exception as e:
                     # If parsing fails, continue without address/port
+                    # Include error message in main log line for easier debugging
                     logger.debug(
-                        "URL parsing failed for endpoint: %s",
+                        "URL parsing failed for endpoint '%s': %s",
                         health_url[:50] + "..." if len(health_url) > 50 else health_url,
+                        str(e),
                         extra={
                             "node_id": str(node_id),
-                            "error": str(e),
+                            "error_type": type(e).__name__,
                             "correlation_id": str(correlation_id),
                         },
                     )

@@ -50,6 +50,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _normalize_metadata(metadata: dict[str, object] | None) -> dict[str, object] | None:
+    """Normalize metadata values, handling bytes to str conversion.
+
+    Kafka headers and metadata may arrive as bytes. This function defensively
+    converts bytes values to strings using UTF-8 decoding to ensure consistent
+    string-based metadata handling downstream.
+
+    Args:
+        metadata: Optional metadata dictionary with potentially mixed value types.
+
+    Returns:
+        Normalized metadata dict with bytes converted to str, or None if input is None.
+    """
+    if metadata is None:
+        return None
+
+    normalized: dict[str, object] = {}
+    for key, value in metadata.items():
+        if isinstance(value, bytes):
+            try:
+                normalized[key] = value.decode("utf-8")
+            except UnicodeDecodeError:
+                # If decoding fails, use repr as fallback
+                normalized[key] = repr(value)
+        else:
+            normalized[key] = value
+    return normalized
+
+
 class IntrospectionEventRouter:
     """Router for introspection event messages from Kafka.
 
@@ -249,11 +278,13 @@ class IntrospectionEventRouter:
                 introspection_event = ModelNodeIntrospectionEvent.model_validate(
                     payload_dict
                 )
+                # Use the event's original timestamp for envelope (prefer event time
+                # over processing time for better traceability and replay support)
                 event_envelope = ModelEventEnvelope(
                     payload=introspection_event,
                     correlation_id=introspection_event.correlation_id
                     or callback_correlation_id,
-                    envelope_timestamp=datetime.now(UTC),
+                    envelope_timestamp=introspection_event.timestamp,
                 )
                 logger.info(
                     "Raw event wrapped in envelope (correlation_id=%s)",
@@ -269,6 +300,7 @@ class IntrospectionEventRouter:
                     raw_envelope.payload
                 )
                 # Create typed envelope with validated payload
+                # Note: Defensively normalize metadata to handle bytes values from Kafka
                 event_envelope = ModelEventEnvelope[ModelNodeIntrospectionEvent](
                     payload=introspection_event,
                     envelope_id=raw_envelope.envelope_id,
@@ -278,7 +310,7 @@ class IntrospectionEventRouter:
                     or callback_correlation_id,
                     source_tool=raw_envelope.source_tool,
                     target_tool=raw_envelope.target_tool,
-                    metadata=raw_envelope.metadata,
+                    metadata=_normalize_metadata(raw_envelope.metadata),
                     priority=raw_envelope.priority,
                     timeout_seconds=raw_envelope.timeout_seconds,
                     trace_id=raw_envelope.trace_id,
@@ -355,6 +387,20 @@ class IntrospectionEventRouter:
                         len(result.output_events),
                         self._output_topic,
                         callback_correlation_id,
+                    )
+                else:
+                    # No output events after successful processing - this may indicate
+                    # the handler didn't produce expected completion events
+                    logger.warning(
+                        "Introspection event processed successfully but no output events "
+                        "were produced. This may indicate the handler did not emit "
+                        "expected completion events (correlation_id=%s)",
+                        callback_correlation_id,
+                        extra={
+                            "node_id": str(introspection_event.node_id),
+                            "node_type": introspection_event.node_type,
+                            "dispatcher_duration_seconds": dispatcher_duration,
+                        },
                     )
             else:
                 logger.warning(

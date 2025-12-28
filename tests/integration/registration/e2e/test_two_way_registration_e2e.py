@@ -1436,13 +1436,13 @@ class TestSuite4HeartbeatPublishing:
         # Record time before sending heartbeat
         min_heartbeat_time = datetime.now(UTC)
 
-        # Create heartbeat event
+        # Create heartbeat event - preserve test's correlation_id for tracing
         heartbeat_event = ModelNodeHeartbeatEvent(
             node_id=unique_node_id,
             node_type=introspectable_test_node.node_type,
             uptime_seconds=10.0,
             active_operations_count=0,
-            correlation_id=uuid4(),
+            correlation_id=correlation_id,
             timestamp=datetime.now(UTC),
         )
 

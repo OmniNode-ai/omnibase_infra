@@ -523,20 +523,39 @@ async def cleanup_consul_test_services():
 
         try:
             # Get all registered services
+            # NOTE: consul.list_services is not yet implemented in ConsulHandler.
+            # When implemented, it should return ModelHandlerOutput with services data.
+            # For now, this will raise RuntimeHostError for unsupported operation,
+            # which is caught by the outer exception handler.
             list_envelope = {
                 "operation": "consul.list_services",
                 "payload": {},
             }
             result = await handler.execute(list_envelope)
 
-            if result and isinstance(result, dict) and result.get("success"):
-                services = result.get("data", {})
+            # Access model attributes instead of dict keys
+            # result is ModelHandlerOutput[ModelConsulHandlerResponse]
+            if result and result.result and result.result.status == "success":
+                # Access payload data via model attributes
+                payload_data = result.result.payload.data
+                # Services data structure depends on list_services implementation
+                # Expected: dict mapping service_id -> service_info
+                services = (
+                    getattr(payload_data, "services", {})
+                    if hasattr(payload_data, "services")
+                    else {}
+                )
 
                 # Identify test services to cleanup
                 test_service_ids: list[str] = []
                 for service_id, service_info in services.items():
                     service_name = ""
-                    if isinstance(service_info, dict):
+                    # Access model attributes instead of dict keys
+                    if hasattr(service_info, "name"):
+                        service_name = service_info.name
+                    elif hasattr(service_info, "Service"):
+                        service_name = service_info.Service
+                    elif isinstance(service_info, dict):
                         service_name = service_info.get("Service", "")
                     elif isinstance(service_info, list) and service_info:
                         service_name = str(service_info[0]) if service_info else ""
@@ -558,10 +577,14 @@ async def cleanup_consul_test_services():
                 for service_id in test_service_ids:
                     try:
                         deregister_envelope = {
-                            "operation": "consul.deregister_service",
+                            "operation": "consul.deregister",
                             "payload": {"service_id": service_id},
                         }
                         await handler.execute(deregister_envelope)
+                        logger.debug(
+                            "Successfully deregistered Consul test service: %s",
+                            service_id,
+                        )
                     except Exception as e:
                         logger.warning(
                             "Cleanup failed for Consul service %s: %s",

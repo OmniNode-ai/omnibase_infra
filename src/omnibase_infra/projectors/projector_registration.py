@@ -909,11 +909,6 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             ...     now=datetime.now(UTC),
             ... )
         """
-        from omnibase_infra.enums import EnumRegistrationState
-        from omnibase_infra.models.registration.model_node_capabilities import (
-            ModelNodeCapabilities,
-        )
-
         corr_id = correlation_id or uuid4()
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,

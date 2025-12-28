@@ -381,23 +381,34 @@ async def collect_registration_events(
                 # Check if payload matches any expected type
                 payload = data.get("payload", data)
                 event_node_id = payload.get("node_id") or payload.get("entity_id")
-                if event_node_id and UUID(event_node_id) == node_id:
-                    # Try to match event type using exact comparison
-                    # to prevent false positives from partial string matches
+                # Safely parse UUID - malformed UUIDs are skipped
+                try:
+                    parsed_node_id = UUID(event_node_id) if event_node_id else None
+                except (ValueError, AttributeError):
+                    # Invalid UUID format - skip this event
+                    return
+                if parsed_node_id == node_id:
+                    # Extract event type for exact matching
                     event_type_name = data.get("event_type")
                     if event_type_name is None:
                         # Skip events without explicit event_type field
                         return
 
+                    # Extract the final component of namespaced event types
+                    # e.g., "dev.registration.ModelNodeRegistrationInitiated"
+                    #       -> "ModelNodeRegistrationInitiated"
+                    # This uses rsplit to handle both namespaced and simple types
+                    event_type_class_name = str(event_type_name).rsplit(".", 1)[-1]
+
                     for type_name, model_class in type_map.items():
-                        # Exact match: event_type equals the model class name
-                        # or ends with the model class name (for namespaced types)
-                        if event_type_name == type_name or event_type_name.endswith(
-                            f".{type_name}"
-                        ):
+                        # Exact match only: event type class name must exactly
+                        # equal the expected model class name
+                        if event_type_class_name == type_name:
                             try:
                                 event = model_class.model_validate(payload)
                                 collected.append(event)
+                                # Break after first match to prevent duplicate collection
+                                break
                             except ValueError:
                                 # Pydantic validation failed - skip this event
                                 pass

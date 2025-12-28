@@ -3,7 +3,7 @@
 """Runtime Host Process implementation for ONEX Infrastructure.
 
 This module implements the RuntimeHostProcess class, which is responsible for:
-- Owning and managing an InMemoryEventBus instance
+- Owning and managing an event bus instance (InMemoryEventBus or KafkaEventBus)
 - Registering handlers via the wiring module
 - Subscribing to event bus topics and routing envelopes to handlers
 - Handling errors by producing success=False response envelopes
@@ -12,6 +12,13 @@ This module implements the RuntimeHostProcess class, which is responsible for:
 
 The RuntimeHostProcess is the central coordinator for infrastructure runtime,
 bridging event-driven message routing with protocol handlers.
+
+Event Bus Support:
+    The RuntimeHostProcess supports two event bus implementations:
+    - InMemoryEventBus: For local development and testing
+    - KafkaEventBus: For production use with Kafka/Redpanda
+
+    The event bus can be injected via constructor or auto-created based on config.
 
 Example Usage:
     ```python
@@ -99,8 +106,9 @@ class RuntimeHostProcess:
     """Runtime host process that owns event bus and coordinates handlers.
 
     The RuntimeHostProcess is the central coordinator for ONEX infrastructure
-    runtime. It owns an InMemoryEventBus instance, registers handlers via the
-    wiring module, and routes incoming envelopes to appropriate handlers.
+    runtime. It owns an event bus instance (InMemoryEventBus or KafkaEventBus),
+    registers handlers via the wiring module, and routes incoming envelopes to
+    appropriate handlers.
 
     Container Integration:
         RuntimeHostProcess now accepts a ModelONEXContainer parameter for
@@ -112,7 +120,7 @@ class RuntimeHostProcess:
         in favor of container resolution.
 
     Attributes:
-        event_bus: The owned InMemoryEventBus instance
+        event_bus: The owned event bus instance (InMemoryEventBus or KafkaEventBus)
         is_running: Whether the process is currently running
         input_topic: Topic to subscribe to for incoming envelopes
         output_topic: Topic to publish responses to
@@ -1173,6 +1181,10 @@ class RuntimeHostProcess:
 
         try:
             event_bus_health = await self._event_bus.health_check()
+            # Assert for type narrowing: health_check() returns dict per contract
+            assert isinstance(event_bus_health, dict), (
+                f"health_check() must return dict, got {type(event_bus_health).__name__}"
+            )
             event_bus_healthy = bool(event_bus_health.get("healthy", False))
         except Exception as e:
             # Create infrastructure error context for health check failure

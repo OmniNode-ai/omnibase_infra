@@ -206,7 +206,7 @@ check_required_log "$STARTUP_LOG" "ONEX Runtime Kernel" "Kernel banner displayed
 
 # Check for startup errors (store in variable to handle empty results safely)
 # Exclude false positives: WARNING lines, metric names (validation_error_count, error_count)
-startup_errors=$(grep -i "error\|exception" "$STARTUP_LOG" | grep -v "WARNING" | grep -v "error_count" || true)
+startup_errors=$(grep -i "error\|exception" "$STARTUP_LOG" | grep -v "WARNING" | grep -v "validation_error_count" | grep -v "error_count" || true)
 if [ -n "$startup_errors" ]; then
     log_warning "Startup errors detected:"
     echo "$startup_errors" | head -10
@@ -372,7 +372,7 @@ log_info "Recommended Fix: ${RECOMMENDED_FIX}"
 section_header "Step 8: Error Summary"
 
 log_info "Extracting errors from logs..."
-if grep -i "error\|exception\|failed" "$FULL_LOG" | grep -v "WARNING" | grep -v "validation_error_count" > /tmp/errors.txt; then
+if grep -i "error\|exception\|failed" "$FULL_LOG" | grep -v "WARNING" | grep -v "validation_error_count" | grep -v "error_count" > /tmp/errors.txt; then
     ERROR_COUNT=$(wc -l < /tmp/errors.txt)
     log_warning "Found $ERROR_COUNT error lines:"
     head -20 /tmp/errors.txt
@@ -419,7 +419,7 @@ if [ "$FULL_REPORT" = true ]; then
 
 ### Startup Errors
 \`\`\`
-$(grep -i "error\|exception" "$STARTUP_LOG" | grep -v "WARNING" | head -20 || echo "No errors found")
+$(grep -i "error\|exception" "$STARTUP_LOG" | grep -v "WARNING" | grep -v "validation_error_count" | grep -v "error_count" | head -20 || echo "No errors found")
 \`\`\`
 
 ---
@@ -437,14 +437,14 @@ $(grep -i "error\|exception" "$STARTUP_LOG" | grep -v "WARNING" | head -20 || ec
 
 ### Processing Errors
 \`\`\`
-$(grep -i "error\|exception\|failed" "$FULL_LOG" | grep -v "WARNING" | grep -v "validation_error_count" | head -30 || echo "No errors found")
+$(grep -i "error\|exception\|failed" "$FULL_LOG" | grep -v "WARNING" | grep -v "validation_error_count" | grep -v "error_count" | head -30 || echo "No errors found")
 \`\`\`
 
 ---
 
 ## Correlation IDs
 \`\`\`
-$(grep -oE "correlation_id=[a-f0-9-]+" "$FULL_LOG" | sed 's/correlation_id=//' | sort -u | head -20)
+$(grep -oE "correlation_id=[a-f0-9-]+" "$FULL_LOG" 2>/dev/null | sed 's/correlation_id=//' | sort -u | head -20 || echo "No correlation IDs found")
 \`\`\`
 
 ---

@@ -12,63 +12,24 @@ is 100% driven by contract.yaml. These tests verify:
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-import yaml
 
 from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 # =============================================================================
 # Test Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def simple_mock_container() -> MagicMock:
-    """Create a simple mock ONEX container for orchestrator tests.
-
-    This is a simpler version than the conftest.py mock_container, providing
-    just the basic container.config attribute needed for NodeOrchestrator.
-    """
-    container = MagicMock()
-    container.config = MagicMock()
-    return container
-
-
-@pytest.fixture
-def contract_path() -> Path:
-    """Return path to contract.yaml.
-
-    Raises:
-        pytest.skip: If contract file doesn't exist (allows tests to be skipped gracefully).
-    """
-    path = Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
-    if not path.exists():
-        pytest.skip(f"Contract file not found: {path}")
-    return path
-
-
-@pytest.fixture
-def contract_data(contract_path: Path) -> dict:
-    """Load and return contract.yaml as dict.
-
-    Raises:
-        pytest.skip: If contract file doesn't exist (allows tests to be skipped gracefully).
-        pytest.fail: If contract file contains invalid YAML.
-    """
-    if not contract_path.exists():
-        pytest.skip(f"Contract file not found: {contract_path}")
-
-    with open(contract_path, encoding="utf-8") as f:
-        try:
-            return yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            pytest.fail(f"Invalid YAML in contract file: {e}")
+# Note: simple_mock_container, contract_path, and contract_data fixtures are
+# provided by tests/unit/nodes/conftest.py - no local definition needed.
 
 
 # =============================================================================

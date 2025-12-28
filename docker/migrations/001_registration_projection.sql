@@ -92,8 +92,12 @@ CREATE TABLE IF NOT EXISTS registration_projections (
     -- Node types MUST match omnibase_core.enums.EnumNodeKind values (lowercase serialized form)
     -- Source of truth: omnibase_core/enums/enum_node_kind.py
     -- When EnumNodeKind changes, this constraint MUST be updated to match
-    -- TESTING: Integration tests should validate INSERT with invalid node_type is rejected
-    -- See: tests/integration/test_registration_projection_constraints.py
+    --
+    -- TODO(OMN-892): Create integration test that validates:
+    --   1. INSERT with valid node_type values succeeds
+    --   2. INSERT with invalid node_type is rejected by this constraint
+    --   3. Constraint values match EnumNodeKind enum values from omnibase_core
+    -- Suggested test location: tests/integration/registration/test_projection_constraints.py
     CONSTRAINT valid_node_type CHECK (node_type IN ('effect', 'compute', 'reducer', 'orchestrator'))
 );
 

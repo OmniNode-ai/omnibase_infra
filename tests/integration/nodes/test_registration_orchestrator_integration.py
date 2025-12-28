@@ -31,16 +31,17 @@ Running Tests:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-import yaml
 
 # Fixed timestamp for deterministic tests
 TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
@@ -67,42 +68,8 @@ pytestmark = [
 # =============================================================================
 # Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def simple_mock_container() -> MagicMock:
-    """Create a simple mock ONEX container for orchestrator integration tests.
-
-    This is a simpler version than the conftest.py mock_container, providing
-    just the basic container.config attribute needed for NodeOrchestrator.
-    """
-    container = MagicMock()
-    container.config = MagicMock()
-    return container
-
-
-@pytest.fixture
-def contract_path() -> Path:
-    """Return path to contract.yaml."""
-    return Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
-
-
-@pytest.fixture
-def contract_data(contract_path: Path) -> dict:
-    """Load and return contract.yaml as dict.
-
-    Raises:
-        pytest.skip: If contract file doesn't exist (allows tests to be skipped gracefully).
-        yaml.YAMLError: If contract file contains invalid YAML.
-    """
-    if not contract_path.exists():
-        pytest.skip(f"Contract file not found: {contract_path}")
-
-    with open(contract_path, encoding="utf-8") as f:
-        try:
-            return yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            pytest.fail(f"Invalid YAML in contract file: {e}")
+# Note: simple_mock_container, contract_path, and contract_data fixtures are
+# provided by tests/integration/nodes/conftest.py - no local definition needed.
 
 
 # =============================================================================

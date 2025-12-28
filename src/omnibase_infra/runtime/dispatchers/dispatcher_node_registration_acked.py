@@ -154,19 +154,22 @@ class DispatcherNodeRegistrationAcked:
                 if isinstance(payload, dict):
                     payload = ModelNodeRegistrationAcked.model_validate(payload)
                 else:
+                    completed_at = datetime.now(UTC)
                     return ModelDispatchResult(
                         dispatch_id=uuid4(),
                         status=EnumDispatchStatus.INVALID_MESSAGE,
                         topic="node.registration.acked",
                         dispatcher_id=self.dispatcher_id,
                         started_at=started_at,
-                        completed_at=datetime.now(UTC),
-                        duration_ms=(datetime.now(UTC) - started_at).total_seconds()
-                        * 1000,
+                        completed_at=completed_at,
+                        duration_ms=(completed_at - started_at).total_seconds() * 1000,
                         error_message=f"Expected ModelNodeRegistrationAcked payload, "
                         f"got {type(payload).__name__}",
                         correlation_id=correlation_id,
                     )
+
+            # Assert helps type narrowing after isinstance/model_validate
+            assert isinstance(payload, ModelNodeRegistrationAcked)
 
             # Get current time for handler
             now = datetime.now(UTC)

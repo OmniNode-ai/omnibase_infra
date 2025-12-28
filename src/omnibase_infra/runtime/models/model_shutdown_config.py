@@ -16,7 +16,20 @@ class ModelShutdownConfig(BaseModel):
     Defines graceful shutdown parameters.
 
     Attributes:
-        grace_period_seconds: Time in seconds to wait for graceful shutdown
+        grace_period_seconds: Time in seconds to wait for graceful shutdown.
+            Must be >= 0. A value of 0 means immediate shutdown with no grace
+            period (use with caution as in-flight operations may be interrupted).
+
+    Edge Cases:
+        - 0: Immediate shutdown, no waiting for in-flight operations
+        - Very large values (>3600): May cause delayed shutdowns; consider using
+          reasonable timeouts (30-120 seconds recommended for most use cases)
+        - Negative values: Rejected by Pydantic validation (ge=0 constraint)
+
+    Production Recommendation:
+        Set grace_period_seconds between 30-120 seconds for production deployments
+        to allow sufficient time for in-flight operations while preventing excessive
+        delays during shutdown sequences.
     """
 
     model_config = ConfigDict(
@@ -29,7 +42,8 @@ class ModelShutdownConfig(BaseModel):
     grace_period_seconds: int = Field(
         default=30,
         ge=0,
-        description="Time in seconds to wait for graceful shutdown",
+        le=3600,  # Max 1 hour to prevent accidental excessive delays
+        description="Time in seconds to wait for graceful shutdown (0-3600)",
     )
 
 

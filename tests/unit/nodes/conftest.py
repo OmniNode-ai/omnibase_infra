@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -270,6 +271,39 @@ def dependencies(contract_data: dict) -> list[dict]:
 
 
 # =============================================================================
+# Container Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def simple_mock_container() -> MagicMock:
+    """Create a simple mock ONEX container for orchestrator tests.
+
+    This provides a minimal mock container with just the basic
+    container.config attribute needed for NodeOrchestrator initialization.
+    Use this for unit tests that don't need full container wiring.
+
+    For integration tests requiring real container behavior, use
+    the container_with_registries fixture from tests/conftest.py.
+
+    Returns:
+        MagicMock configured with minimal container.config attribute.
+
+    Example::
+
+        def test_orchestrator_creates(simple_mock_container: MagicMock) -> None:
+            orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
+            assert orchestrator is not None
+
+    """
+    from unittest.mock import MagicMock
+
+    container = MagicMock()
+    container.config = MagicMock()
+    return container
+
+
+# =============================================================================
 # Module Exports
 # =============================================================================
 
@@ -283,4 +317,5 @@ __all__ = [
     "node_module_path",
     "node_source_code",
     "published_events",
+    "simple_mock_container",
 ]
