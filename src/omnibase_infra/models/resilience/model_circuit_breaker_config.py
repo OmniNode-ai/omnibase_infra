@@ -150,9 +150,9 @@ class ModelCircuitBreakerConfig(BaseModel):
 
         Environment Variables:
             {prefix}_THRESHOLD: Maximum consecutive failures before opening circuit.
-                Must be >= 1. Default: 5.
+                Must be >= 1 and <= 1000. Default: 5.
             {prefix}_RESET_TIMEOUT: Seconds before auto-reset from OPEN to HALF_OPEN.
-                Must be >= 0. Default: 60.0.
+                Must be >= 0 and <= 3600 (1 hour). Default: 60.0.
 
         Args:
             service_name: Service identifier for error context and logging.
@@ -203,6 +203,7 @@ class ModelCircuitBreakerConfig(BaseModel):
             threshold_var,
             5,
             min_value=1,
+            max_value=1000,
             transport_type=transport_type,
             service_name=service_name,
         )
@@ -210,6 +211,7 @@ class ModelCircuitBreakerConfig(BaseModel):
             reset_timeout_var,
             60.0,
             min_value=0.0,
+            max_value=3600.0,
             transport_type=transport_type,
             service_name=service_name,
         )

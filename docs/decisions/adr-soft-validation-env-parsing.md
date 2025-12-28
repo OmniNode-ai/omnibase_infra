@@ -74,9 +74,20 @@ Both functions:
 
 ### Warning Message Format
 
+The format specifier differs by type:
+
+**For `parse_env_float`** (uses `%f` for float values):
 ```python
 logger.warning(
     "Environment variable %s value %f is below minimum %f, using default %f",
+    env_var, parsed, min_value, default,
+)
+```
+
+**For `parse_env_int`** (uses `%d` for integer values):
+```python
+logger.warning(
+    "Environment variable %s value %d is below minimum %d, using default %d",
     env_var, parsed, min_value, default,
 )
 ```
@@ -131,7 +142,7 @@ Log warning and use default for out-of-range values.
 - **Clear operator feedback**: Warning logs provide actionable information
 - **Safe defaults**: The system degrades gracefully to known-good values
 - **Type safety maintained**: Invalid types still fail fast with exceptions
-- **Security**: Type errors redact values in error messages (`value="[REDACTED]"`) to prevent credential exposure; range validation warnings do log the actual numeric value since it has already been successfully parsed as the expected type
+- **Security**: Type errors redact values in error messages (`value="[REDACTED]"`) to prevent credential exposure; range validation warnings do log the actual numeric value since it has already been successfully parsed as the expected type. **Rationale**: Once a value has been successfully parsed as a number (int or float), it cannot contain credentials like passwords, API keys, or connection strings - those would have failed type parsing. A successfully parsed numeric value (e.g., `0.5`, `999`) is inherently non-sensitive and safe to log for debugging purposes.
 
 ### Negative
 

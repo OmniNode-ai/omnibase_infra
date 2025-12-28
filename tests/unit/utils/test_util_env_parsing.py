@@ -923,6 +923,8 @@ class TestDifferentTransportTypes:
             EnumInfraTransportType.CONSUL,
             EnumInfraTransportType.VAULT,
             EnumInfraTransportType.VALKEY,
+            EnumInfraTransportType.GRPC,
+            EnumInfraTransportType.RUNTIME,
         ],
     )
     def test_parse_env_int_captures_transport_type(
@@ -950,6 +952,8 @@ class TestDifferentTransportTypes:
             EnumInfraTransportType.CONSUL,
             EnumInfraTransportType.VAULT,
             EnumInfraTransportType.VALKEY,
+            EnumInfraTransportType.GRPC,
+            EnumInfraTransportType.RUNTIME,
         ],
     )
     def test_parse_env_float_captures_transport_type(
@@ -967,3 +971,147 @@ class TestDifferentTransportTypes:
 
             error = exc_info.value
             assert error.model.context["transport_type"] == transport_type
+
+
+@pytest.mark.unit
+class TestGrpcAndRuntimeTransportTypes:
+    """Test suite for GRPC and RUNTIME transport types.
+
+    These tests verify that the newer GRPC and RUNTIME transport types
+    work correctly with the env parsing utilities, including:
+    - Valid value parsing
+    - Error context inclusion
+    - Range validation
+
+    Added per PR #106 review feedback to ensure complete transport type coverage.
+    """
+
+    def test_parse_env_int_with_grpc_transport_type(self) -> None:
+        """Test parse_env_int works with GRPC transport type."""
+        with patch.dict(os.environ, {"GRPC_PORT": "50051"}, clear=True):
+            result = parse_env_int(
+                "GRPC_PORT",
+                default=50050,
+                transport_type=EnumInfraTransportType.GRPC,
+                service_name="grpc_service",
+            )
+
+            assert result == 50051
+
+    def test_parse_env_int_with_runtime_transport_type(self) -> None:
+        """Test parse_env_int works with RUNTIME transport type."""
+        with patch.dict(os.environ, {"RUNTIME_WORKERS": "4"}, clear=True):
+            result = parse_env_int(
+                "RUNTIME_WORKERS",
+                default=2,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                service_name="runtime_host",
+            )
+
+            assert result == 4
+
+    def test_parse_env_float_with_grpc_transport_type(self) -> None:
+        """Test parse_env_float works with GRPC transport type."""
+        with patch.dict(os.environ, {"GRPC_TIMEOUT": "30.5"}, clear=True):
+            result = parse_env_float(
+                "GRPC_TIMEOUT",
+                default=60.0,
+                transport_type=EnumInfraTransportType.GRPC,
+                service_name="grpc_service",
+            )
+
+            assert result == 30.5
+
+    def test_parse_env_float_with_runtime_transport_type(self) -> None:
+        """Test parse_env_float works with RUNTIME transport type."""
+        with patch.dict(os.environ, {"RUNTIME_SCALE_FACTOR": "1.5"}, clear=True):
+            result = parse_env_float(
+                "RUNTIME_SCALE_FACTOR",
+                default=1.0,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                service_name="runtime_host",
+            )
+
+            assert result == 1.5
+
+    def test_grpc_transport_type_in_error_context(self) -> None:
+        """Test GRPC transport type is correctly included in error context."""
+        with patch.dict(os.environ, {"GRPC_PORT": "invalid"}, clear=True):
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                parse_env_int(
+                    "GRPC_PORT",
+                    default=50050,
+                    transport_type=EnumInfraTransportType.GRPC,
+                    service_name="grpc_service",
+                )
+
+            error = exc_info.value
+            assert error.model.context["transport_type"] == EnumInfraTransportType.GRPC
+            assert error.model.context["target_name"] == "grpc_service"
+            assert "GRPC_PORT" in error.message
+
+    def test_runtime_transport_type_in_error_context(self) -> None:
+        """Test RUNTIME transport type is correctly included in error context."""
+        with patch.dict(os.environ, {"RUNTIME_WORKERS": "invalid"}, clear=True):
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                parse_env_int(
+                    "RUNTIME_WORKERS",
+                    default=2,
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    service_name="runtime_host",
+                )
+
+            error = exc_info.value
+            assert (
+                error.model.context["transport_type"] == EnumInfraTransportType.RUNTIME
+            )
+            assert error.model.context["target_name"] == "runtime_host"
+            assert "RUNTIME_WORKERS" in error.message
+
+    def test_grpc_transport_type_with_range_validation(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test GRPC transport type works with range validation."""
+        with patch.dict(os.environ, {"GRPC_PORT": "100"}, clear=True):
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_int(
+                    "GRPC_PORT",
+                    default=50050,
+                    min_value=1024,
+                    max_value=65535,
+                    transport_type=EnumInfraTransportType.GRPC,
+                    service_name="grpc_service",
+                )
+
+            # Value below minimum should use default
+            assert result == 50050
+            assert "GRPC_PORT" in caplog.text
+            assert "below minimum" in caplog.text
+
+    def test_runtime_transport_type_with_range_validation(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test RUNTIME transport type works with range validation."""
+        with patch.dict(os.environ, {"RUNTIME_SCALE_FACTOR": "100.0"}, clear=True):
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_float(
+                    "RUNTIME_SCALE_FACTOR",
+                    default=1.0,
+                    min_value=0.1,
+                    max_value=10.0,
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    service_name="runtime_host",
+                )
+
+            # Value above maximum should use default
+            assert result == 1.0
+            assert "RUNTIME_SCALE_FACTOR" in caplog.text
+            assert "above maximum" in caplog.text
+
+    def test_grpc_transport_type_string_value(self) -> None:
+        """Test GRPC transport type has correct string value."""
+        assert EnumInfraTransportType.GRPC.value == "grpc"
+
+    def test_runtime_transport_type_string_value(self) -> None:
+        """Test RUNTIME transport type has correct string value."""
+        assert EnumInfraTransportType.RUNTIME.value == "runtime"

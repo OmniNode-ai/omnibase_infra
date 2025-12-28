@@ -16,7 +16,7 @@ Test Organization:
     - TestModelCircuitBreakerConfigFromEnv: Environment variable loading (11 tests)
     - TestModelCircuitBreakerConfigFromEnvErrors: Error cases for from_env() (9 tests)
     - TestModelCircuitBreakerConfigFromEnvErrorContext: Error context validation (11 tests)
-    - TestModelCircuitBreakerConfigEdgeCases: Edge cases and boundary conditions (14 tests)
+    - TestModelCircuitBreakerConfigEdgeCases: Edge cases and boundary conditions (16 tests)
 
 Coverage Goals:
     - >90% code coverage for model
@@ -550,14 +550,40 @@ class TestModelCircuitBreakerConfigEdgeCases:
                 assert "ONEX_CB_THRESHOLD" in caplog.text
                 assert "below minimum" in caplog.text
 
-    def test_from_env_very_large_threshold(self) -> None:
-        """Test from_env handles very large threshold values."""
-        with patch.dict(os.environ, {"ONEX_CB_THRESHOLD": "1000000"}, clear=True):
+    def test_from_env_threshold_at_maximum(self) -> None:
+        """Test from_env accepts threshold values at the maximum (1000)."""
+        with patch.dict(os.environ, {"ONEX_CB_THRESHOLD": "1000"}, clear=True):
             config = ModelCircuitBreakerConfig.from_env(
                 service_name="test_service",
                 transport_type=EnumInfraTransportType.HTTP,
             )
-            assert config.threshold == 1000000
+            assert config.threshold == 1000
+
+    def test_from_env_threshold_above_maximum_uses_default(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test threshold above maximum logs warning and uses default value.
+
+        The parse_env_int utility validates ranges and falls back to default
+        with a warning. max_value=1000 is enforced, so 1001+ triggers fallback.
+        """
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            with patch.dict(os.environ, {"ONEX_CB_THRESHOLD": "1001"}, clear=True):
+                config = ModelCircuitBreakerConfig.from_env(
+                    service_name="test_service",
+                    transport_type=EnumInfraTransportType.HTTP,
+                )
+
+                # Verify default is used
+                assert config.threshold == 5  # default value
+
+                # Verify warning was logged
+                assert "ONEX_CB_THRESHOLD" in caplog.text
+                assert "above maximum" in caplog.text
+                assert "1001" in caplog.text
 
     def test_from_env_scientific_notation_timeout(self) -> None:
         """Test from_env handles scientific notation for timeout."""
@@ -638,14 +664,41 @@ class TestModelCircuitBreakerConfigEdgeCases:
                 assert "ONEX_CB_RESET_TIMEOUT" in caplog.text
                 assert "below minimum" in caplog.text
 
-    def test_from_env_very_large_timeout(self) -> None:
-        """Test from_env handles very large timeout values."""
-        with patch.dict(os.environ, {"ONEX_CB_RESET_TIMEOUT": "86400.0"}, clear=True):
+    def test_from_env_reset_timeout_at_maximum(self) -> None:
+        """Test from_env accepts reset_timeout values at the maximum (3600 = 1 hour)."""
+        with patch.dict(os.environ, {"ONEX_CB_RESET_TIMEOUT": "3600.0"}, clear=True):
             config = ModelCircuitBreakerConfig.from_env(
                 service_name="test_service",
                 transport_type=EnumInfraTransportType.HTTP,
             )
-            assert config.reset_timeout_seconds == 86400.0  # 24 hours
+            assert config.reset_timeout_seconds == 3600.0  # 1 hour
+
+    def test_from_env_reset_timeout_above_maximum_uses_default(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test reset_timeout above maximum logs warning and uses default value.
+
+        The parse_env_float utility validates ranges and falls back to default
+        with a warning. max_value=3600.0 is enforced, so values above trigger fallback.
+        """
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            with patch.dict(
+                os.environ, {"ONEX_CB_RESET_TIMEOUT": "3601.0"}, clear=True
+            ):
+                config = ModelCircuitBreakerConfig.from_env(
+                    service_name="test_service",
+                    transport_type=EnumInfraTransportType.HTTP,
+                )
+
+                # Verify default is used
+                assert config.reset_timeout_seconds == 60.0  # default value
+
+                # Verify warning was logged
+                assert "ONEX_CB_RESET_TIMEOUT" in caplog.text
+                assert "above maximum" in caplog.text
 
     def test_from_env_whitespace_around_valid_threshold(self) -> None:
         """Test from_env handles whitespace around valid threshold values.
