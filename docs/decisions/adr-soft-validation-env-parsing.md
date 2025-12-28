@@ -179,19 +179,29 @@ Environment variable {VAR} value {VALUE} is above maximum {MAX}, using default {
 The behavior is verified in `tests/unit/handlers/test_handler_http_env.py`:
 
 ```python
-def test_timeout_below_minimum_uses_default(self, caplog):
+# Constants matching the HTTP handler configuration
+_HTTP_TIMEOUT_DEFAULT: float = 30.0
+_HTTP_TIMEOUT_MIN: float = 1.0
+_HTTP_TIMEOUT_MAX: float = 300.0
+
+def test_timeout_below_minimum_uses_default(
+    self, caplog: pytest.LogCaptureFixture
+) -> None:
     """Test timeout below minimum (1.0s) uses default with warning logged."""
-    with patch.dict(os.environ, {"ONEX_HTTP_TIMEOUT": "0.5"}):
-        result = parse_env_float(
-            "ONEX_HTTP_TIMEOUT",
-            30.0,
-            min_value=1.0,
-            max_value=300.0,
-            transport_type=EnumInfraTransportType.HTTP,
-            service_name="http_handler",
-        )
-    assert result == 30.0
-    assert "below minimum" in caplog.text
+    with patch.dict(os.environ, {"ONEX_HTTP_TIMEOUT": "0.5"}, clear=True):
+        with caplog.at_level(logging.WARNING):
+            result = parse_env_float(
+                "ONEX_HTTP_TIMEOUT",
+                _HTTP_TIMEOUT_DEFAULT,
+                min_value=_HTTP_TIMEOUT_MIN,
+                max_value=_HTTP_TIMEOUT_MAX,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="http_handler",
+            )
+
+        assert result == 30.0
+        assert "ONEX_HTTP_TIMEOUT" in caplog.text
+        assert "below minimum" in caplog.text
 ```
 
 ## References
