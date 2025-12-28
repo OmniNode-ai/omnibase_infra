@@ -235,7 +235,9 @@ async def verify_postgres_registration(
         ModelRegistrationProjection if found, None otherwise.
     """
     try:
-        return await projection_reader.get_entity_state(node_id, domain)
+        return await projection_reader.get_entity_state(
+            node_id, domain, correlation_id=correlation_id
+        )
     except (TimeoutError, ConnectionError, OSError) as e:
         # Expected network/database connection errors
         logger.debug(

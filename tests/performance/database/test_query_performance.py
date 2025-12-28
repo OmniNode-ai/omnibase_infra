@@ -103,7 +103,11 @@ class TestUpdatedAtIndexUsage:
             assert exec_time < 50.0, f"Query took {exec_time:.2f}ms, expected < 50ms"
 
         print("\nRecent changes query performance:")
-        print(f"  Execution time: {exec_time:.2f}ms" if exec_time else "  N/A")
+        print(
+            f"  Execution time: {exec_time:.2f}ms"
+            if exec_time is not None
+            else "  Execution time: N/A"
+        )
         print(f"  Actual rows: {result.get_actual_rows()}")
         print(f"  Indexes used: {result.get_index_names()}")
 
@@ -363,7 +367,11 @@ class TestQueryPerformanceThresholds:
             )
 
         print("\nPrimary key lookup performance:")
-        print(f"  Execution time: {exec_time:.2f}ms" if exec_time else "  N/A")
+        print(
+            f"  Execution time: {exec_time:.2f}ms"
+            if exec_time is not None
+            else "  Execution time: N/A"
+        )
 
     async def test_count_by_state_performance(
         self,
@@ -393,7 +401,11 @@ class TestQueryPerformanceThresholds:
             )
 
         print("\nCount by state performance:")
-        print(f"  Execution time: {exec_time:.2f}ms" if exec_time else "  N/A")
+        print(
+            f"  Execution time: {exec_time:.2f}ms"
+            if exec_time is not None
+            else "  Execution time: N/A"
+        )
 
     async def test_audit_count_by_time_performance(
         self,
@@ -433,7 +445,11 @@ class TestQueryPerformanceThresholds:
             )
 
         print("\nAudit count by time performance:")
-        print(f"  Execution time: {exec_time:.2f}ms" if exec_time else "  N/A")
+        print(
+            f"  Execution time: {exec_time:.2f}ms"
+            if exec_time is not None
+            else "  Execution time: N/A"
+        )
         print(f"  Indexes used: {result.get_index_names()}")
 
 

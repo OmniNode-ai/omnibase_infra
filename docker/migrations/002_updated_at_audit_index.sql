@@ -34,6 +34,9 @@
 --                WHERE updated_at >= :start AND updated_at < :end
 --                ORDER BY updated_at DESC
 -- This is the primary audit index for retrieving changes in a time window.
+-- NOTE: This is a FULL TABLE index (no WHERE clause) - indexes ALL rows.
+--       Audit queries need complete history, unlike the partial indexes in
+--       001_registration_projection.sql which only index specific row subsets.
 CREATE INDEX IF NOT EXISTS idx_registration_updated_at
     ON registration_projections (updated_at DESC);
 
@@ -42,6 +45,8 @@ CREATE INDEX IF NOT EXISTS idx_registration_updated_at
 --                WHERE current_state = :state AND updated_at >= :since
 --                ORDER BY updated_at DESC
 -- Optimizes queries like "find all entities that became 'active' in the last hour"
+-- NOTE: This is a FULL TABLE composite index (no WHERE clause) - indexes ALL rows.
+--       Enables efficient filtering by state with time ordering for audit purposes.
 CREATE INDEX IF NOT EXISTS idx_registration_state_updated_at
     ON registration_projections (current_state, updated_at DESC);
 
@@ -60,11 +65,13 @@ CREATE INDEX IF NOT EXISTS idx_registration_state_updated_at
 -- =============================================================================
 
 COMMENT ON INDEX idx_registration_updated_at IS
-    'B-tree index on updated_at (DESC) for efficient time-range audit queries. '
+    'FULL TABLE B-tree index on updated_at (DESC) for time-range audit queries. '
+    'No WHERE clause - indexes ALL rows for complete audit history. '
     'Supports compliance reporting and debugging recent changes.';
 
 COMMENT ON INDEX idx_registration_state_updated_at IS
-    'Composite index on (current_state, updated_at DESC) for state-based audit queries. '
+    'FULL TABLE composite index on (current_state, updated_at DESC) for state-based audits. '
+    'No WHERE clause - indexes ALL rows unlike partial indexes in 001_registration_projection.sql. '
     'Enables efficient queries like "all entities entering state X since time Y".';
 
 -- =============================================================================
@@ -131,7 +138,16 @@ COMMENT ON INDEX idx_registration_state_updated_at IS
 -- =============================================================================
 -- INDEX MAINTENANCE NOTES
 -- =============================================================================
--- B-tree indexes on timestamp columns may become bloated with high UPDATE frequency.
--- Monitor index size with: SELECT pg_size_pretty(pg_relation_size('idx_registration_updated_at'));
--- Consider REINDEX CONCURRENTLY during maintenance windows if bloat exceeds 50%.
--- PostgreSQL 12+ supports REINDEX CONCURRENTLY for online index rebuild.
+-- These are FULL TABLE B-tree indexes (no WHERE clause), NOT partial indexes.
+-- They index ALL rows in registration_projections for complete audit coverage.
+--
+-- Maintenance considerations:
+-- 1. BLOAT: B-tree indexes on timestamp columns may become bloated with high
+--    UPDATE frequency. Monitor size with:
+--    SELECT pg_size_pretty(pg_relation_size('idx_registration_updated_at'));
+-- 2. REINDEX: Consider REINDEX CONCURRENTLY during maintenance windows if
+--    bloat exceeds 50%. PostgreSQL 12+ supports online rebuild.
+-- 3. STORAGE: Full table indexes consume more space than partial indexes.
+--    For a table with N rows, these indexes will have N entries each.
+--    Compare with partial indexes in 001_registration_projection.sql which
+--    only index row subsets matching their WHERE clauses.

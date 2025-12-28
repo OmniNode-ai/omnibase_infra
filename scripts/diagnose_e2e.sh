@@ -15,6 +15,13 @@
 #   --full-report  Generate comprehensive diagnostic report
 #   --help         Show this help message
 #
+# Portability:
+#   This script is designed to work on both GNU (Linux) and BSD (macOS) systems.
+#   All grep options used are POSIX-compatible or widely supported:
+#     -E (extended regex), -i (case insensitive), -v (invert), -q (quiet)
+#     -A (after context) is supported by both GNU and BSD grep
+#   Character classes use POSIX syntax: [[:space:]] instead of \s
+#
 # Output:
 #   - Test results printed to console
 #   - Logs saved to /tmp/e2e_diagnostic_*
@@ -211,15 +218,19 @@ check_required_log "$STARTUP_LOG" "ONEX Runtime Kernel" "Kernel banner displayed
 # Check for startup errors (store in variable to handle empty results safely)
 # Exclude false positives (case-insensitive to match the case-insensitive search):
 #   - WARNING lines (not errors)
-#   - Metric names: *_error_count, errors_total (prometheus metrics)
-#   - Method references: record_error (logging method)
-#   - Zero counts: error_count=0, "error_count": 0 (no actual errors)
+#   - Metric names: *_error_count, *_errors_total, errors_total (prometheus metrics)
+#   - Method/function references: record_error, on_error, handle_error, error_handler (code references)
+#   - Class names: ErrorHandler, ErrorContext, OnexError (type references, not actual errors)
+#   - Zero counts: error_count=0, "error_count": 0, "errors": 0 (no actual errors)
+#   - Debug log patterns: has_error=False, error=None (status checks, not errors)
 # Note: Use -Eiv (case-insensitive exclusion) to match -Ei search pattern
 # Note: Use -E (ERE) for portability across GNU and BSD grep (macOS)
 # Note: Use intermediate file to avoid pipefail issues with empty grep results
 startup_errors=""
-if grep -Ei "error|exception" "$STARTUP_LOG" > /tmp/startup_errors_raw.txt 2>/dev/null; then
-    startup_errors=$(grep -Eiv 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/startup_errors_raw.txt 2>/dev/null || true)
+: > /tmp/startup_errors_raw.txt  # Create/truncate temp file
+if grep -Ei "error|exception" "$STARTUP_LOG" >> /tmp/startup_errors_raw.txt 2>/dev/null; then
+    # Apply comprehensive exclusion filter for false positives
+    startup_errors=$(grep -Eiv 'WARNING|_error_count|_errors_total|errors_total|record_error|on_error|handle_error|error_handler|ErrorHandler|ErrorContext|OnexError|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0|"errors":[[:space:]]*0|has_error[[:space:]]*=[[:space:]]*(False|false)|error[[:space:]]*=[[:space:]]*None' /tmp/startup_errors_raw.txt 2>/dev/null) || true
 fi
 if [ -n "$startup_errors" ]; then
     log_warning "Startup errors detected:"
@@ -389,9 +400,11 @@ log_info "Extracting errors from logs..."
 # Note: Use -Eiv (case-insensitive exclusion) to match -Ei search pattern
 # Note: Use -E (ERE) for portability across GNU and BSD grep (macOS)
 # Note: Use intermediate file to avoid pipefail issues with empty grep results
+# Exclusions match startup error detection for consistency
 : > /tmp/errors.txt  # Create empty file
-if grep -Ei "error|exception|failed" "$FULL_LOG" > /tmp/errors_raw.txt 2>/dev/null; then
-    grep -Eiv 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/errors_raw.txt > /tmp/errors.txt 2>/dev/null || true
+: > /tmp/errors_raw.txt  # Create/truncate temp file
+if grep -Ei "error|exception|failed" "$FULL_LOG" >> /tmp/errors_raw.txt 2>/dev/null; then
+    grep -Eiv 'WARNING|_error_count|_errors_total|errors_total|record_error|on_error|handle_error|error_handler|ErrorHandler|ErrorContext|OnexError|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0|"errors":[[:space:]]*0|has_error[[:space:]]*=[[:space:]]*(False|false)|error[[:space:]]*=[[:space:]]*None' /tmp/errors_raw.txt > /tmp/errors.txt 2>/dev/null || true
 fi
 if [ -s /tmp/errors.txt ]; then
     ERROR_COUNT=$(wc -l < /tmp/errors.txt)
@@ -418,25 +431,40 @@ if [ "$FULL_REPORT" = true ]; then
     # Note: Use intermediate files and explicit || true to handle pipefail safely
 
     # Startup errors - two-stage grep to avoid pipefail with empty results
+    # Note: Create temp file first to ensure it exists, avoiding pipefail issues
+    # Exclusions match startup error detection for consistency
     REPORT_STARTUP_ERRORS=""
-    if grep -Ei "error|exception" "$STARTUP_LOG" > /tmp/report_startup_raw.txt 2>/dev/null; then
-        REPORT_STARTUP_ERRORS=$(grep -Eiv 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/report_startup_raw.txt 2>/dev/null | head -20 || true)
+    : > /tmp/report_startup_raw.txt  # Create/truncate temp file
+    if grep -Ei "error|exception" "$STARTUP_LOG" >> /tmp/report_startup_raw.txt 2>/dev/null; then
+        REPORT_STARTUP_ERRORS=$(grep -Eiv 'WARNING|_error_count|_errors_total|errors_total|record_error|on_error|handle_error|error_handler|ErrorHandler|ErrorContext|OnexError|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0|"errors":[[:space:]]*0|has_error[[:space:]]*=[[:space:]]*(False|false)|error[[:space:]]*=[[:space:]]*None' /tmp/report_startup_raw.txt 2>/dev/null | head -20) || true
     fi
-    [ -z "$REPORT_STARTUP_ERRORS" ] && REPORT_STARTUP_ERRORS="No errors found"
+    if [ -z "$REPORT_STARTUP_ERRORS" ]; then
+        REPORT_STARTUP_ERRORS="No errors found"
+    fi
 
     # Processing errors - two-stage grep to avoid pipefail with empty results
+    # Note: Create temp file first to ensure it exists, avoiding pipefail issues
+    # Exclusions match error summary for consistency
     REPORT_PROCESSING_ERRORS=""
-    if grep -Ei "error|exception|failed" "$FULL_LOG" > /tmp/report_processing_raw.txt 2>/dev/null; then
-        REPORT_PROCESSING_ERRORS=$(grep -Eiv 'WARNING|_error_count|errors_total|record_error|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0' /tmp/report_processing_raw.txt 2>/dev/null | head -30 || true)
+    : > /tmp/report_processing_raw.txt  # Create/truncate temp file
+    if grep -Ei "error|exception|failed" "$FULL_LOG" >> /tmp/report_processing_raw.txt 2>/dev/null; then
+        REPORT_PROCESSING_ERRORS=$(grep -Eiv 'WARNING|_error_count|_errors_total|errors_total|record_error|on_error|handle_error|error_handler|ErrorHandler|ErrorContext|OnexError|"error_count":[[:space:]]*0|error_count[[:space:]]*=[[:space:]]*0|"errors":[[:space:]]*0|has_error[[:space:]]*=[[:space:]]*(False|false)|error[[:space:]]*=[[:space:]]*None' /tmp/report_processing_raw.txt 2>/dev/null | head -30) || true
     fi
-    [ -z "$REPORT_PROCESSING_ERRORS" ] && REPORT_PROCESSING_ERRORS="No errors found"
+    if [ -z "$REPORT_PROCESSING_ERRORS" ]; then
+        REPORT_PROCESSING_ERRORS="No errors found"
+    fi
 
     # Correlation IDs - two-stage grep to avoid pipefail issues with empty results
+    # Note: Create temp file first to ensure it exists, avoiding pipefail with empty grep results
     REPORT_CORRELATION_IDS=""
-    if grep -E "correlation_id=[a-f0-9-]+" "$FULL_LOG" > /tmp/report_correlation_raw.txt 2>/dev/null; then
-        REPORT_CORRELATION_IDS=$(sed 's/.*correlation_id=\([a-f0-9-]*\).*/\1/' /tmp/report_correlation_raw.txt | sort -u | head -20 || true)
+    : > /tmp/report_correlation_raw.txt  # Create/truncate temp file
+    if grep -E "correlation_id=[a-f0-9-]+" "$FULL_LOG" >> /tmp/report_correlation_raw.txt 2>/dev/null; then
+        # File has content - extract unique IDs
+        REPORT_CORRELATION_IDS=$(sed 's/.*correlation_id=\([a-f0-9-]*\).*/\1/' /tmp/report_correlation_raw.txt 2>/dev/null | sort -u 2>/dev/null | head -20 2>/dev/null) || true
     fi
-    [ -z "$REPORT_CORRELATION_IDS" ] && REPORT_CORRELATION_IDS="No correlation IDs found"
+    if [ -z "$REPORT_CORRELATION_IDS" ]; then
+        REPORT_CORRELATION_IDS="No correlation IDs found"
+    fi
 
     # Assertion details - grep with context, || true for empty results
     # Note: -A (after context) is supported by GNU and BSD grep (including macOS)
@@ -528,7 +556,13 @@ ${REPORT_CALLBACK_LOGS}
 
 ### Recent Projections
 \`\`\`
-$(docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d omninode_bridge -c "SELECT entity_id, node_type, registration_phase, created_at FROM registration_projections ORDER BY created_at DESC LIMIT 10;" 2>/dev/null || echo "Unable to query database")
+$(docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d omninode_bridge -c "SELECT entity_id, node_type, registration_phase, created_at FROM registration_projections ORDER BY created_at DESC LIMIT 10;" 2>&1 || echo "ERROR: Failed to query registration_projections table.
+Possible causes:
+  - PostgreSQL container 'postgres' is not running (check: docker compose ps postgres)
+  - Database 'omninode_bridge' does not exist
+  - Table 'registration_projections' does not exist (run migrations)
+  - Network connectivity issue between containers
+Run 'docker compose -f $COMPOSE_FILE logs postgres' for container logs.")
 \`\`\`
 
 ---

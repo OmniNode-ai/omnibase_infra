@@ -40,6 +40,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
@@ -94,10 +95,33 @@ pytestmark = [
 # Test Topic Constants
 # =============================================================================
 
-# Test-specific topic to avoid interference with other tests and runtime.
-# This is intentionally hardcoded (not from env) to ensure test isolation.
-# The runtime uses ONEX_INPUT_TOPIC env var; these tests use a separate topic.
-TEST_INTROSPECTION_TOPIC = "e2e-test.node.introspection.v1"
+# Base topic name for E2E tests. In parallel execution, use get_test_topic()
+# to get a unique topic name per test session/worker.
+_BASE_TEST_TOPIC = "e2e-test.node.introspection.v1"
+
+# Session-unique suffix for test isolation in parallel execution.
+# Generated once at module load time to ensure all tests in the same
+# session/worker use the same topic while different workers use different topics.
+_TEST_SESSION_ID = uuid4().hex[:8]
+
+
+def get_test_topic(base_topic: str = _BASE_TEST_TOPIC) -> str:
+    """Get a unique topic name for test isolation.
+
+    In parallel test execution (e.g., pytest-xdist), each worker will have
+    a unique session ID, ensuring topic isolation between workers.
+
+    Args:
+        base_topic: Base topic name to extend with session ID.
+
+    Returns:
+        Topic name with session-unique suffix.
+    """
+    return f"{base_topic}.{_TEST_SESSION_ID}"
+
+
+# Default test topic - unique per test session for parallel execution safety.
+TEST_INTROSPECTION_TOPIC = get_test_topic()
 
 
 # =============================================================================
@@ -141,6 +165,9 @@ class OrchestratorPipeline:
         self._processed_events: list[UUID] = []
         self._processing_lock = asyncio.Lock()
         self._processing_errors: list[Exception] = []
+        # Sequence counter for ordering guarantees across multiple events.
+        # Starts at 0 and increments for each processed event.
+        self._sequence_counter: int = 0
 
     @property
     def processed_events(self) -> list[UUID]:
@@ -314,6 +341,15 @@ class OrchestratorPipeline:
             },
         )
 
+    def _next_sequence(self) -> int:
+        """Get the next sequence number for event ordering.
+
+        Returns:
+            Incrementing sequence number (1-based).
+        """
+        self._sequence_counter += 1
+        return self._sequence_counter
+
     async def _persist_projection(
         self,
         event: ModelNodeIntrospectionEvent,
@@ -332,8 +368,8 @@ class OrchestratorPipeline:
             ModelSequenceInfo,
         )
 
-        # Use a simple sequence for test purposes
-        sequence_info = ModelSequenceInfo.from_sequence(1)
+        # Use incrementing sequence for proper ordering across multiple events
+        sequence_info = ModelSequenceInfo.from_sequence(self._next_sequence())
 
         projection = ModelRegistrationProjection(
             entity_id=event.node_id,
@@ -359,6 +395,27 @@ class OrchestratorPipeline:
 # =============================================================================
 # Fixtures for Full Pipeline Testing
 # =============================================================================
+
+
+@dataclass
+class OrchestratorTestContext:
+    """Groups orchestrator pipeline with its mock dependencies.
+
+    This dataclass ensures that the mock instances used for assertions
+    are the exact same instances injected into the pipeline, preventing
+    test failures due to pytest fixture instance mismatches.
+
+    Attributes:
+        pipeline: The orchestrator pipeline for processing events.
+        mock_consul_client: Mock Consul client injected into the pipeline.
+        mock_postgres_adapter: Mock PostgreSQL adapter injected into the pipeline.
+        unsubscribe: Async function to unsubscribe from Kafka topic.
+    """
+
+    pipeline: OrchestratorPipeline
+    mock_consul_client: AsyncMock
+    mock_postgres_adapter: AsyncMock
+    unsubscribe: Callable[[], Awaitable[None]] | None = None
 
 
 @pytest.fixture
@@ -412,74 +469,70 @@ async def orchestrator_pipeline(
     projection_reader: ProjectionReaderRegistration,
     real_projector: ProjectorRegistration,
     registry_effect_node: NodeRegistryEffect,
-    mock_consul_client: AsyncMock,  # Explicit dep ensures pytest shares instances
-    mock_postgres_adapter: AsyncMock,  # Explicit dep ensures pytest shares instances
-) -> OrchestratorPipeline:
-    """Create the full orchestrator pipeline.
+    mock_consul_client: AsyncMock,
+    mock_postgres_adapter: AsyncMock,
+) -> OrchestratorTestContext:
+    """Create the full orchestrator pipeline with its mock dependencies.
+
+    This fixture explicitly connects the mock instances to the pipeline and
+    returns them together in an OrchestratorTestContext to ensure test
+    assertions use the exact same mock instances that were injected.
 
     Args:
         projection_reader: Projection reader fixture.
         real_projector: Projector fixture.
-        registry_effect_node: Registry effect fixture.
-        mock_consul_client: Mock Consul client (explicit dep for fixture sharing).
-        mock_postgres_adapter: Mock PostgreSQL adapter (explicit dep for fixture sharing).
+        registry_effect_node: Registry effect fixture (contains the mocks).
+        mock_consul_client: Mock Consul client injected into registry_effect_node.
+        mock_postgres_adapter: Mock PostgreSQL adapter injected into registry_effect_node.
 
     Returns:
-        OrchestratorPipeline: Configured pipeline.
+        OrchestratorTestContext: Context containing pipeline and connected mocks.
 
     Note:
-        The mock_consul_client and mock_postgres_adapter parameters are explicitly
-        listed here (even though registry_effect_node already uses them) to ensure
-        pytest resolves them first and shares the same instances. Without this
-        explicit dependency, pytest's fixture resolution order could vary, potentially
-        causing different mock instances to be used in tests vs the pipeline.
+        The mock parameters are explicitly listed to:
+        1. Ensure pytest shares the same instances with registry_effect_node
+        2. Return them in the context for test assertions
+        3. Make the mock-to-pipeline connection explicit and verifiable
     """
-    # Note: mock_consul_client and mock_postgres_adapter are not used directly here
-    # but are declared as dependencies to ensure pytest fixture sharing works correctly.
-    # The registry_effect_node already has these mocks injected.
-    _ = mock_consul_client  # Referenced to avoid unused parameter warning
-    _ = mock_postgres_adapter  # Referenced to avoid unused parameter warning
-
     reducer = RegistrationReducer()
-    return OrchestratorPipeline(
+    pipeline = OrchestratorPipeline(
         projection_reader=projection_reader,
         projector=real_projector,
         registry_effect=registry_effect_node,
         reducer=reducer,
     )
 
+    # Return context with pipeline and its connected mocks for test assertions
+    return OrchestratorTestContext(
+        pipeline=pipeline,
+        mock_consul_client=mock_consul_client,
+        mock_postgres_adapter=mock_postgres_adapter,
+    )
+
 
 @pytest.fixture
 async def running_orchestrator_consumer(
     real_kafka_event_bus: KafkaEventBus,
-    orchestrator_pipeline: OrchestratorPipeline,
-    mock_consul_client: AsyncMock,
-    mock_postgres_adapter: AsyncMock,
-) -> AsyncGenerator[
-    tuple[OrchestratorPipeline, Callable[[], Awaitable[None]], AsyncMock, AsyncMock],
-    None,
-]:
+    orchestrator_pipeline: OrchestratorTestContext,
+) -> AsyncGenerator[OrchestratorTestContext, None]:
     """Start a Kafka consumer that routes messages through the pipeline.
 
     This fixture creates a real Kafka subscription that:
     - Subscribes to the test introspection topic
     - Routes incoming messages to the OrchestratorPipeline.process_message callback
-    - Returns the pipeline, unsubscribe function, and mock clients
+    - Returns the OrchestratorTestContext with pipeline, mocks, and unsubscribe function
 
     Args:
         real_kafka_event_bus: Real Kafka event bus.
-        orchestrator_pipeline: The orchestrator pipeline.
-        mock_consul_client: Mock Consul client (shared with registry_effect_node).
-        mock_postgres_adapter: Mock PostgreSQL adapter (shared with registry_effect_node).
+        orchestrator_pipeline: Context containing pipeline and connected mocks.
 
     Yields:
-        Tuple of (pipeline, unsubscribe function, mock_consul_client, mock_postgres_adapter).
+        OrchestratorTestContext with pipeline, mocks, and unsubscribe function.
 
     Note:
-        The mock fixtures are explicitly included in this fixture's dependencies
-        to ensure pytest resolves them first and shares the same instances with
-        the registry_effect_node used by the pipeline. This prevents assertion
-        failures when tests verify mock method calls.
+        The OrchestratorTestContext pattern ensures the mock instances returned
+        are the exact same instances injected into the pipeline, preventing
+        assertion failures when tests verify mock method calls.
     """
     # Use unique group ID per test run to avoid cross-test coupling
     unique_group_id = f"e2e-orchestrator-test-{uuid4().hex[:8]}"
@@ -487,13 +540,21 @@ async def running_orchestrator_consumer(
     unsubscribe = await real_kafka_event_bus.subscribe(
         topic=TEST_INTROSPECTION_TOPIC,
         group_id=unique_group_id,
-        on_message=orchestrator_pipeline.process_message,
+        on_message=orchestrator_pipeline.pipeline.process_message,
     )
 
     # Give consumer time to start
     await asyncio.sleep(0.5)
 
-    yield orchestrator_pipeline, unsubscribe, mock_consul_client, mock_postgres_adapter
+    # Create a new context with the unsubscribe function included
+    context = OrchestratorTestContext(
+        pipeline=orchestrator_pipeline.pipeline,
+        mock_consul_client=orchestrator_pipeline.mock_consul_client,
+        mock_postgres_adapter=orchestrator_pipeline.mock_postgres_adapter,
+        unsubscribe=unsubscribe,
+    )
+
+    yield context
 
     # Cleanup
     await unsubscribe()
@@ -517,12 +578,7 @@ class TestFullOrchestratorFlow:
     async def test_introspection_triggers_full_pipeline_processing(
         self,
         real_kafka_event_bus: KafkaEventBus,
-        running_orchestrator_consumer: tuple[
-            OrchestratorPipeline,
-            Callable[[], Awaitable[None]],
-            AsyncMock,
-            AsyncMock,
-        ],
+        running_orchestrator_consumer: OrchestratorTestContext,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
     ) -> None:
@@ -536,7 +592,8 @@ class TestFullOrchestratorFlow:
 
         This validates the ACTUAL Kafka consumption, not mocked handler calls.
         """
-        pipeline, _, _, _ = running_orchestrator_consumer
+        ctx = running_orchestrator_consumer
+        pipeline = ctx.pipeline
 
         # Create introspection event
         event = ModelNodeIntrospectionEvent(
@@ -588,12 +645,7 @@ class TestFullOrchestratorFlow:
     async def test_handler_reducer_effect_chain_execution(
         self,
         real_kafka_event_bus: KafkaEventBus,
-        running_orchestrator_consumer: tuple[
-            OrchestratorPipeline,
-            Callable[[], Awaitable[None]],
-            AsyncMock,
-            AsyncMock,
-        ],
+        running_orchestrator_consumer: OrchestratorTestContext,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
     ) -> None:
@@ -604,11 +656,11 @@ class TestFullOrchestratorFlow:
         - Reducer generates intents
         - Effect executes Consul and PostgreSQL registration
         """
-        # Unpack fixture tuple: mocks are included to ensure same instances
-        # used by the pipeline are available for assertion
-        pipeline, _, mock_consul_client, mock_postgres_adapter = (
-            running_orchestrator_consumer
-        )
+        # Use context to access pipeline and its connected mocks
+        ctx = running_orchestrator_consumer
+        pipeline = ctx.pipeline
+        mock_consul_client = ctx.mock_consul_client
+        mock_postgres_adapter = ctx.mock_postgres_adapter
 
         # Create introspection event
         event = ModelNodeIntrospectionEvent(
@@ -666,18 +718,14 @@ class TestFullOrchestratorFlow:
     async def test_multiple_events_processed_in_order(
         self,
         real_kafka_event_bus: KafkaEventBus,
-        running_orchestrator_consumer: tuple[
-            OrchestratorPipeline,
-            Callable[[], Awaitable[None]],
-            AsyncMock,
-            AsyncMock,
-        ],
+        running_orchestrator_consumer: OrchestratorTestContext,
     ) -> None:
         """Test that multiple introspection events are processed.
 
         Publishes multiple events and verifies all are processed.
         """
-        pipeline, _, _, _ = running_orchestrator_consumer
+        ctx = running_orchestrator_consumer
+        pipeline = ctx.pipeline
 
         # Create multiple events
         node_ids = [uuid4() for _ in range(3)]
@@ -735,12 +783,7 @@ class TestFullOrchestratorFlow:
     async def test_malformed_message_handled_gracefully(
         self,
         real_kafka_event_bus: KafkaEventBus,
-        running_orchestrator_consumer: tuple[
-            OrchestratorPipeline,
-            Callable[[], Awaitable[None]],
-            AsyncMock,
-            AsyncMock,
-        ],
+        running_orchestrator_consumer: OrchestratorTestContext,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
     ) -> None:
@@ -749,7 +792,8 @@ class TestFullOrchestratorFlow:
         The pipeline should log a warning but not crash when receiving
         invalid JSON or non-conforming messages.
         """
-        pipeline, _, _, _ = running_orchestrator_consumer
+        ctx = running_orchestrator_consumer
+        pipeline = ctx.pipeline
 
         # Publish malformed message
         headers = ModelEventHeaders(
@@ -1072,7 +1116,9 @@ class TestPipelineLifecycle:
 
 __all__ = [
     "OrchestratorPipeline",
+    "OrchestratorTestContext",
     "TestFullOrchestratorFlow",
     "TestFullPipelineWithRealInfrastructure",
     "TestPipelineLifecycle",
+    "get_test_topic",
 ]

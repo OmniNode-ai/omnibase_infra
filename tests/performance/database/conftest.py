@@ -140,6 +140,9 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
 
     Yields:
         asyncpg.Pool: Connection pool for database operations.
+
+    Raises:
+        RuntimeError: If pool creation fails (with sanitized error message).
     """
     import asyncpg
 
@@ -147,12 +150,22 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
         pytest.skip("PostgreSQL not available")
 
     dsn = _build_postgres_dsn()
-    pool = await asyncpg.create_pool(
-        dsn,
-        min_size=2,
-        max_size=5,
-        command_timeout=60.0,
-    )
+    try:
+        pool = await asyncpg.create_pool(
+            dsn,
+            min_size=2,
+            max_size=5,
+            command_timeout=60.0,
+        )
+    except Exception as e:
+        # Sanitize exception to prevent DSN/credential leakage in error messages
+        _logger.warning(
+            "Failed to create PostgreSQL connection pool: %s",
+            sanitize_error_message(e),
+        )
+        raise RuntimeError(
+            f"Failed to create PostgreSQL connection pool: {sanitize_error_message(e)}"
+        ) from e
 
     yield pool
 

@@ -19,6 +19,12 @@ def _coerce_grace_period(v: object) -> int:
     is passed. With strict=True, Pydantic would reject floats, but
     this validator ensures whole-number floats are accepted.
 
+    Note:
+        Boolean values are explicitly rejected even though bool is a
+        subclass of int in Python. This maintains semantic correctness
+        and consistency with other integer configuration fields that
+        use strict=True without pre-validators.
+
     Args:
         v: The input value (may be int, float, or other).
 
@@ -27,8 +33,13 @@ def _coerce_grace_period(v: object) -> int:
 
     Raises:
         ValueError: If float has a fractional part.
-        TypeError: If input is not numeric.
+        TypeError: If input is not numeric or is a boolean.
     """
+    # Explicitly reject booleans first - bool is a subclass of int in Python,
+    # so isinstance(True, int) returns True. We must check bool before int
+    # to maintain strict type semantics and prevent unexpected coercion.
+    if isinstance(v, bool):
+        raise TypeError("grace_period_seconds must be an integer, got bool")
     if isinstance(v, float):
         if v != int(v):
             raise ValueError(f"grace_period_seconds must be a whole number, got {v}")
@@ -75,6 +86,7 @@ class ModelShutdownConfig(BaseModel):
         default=30,
         ge=0,
         le=3600,  # Max 1 hour to prevent accidental excessive delays
+        strict=False,  # Override model-level strict=True to allow BeforeValidator coercion
         description="Time in seconds to wait for graceful shutdown (0-3600)",
     )
 

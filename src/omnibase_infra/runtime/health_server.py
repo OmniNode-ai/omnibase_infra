@@ -500,11 +500,14 @@ class HealthServer:
             # Get health status from runtime
             health_details = await self._runtime.health_check()
 
-            # Assert for type narrowing: health_check() returns dict per contract
+            # Runtime type validation: health_check() returns dict per contract
             # This helps static analysis and provides runtime validation
-            assert isinstance(health_details, dict), (
-                f"health_check() must return dict, got {type(health_details).__name__}"
-            )
+            # NOTE: Use explicit if/raise instead of assert - assertions can be
+            # disabled with Python's -O flag, which would skip this safety check
+            if not isinstance(health_details, dict):
+                raise TypeError(
+                    f"health_check() must return dict, got {type(health_details).__name__}"
+                )
 
             # Determine overall status based on health check results
             is_healthy = bool(health_details.get("healthy", False))
