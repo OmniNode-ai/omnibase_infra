@@ -47,6 +47,15 @@ than AST-based validation. This is a pragmatic choice because:
    positive (matching a comment or string literal), it triggers human review
    of the code - an acceptable outcome for a constraint test.
 
+   Known edge cases that may trigger false positives (all acceptable):
+   - Pattern strings in docstrings (e.g., documenting forbidden patterns)
+   - Pattern strings in test assertions (testing the detection itself)
+   - Comments explaining what NOT to do (instructional code)
+   - String literals containing patterns (e.g., error messages)
+
+   In all cases, human review is the desired outcome - better to flag a
+   potential violation than to miss a real one.
+
 Protocol Compliance
 -------------------
 Protocol compliance uses duck typing (hasattr checks) per ONEX patterns:
@@ -275,9 +284,12 @@ def http_handler() -> Generator[HttpRestHandler, None, None]:
 def introspection_handler() -> HandlerNodeIntrospected:
     """Create HandlerNodeIntrospected with mock dependencies.
 
-    Yields handler instance with mock projection_reader.
+    Returns handler instance with mock projection_reader.
     Use this fixture for tests that only need basic handler functionality.
     Tests requiring specific mock configurations should instantiate directly.
+
+    Note: Unlike http_handler, this fixture uses return instead of yield
+    because no cleanup is needed for mock dependencies.
     """
     mock_reader = MagicMock()
     handler = HandlerNodeIntrospected(projection_reader=mock_reader)
@@ -607,6 +619,18 @@ class TestHandlerNoPublishConstraintCrossValidation:
 
     See module docstring for rationale on string matching vs AST analysis.
     """
+
+    # =========================================================================
+    # Handler Test Coverage
+    # =========================================================================
+    # Current handlers covered by parametrized tests:
+    #   - HttpRestHandler (protocol handler)
+    #   - HandlerNodeIntrospected (domain handler)
+    #
+    # As the codebase grows, add new handlers to the parametrize lists below.
+    # Future enhancement: Consider implementing a handler registry or discovery
+    # mechanism to automatically include all handlers in constraint validation.
+    # =========================================================================
 
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs"),
