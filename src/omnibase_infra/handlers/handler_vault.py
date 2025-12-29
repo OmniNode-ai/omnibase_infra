@@ -27,10 +27,13 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import hvac
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
 from omnibase_core.models.dispatch import ModelHandlerOutput
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     ModelInfraErrorContext,
@@ -142,8 +145,13 @@ class VaultHandler(
 
     @property
     def handler_type(self) -> EnumHandlerType:
-        """Return EnumHandlerType.VAULT."""
-        return EnumHandlerType.VAULT
+        """Return EnumHandlerType.INFRA_HANDLER for infrastructure protocol handlers."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return EnumHandlerTypeCategory.EFFECT for side-effecting I/O operations."""
+        return EnumHandlerTypeCategory.EFFECT
 
     @property
     def max_workers(self) -> int:
@@ -344,6 +352,7 @@ class VaultHandler(
         """
         return {
             "handler_type": self.handler_type.value,
+            "handler_category": self.handler_category.value,
             "supported_operations": sorted(SUPPORTED_OPERATIONS),
             "timeout_seconds": self._config.timeout_seconds if self._config else 30.0,
             "initialized": self._initialized,

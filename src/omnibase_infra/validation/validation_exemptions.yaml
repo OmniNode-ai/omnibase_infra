@@ -201,18 +201,41 @@ pattern_exemptions:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-812
   # ==========================================================================
+  # Infrastructure Handler Exemptions (OMN-1092)
+  # ==========================================================================
+  # Infrastructure handlers require multiple methods for: connection lifecycle,
+  # operation dispatching, health checks, and protocol-specific operations.
+  - file_pattern: 'handler_consul\.py'
+    class_pattern: "Class 'ConsulHandler'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Infrastructure handler pattern requires multiple methods: connection lifecycle (connect, disconnect), operation dispatch (handle_operation, handle_kv_*, handle_service_*), properties (handler_type, handler_category), and health/describe methods. This is standard for infrastructure handlers.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - CLAUDE.md (Infrastructure Patterns - Adapter Pattern)
+    ticket: OMN-1092
+  # ==========================================================================
   # Execution Shape Validator Exemptions (OMN-958)
   # ==========================================================================
   - file_pattern: 'enum_handler_type\.py'
     violation_pattern: "contains anti-pattern 'Handler'"
     reason: >
-      EnumHandlerType defines ONEX handler types (Effect, Compute, Reducer, Orchestrator) which are architectural concepts, not implementation classes.
+      EnumHandlerType defines ONEX handler architectural roles (InfraHandler, NodeHandler, etc.) which are architectural concepts, not implementation classes.
 
     documentation:
-      - docs/as_is/02_NODE_EXECUTION_SHAPES.md
-      - docs/decisions/adr-enum-message-category-vs-node-output-type.md
-      - CLAUDE.md (ONEX Architecture - 4-Node Pattern)
-    ticket: OMN-958
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - CLAUDE.md (ONEX Architecture - Handler Types)
+    ticket: OMN-1092
+  - file_pattern: 'enum_handler_type_category\.py'
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      EnumHandlerTypeCategory defines ONEX handler behavioral classification (Compute, Effect, NondeterministicCompute) which are architectural concepts for policy envelopes, not implementation classes.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - CLAUDE.md (ONEX Architecture - Handler Classification)
+    ticket: OMN-1092
   - file_pattern: 'execution_shape_validator\.py'
     class_pattern: "Class name 'HandlerInfo'"
     violation_pattern: "contains anti-pattern 'Handler'"

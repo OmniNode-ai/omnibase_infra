@@ -94,15 +94,15 @@ Security Design (Intentional Fail-Open Architecture):
 
     1. **Fail-Closed Wrapper**::
 
-           def strict_is_output_allowed(handler_type, output_category) -> bool:
-               if handler_type not in EXECUTION_SHAPE_RULES:
+           def strict_is_output_allowed(node_archetype, output_category) -> bool:
+               if node_archetype not in EXECUTION_SHAPE_RULES:
                    return False  # Fail-closed for unknown types
-               return validator.is_output_allowed(handler_type, output_category)
+               return validator.is_output_allowed(node_archetype, output_category)
 
     2. **Policy Decorator**::
 
            @require_known_category  # Custom decorator that rejects None categories
-           @enforce_execution_shape(EnumHandlerType.REDUCER)
+           @enforce_execution_shape(EnumNodeArchetype.REDUCER)
            def my_strict_handler(event):
                return result
 
@@ -111,7 +111,7 @@ Security Design (Intentional Fail-Open Architecture):
            category = detect_message_category(result)
            if category is None:
                raise ValueError("All outputs must have detectable categories")
-           validator.validate_and_raise(handler_type, result, category)
+           validator.validate_and_raise(node_archetype, result, category)
 
     **Security Responsibility Boundaries**:
     - This validator: Architectural pattern enforcement (developer guardrails)
@@ -124,12 +124,12 @@ Usage:
     ...     RuntimeShapeValidator,
     ...     enforce_execution_shape,
     ... )
-    >>> from omnibase_infra.enums import EnumHandlerType, EnumMessageCategory
+    >>> from omnibase_infra.enums import EnumNodeArchetype, EnumMessageCategory
     >>>
     >>> # Direct validation
     >>> validator = RuntimeShapeValidator()
     >>> violation = validator.validate_handler_output(
-    ...     handler_type=EnumHandlerType.REDUCER,
+    ...     node_archetype=EnumNodeArchetype.REDUCER,
     ...     output=some_event,
     ...     output_category=EnumMessageCategory.EVENT,
     ... )
@@ -137,7 +137,7 @@ Usage:
     ...     print(f"Violation: {violation.message}")
     >>>
     >>> # Decorator usage
-    >>> @enforce_execution_shape(EnumHandlerType.REDUCER)
+    >>> @enforce_execution_shape(EnumNodeArchetype.REDUCER)
     ... def my_reducer_handler(event):
     ...     return ProjectionResult(...)  # OK
     ...     # return EventResult(...)  # Would raise ExecutionShapeViolationError
@@ -162,8 +162,8 @@ from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
 )
-from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.validation.model_execution_shape_rule import (
     ModelExecutionShapeRule,
@@ -185,7 +185,7 @@ F = TypeVar("F", bound=Callable[..., object])
 # Violation Type Mapping
 # ==============================================================================
 
-# Maps (handler_type, forbidden_category) to specific violation type.
+# Maps (node_archetype, forbidden_category) to specific violation type.
 #
 # This mapping covers explicitly forbidden return types from EXECUTION_SHAPE_RULES:
 #   - EFFECT: Cannot return PROJECTION (explicit forbidden)
@@ -200,23 +200,23 @@ F = TypeVar("F", bound=Callable[..., object])
 # These implicit violations use FORBIDDEN_RETURN_TYPE as the fallback, which is
 # semantically correct: the handler is returning a type that's not in its allow-list.
 _VIOLATION_TYPE_MAP: dict[
-    tuple[EnumHandlerType, EnumMessageCategory | EnumNodeOutputType],
+    tuple[EnumNodeArchetype, EnumMessageCategory | EnumNodeOutputType],
     EnumExecutionShapeViolation,
 ] = {
     (
-        EnumHandlerType.REDUCER,
+        EnumNodeArchetype.REDUCER,
         EnumMessageCategory.EVENT,
     ): EnumExecutionShapeViolation.REDUCER_RETURNS_EVENTS,
     (
-        EnumHandlerType.ORCHESTRATOR,
+        EnumNodeArchetype.ORCHESTRATOR,
         EnumMessageCategory.INTENT,
     ): EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_INTENTS,
     (
-        EnumHandlerType.ORCHESTRATOR,
+        EnumNodeArchetype.ORCHESTRATOR,
         EnumNodeOutputType.PROJECTION,
     ): EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_PROJECTIONS,
     (
-        EnumHandlerType.EFFECT,
+        EnumNodeArchetype.EFFECT,
         EnumNodeOutputType.PROJECTION,
     ): EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS,
 }
@@ -240,7 +240,7 @@ class ExecutionShapeViolationError(ModelOnexError):
     Example:
         >>> try:
         ...     validator.validate_and_raise(
-        ...         handler_type=EnumHandlerType.REDUCER,
+        ...         node_archetype=EnumNodeArchetype.REDUCER,
         ...         output=event_output,
         ...         output_category=EnumMessageCategory.EVENT,
         ...     )
@@ -272,16 +272,18 @@ class ExecutionShapeViolationError(ModelOnexError):
                 to specific requests across service boundaries.
         """
         self.violation = violation
-        # handler_type may be None if the handler type couldn't be determined
-        handler_type_value = (
-            violation.handler_type.value if violation.handler_type is not None else None
+        # node_archetype may be None if the archetype couldn't be determined
+        node_archetype_value = (
+            violation.node_archetype.value
+            if violation.node_archetype is not None
+            else None
         )
         super().__init__(
             message=violation.message,
             error_code=EnumCoreErrorCode.VALIDATION_FAILED,
             correlation_id=correlation_id,
             violation_type=violation.violation_type.value,
-            handler_type=handler_type_value,
+            node_archetype=node_archetype_value,
             severity=violation.severity,
             file_path=violation.file_path,
             line_number=violation.line_number,
@@ -428,11 +430,11 @@ class RuntimeShapeValidator:
     """Runtime validator for ONEX handler execution shape constraints.
 
     This validator checks handler outputs at runtime against the ONEX 4-node
-    architecture execution shape rules. Each handler type has specific
+    architecture execution shape rules. Each node archetype has specific
     constraints on what message categories it can produce.
 
     Attributes:
-        rules: Dictionary mapping handler types to their execution shape rules.
+        rules: Dictionary mapping node archetypes to their execution shape rules.
 
     Thread Safety:
         RuntimeShapeValidator instances are stateless after initialization.
@@ -452,12 +454,12 @@ class RuntimeShapeValidator:
         >>> validator = RuntimeShapeValidator()
         >>>
         >>> # Check if output is allowed
-        >>> if not validator.is_output_allowed(EnumHandlerType.REDUCER, EnumMessageCategory.EVENT):
+        >>> if not validator.is_output_allowed(EnumNodeArchetype.REDUCER, EnumMessageCategory.EVENT):
         ...     print("Reducer cannot return events!")
         >>>
         >>> # Get full violation details
         >>> violation = validator.validate_handler_output(
-        ...     handler_type=EnumHandlerType.REDUCER,
+        ...     node_archetype=EnumNodeArchetype.REDUCER,
         ...     output=event_output,
         ...     output_category=EnumMessageCategory.EVENT,
         ... )
@@ -466,14 +468,14 @@ class RuntimeShapeValidator:
         >>>
         >>> # Raise exception on violation
         >>> validator.validate_and_raise(
-        ...     handler_type=EnumHandlerType.REDUCER,
+        ...     node_archetype=EnumNodeArchetype.REDUCER,
         ...     output=event_output,
         ...     output_category=EnumMessageCategory.EVENT,
         ... )  # Raises ExecutionShapeViolationError
     """
 
     def __init__(
-        self, rules: dict[EnumHandlerType, ModelExecutionShapeRule] | None = None
+        self, rules: dict[EnumNodeArchetype, ModelExecutionShapeRule] | None = None
     ) -> None:
         """Initialize RuntimeShapeValidator.
 
@@ -483,36 +485,38 @@ class RuntimeShapeValidator:
         """
         self.rules = rules if rules is not None else EXECUTION_SHAPE_RULES
 
-    def get_rule(self, handler_type: EnumHandlerType) -> ModelExecutionShapeRule:
-        """Get execution shape rule for a handler type.
+    def get_rule(self, node_archetype: EnumNodeArchetype) -> ModelExecutionShapeRule:
+        """Get execution shape rule for a node archetype.
 
         Args:
-            handler_type: The handler type to get the rule for.
+            node_archetype: The node archetype to get the rule for.
 
         Returns:
-            The ModelExecutionShapeRule for the specified handler type.
+            The ModelExecutionShapeRule for the specified node archetype.
 
         Raises:
-            KeyError: If no rule is defined for the handler type.
+            KeyError: If no rule is defined for the node archetype.
         """
-        if handler_type not in self.rules:
-            raise KeyError(f"No execution shape rule defined for: {handler_type.value}")
-        return self.rules[handler_type]
+        if node_archetype not in self.rules:
+            raise KeyError(
+                f"No execution shape rule defined for: {node_archetype.value}"
+            )
+        return self.rules[node_archetype]
 
-    def _get_allowed_types_for_handler(self, handler_type: EnumHandlerType) -> str:
+    def _get_allowed_types_for_handler(self, node_archetype: EnumNodeArchetype) -> str:
         """Get a human-readable string of allowed output types for a handler.
 
         Used to generate helpful error messages that suggest valid alternatives
         when a handler attempts to return a forbidden output type.
 
         Args:
-            handler_type: The handler type to get allowed types for.
+            node_archetype: The node archetype to get allowed types for.
 
         Returns:
             A formatted string listing allowed output types (e.g., "EVENTs or COMMANDs").
         """
         try:
-            rule = self.get_rule(handler_type)
+            rule = self.get_rule(node_archetype)
             allowed = [t.value.upper() + "s" for t in rule.allowed_return_types]
             if len(allowed) == 0:
                 return "no specific types (check EXECUTION_SHAPE_RULES)"
@@ -526,16 +530,16 @@ class RuntimeShapeValidator:
 
     def is_output_allowed(
         self,
-        handler_type: EnumHandlerType,
+        node_archetype: EnumNodeArchetype,
         output_category: EnumMessageCategory | EnumNodeOutputType,
     ) -> bool:
-        """Check if an output category is allowed for a handler type.
+        """Check if an output category is allowed for a node archetype.
 
         This is a quick check that returns True/False without creating
         a full violation result.
 
         Args:
-            handler_type: The handler type to check.
+            node_archetype: The node archetype to check.
             output_category: The message category or node output type of the output.
 
         Returns:
@@ -543,12 +547,12 @@ class RuntimeShapeValidator:
 
         Security Note (Intentional Fail-Open Design):
             This method returns True (allowing the output) when no rule exists
-            for the given handler type. This is an INTENTIONAL design decision,
+            for the given node archetype. This is an INTENTIONAL design decision,
             not a security vulnerability:
 
-            1. **Extensibility**: New handler types should work by default without
+            1. **Extensibility**: New node archetypes should work by default without
                requiring immediate rule definitions. This prevents blocking valid
-               code during handler type evolution.
+               code during archetype evolution.
 
             2. **Validation vs Security Boundary**: This validator enforces
                architectural constraints (ONEX 4-node patterns), NOT security
@@ -559,7 +563,7 @@ class RuntimeShapeValidator:
                at the infrastructure layer (authentication, authorization,
                input validation) - not in architectural pattern validators.
 
-            4. **Fail-Safe for Unknown Types**: Unknown handler types represent
+            4. **Fail-Safe for Unknown Types**: Unknown node archetypes represent
                future extensions or custom implementations. Blocking them would
                break forward compatibility without security benefit.
 
@@ -567,19 +571,19 @@ class RuntimeShapeValidator:
             use a fail-closed wrapper or policy decorator.
         """
         try:
-            rule = self.get_rule(handler_type)
+            rule = self.get_rule(node_archetype)
             # Convert to EnumNodeOutputType for validation
             node_output_type = _to_node_output_type(output_category)
             return rule.is_return_type_allowed(node_output_type)
         except KeyError:
-            # SECURITY DESIGN: Fail-open for unknown handler types.
+            # SECURITY DESIGN: Fail-open for unknown node archetypes.
             # See docstring "Security Note" for rationale.
-            # This is intentional - new handler types should be allowed by default.
+            # This is intentional - new archetypes should be allowed by default.
             return True
 
     def validate_handler_output(
         self,
-        handler_type: EnumHandlerType,
+        node_archetype: EnumNodeArchetype,
         output: object,
         output_category: EnumMessageCategory | EnumNodeOutputType,
         file_path: str = "<runtime>",
@@ -588,7 +592,7 @@ class RuntimeShapeValidator:
         """Validate handler output against execution shape constraints.
 
         Args:
-            handler_type: The declared handler type.
+            node_archetype: The declared node archetype.
             output: The actual output object (used for context in violation message).
             output_category: The message category or node output type of the output.
             file_path: Optional file path for violation reporting.
@@ -598,7 +602,7 @@ class RuntimeShapeValidator:
             A ModelExecutionShapeViolationResult if a violation is detected,
             or None if the output is valid.
         """
-        if self.is_output_allowed(handler_type, output_category):
+        if self.is_output_allowed(node_archetype, output_category):
             return None
 
         # Determine specific violation type.
@@ -614,7 +618,7 @@ class RuntimeShapeValidator:
         # The generic FORBIDDEN_RETURN_TYPE is semantically appropriate for these
         # cases because they represent allow-list violations rather than explicit
         # architectural constraint violations.
-        violation_key = (handler_type, output_category)
+        violation_key = (node_archetype, output_category)
         violation_type = _VIOLATION_TYPE_MAP.get(
             violation_key,
             EnumExecutionShapeViolation.FORBIDDEN_RETURN_TYPE,
@@ -624,7 +628,7 @@ class RuntimeShapeValidator:
         # The message distinguishes between explicit forbidden types (architectural
         # constraint) and implicit forbidden types (not in allow-list).
         output_type_name = type(output).__name__
-        handler_name = handler_type.value.upper()
+        archetype_name = node_archetype.value.upper()
         category_name = output_category.value.upper()
 
         # Check if this is a PROJECTION violation - these need educational context
@@ -638,7 +642,7 @@ class RuntimeShapeValidator:
             if is_projection_violation:
                 # Special case: PROJECTION needs educational message
                 message = (
-                    f"{handler_name} handler cannot return PROJECTION type "
+                    f"{archetype_name} handler cannot return PROJECTION type "
                     f"'{output_type_name}'. PROJECTION is a node output type "
                     f"(EnumNodeOutputType), not a message routing category "
                     f"(EnumMessageCategory). Projections represent aggregated state "
@@ -646,33 +650,33 @@ class RuntimeShapeValidator:
                 )
             else:
                 message = (
-                    f"{handler_name} handler cannot return {category_name} type "
+                    f"{archetype_name} handler cannot return {category_name} type "
                     f"'{output_type_name}'. {category_name} is not in the allowed "
-                    f"return types for {handler_name} handlers. "
+                    f"return types for {archetype_name} handlers. "
                     f"Check EXECUTION_SHAPE_RULES for allowed message categories."
                 )
         # Explicit violation: known architectural constraint
         elif is_projection_violation:
             # PROJECTION violations get enhanced educational message
-            allowed_types = self._get_allowed_types_for_handler(handler_type)
+            allowed_types = self._get_allowed_types_for_handler(node_archetype)
             message = (
-                f"{handler_name} handler cannot return PROJECTION type "
+                f"{archetype_name} handler cannot return PROJECTION type "
                 f"'{output_type_name}'. PROJECTION is a node output type "
                 f"(EnumNodeOutputType), not a message routing category "
                 f"(EnumMessageCategory). Projections represent aggregated state "
                 f"and are only valid for REDUCER node output types. "
-                f"{handler_name} handlers should return {allowed_types} instead."
+                f"{archetype_name} handlers should return {allowed_types} instead."
             )
         else:
             message = (
-                f"{handler_name} handler cannot return {category_name} type "
+                f"{archetype_name} handler cannot return {category_name} type "
                 f"'{output_type_name}'. This violates ONEX 4-node architecture "
                 f"execution shape constraints ({violation_type.value})."
             )
 
         return ModelExecutionShapeViolationResult(
             violation_type=violation_type,
-            handler_type=handler_type,
+            node_archetype=node_archetype,
             file_path=file_path,
             line_number=line_number if line_number > 0 else 1,
             message=message,
@@ -681,7 +685,7 @@ class RuntimeShapeValidator:
 
     def validate_and_raise(
         self,
-        handler_type: EnumHandlerType,
+        node_archetype: EnumNodeArchetype,
         output: object,
         output_category: EnumMessageCategory | EnumNodeOutputType,
         file_path: str = "<runtime>",
@@ -694,7 +698,7 @@ class RuntimeShapeValidator:
         but raises an ExecutionShapeViolationError if a violation is detected.
 
         Args:
-            handler_type: The declared handler type.
+            node_archetype: The declared node archetype.
             output: The actual output object.
             output_category: The message category or node output type of the output.
             file_path: Optional file path for violation reporting.
@@ -705,10 +709,10 @@ class RuntimeShapeValidator:
 
         Raises:
             ExecutionShapeViolationError: If the output violates execution
-                shape constraints for the handler type.
+                shape constraints for the node archetype.
         """
         violation = self.validate_handler_output(
-            handler_type=handler_type,
+            node_archetype=node_archetype,
             output=output,
             output_category=output_category,
             file_path=file_path,
@@ -759,11 +763,11 @@ _default_validator = RuntimeShapeValidator()
 # ==============================================================================
 
 
-def enforce_execution_shape(handler_type: EnumHandlerType) -> Callable[[F], F]:
+def enforce_execution_shape(node_archetype: EnumNodeArchetype) -> Callable[[F], F]:
     """Decorator to enforce execution shape constraints at runtime.
 
     This decorator wraps a handler function and validates its return value
-    against the execution shape rules for the specified handler type.
+    against the execution shape rules for the specified node archetype.
     If the return value violates the constraints, an ExecutionShapeViolationError
     is raised.
 
@@ -772,18 +776,18 @@ def enforce_execution_shape(handler_type: EnumHandlerType) -> Callable[[F], F]:
     determined, no validation is performed (fail-open behavior).
 
     Args:
-        handler_type: The handler type that determines allowed output categories.
+        node_archetype: The node archetype that determines allowed output categories.
 
     Returns:
         A decorator function that wraps the handler with runtime validation.
 
     Example:
-        >>> @enforce_execution_shape(EnumHandlerType.REDUCER)
+        >>> @enforce_execution_shape(EnumNodeArchetype.REDUCER)
         ... def my_reducer(event):
         ...     # This is OK - reducer can return projections
         ...     return UserProjection(user_id=event.user_id)
         >>>
-        >>> @enforce_execution_shape(EnumHandlerType.REDUCER)
+        >>> @enforce_execution_shape(EnumNodeArchetype.REDUCER)
         ... def bad_reducer(event):
         ...     # This will raise ExecutionShapeViolationError
         ...     return UserCreatedEvent(user_id=event.user_id)
@@ -845,7 +849,7 @@ def enforce_execution_shape(handler_type: EnumHandlerType) -> Callable[[F], F]:
 
             # Validate against execution shape rules
             _default_validator.validate_and_raise(
-                handler_type=handler_type,
+                node_archetype=node_archetype,
                 output=result,
                 output_category=output_category,
                 file_path=source_file,

@@ -14,8 +14,8 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
 
+from omnibase_infra.enums import EnumHandlerType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -42,9 +42,9 @@ class TestDbHandlerInitialization:
         assert handler._pool_size == 5
         assert handler._timeout == 30.0
 
-    def test_handler_type_returns_database(self, handler: DbHandler) -> None:
-        """Test handler_type property returns EnumHandlerType.DATABASE."""
-        assert handler.handler_type == EnumHandlerType.DATABASE
+    def test_handler_type_returns_infra_handler(self, handler: DbHandler) -> None:
+        """Test handler_type property returns EnumHandlerType.INFRA_HANDLER."""
+        assert handler.handler_type == EnumHandlerType.INFRA_HANDLER
 
     @pytest.mark.asyncio
     async def test_initialize_missing_dsn_raises_error(

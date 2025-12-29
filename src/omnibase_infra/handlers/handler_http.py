@@ -24,10 +24,13 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import httpx
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
 from omnibase_core.models.dispatch import ModelHandlerOutput
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -124,8 +127,13 @@ class HttpRestHandler(MixinEnvelopeExtraction):
 
     @property
     def handler_type(self) -> EnumHandlerType:
-        """Return EnumHandlerType.HTTP."""
-        return EnumHandlerType.HTTP
+        """Return EnumHandlerType.INFRA_HANDLER for infrastructure protocol handlers."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return EnumHandlerTypeCategory.EFFECT for side-effecting I/O operations."""
+        return EnumHandlerTypeCategory.EFFECT
 
     async def initialize(self, config: dict[str, JsonValue]) -> None:
         """Initialize HTTP client with configurable timeout and size limits.
@@ -795,6 +803,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         """Return handler metadata and capabilities."""
         return {
             "handler_type": self.handler_type.value,
+            "handler_category": self.handler_category.value,
             "supported_operations": sorted(_SUPPORTED_OPERATIONS),
             "timeout_seconds": self._timeout,
             "max_request_size": self._max_request_size,

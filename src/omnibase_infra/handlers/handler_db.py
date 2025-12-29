@@ -70,10 +70,13 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import asyncpg
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
 from omnibase_core.models.dispatch import ModelHandlerOutput
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -163,8 +166,13 @@ class DbHandler(MixinEnvelopeExtraction):
 
     @property
     def handler_type(self) -> EnumHandlerType:
-        """Return EnumHandlerType.DATABASE."""
-        return EnumHandlerType.DATABASE
+        """Return EnumHandlerType.INFRA_HANDLER for infrastructure protocol handlers."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return EnumHandlerTypeCategory.EFFECT for side-effecting I/O operations."""
+        return EnumHandlerTypeCategory.EFFECT
 
     async def initialize(self, config: dict[str, JsonValue]) -> None:
         """Initialize database connection pool with fixed size (5).
@@ -595,6 +603,7 @@ class DbHandler(MixinEnvelopeExtraction):
         """Return handler metadata and capabilities."""
         return ModelDbDescribeResponse(
             handler_type=self.handler_type.value,
+            handler_category=self.handler_category.value,
             supported_operations=sorted(_SUPPORTED_OPERATIONS),
             pool_size=self._pool_size,
             timeout_seconds=self._timeout,

@@ -169,7 +169,7 @@ from omnibase_infra.validation.runtime_shape_validator import (
 
 # Topic category validation for execution shape enforcement
 from omnibase_infra.validation.topic_category_validator import (
-    HANDLER_EXPECTED_CATEGORIES,
+    NODE_ARCHETYPE_EXPECTED_CATEGORIES,
     TOPIC_CATEGORY_PATTERNS,
     TOPIC_SUFFIXES,
     TopicCategoryASTVisitor,
@@ -182,7 +182,7 @@ from omnibase_infra.validation.topic_category_validator import (
 __all__: list[str] = [
     # Runtime shape validation
     "EXECUTION_SHAPE_RULES",
-    "HANDLER_EXPECTED_CATEGORIES",
+    "NODE_ARCHETYPE_EXPECTED_CATEGORIES",
     # Infrastructure-specific wrappers
     "INFRA_MAX_UNIONS",
     "TOPIC_CATEGORY_PATTERNS",

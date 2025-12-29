@@ -29,7 +29,11 @@ from uuid import UUID, uuid4
 import consul
 from omnibase_core.models.dispatch import ModelHandlerOutput
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -67,10 +71,6 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
-
-# Consul handler type constant for registry compatibility
-# Note: EnumHandlerType.CONSUL will be added to omnibase_core in future
-HANDLER_TYPE_CONSUL: str = "consul"
 
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_CONSUL: str = "consul-handler"
@@ -203,17 +203,14 @@ class ConsulHandler(
         self._circuit_breaker_initialized: bool = False
 
     @property
-    def handler_type(self) -> str:
-        """Return handler type identifier for Consul.
+    def handler_type(self) -> EnumHandlerType:
+        """Return EnumHandlerType.INFRA_HANDLER for infrastructure protocol handlers."""
+        return EnumHandlerType.INFRA_HANDLER
 
-        Returns:
-            String "consul" for registry compatibility.
-
-        Note:
-            Will return EnumHandlerType.CONSUL once that enum value is added
-            to omnibase_core.
-        """
-        return HANDLER_TYPE_CONSUL
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return EnumHandlerTypeCategory.EFFECT for side-effecting I/O operations."""
+        return EnumHandlerTypeCategory.EFFECT
 
     @property
     def max_workers(self) -> int:
@@ -665,7 +662,8 @@ class ConsulHandler(
             Handler description with supported operations and configuration
         """
         return {
-            "handler_type": self.handler_type,
+            "handler_type": self.handler_type.value,
+            "handler_category": self.handler_category.value,
             "supported_operations": sorted(SUPPORTED_OPERATIONS),
             "timeout_seconds": self._config.timeout_seconds if self._config else 30.0,
             "initialized": self._initialized,

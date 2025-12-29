@@ -5,14 +5,16 @@
 Provides infrastructure-specific enumerations for transport types,
 protocol identification, policy classification, dispatch status,
 message categories, topic types, topic standards, chain validation,
-registration states, handler types, and other infrastructure concerns.
+registration states, handler types, node archetypes, and other infrastructure concerns.
 
 Exports:
     EnumChainViolationType: Chain violation type enumeration for correlation/causation validation
     EnumDispatchStatus: Dispatch operation status enumeration
-    EnumHandlerType: Handler type enumeration for ONEX 4-node architecture (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
+    EnumHandlerType: Handler architectural role enumeration (INFRA_HANDLER, NODE_HANDLER, etc.)
+    EnumHandlerTypeCategory: Handler behavioral classification (COMPUTE, EFFECT, NONDETERMINISTIC_COMPUTE)
     EnumInfraTransportType: Infrastructure transport type enumeration
     EnumMessageCategory: Message category enumeration (EVENT, COMMAND, INTENT)
+    EnumNodeArchetype: Node archetype enumeration for ONEX 4-node architecture (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
     EnumNodeOutputType: Node output type enumeration for execution shape validation
     EnumNonRetryableErrorCategory: Non-retryable error categories for DLQ and retry logic
     EnumPolicyType: Policy type enumeration for PolicyRegistry plugins
@@ -26,8 +28,10 @@ from omnibase_core.enums import EnumTopicType
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
+from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.enums.enum_non_retryable_error_category import (
     EnumNonRetryableErrorCategory,
@@ -40,8 +44,10 @@ __all__: list[str] = [
     "EnumChainViolationType",
     "EnumDispatchStatus",
     "EnumHandlerType",
+    "EnumHandlerTypeCategory",
     "EnumInfraTransportType",
     "EnumMessageCategory",
+    "EnumNodeArchetype",
     "EnumNodeOutputType",
     "EnumNonRetryableErrorCategory",
     "EnumPolicyType",

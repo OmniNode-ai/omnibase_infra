@@ -16,8 +16,8 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
 
+from omnibase_infra.enums import EnumHandlerType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -100,9 +100,9 @@ class TestHttpRestHandlerInitialization:
         assert handler._client is None
         assert handler._timeout == 30.0
 
-    def test_handler_type_returns_http(self, handler: HttpRestHandler) -> None:
-        """Test handler_type property returns EnumHandlerType.HTTP."""
-        assert handler.handler_type == EnumHandlerType.HTTP
+    def test_handler_type_returns_infra_handler(self, handler: HttpRestHandler) -> None:
+        """Test handler_type property returns EnumHandlerType.INFRA_HANDLER."""
+        assert handler.handler_type == EnumHandlerType.INFRA_HANDLER
 
     @pytest.mark.asyncio
     async def test_initialize_with_empty_config(self, handler: HttpRestHandler) -> None:

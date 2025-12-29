@@ -39,8 +39,8 @@ from pathlib import Path
 from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
 )
-from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
@@ -88,26 +88,26 @@ TOPIC_SUFFIXES: dict[EnumMessageCategory | EnumNodeOutputType, str] = {
     EnumNodeOutputType.PROJECTION: "",  # Projections have no suffix requirement
 }
 
-# Handler type to expected message categories mapping
-# Defines which message categories each handler type should consume
+# Node archetype to expected message categories mapping
+# Defines which message categories each node archetype should consume
 # Note: REDUCER can consume EVENTs (message category) and produce PROJECTIONs (node output type)
-HANDLER_EXPECTED_CATEGORIES: dict[
-    EnumHandlerType, list[EnumMessageCategory | EnumNodeOutputType]
+NODE_ARCHETYPE_EXPECTED_CATEGORIES: dict[
+    EnumNodeArchetype, list[EnumMessageCategory | EnumNodeOutputType]
 ] = {
-    EnumHandlerType.EFFECT: [
+    EnumNodeArchetype.EFFECT: [
         EnumMessageCategory.COMMAND,
         EnumMessageCategory.EVENT,
     ],
-    EnumHandlerType.COMPUTE: [
+    EnumNodeArchetype.COMPUTE: [
         EnumMessageCategory.EVENT,
         EnumMessageCategory.COMMAND,
         EnumMessageCategory.INTENT,
     ],
-    EnumHandlerType.REDUCER: [
+    EnumNodeArchetype.REDUCER: [
         EnumMessageCategory.EVENT,
         EnumNodeOutputType.PROJECTION,
     ],
-    EnumHandlerType.ORCHESTRATOR: [
+    EnumNodeArchetype.ORCHESTRATOR: [
         EnumMessageCategory.EVENT,
         EnumMessageCategory.COMMAND,
         EnumMessageCategory.INTENT,
@@ -150,7 +150,7 @@ class TopicCategoryValidator:
         """Initialize the topic category validator with default patterns."""
         self.patterns = TOPIC_CATEGORY_PATTERNS
         self.suffixes = TOPIC_SUFFIXES
-        self.handler_categories = HANDLER_EXPECTED_CATEGORIES
+        self.archetype_categories = NODE_ARCHETYPE_EXPECTED_CATEGORIES
 
     def validate_message_topic(
         self,
@@ -214,7 +214,7 @@ class TopicCategoryValidator:
         expected_suffix = self.suffixes.get(message_category, "unknown")
         return ModelExecutionShapeViolationResult(
             violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
-            handler_type=None,  # Unknown at runtime validation without handler context
+            node_archetype=None,  # Unknown at runtime validation without handler context
             file_path="<runtime>",  # Runtime validation has no file context
             line_number=1,
             message=(
@@ -226,7 +226,7 @@ class TopicCategoryValidator:
 
     def validate_subscription(
         self,
-        handler_type: EnumHandlerType,
+        node_archetype: EnumNodeArchetype,
         subscribed_topics: list[str],
         expected_categories: list[EnumMessageCategory | EnumNodeOutputType],
     ) -> list[ModelExecutionShapeViolationResult]:
@@ -236,7 +236,7 @@ class TopicCategoryValidator:
         categories it should be consuming based on ONEX architecture rules.
 
         Args:
-            handler_type: The type of handler (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
+            node_archetype: The node archetype (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
             subscribed_topics: List of Kafka topics the handler subscribes to.
             expected_categories: List of message categories or node output types
                 the handler should process (e.g., EVENT, COMMAND, PROJECTION).
@@ -248,7 +248,7 @@ class TopicCategoryValidator:
         Example:
             >>> validator = TopicCategoryValidator()
             >>> violations = validator.validate_subscription(
-            ...     EnumHandlerType.REDUCER,
+            ...     EnumNodeArchetype.REDUCER,
             ...     ["order.events", "order.commands"],  # commands not valid for reducer
             ...     [EnumMessageCategory.EVENT, EnumNodeOutputType.PROJECTION],
             ... )
@@ -275,7 +275,7 @@ class TopicCategoryValidator:
                 violations.append(
                     ModelExecutionShapeViolationResult(
                         violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
-                        handler_type=handler_type,
+                        node_archetype=node_archetype,
                         file_path="<runtime>",
                         line_number=1,
                         message=(
@@ -292,11 +292,11 @@ class TopicCategoryValidator:
                 violations.append(
                     ModelExecutionShapeViolationResult(
                         violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
-                        handler_type=handler_type,
+                        node_archetype=node_archetype,
                         file_path="<runtime>",
                         line_number=1,
                         message=(
-                            f"Handler type '{handler_type.value}' subscribed to topic '{topic}' "
+                            f"Node archetype '{node_archetype.value}' subscribed to topic '{topic}' "
                             f"which implies '{inferred_category.value}' messages, but handler "
                             f"expects categories: {[c.value for c in expected_categories]}"
                         ),
@@ -397,7 +397,7 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         violations: List of detected violations.
         file_path: Path to the file being analyzed.
         validator: TopicCategoryValidator instance for validation logic.
-        current_handler_type: Inferred handler type from class context.
+        current_node_archetype: Inferred node archetype from class context.
     """
 
     def __init__(
@@ -414,13 +414,13 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         self.violations: list[ModelExecutionShapeViolationResult] = []
         self.file_path = file_path
         self.validator = validator
-        self.current_handler_type: EnumHandlerType | None = None
+        self.current_node_archetype: EnumNodeArchetype | None = None
         self.current_class_name: str | None = None
 
     def visit_ClassDef(self, node: ast.ClassDef) -> ast.AST:
-        """Visit class definitions to infer handler type from class name.
+        """Visit class definitions to infer node archetype from class name.
 
-        Infers the handler type based on class name conventions:
+        Infers the node archetype based on class name conventions:
         - *Effect -> EFFECT
         - *Compute -> COMPUTE
         - *Reducer -> REDUCER
@@ -429,20 +429,20 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         PATTERN MATCHING ORDER:
         The order of keyword checks (effect, compute, reducer, orchestrator)
         matters when a class name contains multiple keywords. The checks are
-        ordered by specificity of the ONEX handler types:
+        ordered by specificity of the ONEX node archetypes:
 
-        1. "effect" - Checked first because EFFECT handlers are most common
+        1. "effect" - Checked first because EFFECT nodes are most common
            for I/O operations and have the most restrictive constraints
-        2. "compute" - Pure computation handlers, checked second
-        3. "reducer" - State projection handlers with strict determinism rules
-        4. "orchestrator" - Workflow coordination handlers
+        2. "compute" - Pure computation nodes, checked second
+        3. "reducer" - State projection nodes with strict determinism rules
+        4. "orchestrator" - Workflow coordination nodes
 
         Example edge cases:
         - "EffectReducer" would be classified as EFFECT (first match wins)
         - "ComputeOrchestrator" would be classified as COMPUTE
 
         In practice, handler class names should be unambiguous and follow
-        the convention of using a single handler type in the name suffix
+        the convention of using a single node archetype in the name suffix
         (e.g., "OrderEffectHandler", not "OrderEffectReducer").
 
         Args:
@@ -451,28 +451,28 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         Returns:
             The visited node.
         """
-        old_handler_type = self.current_handler_type
+        old_archetype = self.current_node_archetype
         old_class_name = self.current_class_name
 
         self.current_class_name = node.name
 
-        # Infer handler type from class name.
+        # Infer node archetype from class name.
         # Order matters: first match wins for ambiguous names.
         class_name = node.name.lower()
         if "effect" in class_name:
-            self.current_handler_type = EnumHandlerType.EFFECT
+            self.current_node_archetype = EnumNodeArchetype.EFFECT
         elif "compute" in class_name:
-            self.current_handler_type = EnumHandlerType.COMPUTE
+            self.current_node_archetype = EnumNodeArchetype.COMPUTE
         elif "reducer" in class_name:
-            self.current_handler_type = EnumHandlerType.REDUCER
+            self.current_node_archetype = EnumNodeArchetype.REDUCER
         elif "orchestrator" in class_name:
-            self.current_handler_type = EnumHandlerType.ORCHESTRATOR
+            self.current_node_archetype = EnumNodeArchetype.ORCHESTRATOR
 
         # Visit children
         self.generic_visit(node)
 
         # Restore context
-        self.current_handler_type = old_handler_type
+        self.current_node_archetype = old_archetype
         self.current_class_name = old_class_name
 
         return node
@@ -550,11 +550,11 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
 
         if inferred_category is None:
             # Topic doesn't follow naming convention - add warning
-            # Use current_handler_type if available (from class context), otherwise None
+            # Use current_node_archetype if available (from class context), otherwise None
             self.violations.append(
                 ModelExecutionShapeViolationResult(
                     violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
-                    handler_type=self.current_handler_type,  # May be None if outside handler class
+                    node_archetype=self.current_node_archetype,  # May be None if outside handler class
                     file_path=str(self.file_path.absolute()),
                     line_number=node.lineno,
                     message=(
@@ -567,20 +567,20 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
             return
 
         # If we have handler context, validate the subscription makes sense
-        if self.current_handler_type is not None:
-            expected_categories = self.validator.handler_categories.get(
-                self.current_handler_type, []
+        if self.current_node_archetype is not None:
+            expected_categories = self.validator.archetype_categories.get(
+                self.current_node_archetype, []
             )
             if inferred_category not in expected_categories:
                 self.violations.append(
                     ModelExecutionShapeViolationResult(
                         violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
-                        handler_type=self.current_handler_type,
+                        node_archetype=self.current_node_archetype,
                         file_path=str(self.file_path.absolute()),
                         line_number=node.lineno,
                         message=(
                             f"Handler '{self.current_class_name or 'unknown'}' "
-                            f"({self.current_handler_type.value}) uses topic '{topic_name}' "
+                            f"({self.current_node_archetype.value}) uses topic '{topic_name}' "
                             f"in {method_name}() call, implying '{inferred_category.value}' "
                             f"messages. Expected categories for this handler: "
                             f"{[c.value for c in expected_categories]}"
@@ -621,11 +621,11 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         message_hint = self._infer_message_category_from_expr(second_arg)
 
         if message_hint is not None and message_hint != topic_category:
-            # Use current_handler_type if available (from class context), otherwise None
+            # Use current_node_archetype if available (from class context), otherwise None
             self.violations.append(
                 ModelExecutionShapeViolationResult(
                     violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
-                    handler_type=self.current_handler_type,  # May be None if outside handler class
+                    node_archetype=self.current_node_archetype,  # May be None if outside handler class
                     file_path=str(self.file_path.absolute()),
                     line_number=node.lineno,
                     message=(
@@ -936,11 +936,11 @@ def validate_topic_categories_in_file(
     except SyntaxError as e:
         # Syntax error is a file-level issue, not a handler-specific violation.
         # Use SYNTAX_ERROR violation type for AST parse failures.
-        # handler_type is None because we can't analyze the code structure.
+        # node_archetype is None because we can't analyze the code structure.
         return [
             ModelExecutionShapeViolationResult(
                 violation_type=EnumExecutionShapeViolation.SYNTAX_ERROR,
-                handler_type=None,  # Cannot determine handler type from unparseable file
+                node_archetype=None,  # Cannot determine archetype from unparseable file
                 file_path=str(file_path.absolute()),
                 line_number=e.lineno or 1,
                 message=f"Syntax error in file: {e.msg}",
@@ -1011,7 +1011,7 @@ def validate_message_on_topic(
         )
         return ModelExecutionShapeViolationResult(
             violation_type=result.violation_type,
-            handler_type=result.handler_type,
+            node_archetype=result.node_archetype,
             file_path=result.file_path,
             line_number=result.line_number,
             message=enhanced_message,
@@ -1076,13 +1076,13 @@ def validate_topic_categories_in_directory(
 # - All mutable state is in TopicCategoryASTVisitor (created per-file)
 #
 # Note: TopicCategoryASTVisitor still requires per-file instantiation because
-# it stores file-specific state (violations list, current_handler_type, etc.).
+# it stores file-specific state (violations list, current_node_archetype, etc.).
 
 _default_validator = TopicCategoryValidator()
 
 
 __all__ = [
-    "HANDLER_EXPECTED_CATEGORIES",
+    "NODE_ARCHETYPE_EXPECTED_CATEGORIES",
     # Constants
     "TOPIC_CATEGORY_PATTERNS",
     "TOPIC_SUFFIXES",
