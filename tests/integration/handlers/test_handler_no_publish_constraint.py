@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from collections.abc import Generator
 from unittest.mock import MagicMock
 
 import pytest
@@ -226,6 +227,63 @@ def detect_forbidden_source_patterns(
     return violations
 
 
+def assert_no_bus_attributes(handler: object, handler_name: str) -> None:
+    """Assert handler has no bus-related attributes.
+
+    Validates that neither public nor private (underscore-prefixed) versions
+    of forbidden bus attributes exist on the handler instance.
+
+    Args:
+        handler: Handler instance to check
+        handler_name: Name of handler class for error messages
+
+    Raises:
+        AssertionError: If any forbidden bus attribute is found
+    """
+    for attr in FORBIDDEN_BUS_ATTRIBUTES:
+        assert not hasattr(handler, attr), (
+            f"{handler_name} should not have '{attr}' attribute - "
+            f"handlers must not have bus access"
+        )
+        assert not hasattr(handler, f"_{attr}"), (
+            f"{handler_name} should not have '_{attr}' attribute - "
+            f"handlers must not have bus access"
+        )
+
+
+# ============================================================================
+# Test Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def http_handler() -> Generator[HttpRestHandler, None, None]:
+    """Create HttpRestHandler with cleanup.
+
+    Yields handler instance and ensures proper shutdown if initialized.
+    This prevents resource warnings from httpx clients that may be
+    initialized during handler usage.
+    """
+    handler = HttpRestHandler()
+    yield handler
+    # Cleanup if handler was initialized (has httpx client)
+    if hasattr(handler, "_initialized") and handler._initialized:
+        asyncio.get_event_loop().run_until_complete(handler.shutdown())
+
+
+@pytest.fixture
+def introspection_handler() -> HandlerNodeIntrospected:
+    """Create HandlerNodeIntrospected with mock dependencies.
+
+    Yields handler instance with mock projection_reader.
+    Use this fixture for tests that only need basic handler functionality.
+    Tests requiring specific mock configurations should instantiate directly.
+    """
+    mock_reader = MagicMock()
+    handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+    return handler
+
+
 # ============================================================================
 # Test HttpRestHandler Bus Isolation
 # ============================================================================
@@ -279,19 +337,11 @@ class TestHttpRestHandlerBusIsolation:
                 f"handlers must not have bus access"
             )
 
-    def test_no_bus_attribute_after_instantiation(self) -> None:
+    def test_no_bus_attribute_after_instantiation(
+        self, http_handler: HttpRestHandler
+    ) -> None:
         """Handler instance has no bus-related attributes."""
-        handler = HttpRestHandler()
-
-        for attr in FORBIDDEN_BUS_ATTRIBUTES:
-            assert not hasattr(handler, attr), (
-                f"HttpRestHandler should not have '{attr}' attribute - "
-                f"handlers must not have bus access"
-            )
-            assert not hasattr(handler, f"_{attr}"), (
-                f"HttpRestHandler should not have '_{attr}' attribute - "
-                f"handlers must not have bus access"
-            )
+        assert_no_bus_attributes(http_handler, "HttpRestHandler")
 
     def test_execute_returns_model_handler_output(self) -> None:
         """execute() returns ModelHandlerOutput, not a publish action."""
@@ -309,21 +359,19 @@ class TestHttpRestHandlerBusIsolation:
             f"execute() should return ModelHandlerOutput, got: {annotation_str}"
         )
 
-    def test_no_publish_methods_exist(self) -> None:
+    def test_no_publish_methods_exist(self, http_handler: HttpRestHandler) -> None:
         """Handler has no publish/emit/dispatch methods."""
-        handler = HttpRestHandler()
-
         for method_name in FORBIDDEN_PUBLISH_METHODS:
-            assert not hasattr(handler, method_name), (
+            assert not hasattr(http_handler, method_name), (
                 f"HttpRestHandler should not have '{method_name}' method - "
                 f"handlers must not publish directly"
             )
 
-    def test_handler_has_no_messaging_infrastructure_attributes(self) -> None:
+    def test_handler_has_no_messaging_infrastructure_attributes(
+        self, http_handler: HttpRestHandler
+    ) -> None:
         """Handler has no messaging/bus-related internal state."""
-        handler = HttpRestHandler()
-
-        internal_attrs = [attr for attr in dir(handler) if attr.startswith("_")]
+        internal_attrs = [attr for attr in dir(http_handler) if attr.startswith("_")]
         handler_attrs = [attr for attr in internal_attrs if not attr.startswith("__")]
 
         # Check that no internal attributes are bus/messaging-related.
@@ -331,7 +379,7 @@ class TestHttpRestHandlerBusIsolation:
         # to avoid false positives (e.g., "_event_loop" should NOT match,
         # but "_event_bus" SHOULD match).
         for attr in handler_attrs:
-            if callable(getattr(handler, attr, None)):
+            if callable(getattr(http_handler, attr, None)):
                 continue
             attr_lower = attr.lower()
             for keyword in BUS_INFRASTRUCTURE_KEYWORDS:
@@ -344,32 +392,32 @@ class TestHttpRestHandlerBusIsolation:
     # Positive Validation Tests - Handler HAS Expected Attributes
     # =========================================================================
 
-    def test_handler_has_expected_http_attributes(self) -> None:
+    def test_handler_has_expected_http_attributes(
+        self, http_handler: HttpRestHandler
+    ) -> None:
         """Verify HttpRestHandler has expected HTTP-related state.
 
         Positive validation: handler DOES have the infrastructure it needs
         for HTTP operations, proving it's properly configured for its purpose.
         """
-        handler = HttpRestHandler()
-
         # Verify handler has expected HTTP infrastructure
         # Check for common HTTP client attributes (at least one should exist)
         http_attrs = ["_client", "_timeout", "_base_url", "_session", "_http_client"]
-        has_http_attr = any(hasattr(handler, attr) for attr in http_attrs)
+        has_http_attr = any(hasattr(http_handler, attr) for attr in http_attrs)
 
         # Note: This is a soft check - handler may use different attr names
         # The key constraint is that it HAS http infrastructure, not bus infrastructure
-        assert has_http_attr or hasattr(handler, "handler_type"), (
+        assert has_http_attr or hasattr(http_handler, "handler_type"), (
             "HttpRestHandler should have HTTP-related attributes or handler_type"
         )
 
-    def test_handler_has_required_protocol_attributes(self) -> None:
+    def test_handler_has_required_protocol_attributes(
+        self, http_handler: HttpRestHandler
+    ) -> None:
         """Verify HttpRestHandler has required ProtocolHandler attributes."""
-        handler = HttpRestHandler()
-
         # Required protocol attributes
-        assert hasattr(handler, "handler_type"), "Must have handler_type property"
-        assert hasattr(handler, "execute"), "Must have execute method"
+        assert hasattr(http_handler, "handler_type"), "Must have handler_type property"
+        assert hasattr(http_handler, "execute"), "Must have execute method"
 
 
 # ============================================================================
@@ -426,21 +474,11 @@ class TestHandlerNodeIntrospectedBusIsolation:
                 f"handlers must not have bus access"
             )
 
-    def test_no_bus_attribute_after_instantiation(self) -> None:
+    def test_no_bus_attribute_after_instantiation(
+        self, introspection_handler: HandlerNodeIntrospected
+    ) -> None:
         """Handler instance has no bus-related attributes."""
-        # Create with mock dependencies
-        mock_reader = MagicMock()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
-        for attr in FORBIDDEN_BUS_ATTRIBUTES:
-            assert not hasattr(handler, attr), (
-                f"HandlerNodeIntrospected should not have '{attr}' attribute - "
-                f"handlers must not have bus access"
-            )
-            assert not hasattr(handler, f"_{attr}"), (
-                f"HandlerNodeIntrospected should not have '_{attr}' attribute - "
-                f"handlers must not have bus access"
-            )
+        assert_no_bus_attributes(introspection_handler, "HandlerNodeIntrospected")
 
     def test_handle_returns_list_of_events(self) -> None:
         """handle() returns list[BaseModel], not a publish action.
@@ -462,13 +500,12 @@ class TestHandlerNodeIntrospectedBusIsolation:
             f"handle() should return a list, got: {annotation_str}"
         )
 
-    def test_no_publish_methods_exist(self) -> None:
+    def test_no_publish_methods_exist(
+        self, introspection_handler: HandlerNodeIntrospected
+    ) -> None:
         """Handler has no publish/emit/dispatch methods."""
-        mock_reader = MagicMock()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
         for method_name in FORBIDDEN_PUBLISH_METHODS:
-            assert not hasattr(handler, method_name), (
+            assert not hasattr(introspection_handler, method_name), (
                 f"HandlerNodeIntrospected should not have '{method_name}' method - "
                 f"handlers must not publish directly"
             )
@@ -534,14 +571,13 @@ class TestHandlerNodeIntrospectedBusIsolation:
         assert hasattr(handler, "_consul_handler"), "Must store consul_handler"
         assert hasattr(handler, "_ack_timeout_seconds"), "Must store ack_timeout"
 
-    def test_handler_has_required_domain_methods(self) -> None:
+    def test_handler_has_required_domain_methods(
+        self, introspection_handler: HandlerNodeIntrospected
+    ) -> None:
         """Verify HandlerNodeIntrospected has required domain methods."""
-        mock_reader = MagicMock()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
         # Domain handlers use handle() instead of execute()
-        assert hasattr(handler, "handle"), "Must have handle method"
-        assert callable(handler.handle), "handle must be callable"
+        assert hasattr(introspection_handler, "handle"), "Must have handle method"
+        assert callable(introspection_handler.handle), "handle must be callable"
 
 
 # ============================================================================
@@ -740,7 +776,9 @@ class TestHandlerProtocolCompliance:
     ONEX's structural subtyping approach and Python's Protocol pattern.
     """
 
-    def test_http_rest_handler_implements_protocol_handler_interface(self) -> None:
+    def test_http_rest_handler_implements_protocol_handler_interface(
+        self, http_handler: HttpRestHandler
+    ) -> None:
         """Verify HttpRestHandler implements ProtocolHandler using duck typing.
 
         This comprehensive test verifies that HttpRestHandler implements all
@@ -757,17 +795,15 @@ class TestHandlerProtocolCompliance:
             - shutdown: Async method for cleanup
             - describe: Method for returning handler metadata
         """
-        handler = HttpRestHandler()
-
         # =====================================================================
         # Required: handler_type property
         # =====================================================================
-        assert hasattr(handler, "handler_type"), (
+        assert hasattr(http_handler, "handler_type"), (
             "HttpRestHandler must have 'handler_type' property per ProtocolHandler"
         )
 
         # handler_type must be accessible (not raise on access)
-        handler_type = handler.handler_type
+        handler_type = http_handler.handler_type
         assert handler_type is not None, "HttpRestHandler.handler_type must not be None"
 
         # handler_type.value should be a non-empty string (EnumHandlerType pattern)
@@ -783,13 +819,15 @@ class TestHandlerProtocolCompliance:
         # =====================================================================
         # Required: execute method
         # =====================================================================
-        assert hasattr(handler, "execute"), (
+        assert hasattr(http_handler, "execute"), (
             "HttpRestHandler must have 'execute' method per ProtocolHandler"
         )
-        assert callable(handler.execute), "HttpRestHandler.execute must be callable"
+        assert callable(http_handler.execute), (
+            "HttpRestHandler.execute must be callable"
+        )
 
         # Verify execute signature takes envelope parameter
-        sig = inspect.signature(handler.execute)
+        sig = inspect.signature(http_handler.execute)
         param_names = list(sig.parameters.keys())
         assert "envelope" in param_names, (
             f"HttpRestHandler.execute must accept 'envelope' parameter, "
@@ -799,30 +837,34 @@ class TestHandlerProtocolCompliance:
         # =====================================================================
         # Optional: initialize method (recommended for protocol handlers)
         # =====================================================================
-        assert hasattr(handler, "initialize"), (
+        assert hasattr(http_handler, "initialize"), (
             "HttpRestHandler should have 'initialize' method for lifecycle management"
         )
-        assert callable(handler.initialize), (
+        assert callable(http_handler.initialize), (
             "HttpRestHandler.initialize must be callable"
         )
 
         # =====================================================================
         # Optional: shutdown method (recommended for protocol handlers)
         # =====================================================================
-        assert hasattr(handler, "shutdown"), (
+        assert hasattr(http_handler, "shutdown"), (
             "HttpRestHandler should have 'shutdown' method for cleanup"
         )
-        assert callable(handler.shutdown), "HttpRestHandler.shutdown must be callable"
+        assert callable(http_handler.shutdown), (
+            "HttpRestHandler.shutdown must be callable"
+        )
 
         # =====================================================================
         # Optional: describe method (recommended for introspection)
         # =====================================================================
-        assert hasattr(handler, "describe"), (
+        assert hasattr(http_handler, "describe"), (
             "HttpRestHandler should have 'describe' method for introspection"
         )
-        assert callable(handler.describe), "HttpRestHandler.describe must be callable"
+        assert callable(http_handler.describe), (
+            "HttpRestHandler.describe must be callable"
+        )
         # describe() should return a dict (metadata)
-        description = handler.describe()
+        description = http_handler.describe()
         assert isinstance(description, dict), (
             f"HttpRestHandler.describe() must return dict, "
             f"got {type(description).__name__}"
@@ -916,30 +958,27 @@ class TestHandlerProtocolCompliance:
     # Async Coroutine Validation
     # =========================================================================
 
-    def test_http_handler_execute_is_async(self) -> None:
+    def test_http_handler_execute_is_async(self, http_handler: HttpRestHandler) -> None:
         """Verify HttpRestHandler.execute is an async coroutine function.
 
         Protocol handlers must use async methods to enable non-blocking I/O
         and proper integration with the async event loop. This is essential
         for handling concurrent HTTP requests efficiently.
         """
-        handler = HttpRestHandler()
-
-        assert asyncio.iscoroutinefunction(handler.execute), (
+        assert asyncio.iscoroutinefunction(http_handler.execute), (
             "HttpRestHandler.execute must be an async coroutine function"
         )
 
-    def test_introspection_handler_handle_is_async(self) -> None:
+    def test_introspection_handler_handle_is_async(
+        self, introspection_handler: HandlerNodeIntrospected
+    ) -> None:
         """Verify HandlerNodeIntrospected.handle is an async coroutine function.
 
         Domain handlers must use async methods to enable non-blocking I/O
         operations such as reading projections and coordinating with Consul.
         This ensures the handler can be awaited by orchestrators.
         """
-        mock_reader = MagicMock()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
-        assert asyncio.iscoroutinefunction(handler.handle), (
+        assert asyncio.iscoroutinefunction(introspection_handler.handle), (
             "HandlerNodeIntrospected.handle must be an async coroutine function"
         )
 
@@ -1234,6 +1273,9 @@ __all__: list[str] = [
     "BUS_INFRASTRUCTURE_KEYWORDS",
     "FORBIDDEN_SOURCE_PATTERNS",
     "detect_forbidden_source_patterns",
+    "assert_no_bus_attributes",
+    "http_handler",
+    "introspection_handler",
     "TestHttpRestHandlerBusIsolation",
     "TestHandlerNodeIntrospectedBusIsolation",
     "TestHandlerNoPublishConstraintCrossValidation",
