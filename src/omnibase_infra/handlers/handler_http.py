@@ -135,6 +135,16 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         """Return EnumHandlerTypeCategory.EFFECT for side-effecting I/O operations."""
         return EnumHandlerTypeCategory.EFFECT
 
+    @property
+    def transport_type(self) -> EnumInfraTransportType:
+        """Return EnumInfraTransportType.HTTP for HTTP protocol handlers.
+
+        This identifies the specific transport/protocol this handler uses,
+        distinct from handler_type (architectural role) and handler_category
+        (behavioral classification).
+        """
+        return EnumInfraTransportType.HTTP
+
     async def initialize(self, config: dict[str, JsonValue]) -> None:
         """Initialize HTTP client with configurable timeout and size limits.
 
@@ -800,10 +810,24 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         )
 
     def describe(self) -> dict[str, JsonValue]:
-        """Return handler metadata and capabilities."""
+        """Return handler metadata and capabilities.
+
+        Returns:
+            dict containing:
+                - handler_type: Architectural role (e.g., "infra_handler")
+                - handler_category: Behavioral classification (e.g., "effect")
+                - transport_type: Protocol/transport identifier (e.g., "http")
+                - supported_operations: List of supported operations
+                - timeout_seconds: Request timeout in seconds
+                - max_request_size: Maximum request body size in bytes
+                - max_response_size: Maximum response body size in bytes
+                - initialized: Whether the handler is initialized
+                - version: Handler version string
+        """
         return {
             "handler_type": self.handler_type.value,
             "handler_category": self.handler_category.value,
+            "transport_type": self.transport_type.value,
             "supported_operations": sorted(_SUPPORTED_OPERATIONS),
             "timeout_seconds": self._timeout,
             "max_request_size": self._max_request_size,

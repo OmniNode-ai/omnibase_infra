@@ -847,7 +847,8 @@ class TestVaultHandlerDescribe:
 
             description = handler.describe()
 
-            assert description["handler_type"] == "vault"
+            assert description["handler_type"] == "infra_handler"
+            assert description["handler_category"] == "effect"
             supported_ops = description["supported_operations"]
             assert isinstance(supported_ops, list)
             assert "vault.read_secret" in supported_ops

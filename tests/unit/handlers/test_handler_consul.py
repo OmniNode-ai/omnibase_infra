@@ -15,6 +15,7 @@ import consul
 import pytest
 from pydantic import SecretStr, ValidationError
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -301,13 +302,30 @@ class TestConsulHandlerInitialization:
 
 
 class TestConsulHandlerType:
-    """Test ConsulHandler type property."""
+    """Test ConsulHandler type and category properties."""
 
     def test_handler_type_property(self) -> None:
-        """Test handler_type property returns correct type."""
+        """Test handler_type property returns EnumHandlerType.INFRA_HANDLER.
+
+        Infrastructure protocol handlers (Consul, Vault, Kafka, etc.) return
+        INFRA_HANDLER as their architectural role. The transport-specific
+        identification is provided by handler_category.
+        """
         handler = ConsulHandler()
         handler_type = handler.handler_type
-        assert handler_type == "consul"
+        assert handler_type == EnumHandlerType.INFRA_HANDLER
+        assert handler_type.value == "infra_handler"
+
+    def test_handler_category_property(self) -> None:
+        """Test handler_category property returns EnumHandlerTypeCategory.EFFECT.
+
+        Consul handlers are EFFECT handlers because they perform side-effecting
+        I/O operations (service registration, KV store operations, etc.).
+        """
+        handler = ConsulHandler()
+        handler_category = handler.handler_category
+        assert handler_category == EnumHandlerTypeCategory.EFFECT
+        assert handler_category.value == "effect"
 
 
 class TestConsulHandlerKVOperations:
@@ -935,8 +953,12 @@ class TestConsulHandlerDescribe:
 
             description = handler.describe()
 
+            # handler_type is the architectural role (INFRA_HANDLER for protocol handlers)
             assert "handler_type" in description
-            assert description["handler_type"] == "consul"
+            assert description["handler_type"] == "infra_handler"
+            # handler_category is the behavioral classification (EFFECT for I/O operations)
+            assert "handler_category" in description
+            assert description["handler_category"] == "effect"
             assert "supported_operations" in description
             supported_ops = description["supported_operations"]
             assert isinstance(supported_ops, list)

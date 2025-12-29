@@ -770,14 +770,14 @@ class RoutingCoverageValidator:
             category = self._discovered_types.get(type_name)
             category_name = category.value if category else "unknown"
 
-            # Routing coverage is a configuration issue, not specific to any handler type.
-            # handler_type is None because this violation is about missing routing
+            # Routing coverage is a configuration issue, not specific to any node archetype.
+            # node_archetype is None because this violation is about missing routing
             # registration, not about a specific handler's behavior.
             # Use UNMAPPED_MESSAGE_ROUTE for semantic correctness - this is a routing
             # configuration issue, not a topic/category mismatch.
             violation = ModelExecutionShapeViolationResult(
                 violation_type=EnumExecutionShapeViolation.UNMAPPED_MESSAGE_ROUTE,
-                handler_type=None,  # Routing coverage is not handler-specific
+                node_archetype=None,  # Routing coverage is not archetype-specific
                 file_path=str(self.source_directory),
                 line_number=1,
                 message=(
