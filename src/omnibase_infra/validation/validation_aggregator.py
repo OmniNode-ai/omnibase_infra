@@ -331,6 +331,8 @@ class ValidationAggregator:
             ProtocolConfigurationError: Handler validation failed: 2 blocking errors
         """
         if self.has_blocking_errors:
+            from uuid import uuid4
+
             from omnibase_infra.enums import EnumInfraTransportType
             from omnibase_infra.errors import ProtocolConfigurationError
             from omnibase_infra.models.errors import ModelInfraErrorContext
@@ -338,6 +340,7 @@ class ValidationAggregator:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="startup_validation",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 f"Handler validation failed: {self.blocking_error_count} blocking errors\n{self.format_for_console()}",

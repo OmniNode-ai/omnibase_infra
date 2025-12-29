@@ -18,6 +18,7 @@ until ModelHandlerValidationError is implemented.
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums import (
     EnumHandlerErrorType,
@@ -284,7 +285,7 @@ class TestModelHandlerValidationError:
             remediation_hint="Change handler type to EFFECT",
         )
 
-        with pytest.raises(Exception):  # ValidationError for frozen models
+        with pytest.raises(ValidationError):
             error.message = "new message"  # type: ignore[misc]
 
 

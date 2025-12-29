@@ -244,4 +244,7 @@ class TestSecurityRuleIds:
 
         for rule_id in rule_ids:
             assert rule_id.startswith("SECURITY-")
-            assert rule_id[9:].isdigit()  # After "SECURITY-"
+            # Verify format: SECURITY-<digits>
+            prefix, _, suffix = rule_id.partition("-")
+            assert prefix == "SECURITY"
+            assert suffix.isdigit(), f"Expected digits after prefix, got: {suffix}"
