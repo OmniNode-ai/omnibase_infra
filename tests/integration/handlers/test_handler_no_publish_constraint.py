@@ -2,13 +2,23 @@
 # Copyright (c) 2025 OmniNode Team
 """Integration tests proving handler no-publish constraint is enforced.
 
-This module validates that handlers cannot directly access the event bus.
-Handlers return results/events to the caller; they do NOT publish.
+This module validates two critical ONEX handler constraints:
 
-This is a structural constraint enforced by dependency injection patterns:
+1. **No-Publish Constraint**: Handlers cannot directly access the event bus.
+   Handlers return results/events to the caller; they do NOT publish.
+
+2. **Protocol Compliance**: Handlers implement the ProtocolHandler protocol
+   from omnibase_spi, ensuring consistent interfaces across all handler types.
+
+The no-publish constraint is enforced by dependency injection patterns:
 - Handlers receive only domain-specific dependencies (readers, projectors, etc.)
 - No bus, dispatcher, or event publisher is injected
 - Handlers return data structures; callers decide what to publish
+
+Protocol compliance uses duck typing (hasattr checks) per ONEX patterns:
+- Protocol handlers implement: handler_type, execute(), initialize(), shutdown()
+- describe() is optional but recommended for introspection support
+- Domain handlers may implement handle() instead of execute()
 
 Related Tickets:
     - OMN-1094: Test Coverage - Existing No-Publish Constraint
@@ -20,6 +30,10 @@ Test Strategy:
     1. No bus dependency is accepted in their constructor signatures
     2. No bus-related attributes exist on handler instances
     3. Return types are data structures, not publish operations
+
+    Additionally, protocol compliance tests verify handlers implement
+    the expected ProtocolHandler interface using duck typing to support
+    structural subtyping without requiring explicit inheritance.
 """
 
 from __future__ import annotations
@@ -41,7 +55,19 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_i
 
 
 class TestHttpRestHandlerBusIsolation:
-    """Prove HttpRestHandler cannot access the event bus structurally."""
+    """Prove HttpRestHandler cannot access the event bus structurally.
+
+    These tests verify that HttpRestHandler is architecturally isolated from
+    the event bus infrastructure. The isolation is enforced through:
+
+    1. Constructor signature analysis - no bus-related parameters accepted
+    2. Instance attribute inspection - no bus-related attributes present
+    3. Method signature validation - returns data, not publish actions
+    4. Source code pattern matching - no direct bus access patterns
+
+    This isolation is a core ONEX architectural constraint: handlers process
+    requests and return results; orchestrators handle event publishing.
+    """
 
     def test_constructor_takes_no_parameters(self) -> None:
         """HttpRestHandler.__init__ takes only self - no dependency injection."""
@@ -153,7 +179,19 @@ class TestHttpRestHandlerBusIsolation:
 
 
 class TestHandlerNodeIntrospectedBusIsolation:
-    """Prove HandlerNodeIntrospected cannot access the event bus structurally."""
+    """Prove HandlerNodeIntrospected cannot access the event bus structurally.
+
+    HandlerNodeIntrospected is a domain-specific handler for processing node
+    introspection events. These tests verify it maintains bus isolation through:
+
+    1. Constructor parameter validation - only domain dependencies accepted
+    2. Instance attribute inspection - no bus-related attributes present
+    3. Method signature validation - handle() returns list of events
+    4. Stored dependency verification - only domain dependencies stored
+
+    Unlike protocol handlers (HttpRestHandler), domain handlers use handle()
+    instead of execute(), but the no-publish constraint applies equally.
+    """
 
     def test_constructor_has_no_bus_parameter(self) -> None:
         """Constructor accepts only domain dependencies, not bus/dispatcher."""
@@ -300,7 +338,17 @@ class TestHandlerNodeIntrospectedBusIsolation:
 
 
 class TestHandlerNoPublishConstraintCrossValidation:
-    """Cross-validate the no-publish constraint across handler types."""
+    """Cross-validate the no-publish constraint across handler types.
+
+    These tests apply parametrized validation across multiple handler types
+    to ensure the no-publish constraint is consistently enforced. Tests use:
+
+    1. Source code analysis - detect forbidden bus access patterns
+    2. Method signature validation - verify handler patterns are followed
+
+    This cross-cutting validation catches constraint violations that might
+    slip through type-specific tests by applying uniform checks.
+    """
 
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs"),
@@ -312,16 +360,23 @@ class TestHandlerNoPublishConstraintCrossValidation:
     def test_handler_has_no_async_context_bus_access(
         self,
         handler_class: type,
-        init_kwargs: dict,
+        init_kwargs: dict[str, object],
     ) -> None:
         """Handlers don't use async context managers for bus access.
 
+        Verifies handlers don't contain bus access patterns in their source code.
         The pattern `async with self.bus:` or similar is forbidden.
-        This test verifies no such pattern exists in the handler methods.
+
+        Note: This is a defensive check; the primary enforcement is through
+        dependency injection (no bus is injected into handlers). This catches
+        common direct-access patterns but won't detect all indirect access.
+
+        Args:
+            handler_class: Handler class to test
+            init_kwargs: Keyword arguments for handler instantiation
         """
         handler = handler_class(**init_kwargs)
 
-        # Check all async methods for bus-related patterns
         for name in dir(handler):
             if name.startswith("_"):
                 continue
@@ -330,16 +385,11 @@ class TestHandlerNoPublishConstraintCrossValidation:
             if not callable(method):
                 continue
 
-            # Get method source if available
             try:
                 source = inspect.getsource(method)
             except (TypeError, OSError):
                 continue
 
-            # Check for forbidden patterns in source
-            # Note: This is a defensive check; the primary enforcement is through
-            # dependency injection (no bus is injected into handlers). This catches
-            # common direct-access patterns but won't detect all indirect access.
             forbidden_patterns = [
                 "async with self.bus",
                 "async with self._bus",
@@ -367,9 +417,10 @@ class TestHandlerNoPublishConstraintCrossValidation:
         params = list(sig.parameters.keys())
 
         # Should be (self, envelope) - no bus parameter
-        assert params == ["self", "envelope"], (
-            f"execute() should take (self, envelope), got: {params}"
-        )
+        assert params == [
+            "self",
+            "envelope",
+        ], f"execute() should take (self, envelope), got: {params}"
 
     def test_introspection_handler_handle_signature_matches_pattern(self) -> None:
         """HandlerNodeIntrospected.handle follows the handler pattern.
@@ -396,16 +447,136 @@ class TestHandlerProtocolCompliance:
     These tests ensure that handlers conform to the ProtocolHandler protocol
     from omnibase_spi, which defines the expected interface for all handlers.
 
+    Per ONEX patterns, we use duck typing (hasattr checks) rather than isinstance
+    to support structural subtyping. This allows handlers to implement the
+    protocol without explicit inheritance, following Python's protocol pattern.
+
+    ProtocolHandler Interface (from omnibase_spi):
+        Required Members:
+            - handler_type (property): Returns EnumHandlerType or compatible value
+            - execute(envelope) (method): Async method for executing operations
+
+        Optional Members:
+            - initialize(config) (method): Async initialization with configuration
+            - shutdown() (method): Async cleanup/resource release
+            - describe() (method): Returns handler metadata for introspection
+
     Handler Types:
         - Protocol handlers (HttpRestHandler): Full protocol implementation with
-          handler_type property, execute() method, and describe() method.
+          handler_type property, execute() method, initialize/shutdown lifecycle,
+          and describe() introspection method.
         - Domain handlers (HandlerNodeIntrospected): Domain-specific handlers that
           implement handle() method for event processing. These may not implement
-          all ProtocolHandler members.
+          all ProtocolHandler members as they serve different architectural roles.
+
+    Test Strategy:
+        Duck typing verification using hasattr() to check for required interface
+        members without requiring explicit protocol inheritance. This aligns with
+        ONEX's structural subtyping approach and Python's Protocol pattern.
     """
 
+    def test_http_rest_handler_implements_protocol_handler_interface(self) -> None:
+        """Verify HttpRestHandler implements ProtocolHandler using duck typing.
+
+        This comprehensive test verifies that HttpRestHandler implements all
+        required and optional members of the ProtocolHandler protocol from
+        omnibase_spi. Per ONEX patterns, we use hasattr() for duck typing
+        rather than isinstance() to support structural subtyping.
+
+        Required Protocol Members Verified:
+            - handler_type: Property returning handler type identifier
+            - execute: Async method for processing envelopes
+
+        Optional Protocol Members Verified:
+            - initialize: Async method for handler initialization
+            - shutdown: Async method for cleanup
+            - describe: Method for returning handler metadata
+        """
+        handler = HttpRestHandler()
+
+        # =====================================================================
+        # Required: handler_type property
+        # =====================================================================
+        assert hasattr(handler, "handler_type"), (
+            "HttpRestHandler must have 'handler_type' property per ProtocolHandler"
+        )
+
+        # handler_type must be accessible (not raise on access)
+        handler_type = handler.handler_type
+        assert handler_type is not None, "HttpRestHandler.handler_type must not be None"
+
+        # handler_type.value should be a non-empty string (EnumHandlerType pattern)
+        if hasattr(handler_type, "value"):
+            assert isinstance(handler_type.value, str), (
+                f"HttpRestHandler.handler_type.value must be str, "
+                f"got {type(handler_type.value).__name__}"
+            )
+            assert handler_type.value, (
+                "HttpRestHandler.handler_type.value must not be empty"
+            )
+
+        # =====================================================================
+        # Required: execute method
+        # =====================================================================
+        assert hasattr(handler, "execute"), (
+            "HttpRestHandler must have 'execute' method per ProtocolHandler"
+        )
+        assert callable(handler.execute), "HttpRestHandler.execute must be callable"
+
+        # Verify execute signature takes envelope parameter
+        sig = inspect.signature(handler.execute)
+        param_names = list(sig.parameters.keys())
+        assert "envelope" in param_names, (
+            f"HttpRestHandler.execute must accept 'envelope' parameter, "
+            f"has parameters: {param_names}"
+        )
+
+        # =====================================================================
+        # Optional: initialize method (recommended for protocol handlers)
+        # =====================================================================
+        assert hasattr(handler, "initialize"), (
+            "HttpRestHandler should have 'initialize' method for lifecycle management"
+        )
+        if hasattr(handler, "initialize"):
+            assert callable(handler.initialize), (
+                "HttpRestHandler.initialize must be callable"
+            )
+
+        # =====================================================================
+        # Optional: shutdown method (recommended for protocol handlers)
+        # =====================================================================
+        assert hasattr(handler, "shutdown"), (
+            "HttpRestHandler should have 'shutdown' method for cleanup"
+        )
+        if hasattr(handler, "shutdown"):
+            assert callable(handler.shutdown), (
+                "HttpRestHandler.shutdown must be callable"
+            )
+
+        # =====================================================================
+        # Optional: describe method (recommended for introspection)
+        # =====================================================================
+        assert hasattr(handler, "describe"), (
+            "HttpRestHandler should have 'describe' method for introspection"
+        )
+        if hasattr(handler, "describe"):
+            assert callable(handler.describe), (
+                "HttpRestHandler.describe must be callable"
+            )
+            # describe() should return a dict (metadata)
+            description = handler.describe()
+            assert isinstance(description, dict), (
+                f"HttpRestHandler.describe() must return dict, "
+                f"got {type(description).__name__}"
+            )
+
     def test_http_rest_handler_has_handler_type_property(self) -> None:
-        """HttpRestHandler must expose handler_type property per ProtocolHandler."""
+        """HttpRestHandler must expose handler_type property per ProtocolHandler.
+
+        This test specifically validates the handler_type property returns a
+        string-compatible value, which is the primary identifier used for
+        handler routing in the runtime host.
+        """
         handler = HttpRestHandler()
 
         # handler_type should be a property or attribute
@@ -414,15 +585,25 @@ class TestHandlerProtocolCompliance:
             "per ProtocolHandler protocol"
         )
 
-        # handler_type should return a string
+        # handler_type should return a string-compatible value
         handler_type = handler.handler_type
-        assert isinstance(handler_type, str), (
-            f"HttpRestHandler.handler_type must return str, "
-            f"got {type(handler_type).__name__}"
-        )
+        # Check for EnumHandlerType pattern (has .value) or direct string
+        if hasattr(handler_type, "value"):
+            assert isinstance(handler_type.value, str), (
+                f"HttpRestHandler.handler_type.value must be str, "
+                f"got {type(handler_type.value).__name__}"
+            )
+        else:
+            assert isinstance(handler_type, str), (
+                f"HttpRestHandler.handler_type must return str, "
+                f"got {type(handler_type).__name__}"
+            )
 
         # handler_type should be non-empty
-        assert handler_type, "HttpRestHandler.handler_type must not be empty"
+        type_value = (
+            handler_type.value if hasattr(handler_type, "value") else handler_type
+        )
+        assert type_value, "HttpRestHandler.handler_type must not be empty"
 
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs"),
@@ -434,9 +615,21 @@ class TestHandlerProtocolCompliance:
     def test_handler_has_execute_method(
         self,
         handler_class: type,
-        init_kwargs: dict,
+        init_kwargs: dict[str, object],
     ) -> None:
-        """Handlers must have an execute or handle method."""
+        """Handlers must have an execute or handle method.
+
+        Protocol handlers (like HttpRestHandler) implement execute() for
+        envelope-based operations. Domain handlers (like HandlerNodeIntrospected)
+        may implement handle() for event-specific processing.
+
+        Both patterns satisfy the handler contract requirement of having a
+        callable entry point for processing requests.
+
+        Args:
+            handler_class: Handler class to test
+            init_kwargs: Keyword arguments for handler instantiation
+        """
         handler = handler_class(**init_kwargs)
 
         # Should have execute (for HttpRestHandler) or handle (for domain handlers)
@@ -458,13 +651,21 @@ class TestHandlerProtocolCompliance:
     def test_handler_has_describe_method(
         self,
         handler_class: type,
-        init_kwargs: dict,
+        init_kwargs: dict[str, object],
     ) -> None:
         """Handlers may have describe method for introspection.
+
+        The describe() method is optional per ProtocolHandler but recommended
+        for protocol handlers that need to expose metadata for runtime discovery
+        and introspection capabilities.
 
         Protocol handlers (HttpRestHandler) implement full ProtocolHandler interface
         including describe(). Domain handlers (HandlerNodeIntrospected) may omit
         describe() as they implement domain-specific handle() instead of execute().
+
+        Args:
+            handler_class: Handler class to test
+            init_kwargs: Keyword arguments for handler instantiation
         """
         handler = handler_class(**init_kwargs)
 
