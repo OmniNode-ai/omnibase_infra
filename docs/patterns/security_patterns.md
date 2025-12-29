@@ -1254,6 +1254,199 @@ kafka-acls.sh --add --deny-principal User:* \\
 
 **Related**: [CLAUDE.md - Node Introspection Security Considerations](../../CLAUDE.md#node-introspection-security-considerations)
 
+### Structured Security Error Reporting
+
+As of OMN-1091, ONEX uses structured error models for security validation failures. This enables consistent error tracking, remediation guidance, and CI integration.
+
+#### Using ModelHandlerValidationError for Security Violations
+
+```python
+from omnibase_infra.enums import EnumHandlerType
+from omnibase_infra.models.errors import ModelHandlerValidationError
+from omnibase_infra.models.handlers import ModelHandlerIdentifier
+from omnibase_infra.validation.security_validator import (
+    SecurityRuleId,
+    validate_method_exposure,
+    validate_handler_security,
+)
+
+
+# Example: Validate method exposure during introspection
+def validate_node_security(
+    node_path: str,
+    method_names: list[str],
+    method_signatures: dict[str, str],
+) -> list[ModelHandlerValidationError]:
+    """Validate node for security concerns.
+
+    Returns list of structured validation errors with remediation hints.
+    """
+    handler_identity = ModelHandlerIdentifier.from_node(
+        node_path=node_path,
+        handler_type=EnumHandlerType.EFFECT,
+    )
+
+    # Validate method exposure
+    errors = validate_method_exposure(
+        method_names=method_names,
+        handler_identity=handler_identity,
+        method_signatures=method_signatures,
+        file_path=node_path,
+    )
+
+    return errors
+
+
+# Example: Integration with introspection
+from omnibase_infra.mixins import MixinNodeIntrospection
+
+
+class SecureNode(MixinNodeIntrospection):
+    """Node with security validation."""
+
+    async def validate_security(self) -> list[ModelHandlerValidationError]:
+        """Run security validation on this node's introspection data."""
+        # Get capabilities via introspection
+        capabilities = await self.get_capabilities()
+
+        handler_identity = ModelHandlerIdentifier.from_handler_id(
+            str(self._introspection_node_id)
+        )
+
+        # Validate capabilities for security concerns
+        from omnibase_infra.validation import validate_handler_security
+
+        errors = validate_handler_security(
+            handler_identity=handler_identity,
+            capabilities=capabilities,
+            file_path=__file__,
+        )
+
+        return errors
+```
+
+#### Security Rule IDs
+
+Security validation uses structured rule IDs for consistent error tracking:
+
+| Rule ID | Violation | Remediation |
+|---------|-----------|-------------|
+| `SECURITY-001` | Sensitive method exposed | Prefix with underscore |
+| `SECURITY-002` | Credential in signature | Use generic parameter names |
+| `SECURITY-003` | Admin method public | Move to admin module or prefix with _ |
+| `SECURITY-004` | Decrypt method public | Make private or move to crypto module |
+| `SECURITY-100` | Credential in config | Move to Vault/environment |
+| `SECURITY-101` | Hardcoded secret | Use secret management |
+| `SECURITY-102` | Insecure connection | Enable TLS/SSL |
+| `SECURITY-200` | Insecure pattern | Follow security best practices |
+| `SECURITY-201` | Missing auth check | Add authentication decorator |
+| `SECURITY-202` | Missing input validation | Add Pydantic validation |
+
+#### Error Output Formats
+
+```python
+# Example error for CI integration
+error = ModelHandlerValidationError.from_security_violation(
+    rule_id=SecurityRuleId.SENSITIVE_METHOD_EXPOSED,
+    message="Handler exposes 'get_api_key' method",
+    remediation_hint="Prefix with underscore: '_get_api_key'",
+    handler_identity=ModelHandlerIdentifier.from_handler_id("auth-handler"),
+    file_path="nodes/auth/handlers/handler_authenticate.py",
+    line_number=42,
+)
+
+# Format for logging
+print(error.format_for_logging())
+# Output:
+# Handler Validation Error [SECURITY-001]
+# Type: security_validation_error
+# Source: static_analysis
+# Handler: auth-handler
+# File: nodes/auth/handlers/handler_authenticate.py:42
+# Message: Handler exposes 'get_api_key' method
+# Remediation: Prefix with underscore: '_get_api_key'
+
+# Format for CI (GitHub Actions annotation)
+print(error.format_for_ci())
+# Output:
+# ::error file=nodes/auth/handlers/handler_authenticate.py,line=42::[SECURITY-001] Handler exposes 'get_api_key' method. Remediation: Prefix with underscore: '_get_api_key'
+
+# Structured JSON for APIs
+import json
+print(json.dumps(error.to_structured_dict(), indent=2))
+# Output: Full JSON structure with all error fields
+```
+
+#### Integration with Validation Pipeline
+
+```python
+from omnibase_infra.validation import (
+    validate_handler_security,
+    validate_method_exposure,
+)
+
+
+def validate_handlers_in_directory(directory: Path) -> list[ModelHandlerValidationError]:
+    """Scan directory for security violations.
+
+    This can be integrated into CI/CD pipelines as a pre-merge check.
+    """
+    errors: list[ModelHandlerValidationError] = []
+
+    # Discover all handler files
+    handler_files = directory.glob("**/node.py")
+
+    for handler_file in handler_files:
+        # Load handler and extract capabilities
+        # (implementation depends on your introspection setup)
+        capabilities = extract_capabilities(handler_file)
+
+        handler_identity = ModelHandlerIdentifier.from_node(
+            node_path=str(handler_file),
+            handler_type=infer_handler_type(handler_file),
+        )
+
+        # Validate security
+        handler_errors = validate_handler_security(
+            handler_identity=handler_identity,
+            capabilities=capabilities,
+            file_path=str(handler_file),
+        )
+
+        errors.extend(handler_errors)
+
+    return errors
+
+
+# CI script example
+def main() -> int:
+    """CI gate for security validation."""
+    errors = validate_handlers_in_directory(Path("src/handlers"))
+
+    if not errors:
+        print("✓ Security validation passed")
+        return 0
+
+    # Print all errors
+    print(f"✗ Found {len(errors)} security violations:\n")
+    for error in errors:
+        print(error.format_for_ci())
+
+    # Return exit code for CI
+    blocking_errors = [e for e in errors if e.is_blocking()]
+    return 1 if blocking_errors else 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())
+```
+
+**Related**:
+- [ModelHandlerValidationError](../../src/omnibase_infra/models/errors/model_handler_validation_error.py) - Error model implementation
+- [SecurityRuleId](../../src/omnibase_infra/validation/security_validator.py) - Rule ID definitions
+- [Contract Linter](../../src/omnibase_infra/validation/contract_linter.py) - Similar integration pattern
+
 ---
 
 ## Logging and Audit

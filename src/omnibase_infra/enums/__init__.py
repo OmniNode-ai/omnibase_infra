@@ -5,11 +5,14 @@
 Provides infrastructure-specific enumerations for transport types,
 protocol identification, policy classification, dispatch status,
 message categories, topic types, topic standards, chain validation,
-registration states, handler types, and other infrastructure concerns.
+registration states, handler types, handler error types, handler source types,
+and other infrastructure concerns.
 
 Exports:
     EnumChainViolationType: Chain violation type enumeration for correlation/causation validation
     EnumDispatchStatus: Dispatch operation status enumeration
+    EnumHandlerErrorType: Handler error type enumeration for validation and lifecycle management
+    EnumHandlerSourceType: Handler validation error source type enumeration (CONTRACT, DESCRIPTOR, STATIC_ANALYSIS, RUNTIME, REGISTRATION, CONFIGURATION)
     EnumHandlerType: Handler type enumeration for ONEX 4-node architecture (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
     EnumInfraTransportType: Infrastructure transport type enumeration
     EnumMessageCategory: Message category enumeration (EVENT, COMMAND, INTENT)
@@ -25,6 +28,8 @@ from omnibase_core.enums import EnumTopicType
 
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
+from omnibase_infra.enums.enum_handler_error_type import EnumHandlerErrorType
+from omnibase_infra.enums.enum_handler_source_type import EnumHandlerSourceType
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -39,6 +44,8 @@ from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 __all__: list[str] = [
     "EnumChainViolationType",
     "EnumDispatchStatus",
+    "EnumHandlerErrorType",
+    "EnumHandlerSourceType",
     "EnumHandlerType",
     "EnumInfraTransportType",
     "EnumMessageCategory",
