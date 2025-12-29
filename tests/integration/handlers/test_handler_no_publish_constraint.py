@@ -272,6 +272,10 @@ def http_handler() -> Generator[HttpRestHandler, None, None]:
     Yields handler instance and ensures proper shutdown if initialized.
     This prevents resource warnings from httpx clients that may be
     initialized during handler usage.
+
+    Note: Uses Generator return type (not direct type) because this fixture
+    uses yield with teardown code. See introspection_handler for the simpler
+    return pattern when no cleanup is required.
     """
     handler = HttpRestHandler()
     yield handler

@@ -298,6 +298,7 @@ Each dispatcher should:
 | `TestHandlerNodeIntrospectedBusIsolation` | Introspection handler isolation |
 | `TestHandlerProtocolCompliance` | Protocol-level constraints |
 | `TestOrchestratorBusAccessVerification` | Orchestrator-only bus access |
+| `TestHandlerNoPublishConstraintCrossValidation` | Cross-handler constraint validation |
 
 ### Node Introspection Security
 
