@@ -9,21 +9,21 @@ registration states, handler types, handler error types, handler source types,
 node archetypes, and other infrastructure concerns.
 
 Exports:
-    EnumChainViolationType: Chain violation type enumeration for correlation/causation validation
+    EnumChainViolationType: Chain violation types for correlation/causation validation
     EnumDispatchStatus: Dispatch operation status enumeration
-    EnumHandlerErrorType: Handler error type enumeration for validation and lifecycle management
-    EnumHandlerSourceType: Handler validation error source type enumeration (CONTRACT, DESCRIPTOR, STATIC_ANALYSIS, RUNTIME, REGISTRATION, CONFIGURATION)
-    EnumHandlerType: Handler architectural role enumeration (INFRA_HANDLER, NODE_HANDLER, etc.)
-    EnumHandlerTypeCategory: Handler behavioral classification (COMPUTE, EFFECT, NONDETERMINISTIC_COMPUTE)
+    EnumHandlerErrorType: Handler error types for validation and lifecycle
+    EnumHandlerSourceType: Handler validation error source types
+    EnumHandlerType: Handler architectural roles (INFRA_HANDLER, NODE_HANDLER)
+    EnumHandlerTypeCategory: Behavioral classification (COMPUTE, EFFECT)
     EnumInfraTransportType: Infrastructure transport type enumeration
-    EnumMessageCategory: Message category enumeration (EVENT, COMMAND, INTENT)
-    EnumNodeArchetype: Node archetype enumeration for ONEX 4-node architecture (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
-    EnumNodeOutputType: Node output type enumeration for execution shape validation
-    EnumNonRetryableErrorCategory: Non-retryable error categories for DLQ and retry logic
-    EnumPolicyType: Policy type enumeration for PolicyRegistry plugins
-    EnumRegistrationState: Registration FSM state enumeration for two-way registration workflow
-    EnumTopicStandard: Topic standard enumeration (ONEX_KAFKA, ENVIRONMENT_AWARE)
-    EnumTopicType: Topic type enumeration (EVENTS, COMMANDS, INTENTS, SNAPSHOTS)
+    EnumMessageCategory: Message categories (EVENT, COMMAND, INTENT)
+    EnumNodeArchetype: 4-node architecture (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
+    EnumNodeOutputType: Node output types for execution shape validation
+    EnumNonRetryableErrorCategory: Non-retryable error categories for DLQ
+    EnumPolicyType: Policy types for PolicyRegistry plugins
+    EnumRegistrationState: Registration FSM states for two-way registration
+    EnumTopicStandard: Topic standards (ONEX_KAFKA, ENVIRONMENT_AWARE)
+    EnumTopicType: Topic types (EVENTS, COMMANDS, INTENTS, SNAPSHOTS)
 """
 
 from omnibase_core.enums import EnumTopicType

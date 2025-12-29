@@ -181,17 +181,26 @@ class ModelHandlerValidationError(BaseModel):
             >>> error = ModelHandlerValidationError.from_contract_error(...)
             >>> logger.error(error.format_for_logging())
             Handler Validation Error [CONTRACT-001]
-            Type: contract_parse_error
-            Source: contract
+            Error Type: CONTRACT_PARSE_ERROR (EnumHandlerErrorType.CONTRACT_PARSE_ERROR)
+            Source: CONTRACT (EnumHandlerSourceType.CONTRACT)
             Handler: registration-orchestrator
             File: nodes/registration/contract.yaml:1
             Message: Invalid YAML syntax in contract.yaml
             Remediation: Check YAML indentation and syntax
         """
+        # Include enum names for clarity in logs
+        error_type_display = (
+            f"{self.error_type.name} (EnumHandlerErrorType.{self.error_type.name})"
+        )
+        source_type_display = (
+            f"{self.source_type.name} (EnumHandlerSourceType.{self.source_type.name})"
+        )
+
         lines = [
             f"Handler Validation Error [{self.rule_id}]",
-            f"Type: {self.error_type.value}",
-            f"Source: {self.source_type.value}",
+            f"Severity: {self.severity.upper()}",
+            f"Error Type: {error_type_display}",
+            f"Source: {source_type_display}",
             f"Handler: {self.handler_identity.format_for_error()}",
         ]
 
@@ -200,7 +209,7 @@ class ModelHandlerValidationError(BaseModel):
             location = self.file_path
             if self.line_number:
                 location = f"{location}:{self.line_number}"
-            lines.append(f"File: {location}")
+            lines.append(f"Location: {location}")
 
         lines.extend(
             [
@@ -233,7 +242,7 @@ class ModelHandlerValidationError(BaseModel):
         Example:
             >>> error = ModelHandlerValidationError.from_contract_error(...)
             >>> print(error.format_for_ci())
-            ::error file=nodes/registration/contract.yaml,line=1::[CONTRACT-001] Invalid YAML...
+            ::error file=nodes/registration/contract.yaml,line=1::[CONTRACT-001] (CONTRACT_PARSE_ERROR) Invalid YAML...
         """
         annotation_type = "error" if self.is_blocking() else "warning"
 
@@ -242,8 +251,8 @@ class ModelHandlerValidationError(BaseModel):
         if self.line_number:
             file_location += f",line={self.line_number}"
 
-        # Build error message with rule ID
-        error_message = f"[{self.rule_id}] {self.message}"
+        # Build error message with rule ID and error type for clarity
+        error_message = f"[{self.rule_id}] ({self.error_type.name}) {self.message}"
 
         # Include remediation hint in CI output
         full_message = f"{error_message}. Remediation: {self.remediation_hint}"

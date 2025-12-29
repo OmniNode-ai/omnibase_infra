@@ -232,45 +232,66 @@ class ValidationAggregator:
             HANDLER VALIDATION ERRORS (3 total, 2 blocking)
             ============================================================
 
-            [CONTRACT]
+            [CONTRACT] (EnumHandlerSourceType.CONTRACT)
             ----------------------------------------
-              ✗ [CONTRACT-001] Invalid YAML syntax
+              ERROR [CONTRACT-001] (CONTRACT_PARSE_ERROR) Invalid YAML syntax
+                Handler: registration-orchestrator
                 Location: nodes/registration/contract.yaml:5
-                Fix: Check YAML indentation
+                Remediation: Check YAML indentation
             ...
         """
         if not self._errors:
-            return "✓ No validation errors found"
+            return "No validation errors found"
 
+        warning_count = self.error_count - self.blocking_error_count
         lines = [
             "",
-            "=" * 60,
-            f"HANDLER VALIDATION ERRORS ({self.error_count} total, {self.blocking_error_count} blocking)",
-            "=" * 60,
+            "=" * 70,
+            f"HANDLER VALIDATION ERRORS ({self.error_count} total: "
+            f"{self.blocking_error_count} blocking, {warning_count} warnings)",
+            "=" * 70,
         ]
 
         # Group by source type
         by_source = self.get_errors_by_source()
         for source_type, errors in sorted(by_source.items(), key=lambda x: x[0].value):
-            lines.append(f"\n[{source_type.value.upper()}]")
-            lines.append("-" * 40)
+            lines.append(
+                f"\n[{source_type.name}] (EnumHandlerSourceType.{source_type.name})"
+            )
+            lines.append("-" * 50)
             for error in errors:
-                symbol = "✗" if error.is_blocking() else "⚠"
-                lines.append(f"  {symbol} [{error.rule_id}] {error.message}")
+                severity_label = "ERROR" if error.is_blocking() else "WARNING"
+                # Include error type name for clarity
+                lines.append(
+                    f"  {severity_label} [{error.rule_id}] "
+                    f"({error.error_type.name}) {error.message}"
+                )
+                # Include handler identity
+                lines.append(
+                    f"    Handler: {error.handler_identity.format_for_error()}"
+                )
+                # Include file location
                 if error.file_path:
                     loc = f"{error.file_path}"
                     if error.line_number:
                         loc += f":{error.line_number}"
                     lines.append(f"    Location: {loc}")
-                lines.append(f"    Fix: {error.remediation_hint}")
+                # Include remediation hint
+                lines.append(f"    Remediation: {error.remediation_hint}")
                 lines.append("")
 
-        lines.append("=" * 60)
+        lines.append("=" * 70)
         if self.has_blocking_errors:
-            lines.append("❌ Startup blocked due to validation errors")
+            lines.append(
+                f"BLOCKED: {self.blocking_error_count} blocking error(s) must be "
+                f"resolved before startup can proceed."
+            )
         else:
-            lines.append("⚠ Startup proceeding with warnings")
-        lines.append("=" * 60)
+            lines.append(
+                f"PROCEEDING WITH WARNINGS: {warning_count} warning(s) detected. "
+                f"Consider addressing these for improved code quality."
+            )
+        lines.append("=" * 70)
 
         return "\n".join(lines)
 
@@ -307,14 +328,21 @@ class ValidationAggregator:
         Example:
             >>> aggregator = ValidationAggregator()
             >>> aggregator.format_summary()
-            'Validation: OK'
+            'Handler Validation: PASSED (0 errors)'
             >>> aggregator.add_errors(errors)
             >>> aggregator.format_summary()
-            'Validation: 3 errors (2 blocking)'
+            'Handler Validation: FAILED (3 total: 2 blocking, 1 warning)'
         """
         if not self._errors:
-            return "Validation: OK"
-        return f"Validation: {self.error_count} errors ({self.blocking_error_count} blocking)"
+            return "Handler Validation: PASSED (0 errors)"
+
+        warning_count = self.error_count - self.blocking_error_count
+        status = "FAILED" if self.has_blocking_errors else "PASSED WITH WARNINGS"
+        return (
+            f"Handler Validation: {status} "
+            f"({self.error_count} total: {self.blocking_error_count} blocking, "
+            f"{warning_count} warning{'s' if warning_count != 1 else ''})"
+        )
 
     def raise_if_blocking(self) -> None:
         """Raise exception if blocking errors exist.

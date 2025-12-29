@@ -29,8 +29,10 @@ See Also:
     - EnumNodeOutputType: Defines valid node output types (includes PROJECTION)
     - EnumMessageCategory: Defines message categories for routing (excludes PROJECTION)
     - EnumExecutionShapeViolation: Defines validation violation types
-    - EnumHandlerType: Handler architectural role
-    - EnumHandlerTypeCategory: Handler behavioral classification
+    - EnumHandlerType: Handler architectural role (INFRA_HANDLER, NODE_HANDLER, etc.)
+    - EnumHandlerTypeCategory: Handler behavioral classification (EFFECT, COMPUTE, etc.)
+    - NODE_ARCHETYPE_EXPECTED_CATEGORIES: Maps archetypes to expected input/output types
+      (see topic_category_validator.py for the mapping and its dual-purpose documentation)
 """
 
 from enum import Enum

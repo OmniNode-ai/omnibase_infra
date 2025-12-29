@@ -30,9 +30,17 @@ Design Principle:
     - Behavioral category: Drives execution shape validation and output constraints
 
 See Also:
-    - EnumHandlerTypeCategory: Behavioral classification (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
+    - EnumHandlerTypeCategory: Behavioral classification (EFFECT, COMPUTE, NONDETERMINISTIC_COMPUTE)
+    - EnumNodeArchetype: Node archetypes for execution shape validation
     - EnumNodeOutputType: Valid node output types
     - EnumMessageCategory: Message categories for routing
+    - HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md: Full handler architecture documentation
+
+Future Considerations (TODO):
+    Handler descriptor validation should verify that:
+    - Handler type and category are consistent (e.g., INFRA_HANDLER typically has EFFECT category)
+    - ADAPTER tag is only applied to EFFECT handlers (adapters do I/O)
+    See HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md "ADAPTER Validation" section.
 """
 
 from enum import Enum

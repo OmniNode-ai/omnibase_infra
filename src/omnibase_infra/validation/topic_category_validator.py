@@ -89,8 +89,21 @@ TOPIC_SUFFIXES: dict[EnumMessageCategory | EnumNodeOutputType, str] = {
 }
 
 # Node archetype to expected message categories mapping
-# Defines which message categories each node archetype should consume
-# Note: REDUCER can consume EVENTs (message category) and produce PROJECTIONs (node output type)
+#
+# DUAL PURPOSE EXPLANATION:
+# This mapping serves two purposes in validation:
+# 1. INPUT VALIDATION: Which message categories each node archetype can CONSUME
+#    (e.g., REDUCER can consume EVENT messages from *.events topics)
+# 2. OUTPUT VALIDATION: Which output types each node archetype can PRODUCE
+#    (e.g., REDUCER can produce PROJECTION outputs)
+#
+# Why the union type (EnumMessageCategory | EnumNodeOutputType)?
+# - EnumMessageCategory values (EVENT, COMMAND, INTENT) are for message routing
+# - EnumNodeOutputType values (including PROJECTION) are for node output validation
+# - REDUCER is unique: it consumes EVENTs (message category) and produces PROJECTIONs
+#   (node output type that is NOT routed as a message)
+#
+# See ADR: docs/decisions/adr-enum-message-category-vs-node-output-type.md
 NODE_ARCHETYPE_EXPECTED_CATEGORIES: dict[
     EnumNodeArchetype, list[EnumMessageCategory | EnumNodeOutputType]
 ] = {
@@ -218,8 +231,10 @@ class TopicCategoryValidator:
             file_path="<runtime>",  # Runtime validation has no file context
             line_number=1,
             message=(
-                f"Message category '{message_category.value}' should be on a topic "
-                f"matching '*.<{expected_suffix}>' pattern, but found topic '{topic_name}'"
+                f"Topic category mismatch: Message category '{message_category.name}' "
+                f"(EnumMessageCategory.{message_category.name}) requires a topic matching "
+                f"pattern '<domain>.{expected_suffix}'. Found topic: '{topic_name}'. "
+                f"Expected pattern: '*.{expected_suffix}' (e.g., 'order.{expected_suffix}')."
             ),
             severity="error",
         )
@@ -279,8 +294,11 @@ class TopicCategoryValidator:
                         file_path="<runtime>",
                         line_number=1,
                         message=(
-                            f"Topic '{topic}' does not follow ONEX naming conventions "
-                            f"(expected *.events, *.commands, or *.intents)"
+                            f"Topic naming convention violation: Topic '{topic}' does not match "
+                            f"ONEX naming conventions. Node archetype: '{node_archetype.name}' "
+                            f"(EnumNodeArchetype.{node_archetype.name}). Expected topic patterns: "
+                            f"'<domain>.events', '<domain>.commands', or '<domain>.intents'. "
+                            f"Example valid topics: 'order.events', 'user.commands'."
                         ),
                         severity="warning",
                     )
@@ -289,6 +307,7 @@ class TopicCategoryValidator:
 
             # Check if the inferred category is in the expected categories
             if inferred_category not in expected_categories:
+                expected_names = [c.name for c in expected_categories]
                 violations.append(
                     ModelExecutionShapeViolationResult(
                         violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
@@ -296,9 +315,12 @@ class TopicCategoryValidator:
                         file_path="<runtime>",
                         line_number=1,
                         message=(
-                            f"Node archetype '{node_archetype.value}' subscribed to topic '{topic}' "
-                            f"which implies '{inferred_category.value}' messages, but handler "
-                            f"expects categories: {[c.value for c in expected_categories]}"
+                            f"Subscription category mismatch: Node archetype '{node_archetype.name}' "
+                            f"(EnumNodeArchetype.{node_archetype.name}) subscribed to topic '{topic}' "
+                            f"which implies '{inferred_category.name}' messages. "
+                            f"Expected message categories for this archetype: [{', '.join(expected_names)}]. "
+                            f"Found: {inferred_category.name}. "
+                            f"Review NODE_ARCHETYPE_EXPECTED_CATEGORIES for valid subscriptions."
                         ),
                         severity="error",
                     )
@@ -551,6 +573,12 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         if inferred_category is None:
             # Topic doesn't follow naming convention - add warning
             # Use current_node_archetype if available (from class context), otherwise None
+            archetype_context = (
+                f" Node archetype: '{self.current_node_archetype.name}' "
+                f"(EnumNodeArchetype.{self.current_node_archetype.name})."
+                if self.current_node_archetype
+                else ""
+            )
             self.violations.append(
                 ModelExecutionShapeViolationResult(
                     violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
@@ -558,8 +586,11 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
                     file_path=str(self.file_path.absolute()),
                     line_number=node.lineno,
                     message=(
-                        f"Topic '{topic_name}' in {method_name}() call does not follow "
-                        f"ONEX naming conventions (expected *.events, *.commands, or *.intents)"
+                        f"Topic naming convention violation at line {node.lineno}: "
+                        f"Topic '{topic_name}' in {method_name}() call does not match ONEX "
+                        f"naming conventions.{archetype_context} Expected topic patterns: "
+                        f"'<domain>.events', '<domain>.commands', or '<domain>.intents'. "
+                        f"Example: 'order.events', 'user.commands'."
                     ),
                     severity="warning",
                 )
@@ -572,6 +603,7 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
                 self.current_node_archetype, []
             )
             if inferred_category not in expected_categories:
+                expected_names = [c.name for c in expected_categories]
                 self.violations.append(
                     ModelExecutionShapeViolationResult(
                         violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
@@ -579,11 +611,12 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
                         file_path=str(self.file_path.absolute()),
                         line_number=node.lineno,
                         message=(
-                            f"Handler '{self.current_class_name or 'unknown'}' "
-                            f"({self.current_node_archetype.value}) uses topic '{topic_name}' "
-                            f"in {method_name}() call, implying '{inferred_category.value}' "
-                            f"messages. Expected categories for this handler: "
-                            f"{[c.value for c in expected_categories]}"
+                            f"Topic category mismatch at line {node.lineno}: "
+                            f"Handler '{self.current_class_name or 'unknown'}' with node archetype "
+                            f"'{self.current_node_archetype.name}' (EnumNodeArchetype.{self.current_node_archetype.name}) "
+                            f"uses topic '{topic_name}' in {method_name}() call. Topic implies "
+                            f"'{inferred_category.name}' messages. Expected categories for this "
+                            f"archetype: [{', '.join(expected_names)}]. Found: {inferred_category.name}."
                         ),
                         severity="error",
                     )
@@ -622,6 +655,13 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
 
         if message_hint is not None and message_hint != topic_category:
             # Use current_node_archetype if available (from class context), otherwise None
+            expected_topic_suffix = self.validator.suffixes.get(message_hint, "unknown")
+            archetype_context = (
+                f" Node archetype: '{self.current_node_archetype.name}' "
+                f"(EnumNodeArchetype.{self.current_node_archetype.name})."
+                if self.current_node_archetype
+                else ""
+            )
             self.violations.append(
                 ModelExecutionShapeViolationResult(
                     violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
@@ -629,8 +669,11 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
                     file_path=str(self.file_path.absolute()),
                     line_number=node.lineno,
                     message=(
-                        f"Message appears to be '{message_hint.value}' type but is being "
-                        f"sent to topic '{topic_name}' (expected *.{message_hint.value}s topic)"
+                        f"Message-topic category mismatch at line {node.lineno}: Message appears "
+                        f"to be '{message_hint.name}' type (EnumMessageCategory.{message_hint.name}) "
+                        f"but is being sent to topic '{topic_name}' which expects "
+                        f"'{topic_category.name}' messages.{archetype_context} "
+                        f"Expected topic pattern for {message_hint.name}: '*.{expected_topic_suffix}'."
                     ),
                     severity="error",
                 )
@@ -943,7 +986,12 @@ def validate_topic_categories_in_file(
                 node_archetype=None,  # Cannot determine archetype from unparseable file
                 file_path=str(file_path.absolute()),
                 line_number=e.lineno or 1,
-                message=f"Syntax error in file: {e.msg}",
+                message=(
+                    f"Validation error: Cannot parse Python source file for topic category "
+                    f"validation. Syntax error at line {e.lineno or 1}: {e.msg}. "
+                    f"File: {file_path.name}. Fix the syntax error to enable topic "
+                    f"category validation."
+                ),
                 severity="error",
             )
         ]
@@ -1005,9 +1053,15 @@ def validate_message_on_topic(
     if result is not None:
         # Enhance the message with message type info if available
         message_type_name = type(message).__name__
+        category_name = (
+            message_category.name
+            if hasattr(message_category, "name")
+            else str(message_category)
+        )
         enhanced_message = (
-            f"Message '{message_type_name}' with category '{message_category.value}' "
-            f"is on topic '{topic}'. {result.message}"
+            f"Runtime topic validation failure: Message type '{message_type_name}' with "
+            f"category '{category_name}' (EnumMessageCategory.{category_name}) is on topic "
+            f"'{topic}'. {result.message}"
         )
         return ModelExecutionShapeViolationResult(
             violation_type=result.violation_type,

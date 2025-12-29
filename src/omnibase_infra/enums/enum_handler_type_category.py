@@ -16,8 +16,17 @@ Classification Guide:
 Note: LLM API calls are EFFECT (external I/O), not NONDETERMINISTIC_COMPUTE.
 
 See Also:
-    - EnumHandlerType: Architectural role classification
+    - EnumHandlerType: Architectural role classification (INFRA_HANDLER, NODE_HANDLER, etc.)
+    - EnumNodeArchetype: Node archetypes for execution shape validation (EFFECT, COMPUTE, etc.)
     - HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md: Full architecture documentation
+
+Note on Naming Consistency:
+    EnumHandlerTypeCategory and EnumNodeArchetype both use EFFECT and COMPUTE values but serve
+    different purposes:
+    - EnumHandlerTypeCategory: Classifies handler BEHAVIOR (side effects, determinism)
+    - EnumNodeArchetype: Classifies node ARCHITECTURE (execution shape validation)
+    The shared terminology reflects that EFFECT handlers are typically bound to EFFECT nodes,
+    and COMPUTE handlers to COMPUTE nodes, but they represent different conceptual axes.
 """
 
 from enum import Enum
