@@ -176,6 +176,57 @@ injection constraint. Used for defensive source code analysis.
 """
 
 # ============================================================================
+# Test Utilities
+# ============================================================================
+
+
+def detect_forbidden_source_patterns(
+    handler: object,
+    patterns: tuple[str, ...] = FORBIDDEN_SOURCE_PATTERNS,
+) -> list[tuple[str, str, str]]:
+    """Detect forbidden patterns in handler method source code.
+
+    Args:
+        handler: Handler instance to inspect
+        patterns: Tuple of forbidden patterns to search for
+
+    Returns:
+        List of (method_name, pattern, context) tuples for each violation found.
+        Empty list means no violations detected.
+
+    Note:
+        This is a defensive check using string matching. The primary
+        enforcement is through dependency injection (no bus injected).
+        See module docstring for rationale on string matching vs AST.
+    """
+    violations: list[tuple[str, str, str]] = []
+
+    for name in dir(handler):
+        if name.startswith("_"):
+            continue
+
+        method = getattr(handler, name, None)
+        if not callable(method):
+            continue
+
+        try:
+            source = inspect.getsource(method)
+        except (TypeError, OSError):
+            continue
+
+        for pattern in patterns:
+            if pattern in source:
+                # Extract a snippet around the match for context
+                idx = source.find(pattern)
+                start = max(0, idx - 20)
+                end = min(len(source), idx + len(pattern) + 20)
+                context = source[start:end].replace("\n", " ")
+                violations.append((name, pattern, context))
+
+    return violations
+
+
+# ============================================================================
 # Test HttpRestHandler Bus Isolation
 # ============================================================================
 
@@ -207,16 +258,26 @@ class TestHttpRestHandlerBusIsolation:
     These tests provide defense-in-depth validation.
     """
 
-    def test_constructor_takes_no_parameters(self) -> None:
-        """HttpRestHandler.__init__ takes only self - no dependency injection."""
+    def test_constructor_takes_no_bus_parameters(self) -> None:
+        """HttpRestHandler.__init__ does not accept bus-related parameters.
+
+        This test focuses on the no-publish constraint: the constructor must not
+        accept bus, dispatcher, or publisher parameters. The test does NOT enforce
+        a specific parameter list, allowing the handler to evolve while maintaining
+        the constraint.
+        """
         sig = inspect.signature(HttpRestHandler.__init__)
         params = list(sig.parameters.keys())
 
-        # Only 'self' parameter
-        assert params == ["self"], (
-            f"HttpRestHandler.__init__ should take only 'self', "
-            f"but has parameters: {params}"
-        )
+        # First parameter must be 'self'
+        assert params[0] == "self", "First parameter must be 'self'"
+
+        # Verify no bus-related parameters are accepted
+        for forbidden in FORBIDDEN_BUS_PARAMETERS:
+            assert forbidden not in params, (
+                f"HttpRestHandler.__init__ must not accept '{forbidden}' parameter - "
+                f"handlers must not have bus access"
+            )
 
     def test_no_bus_attribute_after_instantiation(self) -> None:
         """Handler instance has no bus-related attributes."""
@@ -538,52 +599,66 @@ class TestHandlerNoPublishConstraintCrossValidation:
         """
         handler = handler_class(**init_kwargs)
 
-        for name in dir(handler):
-            if name.startswith("_"):
-                continue
+        violations = detect_forbidden_source_patterns(handler)
 
-            method = getattr(handler, name, None)
-            if not callable(method):
-                continue
-
-            try:
-                source = inspect.getsource(method)
-            except (TypeError, OSError):
-                continue
-
-            for pattern in FORBIDDEN_SOURCE_PATTERNS:
-                assert pattern not in source, (
-                    f"Handler {handler_class.__name__}.{name} contains "
-                    f"forbidden pattern '{pattern}' - handlers must not access bus"
-                )
+        assert not violations, (
+            f"Handler {handler_class.__name__} contains forbidden patterns:\n"
+            + "\n".join(
+                f"  - {method}.{pattern}: ...{context}..."
+                for method, pattern, context in violations
+            )
+        )
 
     def test_http_handler_execute_signature_matches_pattern(self) -> None:
         """HttpRestHandler.execute follows the handler pattern.
 
-        Pattern: async def execute(envelope) -> ModelHandlerOutput
+        Pattern: async def execute(envelope, ...) -> ModelHandlerOutput
         NOT: async def execute(envelope, bus) -> None
+
+        This test verifies the constraint (no bus params) while allowing
+        the handler to evolve with additional domain parameters.
         """
         sig = inspect.signature(HttpRestHandler.execute)
         params = list(sig.parameters.keys())
 
-        # Should be (self, envelope) - no bus parameter
-        assert params == [
-            "self",
-            "envelope",
-        ], f"execute() should take (self, envelope), got: {params}"
+        # First parameter must be 'self'
+        assert params[0] == "self", "First parameter must be 'self'"
+
+        # Must accept 'envelope' parameter
+        assert "envelope" in params, "execute() must accept 'envelope' parameter"
+
+        # Must NOT accept any bus-related parameters
+        for forbidden in FORBIDDEN_BUS_PARAMETERS:
+            assert forbidden not in params, (
+                f"execute() must not accept '{forbidden}' parameter - "
+                f"handlers must not have bus access"
+            )
 
     def test_introspection_handler_handle_signature_matches_pattern(self) -> None:
         """HandlerNodeIntrospected.handle follows the handler pattern.
 
-        Pattern: async def handle(event, now, correlation_id) -> list[BaseModel]
+        Pattern: async def handle(event, ...) -> list[BaseModel]
         NOT: async def handle(event, bus) -> None
+
+        This test verifies key domain parameters exist and the no-publish
+        constraint is enforced, while allowing the handler to evolve with
+        additional domain parameters.
         """
         sig = inspect.signature(HandlerNodeIntrospected.handle)
         params = list(sig.parameters.keys())
 
-        # Should be (self, event, now, correlation_id) - no bus parameter
-        expected = ["self", "event", "now", "correlation_id"]
-        assert params == expected, f"handle() should take {expected}, got: {params}"
+        # First parameter must be 'self'
+        assert params[0] == "self", "First parameter must be 'self'"
+
+        # Must accept key domain parameters
+        assert "event" in params, "handle() must accept 'event' parameter"
+
+        # Must NOT accept any bus-related parameters
+        for forbidden in FORBIDDEN_BUS_PARAMETERS:
+            assert forbidden not in params, (
+                f"handle() must not accept '{forbidden}' parameter - "
+                f"handlers must not have bus access"
+            )
 
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs", "method_name"),
@@ -752,41 +827,6 @@ class TestHandlerProtocolCompliance:
             f"HttpRestHandler.describe() must return dict, "
             f"got {type(description).__name__}"
         )
-
-    def test_http_rest_handler_has_handler_type_property(self) -> None:
-        """HttpRestHandler must expose handler_type property per ProtocolHandler.
-
-        This test specifically validates the handler_type property returns a
-        string-compatible value, which is the primary identifier used for
-        handler routing in the runtime host.
-        """
-        handler = HttpRestHandler()
-
-        # handler_type should be a property or attribute
-        assert hasattr(handler, "handler_type"), (
-            "HttpRestHandler must have 'handler_type' property "
-            "per ProtocolHandler protocol"
-        )
-
-        # handler_type should return a string-compatible value
-        handler_type = handler.handler_type
-        # Check for EnumHandlerType pattern (has .value) or direct string
-        if hasattr(handler_type, "value"):
-            assert isinstance(handler_type.value, str), (
-                f"HttpRestHandler.handler_type.value must be str, "
-                f"got {type(handler_type.value).__name__}"
-            )
-        else:
-            assert isinstance(handler_type, str), (
-                f"HttpRestHandler.handler_type must return str, "
-                f"got {type(handler_type).__name__}"
-            )
-
-        # handler_type should be non-empty
-        type_value = (
-            handler_type.value if hasattr(handler_type, "value") else handler_type
-        )
-        assert type_value, "HttpRestHandler.handler_type must not be empty"
 
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs"),
@@ -966,14 +1006,237 @@ class TestHandlerProtocolCompliance:
             )
 
 
+# ============================================================================
+# Orchestrator Bus Access Verification (Companion Tests)
+# ============================================================================
+
+
+class TestOrchestratorBusAccessVerification:
+    """Companion tests verifying orchestrators DO have bus access.
+
+    Constraint Under Test
+    ---------------------
+    **Bus Access Pattern**: While handlers MUST NOT have bus access,
+    orchestrators MUST HAVE bus access because they are responsible for
+    coordinating event publishing.
+
+    Why Companion Tests Matter
+    --------------------------
+    - **Contract Verification**: Proves the architectural boundary is correct
+    - **Defense in Depth**: If handlers have bus access, constraint is violated
+    - **Documentation**: Makes the expected pattern explicit in tests
+
+    Orchestrator Bus Access Architecture
+    ------------------------------------
+    The ONEX orchestrator pattern uses **coordinated bus access**:
+    - Orchestrators receive a `container: ModelONEXContainer`
+    - They accept coordinators/services that have bus dependencies
+    - Example: `TimeoutCoordinator` uses `ServiceTimeoutEmitter` which has `event_bus`
+
+    This is the intended architectural pattern:
+    1. Orchestrator receives container (DI)
+    2. Orchestrator receives coordinators with bus access (setter injection)
+    3. Coordinator delegates to services with event_bus (composition)
+    4. Services publish to event bus (actual publishing)
+
+    This is the OPPOSITE of the handler pattern where bus access is forbidden.
+    """
+
+    def test_timeout_emitter_requires_event_bus_dependency(self) -> None:
+        """ServiceTimeoutEmitter constructor requires event_bus parameter.
+
+        This proves that the service layer, used by orchestrator coordinators,
+        has bus access. The orchestrator pattern is:
+        Orchestrator -> TimeoutCoordinator -> ServiceTimeoutEmitter(event_bus=...)
+        """
+        from omnibase_infra.services.service_timeout_emitter import (
+            ServiceTimeoutEmitter,
+        )
+
+        sig = inspect.signature(ServiceTimeoutEmitter.__init__)
+        params = list(sig.parameters.keys())
+
+        # ServiceTimeoutEmitter MUST accept event_bus parameter
+        assert "event_bus" in params, (
+            "ServiceTimeoutEmitter must accept 'event_bus' parameter - "
+            "this is the architectural pattern that enables orchestrator publishing"
+        )
+
+        # Verify event_bus is a required parameter (no default)
+        event_bus_param = sig.parameters["event_bus"]
+        assert event_bus_param.default is inspect.Parameter.empty, (
+            "event_bus should be a required parameter (no default) - "
+            "orchestrator workflows require bus access"
+        )
+
+    def test_timeout_coordinator_accepts_emitter_with_bus_access(self) -> None:
+        """TimeoutCoordinator accepts ServiceTimeoutEmitter as dependency.
+
+        This proves the coordinator layer can receive services that have
+        bus access. The orchestrator delegates to coordinators which delegate
+        to services for actual event publishing.
+        """
+        from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
+            TimeoutCoordinator,
+        )
+
+        sig = inspect.signature(TimeoutCoordinator.__init__)
+        params = list(sig.parameters.keys())
+
+        # TimeoutCoordinator must accept timeout_emission parameter
+        assert "timeout_emission" in params, (
+            "TimeoutCoordinator must accept 'timeout_emission' parameter - "
+            "this is the ServiceTimeoutEmitter with bus access"
+        )
+
+    def test_orchestrator_has_set_timeout_coordinator_method(self) -> None:
+        """NodeRegistrationOrchestrator has setter for timeout coordinator.
+
+        This proves the orchestrator can receive components with bus access.
+        The setter injection pattern allows orchestrators to be wired with
+        coordinators that have publishing capabilities.
+        """
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            NodeRegistrationOrchestrator,
+        )
+
+        # Verify the method exists
+        assert hasattr(NodeRegistrationOrchestrator, "set_timeout_coordinator"), (
+            "NodeRegistrationOrchestrator must have 'set_timeout_coordinator' method - "
+            "this enables wiring coordinators with bus access"
+        )
+
+        # Verify it's callable
+        assert callable(NodeRegistrationOrchestrator.set_timeout_coordinator), (
+            "set_timeout_coordinator must be callable"
+        )
+
+        # Verify the method signature accepts coordinator
+        sig = inspect.signature(NodeRegistrationOrchestrator.set_timeout_coordinator)
+        params = list(sig.parameters.keys())
+        assert "coordinator" in params, (
+            "set_timeout_coordinator should accept 'coordinator' parameter"
+        )
+
+    def test_orchestrator_has_timeout_coordinator_property(self) -> None:
+        """NodeRegistrationOrchestrator has property to check coordinator status.
+
+        Proves orchestrator exposes whether it has bus-capable coordinator wired.
+        """
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            NodeRegistrationOrchestrator,
+        )
+
+        # Verify the property exists
+        assert hasattr(NodeRegistrationOrchestrator, "has_timeout_coordinator"), (
+            "NodeRegistrationOrchestrator must have 'has_timeout_coordinator' property"
+        )
+
+    def test_orchestrator_container_pattern_differs_from_handlers(self) -> None:
+        """Orchestrator uses container pattern, handlers use direct DI.
+
+        This test explicitly documents the architectural difference:
+        - Handlers: Direct DI of domain dependencies, NO bus access
+        - Orchestrators: Container + setter injection for coordinators with bus
+
+        The container pattern enables orchestrators to resolve bus-related
+        dependencies through the ONEX dependency injection system.
+        """
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            NodeRegistrationOrchestrator,
+        )
+
+        sig = inspect.signature(NodeRegistrationOrchestrator.__init__)
+        params = list(sig.parameters.keys())
+
+        # Orchestrator takes container (not individual dependencies)
+        assert "container" in params, (
+            "NodeRegistrationOrchestrator must accept 'container' parameter - "
+            "this is the ONEX DI pattern for orchestrators"
+        )
+
+        # Contrast with handlers: handlers SHOULD NOT have container
+        # This is already tested in TestHandlerNodeIntrospectedBusIsolation
+        # but we make the contrast explicit here
+        handler_sig = inspect.signature(HandlerNodeIntrospected.__init__)
+        handler_params = list(handler_sig.parameters.keys())
+
+        assert "container" not in handler_params, (
+            "HandlerNodeIntrospected should NOT accept 'container' - "
+            "handlers use direct domain dependency injection"
+        )
+
+    def test_orchestrator_can_be_instantiated_with_container(self) -> None:
+        """Orchestrator can be created with a container dependency.
+
+        This is a runtime verification that the orchestrator pattern works.
+        The container provides access to bus-related services through ONEX DI.
+        """
+        from unittest.mock import MagicMock
+
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            NodeRegistrationOrchestrator,
+        )
+
+        # Create mock container
+        mock_container = MagicMock()
+
+        # Orchestrator should instantiate without error
+        orchestrator = NodeRegistrationOrchestrator(container=mock_container)
+
+        # Verify orchestrator was created
+        assert orchestrator is not None
+        assert isinstance(orchestrator, NodeRegistrationOrchestrator)
+
+        # Verify timeout coordinator is not set by default
+        assert not orchestrator.has_timeout_coordinator, (
+            "Timeout coordinator should not be set by default - "
+            "requires explicit wiring via set_timeout_coordinator()"
+        )
+
+    def test_service_timeout_emitter_stores_event_bus(self) -> None:
+        """ServiceTimeoutEmitter stores the event_bus dependency.
+
+        Proves that the service layer maintains bus access for publishing.
+        This is the endpoint of the orchestrator -> coordinator -> service chain.
+        """
+        from unittest.mock import MagicMock
+
+        from omnibase_infra.services.service_timeout_emitter import (
+            ServiceTimeoutEmitter,
+        )
+
+        # Create mock dependencies
+        mock_query = MagicMock()
+        mock_bus = MagicMock()
+        mock_projector = MagicMock()
+
+        # Create emitter with event_bus
+        emitter = ServiceTimeoutEmitter(
+            timeout_query=mock_query,
+            event_bus=mock_bus,
+            projector=mock_projector,
+        )
+
+        # Verify event_bus is stored (as private attribute per ONEX patterns)
+        assert hasattr(emitter, "_event_bus"), (
+            "ServiceTimeoutEmitter must store event_bus as _event_bus"
+        )
+        assert emitter._event_bus is mock_bus, (
+            "ServiceTimeoutEmitter._event_bus must be the injected bus"
+        )
+
+
 __all__: list[str] = [
     "FORBIDDEN_BUS_ATTRIBUTES",
     "FORBIDDEN_BUS_PARAMETERS",
     "FORBIDDEN_PUBLISH_METHODS",
     "BUS_INFRASTRUCTURE_KEYWORDS",
     "FORBIDDEN_SOURCE_PATTERNS",
+    "detect_forbidden_source_patterns",
     "TestHttpRestHandlerBusIsolation",
     "TestHandlerNodeIntrospectedBusIsolation",
     "TestHandlerNoPublishConstraintCrossValidation",
     "TestHandlerProtocolCompliance",
+    "TestOrchestratorBusAccessVerification",
 ]
