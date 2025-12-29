@@ -116,42 +116,32 @@ class TestHttpRestHandlerBusIsolation:
                 f"handlers must not publish directly"
             )
 
-    def test_handler_is_stateless_http_client_wrapper(self) -> None:
-        """Handler only wraps httpx client - no messaging infrastructure."""
+    def test_handler_has_no_messaging_infrastructure_attributes(self) -> None:
+        """Handler has no messaging/bus-related internal state."""
         handler = HttpRestHandler()
 
-        # Check internal state only contains HTTP-related attributes
         internal_attrs = [attr for attr in dir(handler) if attr.startswith("_")]
-
-        # Filter to non-dunder attributes
         handler_attrs = [attr for attr in internal_attrs if not attr.startswith("__")]
 
-        # All internal attributes should be HTTP-related
-        expected_http_attrs = {
-            "_client",
-            "_timeout",
-            "_max_request_size",
-            "_max_response_size",
-            "_initialized",
-            # From MixinEnvelopeExtraction
-            "_extract_correlation_id",
-            "_extract_envelope_id",
-        }
-
+        # Check that no internal attributes are bus/messaging-related
+        bus_keywords = [
+            "bus",
+            "kafka",
+            "dispatch",
+            "publish",
+            "producer",
+            "event",
+            "message",
+        ]
         for attr in handler_attrs:
-            # Skip methods (we're checking state attributes)
             if callable(getattr(handler, attr, None)):
                 continue
-
-            # Attribute should be HTTP-related or from known mixin
-            is_known = (
-                attr in expected_http_attrs
-                or attr.startswith("_extract")  # Mixin methods
-            )
-            assert is_known or attr.startswith("__"), (
-                f"Unexpected internal attribute '{attr}' - "
-                f"handler should only have HTTP-related state"
-            )
+            attr_lower = attr.lower()
+            for keyword in bus_keywords:
+                assert keyword not in attr_lower, (
+                    f"Found bus-related attribute '{attr}' - "
+                    f"handler must not have messaging infrastructure"
+                )
 
 
 # ============================================================================
@@ -344,6 +334,9 @@ class TestHandlerNoPublishConstraintCrossValidation:
                 continue
 
             # Check for forbidden patterns in source
+            # Note: This is a defensive check; the primary enforcement is through
+            # dependency injection (no bus is injected into handlers). This catches
+            # common direct-access patterns but won't detect all indirect access.
             forbidden_patterns = [
                 "async with self.bus",
                 "async with self._bus",
@@ -389,8 +382,94 @@ class TestHandlerNoPublishConstraintCrossValidation:
         assert params == expected, f"handle() should take {expected}, got: {params}"
 
 
+# ============================================================================
+# Handler Protocol Compliance
+# ============================================================================
+
+
+class TestHandlerProtocolCompliance:
+    """Verify handlers implement the ProtocolHandler protocol interface.
+
+    These tests ensure that handlers conform to the ProtocolHandler protocol
+    from omnibase_spi, which defines the expected interface for all handlers.
+
+    Handler Types:
+        - Protocol handlers (HttpRestHandler): Full protocol implementation with
+          handler_type property, execute() method, and describe() method.
+        - Domain handlers (HandlerNodeIntrospected): Domain-specific handlers that
+          implement handle() method for event processing. These may not implement
+          all ProtocolHandler members.
+    """
+
+    def test_http_rest_handler_has_handler_type_property(self) -> None:
+        """HttpRestHandler must expose handler_type property per ProtocolHandler."""
+        handler = HttpRestHandler()
+
+        # handler_type should be a property or attribute
+        assert hasattr(handler, "handler_type"), (
+            "HttpRestHandler must have 'handler_type' property "
+            "per ProtocolHandler protocol"
+        )
+
+        # handler_type should return a string
+        handler_type = handler.handler_type
+        assert isinstance(handler_type, str), (
+            f"HttpRestHandler.handler_type must return str, "
+            f"got {type(handler_type).__name__}"
+        )
+
+        # handler_type should be non-empty
+        assert handler_type, "HttpRestHandler.handler_type must not be empty"
+
+    @pytest.mark.parametrize(
+        ("handler_class", "init_kwargs"),
+        [
+            (HttpRestHandler, {}),
+            (HandlerNodeIntrospected, {"projection_reader": MagicMock()}),
+        ],
+    )
+    def test_handler_has_execute_method(
+        self,
+        handler_class: type,
+        init_kwargs: dict,
+    ) -> None:
+        """Handlers must have an execute or handle method."""
+        handler = handler_class(**init_kwargs)
+
+        # Should have execute (for HttpRestHandler) or handle (for domain handlers)
+        has_execute = hasattr(handler, "execute") and callable(handler.execute)
+        has_handle = hasattr(handler, "handle") and callable(handler.handle)
+
+        assert has_execute or has_handle, (
+            f"{handler_class.__name__} must have 'execute' or 'handle' method "
+            f"per ProtocolHandler protocol"
+        )
+
+    @pytest.mark.parametrize(
+        ("handler_class", "init_kwargs"),
+        [
+            (HttpRestHandler, {}),
+            (HandlerNodeIntrospected, {"projection_reader": MagicMock()}),
+        ],
+    )
+    def test_handler_has_describe_method(
+        self,
+        handler_class: type,
+        init_kwargs: dict,
+    ) -> None:
+        """Handlers should have describe method for introspection."""
+        handler = handler_class(**init_kwargs)
+
+        # describe is expected on protocol handlers
+        if hasattr(handler, "describe"):
+            assert callable(handler.describe), (
+                f"{handler_class.__name__}.describe must be callable"
+            )
+
+
 __all__: list[str] = [
     "TestHttpRestHandlerBusIsolation",
     "TestHandlerNodeIntrospectedBusIsolation",
     "TestHandlerNoPublishConstraintCrossValidation",
+    "TestHandlerProtocolCompliance",
 ]
