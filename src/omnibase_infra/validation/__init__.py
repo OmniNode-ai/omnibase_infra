@@ -167,6 +167,18 @@ from omnibase_infra.validation.runtime_shape_validator import (
     enforce_execution_shape,
 )
 
+# Security validation for handler introspection and security constraints
+from omnibase_infra.validation.security_validator import (
+    SENSITIVE_METHOD_PATTERNS,
+    SENSITIVE_PARAMETER_NAMES,
+    SecurityRuleId,
+    convert_to_validation_error,
+    has_sensitive_parameters,
+    is_sensitive_method_name,
+    validate_handler_security,
+    validate_method_exposure,
+)
+
 # Topic category validation for execution shape enforcement
 from omnibase_infra.validation.topic_category_validator import (
     NODE_ARCHETYPE_EXPECTED_CATEGORIES,
@@ -179,12 +191,19 @@ from omnibase_infra.validation.topic_category_validator import (
     validate_topic_categories_in_file,
 )
 
+# Validation error aggregation and reporting for startup (OMN-1091)
+from omnibase_infra.validation.validation_aggregator import ValidationAggregator
+
 __all__: list[str] = [
     # Runtime shape validation
     "EXECUTION_SHAPE_RULES",
     "NODE_ARCHETYPE_EXPECTED_CATEGORIES",
     # Infrastructure-specific wrappers
     "INFRA_MAX_UNIONS",
+    # Security validation constants
+    "SENSITIVE_METHOD_PATTERNS",
+    "SENSITIVE_PARAMETER_NAMES",
+    # Topic category validation
     "TOPIC_CATEGORY_PATTERNS",
     "TOPIC_SUFFIXES",
     # Chain propagation validation (OMN-951)
@@ -206,10 +225,15 @@ __all__: list[str] = [
     "RoutingCoverageError",
     "RoutingCoverageValidator",
     "RuntimeShapeValidator",
+    # Security validation
+    "SecurityRuleId",
     "TopicCategoryASTVisitor",
     # Topic category validation
     "TopicCategoryValidator",
+    # Validation error aggregation (OMN-1091)
+    "ValidationAggregator",
     "check_routing_coverage_ci",
+    "convert_to_validation_error",
     "detect_message_category",
     "discover_message_types",
     "discover_registered_routes",
@@ -217,6 +241,8 @@ __all__: list[str] = [
     "enforce_execution_shape",
     "get_execution_shape_rules",
     "get_validation_summary",
+    "has_sensitive_parameters",
+    "is_sensitive_method_name",
     "lint_contract_file",
     "lint_contracts_ci",
     "lint_contracts_in_directory",
@@ -226,6 +252,7 @@ __all__: list[str] = [
     "validate_contracts",
     "validate_execution_shapes",
     "validate_execution_shapes_ci",
+    "validate_handler_security",
     "validate_infra_all",
     "validate_infra_architecture",
     "validate_infra_circular_imports",
@@ -235,6 +262,7 @@ __all__: list[str] = [
     "validate_infra_union_usage",
     "validate_message_chain",
     "validate_message_on_topic",
+    "validate_method_exposure",
     "validate_patterns",
     "validate_routing_coverage_on_startup",
     "validate_topic_categories_in_directory",

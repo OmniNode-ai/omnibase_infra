@@ -18,6 +18,8 @@ from omnibase_infra.models.dispatch import (
     ModelParsedTopic,
     ModelTopicParser,
 )
+from omnibase_infra.models.errors import ModelHandlerValidationError
+from omnibase_infra.models.handlers import ModelHandlerIdentifier
 from omnibase_infra.models.health import ModelHealthCheckResult
 from omnibase_infra.models.logging import ModelLogContext
 
@@ -68,6 +70,10 @@ __all__: list[str] = [
     "ModelDispatcherRegistration",
     "ModelExecutionShapeRule",
     "ModelExecutionShapeViolationResult",
+    # Error models
+    "ModelHandlerValidationError",
+    # Handler models
+    "ModelHandlerIdentifier",
     # Health models
     "ModelHealthCheckResult",
     # Registration models

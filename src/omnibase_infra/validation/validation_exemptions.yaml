@@ -802,6 +802,97 @@ pattern_exemptions:
     documentation:
       - docs/architecture/REGISTRATION_REDUCER.md
     ticket: OMN-1004
+  # ==========================================================================
+  # Handler Validation Error Model Exemptions (OMN-1091)
+  # ==========================================================================
+  # Handler validation error types are explicitly named per ticket requirements.
+  # rule_id and handler_id are human-readable semantic identifiers, not UUIDs.
+  - file_pattern: 'enum_handler_error_type\.py'
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      EnumHandlerErrorType is an enum for handler validation error types (CONTRACT_PARSE_ERROR, SECURITY_VALIDATION_ERROR, etc.). The "Handler" name is intentional per OMN-1091 spec.
+
+    documentation:
+      - CLAUDE.md (ONEX Architecture - Handler Types)
+    ticket: OMN-1091
+  - file_pattern: 'enum_handler_source_type\.py'
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      EnumHandlerSourceType is an enum for validation source types (CONTRACT, DESCRIPTOR, STATIC_ANALYSIS). The "Handler" name is intentional per OMN-1091 spec.
+
+    documentation:
+      - CLAUDE.md (ONEX Architecture - Handler Types)
+    ticket: OMN-1091
+  - file_pattern: 'model_handler_validation_error\.py'
+    violation_pattern: "Field 'rule_id' should use UUID"
+    reason: >
+      rule_id is a human-readable semantic identifier (e.g., "CONTRACT-001", "SECURITY-002") per ticket spec. Used for CI output and developer reference. Not a UUID.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+    ticket: OMN-1091
+  - file_pattern: 'model_handler_validation_error\.py'
+    method_pattern: "Function 'from_contract_error'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Factory method with many optional parameters for complete error construction. Parameters have defaults. Breaking into multiple calls would reduce usability.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+    ticket: OMN-1091
+  - file_pattern: 'model_handler_validation_error\.py'
+    method_pattern: "Function 'from_security_violation'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Factory method with many optional parameters for complete error construction. Parameters have defaults. Breaking into multiple calls would reduce usability.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+    ticket: OMN-1091
+  - file_pattern: 'model_handler_validation_error\.py'
+    method_pattern: "Function 'from_descriptor_error'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Factory method with many optional parameters for complete error construction. Parameters have defaults.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+    ticket: OMN-1091
+  - file_pattern: 'model_handler_validation_error\.py'
+    method_pattern: "Function 'from_architecture_error'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Factory method with many optional parameters for complete error construction. Parameters have defaults.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+    ticket: OMN-1091
+  - file_pattern: 'model_handler_identifier\.py'
+    violation_pattern: "Field 'handler_id' should use UUID"
+    reason: >
+      handler_id is a human-readable semantic identifier (e.g., "http-handler", "db-handler") per existing patterns. Not a UUID.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
+    ticket: OMN-1091
+  - file_pattern: 'validation_aggregator\.py'
+    class_pattern: "Class 'ValidationAggregator'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Aggregator class requires multiple methods for comprehensive error management: collection (add_error, add_errors), properties (has_errors, has_blocking_errors, counts), grouping (by_type, by_source), formatting (console, ci, summary), and lifecycle (raise_if_blocking, clear). This is an established aggregator pattern.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+    ticket: OMN-1091
+  - file_pattern: 'security_validator\.py'
+    method_pattern: "Function 'convert_to_validation_error'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Conversion function requires multiple context parameters for complete error construction. Parameters are distinct required contexts for error reporting.
+
+    documentation:
+      - docs/patterns/security_patterns.md
+    ticket: OMN-1091
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
