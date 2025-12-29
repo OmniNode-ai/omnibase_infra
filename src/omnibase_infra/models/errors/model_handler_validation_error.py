@@ -86,7 +86,9 @@ class ModelHandlerValidationError(BaseModel):
 
     Note:
         This model is frozen to ensure immutability in error contexts.
-        The severity field defaults to 'error' for blocking validation failures.
+        Attempting to mutate any field after instantiation will raise a
+        pydantic.ValidationError. The severity field defaults to 'error'
+        for blocking validation failures.
 
     .. versionadded:: 0.6.1
         Created as part of OMN-1091 structured validation and error reporting.
@@ -106,6 +108,7 @@ class ModelHandlerValidationError(BaseModel):
     rule_id: str = Field(
         ...,
         min_length=1,
+        pattern=r"^[A-Z]+-\d+$",
         description="Unique identifier for the validation rule (e.g., 'CONTRACT-001')",
     )
     handler_identity: ModelHandlerIdentifier = Field(
@@ -339,8 +342,26 @@ class ModelHandlerValidationError(BaseModel):
             ...     handler_identity=ModelHandlerIdentifier.from_handler_id("registration"),
             ...     line_number=5,
             ... )
+
+        Note:
+            Error Type Heuristic - The method automatically classifies errors into
+            CONTRACT_PARSE_ERROR or CONTRACT_VALIDATION_ERROR based on message content:
+
+            - CONTRACT_PARSE_ERROR: Triggered when message contains "parse" or "yaml"
+              (case-insensitive). These are syntax-level errors preventing the contract
+              from being read (e.g., "YAML parse error", "Invalid YAML syntax").
+
+            - CONTRACT_VALIDATION_ERROR: Default for all other contract errors. These
+              are semantic errors where the contract is readable but violates schema
+              requirements (e.g., "Missing required field", "Invalid node_type").
+
+            This keyword-based heuristic provides automatic error classification without
+            requiring callers to explicitly specify the error type. The approach is
+            intentionally simple and robust - YAML/parse errors have distinct
+            terminology that rarely appears in validation error messages.
         """
-        # Determine error type based on message content
+        # Determine error type based on message content using keyword heuristic.
+        # See docstring Note section above for classification rules.
         error_type = (
             EnumHandlerErrorType.CONTRACT_PARSE_ERROR
             if "parse" in message.lower() or "yaml" in message.lower()

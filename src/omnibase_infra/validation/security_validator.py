@@ -84,7 +84,8 @@ class SecurityRuleId:
 
 # Sensitive method name patterns that should be prefixed with underscore
 # These patterns indicate methods that expose sensitive operations
-SENSITIVE_METHOD_PATTERNS: Final[tuple[str, ...]] = (
+# Pre-compiled for performance
+_SENSITIVE_METHOD_PATTERN_STRINGS: Final[tuple[str, ...]] = (
     r"^get_password$",
     r"^get_secret$",
     r"^get_token$",
@@ -99,6 +100,22 @@ SENSITIVE_METHOD_PATTERNS: Final[tuple[str, ...]] = (
     r"^validate_password$",
     r"^check_password$",
     r"^verify_password$",
+)
+
+# Pre-compiled regex patterns for efficient matching
+SENSITIVE_METHOD_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(pattern) for pattern in _SENSITIVE_METHOD_PATTERN_STRINGS
+)
+
+# Patterns that should map to ADMIN_METHOD_PUBLIC rule (SECURITY-003)
+_ADMIN_INTERNAL_PATTERN_STRINGS: Final[tuple[str, ...]] = (
+    r"^admin_",
+    r"^internal_",
+)
+
+# Pre-compiled admin/internal patterns
+_ADMIN_INTERNAL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(pattern) for pattern in _ADMIN_INTERNAL_PATTERN_STRINGS
 )
 
 # Parameter names that indicate sensitive data in method signatures
@@ -138,10 +155,38 @@ def is_sensitive_method_name(method_name: str) -> bool:
     method_lower = method_name.lower()
 
     for pattern in SENSITIVE_METHOD_PATTERNS:
-        if re.match(pattern, method_lower):
+        if pattern.match(method_lower):
             return True
 
     return False
+
+
+def _get_sensitivity_rule_id(method_name: str) -> str | None:
+    """Determine the appropriate security rule ID for a sensitive method.
+
+    Args:
+        method_name: Name of the method to check
+
+    Returns:
+        Security rule ID if method is sensitive, None otherwise
+
+    Note:
+        - admin_/internal_ methods map to SECURITY-003 (ADMIN_METHOD_PUBLIC)
+        - Other sensitive patterns map to SECURITY-001 (SENSITIVE_METHOD_EXPOSED)
+    """
+    method_lower = method_name.lower()
+
+    # Check admin/internal patterns first (SECURITY-003)
+    for pattern in _ADMIN_INTERNAL_PATTERNS:
+        if pattern.match(method_lower):
+            return SecurityRuleId.ADMIN_METHOD_PUBLIC
+
+    # Check other sensitive patterns (SECURITY-001)
+    for pattern in SENSITIVE_METHOD_PATTERNS:
+        if pattern.match(method_lower):
+            return SecurityRuleId.SENSITIVE_METHOD_EXPOSED
+
+    return None
 
 
 def has_sensitive_parameters(signature: str) -> list[str]:
@@ -210,32 +255,28 @@ def validate_method_exposure(
     errors: list[ModelHandlerValidationError] = []
 
     for method_name in method_names:
-        # Check for sensitive method names
-        if is_sensitive_method_name(method_name):
-            error = ModelHandlerValidationError.from_security_violation(
-                rule_id=SecurityRuleId.SENSITIVE_METHOD_EXPOSED,
-                message=f"Handler exposes sensitive method '{method_name}'",
-                remediation_hint=f"Prefix method with underscore: '_{method_name}' to exclude from introspection",
-                handler_identity=handler_identity,
-                file_path=file_path,
-                details={
-                    "method_name": method_name,
-                    "violation_type": "sensitive_method_exposed",
-                },
-            )
-            errors.append(error)
+        # Check for sensitive method names and get appropriate rule ID
+        rule_id = _get_sensitivity_rule_id(method_name)
+        if rule_id is not None:
+            # Customize message and hint based on rule type
+            if rule_id == SecurityRuleId.ADMIN_METHOD_PUBLIC:
+                message = f"Handler exposes admin/internal method '{method_name}'"
+                remediation_hint = f"Prefix method with underscore: '_{method_name}' or move to separate admin module"
+                violation_type = "admin_method_public"
+            else:
+                message = f"Handler exposes sensitive method '{method_name}'"
+                remediation_hint = f"Prefix method with underscore: '_{method_name}' to exclude from introspection"
+                violation_type = "sensitive_method_exposed"
 
-        # Check for admin/internal methods
-        if method_name.startswith(("admin_", "internal_")):
             error = ModelHandlerValidationError.from_security_violation(
-                rule_id=SecurityRuleId.ADMIN_METHOD_PUBLIC,
-                message=f"Handler exposes admin/internal method '{method_name}'",
-                remediation_hint=f"Prefix method with underscore: '_{method_name}' or move to separate admin module",
+                rule_id=rule_id,
+                message=message,
+                remediation_hint=remediation_hint,
                 handler_identity=handler_identity,
                 file_path=file_path,
                 details={
                     "method_name": method_name,
-                    "violation_type": "admin_method_public",
+                    "violation_type": violation_type,
                 },
             )
             errors.append(error)

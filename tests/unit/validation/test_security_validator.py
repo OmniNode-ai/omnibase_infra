@@ -91,14 +91,11 @@ class TestValidateMethodExposure:
             handler_identity=handler_identity,
         )
 
-        # admin_delete_user triggers 2 violations:
-        # 1. SECURITY-001 (matches sensitive pattern ^admin_)
-        # 2. SECURITY-003 (admin method public)
-        assert len(errors) == 2
-        rule_ids = {error.rule_id for error in errors}
-        assert SecurityRuleId.SENSITIVE_METHOD_EXPOSED in rule_ids
-        assert SecurityRuleId.ADMIN_METHOD_PUBLIC in rule_ids
-        assert all("admin_delete_user" in error.message for error in errors)
+        # admin_delete_user triggers 1 violation:
+        # SECURITY-003 (admin method public) - admin_ pattern maps to this rule
+        assert len(errors) == 1
+        assert errors[0].rule_id == SecurityRuleId.ADMIN_METHOD_PUBLIC
+        assert "admin_delete_user" in errors[0].message
 
     def test_credential_in_signature(self) -> None:
         """Test validation detects credentials in method signatures."""

@@ -1261,6 +1261,7 @@ As of OMN-1091, ONEX uses structured error models for security validation failur
 #### Using ModelHandlerValidationError for Security Violations
 
 ```python
+from omnibase_infra.enums import EnumHandlerType
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import ModelHandlerIdentifier
 from omnibase_infra.validation.security_validator import (
