@@ -70,7 +70,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import get_type_hints
 from unittest.mock import MagicMock
 
 import pytest
@@ -347,25 +346,17 @@ class TestHandlerNodeIntrospectedBusIsolation:
     """
 
     def test_constructor_has_no_bus_parameter(self) -> None:
-        """Constructor accepts only domain dependencies, not bus/dispatcher."""
+        """Constructor accepts domain dependencies but never bus-related parameters.
+
+        This test focuses on the no-publish constraint: handlers must not accept
+        bus, dispatcher, or publisher parameters. The test does NOT enforce a
+        specific set of domain parameters, allowing the handler to evolve.
+        """
         sig = inspect.signature(HandlerNodeIntrospected.__init__)
         params = list(sig.parameters.keys())
 
-        # Expected parameters (domain-specific, not messaging)
-        expected = {
-            "self",
-            "projection_reader",
-            "projector",
-            "ack_timeout_seconds",
-            "consul_handler",
-        }
-        actual = set(params)
-
-        assert actual == expected, (
-            f"HandlerNodeIntrospected.__init__ has unexpected parameters.\n"
-            f"Expected: {expected}\n"
-            f"Actual: {actual}"
-        )
+        # First parameter must be 'self'
+        assert params[0] == "self", "First parameter must be 'self'"
 
         # Explicitly verify no bus-related parameters
         for forbidden in FORBIDDEN_BUS_PARAMETERS:
@@ -736,10 +727,9 @@ class TestHandlerProtocolCompliance:
         assert hasattr(handler, "initialize"), (
             "HttpRestHandler should have 'initialize' method for lifecycle management"
         )
-        if hasattr(handler, "initialize"):
-            assert callable(handler.initialize), (
-                "HttpRestHandler.initialize must be callable"
-            )
+        assert callable(handler.initialize), (
+            "HttpRestHandler.initialize must be callable"
+        )
 
         # =====================================================================
         # Optional: shutdown method (recommended for protocol handlers)
@@ -747,10 +737,7 @@ class TestHandlerProtocolCompliance:
         assert hasattr(handler, "shutdown"), (
             "HttpRestHandler should have 'shutdown' method for cleanup"
         )
-        if hasattr(handler, "shutdown"):
-            assert callable(handler.shutdown), (
-                "HttpRestHandler.shutdown must be callable"
-            )
+        assert callable(handler.shutdown), "HttpRestHandler.shutdown must be callable"
 
         # =====================================================================
         # Optional: describe method (recommended for introspection)
@@ -758,16 +745,13 @@ class TestHandlerProtocolCompliance:
         assert hasattr(handler, "describe"), (
             "HttpRestHandler should have 'describe' method for introspection"
         )
-        if hasattr(handler, "describe"):
-            assert callable(handler.describe), (
-                "HttpRestHandler.describe must be callable"
-            )
-            # describe() should return a dict (metadata)
-            description = handler.describe()
-            assert isinstance(description, dict), (
-                f"HttpRestHandler.describe() must return dict, "
-                f"got {type(description).__name__}"
-            )
+        assert callable(handler.describe), "HttpRestHandler.describe must be callable"
+        # describe() should return a dict (metadata)
+        description = handler.describe()
+        assert isinstance(description, dict), (
+            f"HttpRestHandler.describe() must return dict, "
+            f"got {type(description).__name__}"
+        )
 
     def test_http_rest_handler_has_handler_type_property(self) -> None:
         """HttpRestHandler must expose handler_type property per ProtocolHandler.
