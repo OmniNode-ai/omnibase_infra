@@ -279,6 +279,26 @@ Each dispatcher should:
 
 **See**: `docs/patterns/dispatcher_resilience.md` for full pattern details
 
+### Handler No-Publish Constraint
+
+**Handlers MUST NOT have direct event bus access** - only orchestrators may publish events.
+
+| Constraint | Verification |
+|------------|--------------|
+| No bus parameters | `__init__`, `handle()` signatures |
+| No bus attributes | No `_bus`, `_event_bus`, `_publisher` |
+| No publish methods | No `publish()`, `emit()`, `send_event()` |
+| Protocol compliance | `ProtocolHandler` has no bus methods |
+
+**Integration Tests**: `tests/integration/handlers/test_handler_no_publish_constraint.py`
+
+| Test Class | Coverage |
+|------------|----------|
+| `TestHttpRestHandlerBusIsolation` | HTTP handler bus isolation |
+| `TestHandlerNodeIntrospectedBusIsolation` | Introspection handler isolation |
+| `TestHandlerProtocolCompliance` | Protocol-level constraints |
+| `TestOrchestratorBusAccessVerification` | Orchestrator-only bus access |
+
 ### Node Introspection Security
 
 The `MixinNodeIntrospection` mixin uses Python reflection for service discovery. This has security implications:
