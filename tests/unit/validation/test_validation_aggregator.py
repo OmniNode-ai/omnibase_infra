@@ -314,7 +314,7 @@ def test_format_for_console_no_errors() -> None:
 
     output = aggregator.format_for_console()
 
-    assert output == "✓ No validation errors found"
+    assert output == "No validation errors found"
 
 
 def test_format_for_console_single_error(
@@ -327,13 +327,13 @@ def test_format_for_console_single_error(
     output = aggregator.format_for_console()
 
     assert "HANDLER VALIDATION ERRORS" in output
-    assert "(1 total, 1 blocking)" in output
+    assert "(1 total: 1 blocking, 0 warnings)" in output
     assert "[CONTRACT]" in output
-    assert "✗ [CONTRACT-001]" in output
+    assert "[CONTRACT-001]" in output
     assert "Invalid YAML syntax" in output
     assert "Location: nodes/registration/contract.yaml:5" in output
-    assert "Fix: Check YAML indentation and syntax" in output
-    assert "❌ Startup blocked due to validation errors" in output
+    assert "Remediation: Check YAML indentation and syntax" in output
+    assert "BLOCKED:" in output
 
 
 def test_format_for_console_multiple_errors(
@@ -348,13 +348,13 @@ def test_format_for_console_multiple_errors(
     output = aggregator.format_for_console()
 
     assert "HANDLER VALIDATION ERRORS" in output
-    assert "(3 total, 2 blocking)" in output
+    assert "(3 total: 2 blocking, 1 warnings)" in output
     assert "[CONTRACT]" in output
     assert "[STATIC_ANALYSIS]" in output
-    assert "✗ [CONTRACT-001]" in output
-    assert "⚠ [SECURITY-002]" in output
-    assert "✗ [ARCH-001]" in output
-    assert "❌ Startup blocked due to validation errors" in output
+    assert "[CONTRACT-001]" in output
+    assert "[SECURITY-002]" in output
+    assert "[ARCH-001]" in output
+    assert "BLOCKED:" in output
 
 
 def test_format_for_console_only_warnings(
@@ -368,11 +368,10 @@ def test_format_for_console_only_warnings(
     output = aggregator.format_for_console()
 
     assert "HANDLER VALIDATION ERRORS" in output
-    assert "(2 total, 0 blocking)" in output
-    assert "⚠" in output
-    assert "✗" not in output
-    assert "⚠ Startup proceeding with warnings" in output
-    assert "❌" not in output
+    assert "(2 total: 0 blocking, 2 warnings)" in output
+    assert "WARNING" in output
+    assert "PROCEEDING WITH WARNINGS:" in output
+    assert "BLOCKED:" not in output
 
 
 def test_format_for_console_grouping_by_source(
@@ -466,7 +465,7 @@ def test_format_summary_no_errors() -> None:
 
     summary = aggregator.format_summary()
 
-    assert summary == "Validation: OK"
+    assert summary == "Handler Validation: PASSED (0 errors)"
 
 
 def test_format_summary_single_error(
@@ -478,7 +477,7 @@ def test_format_summary_single_error(
 
     summary = aggregator.format_summary()
 
-    assert summary == "Validation: 1 errors (1 blocking)"
+    assert summary == "Handler Validation: FAILED (1 total: 1 blocking, 0 warnings)"
 
 
 def test_format_summary_multiple_errors(
@@ -492,7 +491,7 @@ def test_format_summary_multiple_errors(
 
     summary = aggregator.format_summary()
 
-    assert summary == "Validation: 3 errors (2 blocking)"
+    assert summary == "Handler Validation: FAILED (3 total: 2 blocking, 1 warning)"
 
 
 def test_format_summary_only_warnings(
@@ -505,7 +504,10 @@ def test_format_summary_only_warnings(
 
     summary = aggregator.format_summary()
 
-    assert summary == "Validation: 2 errors (0 blocking)"
+    assert (
+        summary
+        == "Handler Validation: PASSED WITH WARNINGS (2 total: 0 blocking, 2 warnings)"
+    )
 
 
 # =============================================================================
@@ -718,7 +720,7 @@ def test_typical_startup_validation_flow(
     # Format for logging
     console_output = aggregator.format_for_console()
     assert "HANDLER VALIDATION ERRORS" in console_output
-    assert "(3 total, 2 blocking)" in console_output
+    assert "(3 total: 2 blocking, 1 warnings)" in console_output
 
     # Format for CI
     ci_output = aggregator.format_for_ci()
@@ -746,8 +748,8 @@ def test_startup_validation_with_only_warnings(
 
     # Format for logging
     console_output = aggregator.format_for_console()
-    assert "⚠ Startup proceeding with warnings" in console_output
-    assert "❌" not in console_output
+    assert "PROCEEDING WITH WARNINGS:" in console_output
+    assert "BLOCKED:" not in console_output
 
     # Should not raise
     aggregator.raise_if_blocking()

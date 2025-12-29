@@ -18,7 +18,8 @@ class ModelDbDescribeResponse(BaseModel):
     configuration, and version information.
 
     Attributes:
-        handler_type: Type of handler (e.g., "database")
+        handler_type: Architectural role of handler (e.g., "infra_handler")
+        handler_category: Behavioral classification (e.g., "effect")
         supported_operations: List of supported operation types
         pool_size: Connection pool size
         timeout_seconds: Query timeout in seconds
@@ -27,7 +28,8 @@ class ModelDbDescribeResponse(BaseModel):
 
     Example:
         >>> describe = ModelDbDescribeResponse(
-        ...     handler_type="database",
+        ...     handler_type="infra_handler",
+        ...     handler_category="effect",
         ...     supported_operations=["db.query", "db.execute"],
         ...     pool_size=5,
         ...     timeout_seconds=30.0,
@@ -46,7 +48,10 @@ class ModelDbDescribeResponse(BaseModel):
     )
 
     handler_type: str = Field(
-        description="Type of handler (e.g., 'database')",
+        description="Architectural role of handler (e.g., 'infra_handler')",
+    )
+    handler_category: str = Field(
+        description="Behavioral classification (e.g., 'effect')",
     )
     supported_operations: list[str] = Field(
         description="List of supported operation types",

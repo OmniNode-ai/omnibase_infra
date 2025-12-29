@@ -406,8 +406,8 @@ class TestModelHandlerValidationErrorIntegration:
         """
         handler_id = ModelHandlerIdentifier.from_node(
             node_path="nodes/http/node.py",
-            handler_type=EnumHandlerType.EFFECT,
-            handler_name="HTTP Effect Handler",
+            handler_type=EnumHandlerType.INFRA_HANDLER,
+            handler_name="HTTP Infra Handler",
         )
 
         error = ModelHandlerValidationError(
@@ -415,11 +415,11 @@ class TestModelHandlerValidationErrorIntegration:
             rule_id="EXEC-001",
             handler_identity=handler_id,
             source_type=EnumHandlerSourceType.RUNTIME,
-            message="EFFECT handler cannot publish directly",
+            message="INFRA_HANDLER cannot publish directly",
             remediation_hint="Return events instead of publishing",
         )
 
-        assert error.handler_identity.handler_type == EnumHandlerType.EFFECT
+        assert error.handler_identity.handler_type == EnumHandlerType.INFRA_HANDLER
         assert error.handler_identity.node_path == "nodes/http/node.py"
 
     def test_error_collection_multiple_errors(self) -> None:

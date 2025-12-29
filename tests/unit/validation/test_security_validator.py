@@ -174,10 +174,10 @@ class TestErrorFormatting:
 
         formatted = error.format_for_logging()
         assert "SECURITY-001" in formatted
-        assert "security_validation_error" in formatted
-        assert "static_analysis" in formatted
+        assert "SECURITY_VALIDATION_ERROR" in formatted
+        assert "STATIC_ANALYSIS" in formatted
         assert "auth-handler" in formatted
-        assert "line_number=42" in formatted or ":42" in formatted
+        assert ":42" in formatted
         assert "get_api_key" in formatted
 
     def test_format_for_ci(self) -> None:

@@ -19,6 +19,7 @@ import pytest
 from omnibase_core.enums import EnumCoreErrorCode
 from pydantic import SecretStr, ValidationError
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -200,6 +201,33 @@ class TestVaultHandlerInitialization:
         token_repr = repr(config.token)
         assert "sensitive_token_12345" not in token_repr
         assert "SecretStr" in token_repr
+
+
+class TestVaultHandlerType:
+    """Test VaultHandler type and category properties."""
+
+    def test_handler_type_returns_infra_handler(self) -> None:
+        """Test handler_type property returns EnumHandlerType.INFRA_HANDLER.
+
+        Infrastructure protocol handlers (Consul, Vault, Kafka, etc.) return
+        INFRA_HANDLER as their architectural role. The transport-specific
+        identification is provided by handler_category.
+        """
+        handler = VaultHandler()
+        handler_type = handler.handler_type
+        assert handler_type == EnumHandlerType.INFRA_HANDLER
+        assert handler_type.value == "infra_handler"
+
+    def test_handler_category_returns_effect(self) -> None:
+        """Test handler_category property returns EnumHandlerTypeCategory.EFFECT.
+
+        Vault handlers are EFFECT handlers because they perform side-effecting
+        I/O operations (secret read/write, token renewal, etc.).
+        """
+        handler = VaultHandler()
+        handler_category = handler.handler_category
+        assert handler_category == EnumHandlerTypeCategory.EFFECT
+        assert handler_category.value == "effect"
 
 
 class TestVaultHandlerOperations:
@@ -847,7 +875,8 @@ class TestVaultHandlerDescribe:
 
             description = handler.describe()
 
-            assert description["handler_type"] == "vault"
+            assert description["handler_type"] == "infra_handler"
+            assert description["handler_category"] == "effect"
             supported_ops = description["supported_operations"]
             assert isinstance(supported_ops, list)
             assert "vault.read_secret" in supported_ops

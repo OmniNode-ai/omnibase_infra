@@ -27,10 +27,13 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import hvac
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
 from omnibase_core.models.dispatch import ModelHandlerOutput
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     ModelInfraErrorContext,
@@ -142,8 +145,48 @@ class VaultHandler(
 
     @property
     def handler_type(self) -> EnumHandlerType:
-        """Return EnumHandlerType.VAULT."""
-        return EnumHandlerType.VAULT
+        """Return the architectural role of this handler.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - This handler is an infrastructure
+            protocol/transport handler (as opposed to NODE_HANDLER for event
+            processing, PROJECTION_HANDLER for read models, or COMPUTE_HANDLER
+            for pure computation).
+
+        Note:
+            handler_type determines lifecycle, protocol selection, and runtime
+            invocation patterns. It answers "what is this handler in the architecture?"
+
+        See Also:
+            - handler_category: Behavioral classification (EFFECT/COMPUTE)
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification of this handler.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - This handler performs side-effecting
+            I/O operations (Vault secret management). EFFECT handlers are not
+            deterministic and interact with external systems.
+
+        Note:
+            handler_category determines security rules, determinism guarantees,
+            replay safety, and permissions. It answers "how does this handler
+            behave at runtime?"
+
+            Categories:
+            - COMPUTE: Pure, deterministic transformations (no side effects)
+            - EFFECT: Side-effecting I/O (database, HTTP, service calls)
+            - NONDETERMINISTIC_COMPUTE: Pure but not deterministic (UUID, random)
+
+        See Also:
+            - handler_type: Architectural role (INFRA_HANDLER/NODE_HANDLER/etc.)
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     @property
     def max_workers(self) -> int:
@@ -337,13 +380,42 @@ class VaultHandler(
             return await self._renew_token_operation(correlation_id, input_envelope_id)
 
     def describe(self) -> dict[str, JsonValue]:
-        """Return handler metadata and capabilities.
+        """Return handler metadata and capabilities for introspection.
+
+        This method exposes the handler's type classification along with its
+        operational configuration and capabilities.
 
         Returns:
-            Handler description with supported operations and configuration
+            dict containing:
+                - handler_type: Architectural role from handler_type property
+                  (e.g., "infra_handler"). See EnumHandlerType for valid values.
+                - handler_category: Behavioral classification from handler_category
+                  property (e.g., "effect"). See EnumHandlerTypeCategory for valid values.
+                - supported_operations: List of supported operations
+                - timeout_seconds: Request timeout in seconds
+                - initialized: Whether the handler is initialized
+                - version: Handler version string
+
+        Note:
+            The handler_type and handler_category fields form the handler
+            classification system:
+
+            1. handler_type (architectural role): Determines lifecycle and invocation
+               patterns. This handler is INFRA_HANDLER (protocol/transport handler).
+
+            2. handler_category (behavioral classification): Determines security rules
+               and replay safety. This handler is EFFECT (side-effecting I/O).
+
+            The transport type for this handler is VAULT (secret management).
+
+        See Also:
+            - handler_type property: Full documentation of architectural role
+            - handler_category property: Full documentation of behavioral classification
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
         """
         return {
             "handler_type": self.handler_type.value,
+            "handler_category": self.handler_category.value,
             "supported_operations": sorted(SUPPORTED_OPERATIONS),
             "timeout_seconds": self._config.timeout_seconds if self._config else 30.0,
             "initialized": self._initialized,

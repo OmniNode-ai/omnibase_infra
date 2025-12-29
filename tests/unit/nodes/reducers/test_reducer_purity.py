@@ -22,7 +22,7 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.enums import EnumHandlerType
+from omnibase_infra.enums import EnumNodeArchetype
 
 __all__ = [
     "TestStructuralPurityGates",
@@ -189,7 +189,7 @@ class TestDeterminismGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
@@ -244,7 +244,7 @@ class TestDeterminismGates:
         initial_state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={},
             correlation_id=fixed_correlation_id,
@@ -292,7 +292,7 @@ class TestDeterminismGates:
         # Create identical events with same correlation_id
         event1 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={},
             timestamp=fixed_timestamp,
@@ -300,7 +300,7 @@ class TestDeterminismGates:
         )
         event2 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={},
             timestamp=fixed_timestamp,
@@ -319,7 +319,7 @@ class TestDeterminismGates:
         # Different event should produce different ID
         event3 = ModelNodeIntrospectionEvent(
             node_id=UUID("99999999-9999-9999-9999-999999999999"),  # Different node_id
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={},
             timestamp=fixed_timestamp,
@@ -363,7 +363,7 @@ class TestDeterminismGates:
         # ---------------------------------------------------------------------
         event_empty_endpoints = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={},  # Empty
             timestamp=fixed_timestamp,
@@ -383,7 +383,7 @@ class TestDeterminismGates:
         very_long_path = "/path" * 1000  # 5000 character path
         event_long_urls = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.COMPUTE.value,
+            node_type=EnumNodeArchetype.COMPUTE.value,
             node_version="1.0.0",
             endpoints={
                 "health": f"http://localhost:8080{very_long_path}",
@@ -402,7 +402,7 @@ class TestDeterminismGates:
         # ---------------------------------------------------------------------
         event_special_chars = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.REDUCER.value,
+            node_type=EnumNodeArchetype.REDUCER.value,
             node_version="1.0.0",
             endpoints={
                 "health": "http://localhost:8080/health?param=value&other=123",
@@ -424,7 +424,7 @@ class TestDeterminismGates:
         # ---------------------------------------------------------------------
         event_unicode = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.ORCHESTRATOR.value,
+            node_type=EnumNodeArchetype.ORCHESTRATOR.value,
             node_version="1.0.0",
             endpoints={
                 "intl": "http://xn--n3h.example.com/api",  # Punycode for emoji domain
@@ -446,7 +446,7 @@ class TestDeterminismGates:
         # ---------------------------------------------------------------------
         event_ts1 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={},
             timestamp=fixed_timestamp,
@@ -454,7 +454,7 @@ class TestDeterminismGates:
         )
         event_ts2 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={},
             timestamp=fixed_timestamp + timedelta(seconds=1),  # 1 second later
@@ -470,7 +470,7 @@ class TestDeterminismGates:
         # ---------------------------------------------------------------------
         event_same_ts_a = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={},
             timestamp=fixed_timestamp,
@@ -478,7 +478,7 @@ class TestDeterminismGates:
         )
         event_same_ts_b = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={},
             timestamp=fixed_timestamp,  # Same timestamp
@@ -497,10 +497,10 @@ class TestDeterminismGates:
         # Each node type should work correctly
         # ---------------------------------------------------------------------
         node_types = [
-            EnumHandlerType.EFFECT.value,
-            EnumHandlerType.COMPUTE.value,
-            EnumHandlerType.REDUCER.value,
-            EnumHandlerType.ORCHESTRATOR.value,
+            EnumNodeArchetype.EFFECT.value,
+            EnumNodeArchetype.COMPUTE.value,
+            EnumNodeArchetype.REDUCER.value,
+            EnumNodeArchetype.ORCHESTRATOR.value,
         ]
         for node_type in node_types:
             event_type = ModelNodeIntrospectionEvent(
@@ -549,7 +549,7 @@ class TestDeterminismGates:
         for version in version_test_cases:
             event_version = ModelNodeIntrospectionEvent(
                 node_id=fixed_node_id,
-                node_type=EnumHandlerType.EFFECT.value,
+                node_type=EnumNodeArchetype.EFFECT.value,
                 node_version=version,
                 endpoints={},
                 timestamp=fixed_timestamp,
@@ -573,7 +573,7 @@ class TestDeterminismGates:
 
         event_micro1 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={},
             timestamp=ts_base,
@@ -581,7 +581,7 @@ class TestDeterminismGates:
         )
         event_micro2 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={},
             timestamp=ts_micro,
@@ -603,7 +603,7 @@ class TestDeterminismGates:
         }
         event_many = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints=many_endpoints,
             timestamp=fixed_timestamp,
@@ -641,7 +641,7 @@ class TestDeterminismGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
@@ -700,7 +700,7 @@ class TestDeterminismGates:
 
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
@@ -768,7 +768,7 @@ class TestDeterminismGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
@@ -938,7 +938,7 @@ class TestBehavioralPurityGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             timestamp=datetime.now(UTC),
@@ -975,7 +975,7 @@ class TestBehavioralPurityGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={},
             timestamp=datetime.now(UTC),
@@ -1063,7 +1063,7 @@ class TestAdditionalBehavioralGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type=EnumHandlerType.COMPUTE.value,
+            node_type=EnumNodeArchetype.COMPUTE.value,
             node_version="1.0.0",
             endpoints={},
             timestamp=datetime.now(UTC),
@@ -1098,7 +1098,7 @@ class TestAdditionalBehavioralGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type=EnumHandlerType.REDUCER.value,
+            node_type=EnumNodeArchetype.REDUCER.value,
             node_version="1.0.0",
             endpoints={},
             timestamp=datetime.now(UTC),
@@ -1304,7 +1304,7 @@ class TestAdditionalBehavioralGates:
         state1 = ModelRegistrationState()
         event1 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
@@ -1317,7 +1317,7 @@ class TestAdditionalBehavioralGates:
         state2 = ModelRegistrationState()
         event2 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
@@ -1563,7 +1563,7 @@ class TestSecurityGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             metadata=sensitive_metadata,
@@ -1621,7 +1621,7 @@ class TestSecurityGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumHandlerType.EFFECT.value,
+            node_type=EnumNodeArchetype.EFFECT.value,
             node_version="1.0.0",
             # Safe endpoint - no embedded credentials
             endpoints={"health": "http://localhost:8080/health"},
@@ -1694,7 +1694,7 @@ class TestSecurityGates:
             # but that's not what we're testing here.
             event = ModelNodeIntrospectionEvent(
                 node_id=UUID("12345678-1234-1234-1234-123456789abc"),
-                node_type=EnumHandlerType.EFFECT.value,
+                node_type=EnumNodeArchetype.EFFECT.value,
                 node_version="1.0.0",
                 endpoints={},
                 correlation_id=fixed_correlation_id,

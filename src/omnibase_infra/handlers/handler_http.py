@@ -24,10 +24,13 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import httpx
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
 from omnibase_core.models.dispatch import ModelHandlerOutput
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -124,8 +127,75 @@ class HttpRestHandler(MixinEnvelopeExtraction):
 
     @property
     def handler_type(self) -> EnumHandlerType:
-        """Return EnumHandlerType.HTTP."""
-        return EnumHandlerType.HTTP
+        """Return the architectural role of this handler.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - This handler is an infrastructure
+            protocol/transport handler (as opposed to NODE_HANDLER for event
+            processing, PROJECTION_HANDLER for read models, or COMPUTE_HANDLER
+            for pure computation).
+
+        Note:
+            handler_type determines lifecycle, protocol selection, and runtime
+            invocation patterns. It answers "what is this handler in the architecture?"
+
+        See Also:
+            - handler_category: Behavioral classification (EFFECT/COMPUTE)
+            - transport_type: Specific transport protocol (HTTP/DATABASE/etc.)
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification of this handler.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - This handler performs side-effecting
+            I/O operations (external HTTP requests). EFFECT handlers are not
+            deterministic and interact with external systems.
+
+        Note:
+            handler_category determines security rules, determinism guarantees,
+            replay safety, and permissions. It answers "how does this handler
+            behave at runtime?"
+
+            Categories:
+            - COMPUTE: Pure, deterministic transformations (no side effects)
+            - EFFECT: Side-effecting I/O (database, HTTP, service calls)
+            - NONDETERMINISTIC_COMPUTE: Pure but not deterministic (UUID, random)
+
+        See Also:
+            - handler_type: Architectural role (INFRA_HANDLER/NODE_HANDLER/etc.)
+            - transport_type: Specific transport protocol (HTTP/DATABASE/etc.)
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
+        return EnumHandlerTypeCategory.EFFECT
+
+    @property
+    def transport_type(self) -> EnumInfraTransportType:
+        """Return the transport protocol identifier for this handler.
+
+        Returns:
+            EnumInfraTransportType.HTTP - This handler uses HTTP/REST protocol.
+
+        Note:
+            transport_type identifies the specific transport/protocol this handler
+            uses. It is the third dimension of the handler type system, alongside
+            handler_type (architectural role) and handler_category (behavioral
+            classification).
+
+            The three dimensions together form a complete handler classification:
+            - handler_type: INFRA_HANDLER (what it is architecturally)
+            - handler_category: EFFECT (how it behaves at runtime)
+            - transport_type: HTTP (what protocol it uses)
+
+        See Also:
+            - handler_type: Architectural role
+            - handler_category: Behavioral classification
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
+        return EnumInfraTransportType.HTTP
 
     async def initialize(self, config: dict[str, JsonValue]) -> None:
         """Initialize HTTP client with configurable timeout and size limits.
@@ -792,9 +862,49 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         )
 
     def describe(self) -> dict[str, JsonValue]:
-        """Return handler metadata and capabilities."""
+        """Return handler metadata and capabilities for introspection.
+
+        This method exposes the handler's three-dimensional type classification
+        along with its operational configuration and capabilities.
+
+        Returns:
+            dict containing:
+                - handler_type: Architectural role from handler_type property
+                  (e.g., "infra_handler"). See EnumHandlerType for valid values.
+                - handler_category: Behavioral classification from handler_category
+                  property (e.g., "effect"). See EnumHandlerTypeCategory for valid values.
+                - transport_type: Protocol identifier from transport_type property
+                  (e.g., "http"). See EnumInfraTransportType for valid values.
+                - supported_operations: List of supported operations
+                - timeout_seconds: Request timeout in seconds
+                - max_request_size: Maximum request body size in bytes
+                - max_response_size: Maximum response body size in bytes
+                - initialized: Whether the handler is initialized
+                - version: Handler version string
+
+        Note:
+            The handler_type, handler_category, and transport_type fields form the
+            three-dimensional handler classification system:
+
+            1. handler_type (architectural role): Determines lifecycle and invocation
+               patterns. This handler is INFRA_HANDLER (protocol/transport handler).
+
+            2. handler_category (behavioral classification): Determines security rules
+               and replay safety. This handler is EFFECT (side-effecting I/O).
+
+            3. transport_type (protocol identifier): Identifies the specific transport.
+               This handler uses HTTP protocol.
+
+        See Also:
+            - handler_type property: Full documentation of architectural role
+            - handler_category property: Full documentation of behavioral classification
+            - transport_type property: Full documentation of transport identifier
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
         return {
             "handler_type": self.handler_type.value,
+            "handler_category": self.handler_category.value,
+            "transport_type": self.transport_type.value,
             "supported_operations": sorted(_SUPPORTED_OPERATIONS),
             "timeout_seconds": self._timeout,
             "max_request_size": self._max_request_size,

@@ -521,8 +521,8 @@ class TestRoutingCoverageValidator:
             violation.violation_type
             == EnumExecutionShapeViolation.UNMAPPED_MESSAGE_ROUTE
         )
-        # handler_type is None because routing coverage is not handler-specific
-        assert violation.handler_type is None
+        # node_archetype is None because routing coverage is not handler-specific
+        assert violation.node_archetype is None
         assert violation.severity == "error"
         assert "not registered" in violation.message
 

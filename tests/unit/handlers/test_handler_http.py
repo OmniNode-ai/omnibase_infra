@@ -16,8 +16,12 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
 
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -100,9 +104,9 @@ class TestHttpRestHandlerInitialization:
         assert handler._client is None
         assert handler._timeout == 30.0
 
-    def test_handler_type_returns_http(self, handler: HttpRestHandler) -> None:
-        """Test handler_type property returns EnumHandlerType.HTTP."""
-        assert handler.handler_type == EnumHandlerType.HTTP
+    def test_handler_type_returns_infra_handler(self, handler: HttpRestHandler) -> None:
+        """Test handler_type property returns EnumHandlerType.INFRA_HANDLER."""
+        assert handler.handler_type == EnumHandlerType.INFRA_HANDLER
 
     @pytest.mark.asyncio
     async def test_initialize_with_empty_config(self, handler: HttpRestHandler) -> None:
@@ -817,18 +821,74 @@ class TestHttpRestHandlerErrorHandling:
 
 
 class TestHttpRestHandlerDescribe:
-    """Test suite for describe operations."""
+    """Test suite for describe operations and three-dimensional handler type system.
+
+    The ONEX handler architecture uses a three-dimensional type system where each
+    handler is classified along three orthogonal axes:
+
+    1. **handler_type** (Architectural Role): Determines interface, lifecycle, and
+       runtime invocation pattern. Values include INFRA_HANDLER (protocol/transport),
+       NODE_HANDLER (event processing), PROJECTION_HANDLER (read models).
+
+    2. **handler_category** (Behavioral Classification): Determines runtime policies,
+       determinism guarantees, and replay safety. Values include COMPUTE (pure),
+       EFFECT (side-effecting I/O), NONDETERMINISTIC_COMPUTE (pure but non-deterministic).
+
+    3. **transport_type** (Protocol Identifier): Identifies the specific transport
+       protocol. Values include HTTP, DATABASE, KAFKA, CONSUL, VAULT, etc.
+
+    For HttpRestHandler:
+    - handler_type = INFRA_HANDLER (manages HTTP protocol and connections)
+    - handler_category = EFFECT (performs side-effecting network I/O)
+    - transport_type = HTTP (uses HTTP/REST protocol)
+
+    These three dimensions enable fine-grained policy decisions: security rules are
+    driven by handler_category, lifecycle management by handler_type, and
+    transport-specific configuration by transport_type.
+    """
 
     @pytest.fixture
     def handler(self) -> HttpRestHandler:
-        """Create HttpRestHandler fixture."""
+        """Create HttpRestHandler fixture for describe() tests.
+
+        Returns:
+            HttpRestHandler: A new, uninitialized handler instance.
+        """
         return HttpRestHandler()
 
     def test_describe_returns_handler_metadata(self, handler: HttpRestHandler) -> None:
-        """Test describe returns correct handler metadata."""
+        """Test describe() returns all three dimensions of the handler type system.
+
+        Verifies that describe() includes all three type identifiers that form the
+        three-dimensional handler classification:
+
+        1. handler_type: "infra_handler" (EnumHandlerType.INFRA_HANDLER)
+           - Architectural role: Protocol/transport handler managing HTTP connections
+
+        2. handler_category: "effect" (EnumHandlerTypeCategory.EFFECT)
+           - Behavioral classification: Side-effecting I/O requiring idempotency handling
+
+        3. transport_type: "http" (EnumInfraTransportType.HTTP)
+           - Protocol identifier: HTTP/REST protocol transport
+
+        These values are tested both as raw strings and against their enum constants
+        to ensure consistency between the describe() output and property accessors.
+        """
         description = handler.describe()
 
-        assert description["handler_type"] == "http"
+        # Architectural role - INFRA_HANDLER for protocol/transport handlers
+        assert description["handler_type"] == "infra_handler"
+        assert description["handler_type"] == EnumHandlerType.INFRA_HANDLER.value
+
+        # Behavioral classification - EFFECT for side-effecting I/O operations
+        assert description["handler_category"] == "effect"
+        assert description["handler_category"] == EnumHandlerTypeCategory.EFFECT.value
+
+        # Protocol/transport identifier - HTTP for HTTP handlers
+        assert description["transport_type"] == "http"
+        assert description["transport_type"] == EnumInfraTransportType.HTTP.value
+
+        # Standard metadata
         assert description["timeout_seconds"] == 30.0
         assert description["version"] == "0.1.0-mvp"
         assert description["initialized"] is False
@@ -836,7 +896,18 @@ class TestHttpRestHandlerDescribe:
     def test_describe_lists_supported_operations(
         self, handler: HttpRestHandler
     ) -> None:
-        """Test describe lists supported operations."""
+        """Test describe() lists handler-specific supported operations.
+
+        Beyond the three-dimensional type classification, describe() also exposes
+        handler-specific capabilities. For HttpRestHandler, this includes the
+        list of supported HTTP operations.
+
+        MVP supports:
+        - http.get: HTTP GET requests
+        - http.post: HTTP POST requests
+
+        PUT, DELETE, PATCH are deferred to Beta release.
+        """
         description = handler.describe()
 
         assert "supported_operations" in description
@@ -850,7 +921,17 @@ class TestHttpRestHandlerDescribe:
     async def test_describe_reflects_initialized_state(
         self, handler: HttpRestHandler
     ) -> None:
-        """Test describe shows correct initialized state."""
+        """Test describe() reflects handler lifecycle state accurately.
+
+        INFRA_HANDLER types manage connection lifecycle. The describe() output
+        includes an 'initialized' flag that indicates whether the handler has
+        an active connection and is ready to process requests.
+
+        Lifecycle states tested:
+        - Before initialize(): initialized = False
+        - After initialize(): initialized = True
+        - After shutdown(): initialized = False
+        """
         assert handler.describe()["initialized"] is False
 
         await handler.initialize({})
@@ -858,6 +939,117 @@ class TestHttpRestHandlerDescribe:
 
         await handler.shutdown()
         assert handler.describe()["initialized"] is False
+
+    def test_handler_type_property_returns_infra_handler(
+        self, handler: HttpRestHandler
+    ) -> None:
+        """Test handler_type property returns INFRA_HANDLER (Dimension 1: Architectural Role).
+
+        The handler_type property identifies the architectural role of this handler,
+        determining which interface it implements, its lifecycle management pattern,
+        and runtime invocation behavior.
+
+        INFRA_HANDLER indicates this handler:
+        - Manages external connections and protocol-specific operations
+        - Uses connection pooling and health check lifecycle patterns
+        - May implement circuit breakers for resilience
+        - Is responsible for transport layer concerns (not business logic)
+
+        Other handler_type values include NODE_HANDLER (event processing) and
+        PROJECTION_HANDLER (read models), each with different interfaces and lifecycles.
+        """
+        assert handler.handler_type == EnumHandlerType.INFRA_HANDLER
+        assert handler.handler_type.value == "infra_handler"
+
+    def test_handler_category_property_returns_effect(
+        self, handler: HttpRestHandler
+    ) -> None:
+        """Test handler_category property returns EFFECT (Dimension 2: Behavioral Classification).
+
+        The handler_category property identifies the behavioral classification of this
+        handler, determining which runtime policies apply, whether the handler is
+        deterministic, and how it should be handled during replay scenarios.
+
+        EFFECT indicates this handler:
+        - Performs side-effecting I/O operations (network calls)
+        - May produce non-deterministic results (server state may change)
+        - Requires idempotency handling for safe replay
+        - Cannot be safely cached without explicit invalidation
+        - Needs circuit breakers and retry policies for resilience
+
+        Other categories include COMPUTE (pure, deterministic) and
+        NONDETERMINISTIC_COMPUTE (pure but non-deterministic like UUID generation).
+        """
+        assert handler.handler_category == EnumHandlerTypeCategory.EFFECT
+        assert handler.handler_category.value == "effect"
+
+    def test_transport_type_property_returns_http(
+        self, handler: HttpRestHandler
+    ) -> None:
+        """Test transport_type property returns HTTP (Dimension 3: Protocol Identifier).
+
+        The transport_type property identifies the specific transport protocol this
+        handler uses, enabling transport-specific configuration, error handling,
+        and observability.
+
+        HTTP indicates this handler:
+        - Uses HTTP/REST protocol for communication
+        - Applies HTTP-specific timeout and size limit configurations
+        - Reports HTTP-specific error codes and status
+        - May include HTTP-specific headers in error context
+        - Uses HTTP-specific connection pooling (httpx.AsyncClient)
+
+        Other transport_type values include DATABASE, KAFKA, CONSUL, VAULT, VALKEY,
+        GRPC, and RUNTIME, each with their own protocol-specific behaviors.
+        """
+        assert handler.transport_type == EnumInfraTransportType.HTTP
+        assert handler.transport_type.value == "http"
+
+    def test_handler_type_semantics_are_distinct(
+        self, handler: HttpRestHandler
+    ) -> None:
+        """Test that all three type dimensions are present and semantically distinct.
+
+        The three-dimensional type system requires that each dimension represents
+        an orthogonal classification axis. This test verifies:
+
+        1. All three keys are present in describe() output
+        2. Each dimension has a distinct value (no accidental overlap)
+
+        For HttpRestHandler:
+        - handler_type = "infra_handler" (architectural role)
+        - handler_category = "effect" (behavioral classification)
+        - transport_type = "http" (protocol identifier)
+
+        The orthogonality of these dimensions enables independent policy decisions:
+        - A NODE_HANDLER (handler_type) could be COMPUTE or EFFECT (handler_category)
+        - An EFFECT handler could use HTTP or KAFKA (transport_type)
+        - Different transport_types have different timeout/retry defaults
+
+        Note: While theoretically handler_category and transport_type could share
+        the same string value, in practice they come from different enum types
+        and serve different semantic purposes.
+        """
+        description = handler.describe()
+
+        # All three dimensions must be present in describe() output
+        assert "handler_type" in description, "Missing handler_type (Dimension 1)"
+        assert "handler_category" in description, (
+            "Missing handler_category (Dimension 2)"
+        )
+        assert "transport_type" in description, "Missing transport_type (Dimension 3)"
+
+        # Values should be different (they represent orthogonal dimensions)
+        assert description["handler_type"] != description["handler_category"], (
+            "handler_type and handler_category should have distinct values"
+        )
+        assert description["handler_type"] != description["transport_type"], (
+            "handler_type and transport_type should have distinct values"
+        )
+        # For HTTP handlers specifically: "effect" != "http"
+        assert description["handler_category"] != description["transport_type"], (
+            "handler_category and transport_type should have distinct values"
+        )
 
 
 class TestHttpRestHandlerLifecycle:
