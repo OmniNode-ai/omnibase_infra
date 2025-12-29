@@ -79,7 +79,7 @@ class ModelHandlerValidationError(BaseModel):
         ...     remediation_hint="Prefix internal methods with underscore",
         ...     handler_identity=ModelHandlerIdentifier.from_node(
         ...         node_path="nodes/auth/node.py",
-        ...         handler_type=EnumHandlerType.EFFECT,
+        ...         handler_type=EnumHandlerType.INFRA_HANDLER,
         ...     ),
         ...     line_number=42,
         ... )
@@ -426,7 +426,7 @@ class ModelHandlerValidationError(BaseModel):
             ...     remediation_hint="Prefix method with underscore: '_get_api_key'",
             ...     handler_identity=ModelHandlerIdentifier.from_node(
             ...         node_path="nodes/auth/node.py",
-            ...         handler_type=EnumHandlerType.EFFECT,
+            ...         handler_type=EnumHandlerType.INFRA_HANDLER,
             ...     ),
             ...     file_path="nodes/auth/handlers/handler_authenticate.py",
             ...     line_number=42,
@@ -490,7 +490,7 @@ class ModelHandlerValidationError(BaseModel):
             ...     remediation_hint="Add async def handle(self, event) method",
             ...     handler_identity=ModelHandlerIdentifier.from_node(
             ...         node_path="nodes/compute/node.py",
-            ...         handler_type=EnumHandlerType.COMPUTE,
+            ...         handler_type=EnumHandlerType.COMPUTE_HANDLER,
             ...     ),
             ... )
         """
@@ -548,11 +548,11 @@ class ModelHandlerValidationError(BaseModel):
         Example:
             >>> error = ModelHandlerValidationError.from_architecture_error(
             ...     rule_id="ARCH-001",
-            ...     message="COMPUTE handler performs I/O operation",
-            ...     remediation_hint="Move I/O logic to EFFECT handler",
+            ...     message="COMPUTE_HANDLER performs I/O operation",
+            ...     remediation_hint="Move I/O logic to INFRA_HANDLER",
             ...     handler_identity=ModelHandlerIdentifier.from_node(
             ...         node_path="nodes/compute/node.py",
-            ...         handler_type=EnumHandlerType.COMPUTE,
+            ...         handler_type=EnumHandlerType.COMPUTE_HANDLER,
             ...     ),
             ...     line_number=85,
             ... )

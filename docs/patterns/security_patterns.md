@@ -1283,7 +1283,7 @@ def validate_node_security(
     """
     handler_identity = ModelHandlerIdentifier.from_node(
         node_path=node_path,
-        handler_type=EnumHandlerType.EFFECT,
+        handler_type=EnumHandlerType.INFRA_HANDLER,
     )
 
     # Validate method exposure
