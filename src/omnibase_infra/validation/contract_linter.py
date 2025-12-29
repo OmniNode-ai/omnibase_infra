@@ -12,11 +12,32 @@ Validates contract.yaml files against ONEX infrastructure requirements:
 This linter complements omnibase_core.validation.validate_contracts by adding
 infrastructure-specific validation that is not covered by the base validator.
 
+Integration with Structured Error Reporting (OMN-1091):
+    The linter now supports converting contract violations to structured
+    ModelHandlerValidationError instances with unique rule IDs, handler
+    identities, and remediation hints. Use ModelContractLintResult.to_handler_errors()
+    to convert violations to structured errors.
+
+    Rule ID Mapping:
+        CONTRACT-001: YAML parse error
+        CONTRACT-002: Missing required field
+        CONTRACT-003: Invalid node_type
+        CONTRACT-004: Invalid field type
+        CONTRACT-005: Import error for models
+        CONTRACT-006: Invalid contract_version format
+        CONTRACT-007: Invalid model reference
+        CONTRACT-008: Invalid name convention
+        CONTRACT-009: File not found
+        CONTRACT-010: Non-dict contract
+        CONTRACT-011: Model not found in module
+        CONTRACT-012: Encoding error
+
 Usage:
     from omnibase_infra.validation.contract_linter import (
         ContractLinter,
         lint_contracts_in_directory,
         lint_contract_file,
+        convert_violation_to_handler_error,
     )
 
     # Lint all contracts in a directory
@@ -24,6 +45,11 @@ Usage:
 
     # Lint a single contract file
     result = lint_contract_file("path/to/contract.yaml")
+
+    # Convert violations to structured errors
+    errors = result.to_handler_errors()
+    for error in errors:
+        logger.error(error.format_for_logging())
 
 Exit Codes (for CI):
     0: All contracts valid
@@ -37,9 +63,13 @@ import re
 from enum import Enum
 from pathlib import Path
 from typing import Literal
+from uuid import UUID, uuid4
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.models.errors import ModelHandlerValidationError
+from omnibase_infra.models.handlers import ModelHandlerIdentifier
 
 # Module-level logger
 logger = logging.getLogger(__name__)
@@ -132,9 +162,205 @@ class ModelContractLintResult(BaseModel):
         summary = f"Contract Lint: {status} ({self.files_checked} files, {self.error_count} errors, {self.warning_count} warnings)"
         return summary
 
+    def to_handler_errors(
+        self,
+        correlation_id: UUID | None = None,
+    ) -> list[ModelHandlerValidationError]:
+        """Convert all violations to structured handler validation errors.
+
+        Transforms all ModelContractViolation instances into ModelHandlerValidationError
+        instances with appropriate rule IDs, handler identities, and remediation hints.
+        This enables integration with the structured validation and error reporting system.
+
+        Args:
+            correlation_id: Optional correlation ID to apply to all errors.
+
+        Returns:
+            List of ModelHandlerValidationError instances.
+
+        Example:
+            >>> linter = ContractLinter()
+            >>> result = linter.lint_file(Path("contract.yaml"))
+            >>> errors = result.to_handler_errors()
+            >>> for error in errors:
+            ...     logger.error(error.format_for_logging())
+        """
+        return [
+            convert_violation_to_handler_error(violation, correlation_id)
+            for violation in self.violations
+        ]
+
 
 # Valid node types per ONEX 4-node architecture
 VALID_NODE_TYPES = frozenset({"EFFECT", "COMPUTE", "REDUCER", "ORCHESTRATOR"})
+
+
+# Rule ID mapping for contract violations
+class ContractRuleId:
+    """Rule IDs for contract validation errors.
+
+    These IDs provide unique identifiers for each type of contract validation
+    failure, enabling structured error tracking and remediation guidance.
+    """
+
+    YAML_PARSE_ERROR = "CONTRACT-001"
+    MISSING_REQUIRED_FIELD = "CONTRACT-002"
+    INVALID_NODE_TYPE = "CONTRACT-003"
+    INVALID_FIELD_TYPE = "CONTRACT-004"
+    IMPORT_ERROR = "CONTRACT-005"
+    INVALID_CONTRACT_VERSION = "CONTRACT-006"
+    INVALID_MODEL_REFERENCE = "CONTRACT-007"
+    INVALID_NAME_CONVENTION = "CONTRACT-008"
+    FILE_NOT_FOUND = "CONTRACT-009"
+    NON_DICT_CONTRACT = "CONTRACT-010"
+    MODEL_NOT_FOUND = "CONTRACT-011"
+    ENCODING_ERROR = "CONTRACT-012"
+
+
+def convert_violation_to_handler_error(
+    violation: ModelContractViolation,
+    correlation_id: UUID | None = None,
+) -> ModelHandlerValidationError:
+    """Convert contract violation to structured handler validation error.
+
+    Maps ModelContractViolation to ModelHandlerValidationError with appropriate
+    rule IDs, handler identity, and remediation hints for structured error reporting.
+
+    Args:
+        violation: Contract violation to convert.
+        correlation_id: Optional correlation ID for distributed tracing.
+
+    Returns:
+        ModelHandlerValidationError with structured error information.
+
+    Example:
+        >>> violation = ModelContractViolation(
+        ...     file_path="nodes/registration/contract.yaml",
+        ...     field_path="node_type",
+        ...     message="Invalid node_type 'INVALID'",
+        ...     severity=EnumContractViolationSeverity.ERROR,
+        ... )
+        >>> error = convert_violation_to_handler_error(violation)
+        >>> error.rule_id
+        'CONTRACT-003'
+    """
+    # Derive handler_id from file path (e.g., nodes/registration/contract.yaml -> registration)
+    file_path = violation.file_path
+    handler_id = _derive_handler_id_from_path(file_path)
+
+    # Create handler identifier
+    handler_identity = ModelHandlerIdentifier.from_handler_id(handler_id)
+
+    # Map violation to rule ID based on field_path and message
+    rule_id = _map_violation_to_rule_id(violation)
+
+    # Map severity
+    severity: Literal["error", "warning"] = (
+        "error"
+        if violation.severity == EnumContractViolationSeverity.ERROR
+        else "warning"
+    )
+
+    # Use suggestion as remediation hint, or provide default
+    remediation_hint = (
+        violation.suggestion or "Review contract.yaml and fix the validation error"
+    )
+
+    return ModelHandlerValidationError.from_contract_error(
+        rule_id=rule_id,
+        message=violation.message,
+        file_path=file_path,
+        remediation_hint=remediation_hint,
+        handler_identity=handler_identity,
+        line_number=None,  # Contract linter doesn't track line numbers currently
+        correlation_id=correlation_id or uuid4(),
+        severity=severity,
+    )
+
+
+def _derive_handler_id_from_path(file_path: str) -> str:
+    """Derive handler ID from contract file path.
+
+    Extracts the node name from the contract file path to use as handler_id.
+
+    Args:
+        file_path: Path to contract.yaml file.
+
+    Returns:
+        Derived handler ID (e.g., "registration" from "nodes/registration/contract.yaml").
+
+    Example:
+        >>> _derive_handler_id_from_path("nodes/registration/contract.yaml")
+        'registration'
+        >>> _derive_handler_id_from_path("contract.yaml")
+        'contract'
+    """
+    # Extract parent directory name as handler ID
+    path = Path(file_path)
+    if path.name == "contract.yaml" and path.parent.name != ".":
+        return path.parent.name
+    # Fallback to filename without extension
+    return path.stem
+
+
+def _map_violation_to_rule_id(violation: ModelContractViolation) -> str:
+    """Map contract violation to appropriate rule ID.
+
+    Analyzes the violation's field_path and message to determine the
+    appropriate CONTRACT-xxx rule ID for structured error reporting.
+
+    Args:
+        violation: Contract violation to map.
+
+    Returns:
+        Rule ID string (e.g., "CONTRACT-001").
+    """
+    field_path = violation.field_path
+    message_lower = violation.message.lower()
+
+    # YAML/file errors
+    if "not found" in message_lower and not field_path:
+        return ContractRuleId.FILE_NOT_FOUND
+    if "yaml" in message_lower and "parse" in message_lower:
+        return ContractRuleId.YAML_PARSE_ERROR
+    if "encoding" in message_lower or "binary" in message_lower:
+        return ContractRuleId.ENCODING_ERROR
+    if "must be a yaml mapping" in message_lower or "must be a dict" in message_lower:
+        return ContractRuleId.NON_DICT_CONTRACT
+
+    # Field-specific errors
+    if not field_path:
+        return ContractRuleId.YAML_PARSE_ERROR
+
+    # Missing required fields
+    if "missing" in message_lower and "required field" in message_lower:
+        return ContractRuleId.MISSING_REQUIRED_FIELD
+
+    # Node type validation
+    if field_path == "node_type":
+        if "invalid node_type" in message_lower:
+            return ContractRuleId.INVALID_NODE_TYPE
+        if "must be a string" in message_lower:
+            return ContractRuleId.INVALID_FIELD_TYPE
+
+    # Contract version validation
+    if field_path.startswith("contract_version"):
+        return ContractRuleId.INVALID_CONTRACT_VERSION
+
+    # Model reference validation
+    if field_path.startswith(("input_model", "output_model")):
+        if "cannot import" in message_lower:
+            return ContractRuleId.IMPORT_ERROR
+        if "not found in module" in message_lower:
+            return ContractRuleId.MODEL_NOT_FOUND
+        return ContractRuleId.INVALID_MODEL_REFERENCE
+
+    # Name convention validation
+    if field_path == "name":
+        return ContractRuleId.INVALID_NAME_CONVENTION
+
+    # Default to invalid field type
+    return ContractRuleId.INVALID_FIELD_TYPE
 
 
 class ContractLinter:
