@@ -39,12 +39,6 @@ from omnibase_infra.runtime.registry_dispatcher import (
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
 
 # =============================================================================
-# Module-level markers
-# =============================================================================
-
-pytestmark = [pytest.mark.integration]
-
-# =============================================================================
 # Test Payload Models
 # =============================================================================
 

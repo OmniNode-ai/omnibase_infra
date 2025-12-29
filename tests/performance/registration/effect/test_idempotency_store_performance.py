@@ -43,8 +43,6 @@ from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestLRUEvictionEfficiency:
     """Test LRU eviction maintains O(1) performance."""
 
@@ -133,8 +131,6 @@ class TestLRUEvictionEfficiency:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestTTLCleanupPerformance:
     """Test TTL cleanup performance characteristics."""
 
@@ -246,8 +242,6 @@ class TestTTLCleanupPerformance:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestConcurrentAccessScaling:
     """Test performance scaling with concurrent access."""
 
@@ -366,8 +360,6 @@ class TestConcurrentAccessScaling:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestCacheWarmup:
     """Test cold vs warm cache performance."""
 
@@ -421,8 +413,6 @@ class TestCacheWarmup:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestMixedWorkload:
     """Test realistic mixed workload patterns."""
 
@@ -519,8 +509,6 @@ class TestMixedWorkload:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestEdgeCasePerformance:
     """Test performance in edge cases."""
 

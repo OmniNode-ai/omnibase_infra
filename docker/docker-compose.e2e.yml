@@ -1,0 +1,289 @@
+# docker-compose.e2e.yml
+# ONEX Infrastructure E2E Testing Stack
+#
+# This compose file provides infrastructure services for E2E integration testing.
+# It includes PostgreSQL, Redpanda (Kafka), Consul, and Vault - the core infrastructure
+# needed to run the ONEX runtime in a realistic environment.
+#
+# Usage:
+#   # Start infrastructure services only
+#   docker compose -f docker/docker-compose.e2e.yml up -d
+#
+#   # Start infrastructure + runtime for full E2E testing
+#   docker compose -f docker/docker-compose.e2e.yml --profile runtime up -d
+#
+#   # Run E2E tests against the stack
+#   poetry run pytest tests/integration/registration/e2e/ -v
+#
+#   # Tear down
+#   docker compose -f docker/docker-compose.e2e.yml down -v
+#
+# Network:
+#   Uses omnibase-infra-network (created automatically).
+#   All services communicate over this internal Docker network.
+#
+# Ports Exposed (for host access during testing):
+#   - PostgreSQL: 5433 (avoids conflict with any local postgres on 5432)
+#   - Redpanda Kafka: 29092 (external listener)
+#   - Redpanda Admin: 9644
+#   - Consul: 8500
+#   - Vault: 8200
+#   - Runtime Health: 8085 (when runtime profile enabled)
+name: omnibase-infra
+# ==========================================================================
+# Shared Configuration Templates
+# ==========================================================================
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 5s
+  timeout: 5s
+  retries: 10
+  start_period: 15s
+# ==========================================================================
+# Services
+# ==========================================================================
+services:
+  # ==========================================================================
+  # PostgreSQL Database
+  # ==========================================================================
+  postgres:
+    image: postgres:15
+    container_name: omnibase-infra-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}
+      POSTGRES_DB: omninode_bridge
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    networks:
+      - omnibase-infra-network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Initialize schema on first start
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    # Performance optimizations for testing (faster, less durable)
+    command: |
+      postgres
+        -c fsync=off
+        -c synchronous_commit=off
+        -c full_page_writes=off
+        -c max_connections=100
+        -c shared_buffers=128MB
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omninode_bridge"]
+    labels:
+      - "com.omninode.service=postgres"
+      - "com.omninode.role=infrastructure"
+  # ==========================================================================
+  # Redpanda (Kafka-compatible Event Streaming)
+  # ==========================================================================
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:29092
+      # Advertise host.docker.internal for dev containers, localhost for host access
+      # Use host.docker.internal for testing from dev containers
+      # Use localhost for external listener to support host-based testing
+      # For container-to-host access, add 'host.docker.internal' to container's /etc/hosts
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:29092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --default-log-level=warn
+    ports:
+      # Kafka external listener (for host access)
+      - "${KAFKA_PORT:-29092}:29092"
+      # Admin API
+      - "9644:9644"
+      # Schema Registry (external)
+      - "18081:18081"
+      # Pandaproxy (external)
+      - "18082:18082"
+    networks:
+      - omnibase-infra-network
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    mem_limit: 1200m
+    mem_reservation: 256m
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true' || exit 1"]
+      start_period: 30s
+    labels:
+      - "com.omninode.service=redpanda"
+      - "com.omninode.role=infrastructure"
+  # ==========================================================================
+  # Redpanda Topic Manager (creates topics on startup)
+  # ==========================================================================
+  redpanda-topic-manager:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-topic-manager
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - omnibase-infra-network
+    entrypoint: /bin/bash
+    command: |
+      -c "
+      echo 'Creating ONEX infrastructure topics...'
+
+      # Node introspection and registration topics
+      rpk topic create dev.onex.evt.node-introspection.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create dev.onex.evt.node-heartbeat.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create dev.onex.evt.node-registration-acked.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create dev.onex.evt.registry-request-introspection.v1 --brokers redpanda:9092 -p 3 || true
+
+      # Runtime tick and timeout topics
+      rpk topic create dev.onex.evt.runtime-tick.v1 --brokers redpanda:9092 -p 1 || true
+      rpk topic create dev.onex.evt.ack-timeout.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create dev.onex.evt.liveness-timeout.v1 --brokers redpanda:9092 -p 3 || true
+
+      # Registration orchestrator topics
+      rpk topic create dev.onex.evt.registration-effect-requested.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create dev.onex.evt.registration-completed.v1 --brokers redpanda:9092 -p 3 || true
+
+      # Dead letter queue
+      rpk topic create dev.onex.dlq.registration.v1 --brokers redpanda:9092 -p 1 || true
+
+      # Snapshot topics for projection recovery
+      rpk topic create dev.onex.snapshot.registration.v1 --brokers redpanda:9092 -p 1 --config cleanup.policy=compact || true
+
+      echo 'Topics created successfully!'
+      rpk topic list --brokers redpanda:9092
+      "
+    labels:
+      - "com.omninode.service=topic-manager"
+      - "com.omninode.role=infrastructure"
+  # ==========================================================================
+  # Consul (Service Discovery)
+  # ==========================================================================
+  consul:
+    image: hashicorp/consul:1.17
+    container_name: omnibase-infra-consul
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -datacenter=omnibase-infra
+    ports:
+      - "${CONSUL_PORT:-8500}:8500"
+      - "8600:8600/udp"
+    networks:
+      - omnibase-infra-network
+    volumes:
+      - consul_data:/consul/data
+    environment:
+      CONSUL_BIND_INTERFACE: eth0
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD", "consul", "members"]
+    labels:
+      - "com.omninode.service=consul"
+      - "com.omninode.role=infrastructure"
+  # ==========================================================================
+  # Vault (Secrets Management)
+  # ==========================================================================
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: omnibase-infra-vault
+    # Dev mode: in-memory storage, auto-unsealed, root token set via env var
+    command: server -dev -dev-root-token-id=${VAULT_DEV_ROOT_TOKEN:-test-token} -dev-listen-address=0.0.0.0:8200
+    ports:
+      - "${VAULT_PORT:-8200}:8200"
+    networks:
+      - omnibase-infra-network
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN:-test-token}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://127.0.0.1:8200
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD", "vault", "status"]
+    labels:
+      - "com.omninode.service=vault"
+      - "com.omninode.role=infrastructure"
+  # ==========================================================================
+  # ONEX Runtime (profile: runtime)
+  # ==========================================================================
+  # The actual runtime service under test. Only started with --profile runtime.
+  runtime:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+    container_name: omnibase-infra-runtime
+    profiles: ["runtime"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+      redpanda-topic-manager:
+        condition: service_completed_successfully
+    environment:
+      # PostgreSQL
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: omninode_bridge
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}
+      # Kafka (internal address)
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # Consul (internal address)
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      CONSUL_SCHEME: http
+      # Vault (internal address)
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:-test-token}
+      # Runtime configuration
+      ONEX_ENVIRONMENT: test
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-DEBUG}
+      ONEX_INPUT_TOPIC: dev.onex.evt.node-introspection.v1
+      ONEX_OUTPUT_TOPIC: dev.onex.evt.registration-completed.v1
+      ONEX_GROUP_ID: onex-runtime-e2e
+      CONTRACTS_DIR: /app/contracts
+    ports:
+      - "${RUNTIME_PORT:-8085}:8085"
+    networks:
+      - omnibase-infra-network
+    volumes:
+      - ../contracts:/app/contracts:ro
+      - runtime_logs:/app/logs
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      start_period: 40s
+    labels:
+      - "com.omninode.service=runtime"
+      - "com.omninode.role=application"
+# ==========================================================================
+# Networks
+# ==========================================================================
+networks:
+  omnibase-infra-network:
+    name: omnibase-infra-network
+    driver: bridge
+# ==========================================================================
+# Volumes
+# ==========================================================================
+volumes:
+  postgres_data:
+    name: omnibase-infra-postgres-data
+  redpanda_data:
+    name: omnibase-infra-redpanda-data
+  consul_data:
+    name: omnibase-infra-consul-data
+  runtime_logs:
+    name: omnibase-infra-runtime-logs

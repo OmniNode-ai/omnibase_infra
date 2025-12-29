@@ -82,8 +82,24 @@ class ProtocolEventBusLike(Protocol):
             This method MUST be safe for concurrent calls from multiple
             coroutines. Implementations should not rely on call ordering.
 
+        Envelope Structure:
+            The envelope is typically a Pydantic model (ModelEventEnvelope
+            from omnibase_core) with the following fields:
+
+            - correlation_id: UUID for distributed tracing
+            - event_type: String identifying the event type
+            - payload: The event data (dict or Pydantic model)
+            - metadata: Optional metadata dict
+            - timestamp: When the event was created
+
+            Implementations should support:
+            - Pydantic v2 models (model_dump method)
+            - Pydantic v1 models (dict method)
+            - Plain dict objects
+
         Args:
-            envelope: The event envelope/model to publish.
+            envelope: The event envelope/model to publish. Typically
+                ModelEventEnvelope, but any Pydantic model or dict is supported.
             topic: The topic to publish to.
         """
         ...

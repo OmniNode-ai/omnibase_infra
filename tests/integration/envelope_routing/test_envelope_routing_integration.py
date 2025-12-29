@@ -40,8 +40,6 @@ from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 # Test Configuration
 # =============================================================================
 
-pytestmark = [pytest.mark.integration]
-
 # Test timing constants
 MESSAGE_WAIT_TIMEOUT = 2.0
 SUBSCRIBER_SETUP_DELAY = 0.05

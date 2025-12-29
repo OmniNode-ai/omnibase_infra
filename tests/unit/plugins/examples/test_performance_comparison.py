@@ -26,6 +26,7 @@ from omnibase_infra.plugins.examples.plugin_json_normalizer import (
 )
 
 
+@pytest.mark.performance
 class TestPerformanceAnalysis:
     """Detailed performance analysis for PluginJsonNormalizer optimizations."""
 

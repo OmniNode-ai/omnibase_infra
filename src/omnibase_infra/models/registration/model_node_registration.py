@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
+from urllib.parse import urlparse
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
@@ -128,8 +129,6 @@ class ModelNodeRegistration(BaseModel):
         Raises:
             ValueError: If any endpoint URL is invalid (missing scheme or netloc).
         """
-        from urllib.parse import urlparse
-
         for name, url in v.items():
             parsed = urlparse(url)
             if not parsed.scheme or not parsed.netloc:

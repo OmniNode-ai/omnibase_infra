@@ -49,6 +49,32 @@ from omnibase_infra.errors import (
 from omnibase_infra.idempotency import InMemoryIdempotencyStore
 
 # =============================================================================
+# Module-Level Markers - IMPORTANT PYTEST BEHAVIOR
+# =============================================================================
+
+# IMPORTANT: pytestmark at module-level in conftest.py does NOT automatically
+# apply to tests in other files within the same directory or subdirectories.
+#
+# Common misconception:
+#   Many developers expect that placing `pytestmark = pytest.mark.chaos` in
+#   conftest.py will apply the marker to all tests in the directory. This is
+#   INCORRECT - pytestmark only affects tests defined in the SAME FILE where
+#   it is declared.
+#
+# Solution implemented:
+#   We use the pytest_collection_modifyitems hook (see bottom of this file)
+#   to dynamically add the 'chaos' marker to ALL tests in the chaos directory
+#   after test collection. This ensures consistent marking regardless of which
+#   file tests are defined in.
+#
+# Usage:
+#   - Run only chaos tests: pytest -m chaos
+#   - Exclude chaos tests: pytest -m "not chaos"
+#
+# If you need to add additional markers to individual test files, you can still
+# use pytestmark in those files directly (e.g., pytestmark = pytest.mark.slow).
+
+# =============================================================================
 # Chaos Injection Models
 # =============================================================================
 
@@ -1314,3 +1340,54 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "slow: mark test as slow (deferred for performance)",
     )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config,
+    items: list[pytest.Item],
+) -> None:
+    """Dynamically add chaos marker to all tests in the chaos directory.
+
+    This hook runs after test collection and adds the 'chaos' marker to any
+    test located in the tests/chaos directory (or any subdirectory thereof).
+    This is necessary because pytestmark defined in conftest.py does NOT
+    automatically apply to tests in other files within the same directory.
+
+    Why pytestmark doesn't work in conftest.py:
+        The pytestmark variable only applies to tests defined in the SAME file
+        where pytestmark is declared. When placed in conftest.py, it would only
+        mark tests defined directly in conftest.py (which typically has none).
+        Tests in sibling files (test_*.py) or subdirectories are NOT affected.
+
+    This hook solution:
+        By using pytest_collection_modifyitems, we intercept all collected tests
+        and programmatically add markers based on file path. This ensures ALL
+        tests in the chaos directory are properly marked, regardless of which
+        file they're defined in.
+
+    Args:
+        config: Pytest configuration object.
+        items: List of collected test items.
+
+    Usage:
+        Run only chaos tests: pytest -m chaos
+        Exclude chaos tests: pytest -m "not chaos"
+    """
+    chaos_marker = pytest.mark.chaos
+
+    for item in items:
+        # Use item.path (pathlib.Path) for modern pytest compatibility
+        # Check if the test file is in a 'chaos' directory
+        test_path_parts = item.path.parts if hasattr(item, "path") else ()
+        is_chaos_test = "chaos" in test_path_parts
+
+        # Fallback to legacy fspath for older pytest versions
+        if not test_path_parts:
+            is_chaos_test = "/chaos/" in str(item.fspath) or str(item.fspath).endswith(
+                "/chaos"
+            )
+
+        if is_chaos_test:
+            # Only add marker if not already present
+            if not any(marker.name == "chaos" for marker in item.iter_markers()):
+                item.add_marker(chaos_marker)

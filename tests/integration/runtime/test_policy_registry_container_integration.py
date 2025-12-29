@@ -39,9 +39,6 @@ from tests.conftest import (
     assert_policy_registry_interface,
 )
 
-# Module-level markers - all tests in this file are integration tests
-pytestmark = [pytest.mark.integration]
-
 
 class TestPolicyRegistryContainerIntegration:
     """Integration tests for PolicyRegistry with real container."""

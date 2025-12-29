@@ -809,13 +809,143 @@ docker exec omnibase-infra-runtime-main df -h
 docker exec omnibase-infra-runtime-main free -h
 ```
 
+## E2E Testing with Infrastructure
+
+For true end-to-end testing, use `docker-compose.e2e.yml` which includes full infrastructure services (PostgreSQL, Redpanda, Consul) alongside the runtime.
+
+### Quick Start for E2E Testing
+
+```bash
+# 1. Navigate to docker directory
+cd docker
+
+# 2. Copy E2E environment file
+cp .env.e2e .env
+
+# 3. Start infrastructure services only (for running tests from host)
+docker compose -f docker-compose.e2e.yml up -d
+
+# 4. Wait for all services to be healthy
+docker compose -f docker-compose.e2e.yml ps
+
+# 5. Run E2E tests from host
+cd ..
+poetry run pytest tests/integration/registration/e2e/ -v
+
+# 6. Tear down when done
+docker compose -f docker/docker-compose.e2e.yml down -v
+```
+
+### Full Stack Testing (with Runtime in Container)
+
+```bash
+# Start infrastructure AND runtime service
+docker compose -f docker-compose.e2e.yml --profile runtime up -d
+
+# Verify runtime is healthy
+curl http://localhost:8085/health
+
+# Run ALL E2E tests (component tests + runtime tests)
+poetry run pytest tests/integration/registration/e2e/ -v
+
+# Run ONLY true runtime E2E tests (requires runtime container)
+poetry run pytest tests/integration/registration/e2e/test_runtime_e2e.py -v
+
+# View runtime logs
+docker compose -f docker-compose.e2e.yml logs -f runtime
+```
+
+### Two Types of E2E Tests
+
+| Test File | What It Tests | Requires Runtime? |
+|-----------|---------------|-------------------|
+| `test_two_way_registration_e2e.py` | Component integration (handlers, reducers, effects called directly) | No - just infrastructure |
+| `test_full_orchestrator_flow.py` | Pipeline components working together | No - just infrastructure |
+| `test_runtime_e2e.py` | **True E2E**: Publish to Kafka → Runtime processes → Verify in DB | **Yes** |
+
+The `test_runtime_e2e.py` tests will skip automatically if the runtime container isn't running.
+
+### E2E Service Architecture
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                    omnibase-infra-network                          │
+│                                                                    │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
+│  │   postgres   │  │   redpanda   │  │    consul    │             │
+│  │    :5432     │  │    :9092     │  │    :8500     │             │
+│  │  (test DB)   │  │   (Kafka)    │  │  (discovery) │             │
+│  └──────────────┘  └──────────────┘  └──────────────┘             │
+│         │                 │                 │                      │
+│         └─────────────────┴─────────────────┘                      │
+│                           │                                        │
+│                  ┌────────┴────────┐                               │
+│                  │     runtime     │  (profile: runtime)           │
+│                  │     :8085       │                               │
+│                  │  onex-runtime   │                               │
+│                  └─────────────────┘                               │
+│                                                                    │
+└────────────────────────────────────────────────────────────────────┘
+        │                   │                   │
+   Host:5433           Host:29092          Host:8500
+   (postgres)          (kafka)             (consul)
+```
+
+### E2E Environment Variables
+
+| Variable              | Default           | Description                    |
+|-----------------------|-------------------|--------------------------------|
+| `POSTGRES_PASSWORD`   | `test-password`   | PostgreSQL password            |
+| `POSTGRES_PORT`       | `5433`            | Host port for PostgreSQL       |
+| `KAFKA_PORT`          | `29092`           | Host port for Kafka external   |
+| `CONSUL_PORT`         | `8500`            | Host port for Consul           |
+| `RUNTIME_PORT`        | `8085`            | Host port for runtime health   |
+| `ONEX_LOG_LEVEL`      | `DEBUG`           | Runtime log level              |
+
+### Connecting from Host (for Tests)
+
+When running tests from the host machine (outside Docker):
+
+```python
+# PostgreSQL
+POSTGRES_HOST = "localhost"
+POSTGRES_PORT = 5433  # Maps to container 5432
+
+# Kafka (external listener)
+KAFKA_BOOTSTRAP_SERVERS = "localhost:29092"
+
+# Consul
+CONSUL_HOST = "localhost"
+CONSUL_PORT = 8500
+```
+
+### Connecting from Runtime Container
+
+When the runtime runs inside Docker:
+
+```python
+# PostgreSQL (internal DNS)
+POSTGRES_HOST = "postgres"
+POSTGRES_PORT = 5432
+
+# Kafka (internal listener)
+KAFKA_BOOTSTRAP_SERVERS = "redpanda:9092"
+
+# Consul (internal DNS)
+CONSUL_HOST = "consul"
+CONSUL_PORT = 8500
+```
+
 ## File Reference
 
 | File                        | Purpose                                            |
 |-----------------------------|----------------------------------------------------|
 | `Dockerfile.runtime`        | Multi-stage Dockerfile for runtime image           |
 | `docker-compose.runtime.yml`| Service orchestration with profiles                |
+| `docker-compose.e2e.yml`    | E2E testing with infrastructure services           |
 | `.env.example`              | Environment variable template (copy to `.env`)     |
+| `.env.e2e`                  | E2E testing environment template                   |
+| `migrations/`               | PostgreSQL schema files for init                   |
 | `README.md`                 | This documentation                                 |
 
 ## Related Documentation

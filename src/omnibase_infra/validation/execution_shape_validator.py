@@ -529,8 +529,18 @@ class ExecutionShapeValidator:
                     arg_str = self._get_name_from_expr(arg)
                     if arg_str is not None:
                         # Handle EnumNodeArchetype.EFFECT or just EFFECT
+                        # Use exact matching to avoid false positives from substring matches
+                        # (e.g., "side_effect" should not match "effect")
+                        arg_upper = arg_str.upper()
                         for archetype in EnumNodeArchetype:
-                            if archetype.value in arg_str.lower():
+                            # Match exact enum member name: "EFFECT", "COMPUTE", etc.
+                            if arg_upper == archetype.name:
+                                return archetype
+                            # Match qualified name: "EnumNodeArchetype.EFFECT"
+                            if arg_upper.endswith(f".{archetype.name}"):
+                                return archetype
+                            # Match quoted string value: "effect", "compute", etc.
+                            if arg_upper == archetype.value.upper():
                                 return archetype
 
             # Check @effect_handler, @reducer_handler patterns

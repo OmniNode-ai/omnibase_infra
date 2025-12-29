@@ -142,7 +142,20 @@ from omnibase_infra.runtime.container_wiring import (
     get_policy_registry_from_container,
     get_projection_reader_from_container,
     wire_infrastructure_services,
+    wire_registration_dispatchers,
     wire_registration_handlers,
+)
+
+# Registration dispatchers (OMN-892)
+from omnibase_infra.runtime.dispatchers import (
+    DispatcherNodeIntrospected,
+    DispatcherNodeRegistrationAcked,
+    DispatcherRuntimeTick,
+)
+
+# Introspection event router (PR #101)
+from omnibase_infra.runtime.introspection_event_router import (
+    IntrospectionEventRouter,
 )
 
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
@@ -235,4 +248,11 @@ __all__: list[str] = [
     # Container wiring (OMN-888)
     "wire_infrastructure_services",
     "wire_registration_handlers",
+    "wire_registration_dispatchers",
+    # Registration dispatchers (OMN-892)
+    "DispatcherNodeIntrospected",
+    "DispatcherRuntimeTick",
+    "DispatcherNodeRegistrationAcked",
+    # Introspection event router (PR #101)
+    "IntrospectionEventRouter",
 ]

@@ -270,6 +270,14 @@ def dependencies(contract_data: dict) -> list[dict]:
 
 
 # =============================================================================
+# Container Fixtures
+# =============================================================================
+# Note: simple_mock_container is provided by tests/conftest.py.
+# Use it for basic orchestrator tests that only need container.config.
+# For full container wiring, use container_with_registries from tests/conftest.py.
+
+
+# =============================================================================
 # Module Exports
 # =============================================================================
 

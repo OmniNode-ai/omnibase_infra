@@ -354,14 +354,36 @@ class InMemoryEventBus:
         envelope: object,
         topic: str,
     ) -> None:
-        """Publish an OnexEnvelope to a topic.
+        """Publish an event envelope to a topic.
 
         Protocol method for ProtocolEventBus compatibility.
         Serializes the envelope to JSON bytes and publishes.
 
+        Envelope Structure:
+            The envelope is expected to be a Pydantic model (typically
+            ModelEventEnvelope from omnibase_core) with the following structure:
+
+            - correlation_id: UUID for tracing the event across services
+            - event_type: String identifying the event type
+            - payload: The event data (dict or Pydantic model)
+            - metadata: Optional metadata dict
+            - timestamp: When the event was created
+
+            Serialization:
+                - Pydantic models: Uses model_dump(mode="json")
+                - Legacy Pydantic v1: Uses dict()
+                - Dict objects: Passed through directly
+                - Other types: Serialized via json.dumps (may raise TypeError)
+
         Args:
-            envelope: Envelope object to publish (ModelOnexEnvelope)
-            topic: Target topic name
+            envelope: Envelope object to publish. Typically ModelEventEnvelope
+                from omnibase_core, but any object with model_dump(), dict(),
+                or dict-like structure is supported.
+            topic: Target topic name for publishing.
+
+        Raises:
+            InfraUnavailableError: If the bus has not been started.
+            TypeError: If envelope cannot be JSON-serialized.
         """
         # Serialize envelope to JSON bytes
         # Note: envelope is expected to have a model_dump() method (Pydantic)

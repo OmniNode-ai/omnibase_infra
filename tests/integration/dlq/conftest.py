@@ -30,12 +30,16 @@ Related Ticket: OMN-1032 - Complete DLQ Replay PostgreSQL Tracking Integration
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import AsyncGenerator
 from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
+
+# Module-level logger for test cleanup diagnostics
+logger = logging.getLogger(__name__)
 
 from omnibase_infra.dlq import (
     DLQTrackingService,
@@ -165,14 +169,23 @@ async def dlq_tracking_service(
                 await conn.execute(
                     f"DROP TABLE IF EXISTS {dlq_tracking_config.storage_table}"
                 )
-    except Exception:
-        pass  # Ignore cleanup errors - table may not exist or pool closed
+    except Exception as e:
+        logger.warning(
+            "Cleanup failed for DLQ tracking table %s: %s",
+            dlq_tracking_config.storage_table,
+            e,
+            exc_info=True,
+        )
 
     # Always attempt shutdown
     try:
         await service.shutdown()
-    except Exception:
-        pass  # Ignore shutdown errors
+    except Exception as e:
+        logger.warning(
+            "Cleanup failed for DLQTrackingService shutdown: %s",
+            e,
+            exc_info=True,
+        )
 
 
 @pytest.fixture

@@ -13,7 +13,6 @@ The tests validate:
 
 import re
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
@@ -76,9 +75,9 @@ def exemptions_yaml_path() -> Path:
 
 
 @pytest.fixture
-def exemptions_yaml(exemptions_yaml_path: Path) -> dict[str, Any]:
+def exemptions_yaml(exemptions_yaml_path: Path) -> dict[str, object]:
     """Load the exemptions YAML file."""
-    with open(exemptions_yaml_path) as f:
+    with exemptions_yaml_path.open(encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -90,7 +89,9 @@ def source_files() -> list[str]:
 
 
 @pytest.fixture
-def all_regex_patterns(exemptions_yaml: dict[str, Any]) -> list[tuple[str, str, str]]:
+def all_regex_patterns(
+    exemptions_yaml: dict[str, object],
+) -> list[tuple[str, str, str]]:
     """Extract all regex patterns from the exemptions YAML file.
 
     Returns:
@@ -118,13 +119,13 @@ class TestValidationExemptionsRegex:
 
     def test_yaml_file_is_valid_yaml(self, exemptions_yaml_path: Path) -> None:
         """Verify the exemptions file is valid YAML."""
-        with open(exemptions_yaml_path) as f:
+        with exemptions_yaml_path.open(encoding="utf-8") as f:
             try:
                 yaml.safe_load(f)
             except yaml.YAMLError as e:
                 pytest.fail(f"Invalid YAML syntax in {exemptions_yaml_path}: {e}")
 
-    def test_schema_version_present(self, exemptions_yaml: dict[str, Any]) -> None:
+    def test_schema_version_present(self, exemptions_yaml: dict[str, object]) -> None:
         """Verify schema_version is present in the YAML file."""
         assert "schema_version" in exemptions_yaml, (
             "schema_version field is required in validation_exemptions.yaml"
@@ -161,14 +162,14 @@ class TestValidationExemptionsRegex:
 
     @pytest.mark.parametrize("section", EXEMPTION_SECTIONS)
     def test_exemption_section_exists_and_is_list(
-        self, exemptions_yaml: dict[str, Any], section: str
+        self, exemptions_yaml: dict[str, object], section: str
     ) -> None:
         """Verify each exemption section exists and is a list."""
         assert section in exemptions_yaml, f"{section} section is required"
         assert isinstance(exemptions_yaml[section], list), f"{section} must be a list"
 
     def test_all_exemptions_have_required_fields(
-        self, exemptions_yaml: dict[str, Any]
+        self, exemptions_yaml: dict[str, object]
     ) -> None:
         """Verify all exemptions have required fields: file_pattern, violation_pattern, reason."""
         missing_fields_errors: list[str] = []
@@ -203,7 +204,7 @@ class TestExemptionPatternsMatchFiles:
     """Optional tests to verify patterns can match expected files."""
 
     def test_file_patterns_match_at_least_one_file(
-        self, exemptions_yaml: dict[str, Any], source_files: list[str]
+        self, exemptions_yaml: dict[str, object], source_files: list[str]
     ) -> None:
         """Verify each file_pattern matches at least one file in the codebase.
 
