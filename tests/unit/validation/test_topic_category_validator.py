@@ -7,7 +7,7 @@ Validates that:
 - Topic patterns match message categories correctly
 - Static (AST) analysis detects topic/category mismatches
 - Runtime validation catches category violations
-- Handler type to category mappings are enforced
+- Node archetype to category mappings are enforced
 
 Note:
     This module uses pytest's tmp_path fixture for temporary file management.
@@ -108,8 +108,8 @@ class TestTopicSuffixes:
         assert TOPIC_SUFFIXES[EnumNodeOutputType.PROJECTION] == ""
 
 
-class TestHandlerExpectedCategories:
-    """Test the handler to expected categories mapping."""
+class TestNodeArchetypeExpectedCategories:
+    """Test the node archetype to expected categories mapping."""
 
     def test_effect_handler_categories(self) -> None:
         """Verify effect handlers can process commands and events."""

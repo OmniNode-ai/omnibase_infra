@@ -510,8 +510,14 @@ class ExecutionShapeValidator:
 
         Looks for patterns like:
             @node_archetype(EnumNodeArchetype.EFFECT)
+            @handler_type(EnumNodeArchetype.EFFECT)  # Backward compatible alias
             @effect_handler
             @reducer_handler
+
+        Note:
+            Both ``@node_archetype`` and ``@handler_type`` decorator names are
+            supported for backward compatibility during the migration from
+            handler-type to node-archetype terminology.
 
         Args:
             node: The AST node with decorators.

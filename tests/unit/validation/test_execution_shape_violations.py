@@ -586,7 +586,7 @@ class TestHandlerDirectPublishRejected:
     def test_all_handler_types_forbidden_from_direct_publish(
         self, tmp_path: Path
     ) -> None:
-        """All handler types (Effect, Compute, Reducer, Orchestrator) are forbidden."""
+        """All node archetypes (Effect, Compute, Reducer, Orchestrator) are forbidden."""
         handler_templates = [
             ("OrderEffectHandler", "Effect"),
             ("OrderComputeHandler", "Compute"),
@@ -1060,10 +1060,10 @@ class TestProjectionOnlyAllowedForReducer:
         ), "COMPUTE should be allowed to produce PROJECTION (most permissive)"
 
 
-class TestHandlerTypeOutputRestrictions:
-    """Comprehensive tests for handler-specific output type restrictions.
+class TestNodeArchetypeOutputRestrictions:
+    """Comprehensive tests for node archetype-specific output type restrictions.
 
-    Each handler type has specific constraints on what output types it can produce:
+    Each node archetype has specific constraints on what output types it can produce:
     - EFFECT: Can return EVENT, COMMAND but NOT PROJECTION or INTENT
     - REDUCER: Can only return PROJECTION, NOT EVENT, COMMAND, or INTENT
     - ORCHESTRATOR: Can return EVENT, COMMAND but NOT INTENT or PROJECTION

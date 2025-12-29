@@ -1066,7 +1066,7 @@ def validate_topic_categories_in_directory(
 # ==============================================================================
 #
 # Performance Optimization: The TopicCategoryValidator is stateless after
-# initialization (only stores patterns, suffixes, and handler_categories which
+# initialization (only stores patterns, suffixes, and archetype_categories which
 # are all module-level constants). Creating new instances on every validation
 # call is wasteful in hot paths. Instead, we use a module-level singleton.
 #
