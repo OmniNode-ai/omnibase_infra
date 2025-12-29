@@ -277,7 +277,7 @@ def http_handler() -> Generator[HttpRestHandler, None, None]:
     yield handler
     # Cleanup if handler was initialized (has httpx client)
     if hasattr(handler, "_initialized") and handler._initialized:
-        asyncio.get_event_loop().run_until_complete(handler.shutdown())
+        asyncio.run(handler.shutdown())
 
 
 @pytest.fixture
@@ -1235,8 +1235,6 @@ class TestOrchestratorBusAccessVerification:
         This is a runtime verification that the orchestrator pattern works.
         The container provides access to bus-related services through ONEX DI.
         """
-        from unittest.mock import MagicMock
-
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
             NodeRegistrationOrchestrator,
         )
@@ -1263,8 +1261,6 @@ class TestOrchestratorBusAccessVerification:
         Proves that the service layer maintains bus access for publishing.
         This is the endpoint of the orchestrator -> coordinator -> service chain.
         """
-        from unittest.mock import MagicMock
-
         from omnibase_infra.services.service_timeout_emitter import (
             ServiceTimeoutEmitter,
         )
