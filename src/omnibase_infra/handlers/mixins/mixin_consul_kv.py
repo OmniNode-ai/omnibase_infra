@@ -16,7 +16,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 from uuid import UUID
 
-# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
 # recursion issues with recursive type aliases.
 
 T = TypeVar("T")

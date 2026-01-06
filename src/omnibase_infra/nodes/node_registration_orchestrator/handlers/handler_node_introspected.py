@@ -63,7 +63,7 @@ from omnibase_infra.enums import EnumRegistrationState
 if TYPE_CHECKING:
     from typing import Any
 
-    # NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+    # NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
     # recursion issues with recursive type aliases.
     from pydantic import BaseModel
 

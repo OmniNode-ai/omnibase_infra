@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING
+from typing import Any
 from uuid import UUID
 
 import hvac
@@ -27,10 +27,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
-if TYPE_CHECKING:
-    from typing import Any
-
-# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
 # recursion issues with recursive type aliases.
 
 logger = logging.getLogger(__name__)

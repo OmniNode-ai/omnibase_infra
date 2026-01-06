@@ -8,7 +8,7 @@ Provides CRUD operations for secrets in Vault KV v2 secrets engine.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, TypeVar
+from typing import Any, TypeVar
 from uuid import UUID
 
 import hvac
@@ -18,10 +18,7 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
-if TYPE_CHECKING:
-    from typing import Any
-
-# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
 # recursion issues with recursive type aliases.
 
 T = TypeVar("T")

@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Stub for contract validator removed in omnibase_core 0.6.2.
+"""TEMPORARY STUB: Contract validator removed in omnibase_core 0.6.2.
+
+WARNING: This module is a TEMPORARY workaround and will be removed.
+Do not add new dependencies on this module.
 
 This stub provides backwards compatibility for code that depends on
-the removed contract validator. It implements ProtocolContractValidator
-using the validation functions from omnibase_core.validation.
+the removed ServiceContractValidator. It implements basic contract
+validation using the validation functions from omnibase_core.validation.
 
-NOTE: This is a temporary workaround. The proper fix is to update
-all validation code to use the new omnibase_core.validation API directly.
+Migration Path:
+    All code should migrate to using omnibase_core.validation API directly.
+    See OMN-1104 for the migration tracking and context.
 """
 
 from __future__ import annotations
@@ -34,6 +38,12 @@ class StubContractValidator:
     placeholder results and should be updated with actual validation
     logic if needed.
     """
+
+    # TODO(OMN-1104): Remove this stub after migrating to omnibase_core.validation API
+    # This is a temporary workaround for backwards compatibility with code that
+    # depends on the removed ServiceContractValidator. The proper fix is to update
+    # all validation code to use the new omnibase_core.validation API directly.
+    # Tracking: https://linear.app/omninode/issue/OMN-1104
 
     def validate_contract_file(
         self,

@@ -73,7 +73,7 @@ from omnibase_infra.utils.util_env_parsing import parse_env_float
 if TYPE_CHECKING:
     from typing import Any
 
-    # NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+    # NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
     # recursion issues with recursive type aliases.
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 

@@ -13,7 +13,7 @@ Operations:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 from uuid import UUID
 
 T = TypeVar("T")
@@ -35,11 +35,9 @@ from omnibase_infra.handlers.models.model_consul_handler_response import (
 )
 
 if TYPE_CHECKING:
-    from typing import Any
-
     import consul as consul_lib
 
-# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
 # recursion issues with recursive type aliases.
 
 

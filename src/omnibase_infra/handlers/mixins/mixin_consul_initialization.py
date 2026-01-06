@@ -15,7 +15,7 @@ Provides:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
 import consul
@@ -32,9 +32,8 @@ from omnibase_infra.handlers.models.consul import ModelConsulHandlerConfig
 
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
-    from typing import Any
 
-# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
 # recursion issues with recursive type aliases.
 
 logger = logging.getLogger(__name__)

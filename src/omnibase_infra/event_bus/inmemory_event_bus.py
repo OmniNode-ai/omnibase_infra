@@ -48,7 +48,7 @@ import logging
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -59,10 +59,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
-if TYPE_CHECKING:
-    from typing import Any
-
-# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
 # recursion issues with recursive type aliases.
 
 logger = logging.getLogger(__name__)

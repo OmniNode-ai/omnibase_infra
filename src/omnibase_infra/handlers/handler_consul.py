@@ -23,7 +23,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar
 from uuid import UUID, uuid4
 
 import consul
@@ -65,10 +65,7 @@ from omnibase_infra.mixins import (
     RetryErrorClassification,
 )
 
-if TYPE_CHECKING:
-    from typing import Any
-
-# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
 # recursion issues with recursive type aliases.
 
 T = TypeVar("T")

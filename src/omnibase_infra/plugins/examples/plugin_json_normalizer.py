@@ -9,7 +9,7 @@ from typing import Any, TypedDict, cast
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
 
-# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
 # recursion issues with recursive type aliases.
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (

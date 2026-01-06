@@ -178,6 +178,13 @@ state_machine:
       actions:
         - action_name: "record_validation_failure"
           action_type: "state_update"
+  # NOTE: persistence_enabled controls FSM intent emission (implemented in omnibase_core
+  # fsm_executor.py). When true, FSM transitions emit "persist_state" intents. However,
+  # the generic intent dispatch handler for these intents is NOT YET IMPLEMENTED.
+  # Current workaround: Handlers call RegistrationProjector.persist_state_transition()
+  # directly instead of relying on intent-based persistence. This flag is kept true
+  # for forward compatibility when generic state persistence dispatch is implemented.
+  # See: omnibase_core/utils/fsm_executor.py:168 for intent emission logic.
   persistence_enabled: true
   terminal_states: []
   # Note: complete and failed are NOT true terminals - they can reset to idle
