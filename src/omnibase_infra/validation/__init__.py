@@ -104,6 +104,10 @@ from omnibase_core.validation import (
     validate_union_usage,
 )
 
+# ONEX-compliant validator aliases (Validator prefix for validator classes)
+ValidatorCircularImport = CircularImportValidator
+ValidatorServiceContract = ServiceContractValidator
+
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
     ChainPropagationError,
