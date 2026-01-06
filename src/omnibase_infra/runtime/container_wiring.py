@@ -79,47 +79,9 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
+from omnibase_infra.errors import ServiceRegistryUnavailableError
+
 logger = logging.getLogger(__name__)
-
-
-class ServiceRegistryUnavailableError(RuntimeError):
-    """Raised when container.service_registry is None.
-
-    This error indicates that the ModelONEXContainer was initialized
-    without a service registry, either because:
-    - enable_service_registry=False was passed
-    - The ServiceRegistry module is not installed/available
-    - Container initialization failed silently
-
-    This is a distinct error from AttributeError to provide clearer
-    diagnostics and actionable error messages.
-    """
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        operation: str | None = None,
-        hint: str | None = None,
-    ) -> None:
-        """Initialize ServiceRegistryUnavailableError.
-
-        Args:
-            message: Primary error message.
-            operation: The operation that was attempted (e.g., 'register_instance').
-            hint: Actionable hint for fixing the issue.
-        """
-        self.operation = operation
-        self.hint = hint or (
-            "Ensure ModelONEXContainer is created with enable_service_registry=True "
-            "and that the ServiceRegistry module is installed."
-        )
-        full_message = message
-        if operation:
-            full_message = f"{message} (operation: {operation})"
-        if hint:
-            full_message = f"{full_message}\nHint: {hint}"
-        super().__init__(full_message)
 
 
 def _validate_service_registry(
@@ -1385,8 +1347,6 @@ async def wire_registration_dispatchers(
 
 
 __all__: list[str] = [
-    # Error class for None service_registry (OMN-1257)
-    "ServiceRegistryUnavailableError",
     # Container wiring functions
     "get_compute_registry_from_container",
     "get_handler_node_introspected_from_container",

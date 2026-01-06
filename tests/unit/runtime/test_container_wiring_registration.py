@@ -153,6 +153,28 @@ class TestWireRegistrationHandlers:
         ):
             await wire_registration_handlers(mock_container, mock_pool)
 
+    @pytest.mark.asyncio
+    async def test_raises_error_on_none_service_registry(self) -> None:
+        """Test that ServiceRegistryUnavailableError is raised if service_registry is None.
+
+        OMN-1257: Tests the second validation branch where service_registry
+        attribute exists but is set to None (e.g., when enable_service_registry=False).
+        """
+        from omnibase_infra.runtime.container_wiring import (
+            ServiceRegistryUnavailableError,
+        )
+
+        mock_container = MagicMock()
+        mock_container.service_registry = None  # Exists but is None
+
+        mock_pool = MagicMock()
+
+        with pytest.raises(
+            ServiceRegistryUnavailableError,
+            match="Container service_registry is None",
+        ):
+            await wire_registration_handlers(mock_container, mock_pool)
+
 
 class TestGetProjectionReaderFromContainer:
     """Tests for get_projection_reader_from_container function."""
