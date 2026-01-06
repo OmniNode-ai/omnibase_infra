@@ -91,32 +91,15 @@ Security Design (Intentional Fail-Open Architecture):
     - routing_coverage_validator.py: Routing gap detection (module docstring)
 """
 
-# Try to import from omnibase_core.validation if available (requires omnibase_core 0.7.0+)
-try:
-    from omnibase_core.validation import (
-        validate_all,
-        validate_architecture,
-        validate_contracts,
-        validate_patterns,
-        validate_union_usage,
-    )
-    from omnibase_core.validation.circular_import_validator import (
-        CircularImportValidator,
-    )
-    from omnibase_core.validation.contract_validator import ProtocolContractValidator
-
-    _CORE_VALIDATION_AVAILABLE = True
-except ImportError:
-    # omnibase_core < 0.7.0 doesn't have validation module
-    # Provide stub implementations for backward compatibility
-    validate_all = None  # type: ignore[assignment]
-    validate_architecture = None  # type: ignore[assignment]
-    validate_contracts = None  # type: ignore[assignment]
-    validate_patterns = None  # type: ignore[assignment]
-    validate_union_usage = None  # type: ignore[assignment]
-    CircularImportValidator = None  # type: ignore[assignment, misc]
-    ProtocolContractValidator = None  # type: ignore[assignment, misc]
-    _CORE_VALIDATION_AVAILABLE = False
+from omnibase_core.validation import (
+    CircularImportValidator,
+    ServiceContractValidator,
+    validate_all,
+    validate_architecture,
+    validate_contracts,
+    validate_patterns,
+    validate_union_usage,
+)
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
@@ -237,7 +220,7 @@ __all__: list[str] = [
     "ModelContractLintResult",
     "ModelContractViolation",
     "ModelExecutionShapeValidationResult",
-    "ProtocolContractValidator",
+    "ServiceContractValidator",
     # Routing coverage validation (OMN-958)
     "RoutingCoverageError",
     "RoutingCoverageValidator",
