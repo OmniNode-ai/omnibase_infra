@@ -57,7 +57,7 @@ from uuid import uuid4
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType
 
 if TYPE_CHECKING:
     from omnibase_infra.errors.error_infra import ProtocolConfigurationError

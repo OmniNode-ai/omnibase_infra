@@ -23,10 +23,10 @@ from omnibase_infra.models.handlers import ModelHandlerIdentifier
 from omnibase_infra.models.health import ModelHealthCheckResult
 from omnibase_infra.models.logging import ModelLogContext
 
-# ModelSemVer and SEMVER_DEFAULT must be imported from omnibase_core.models.primitives.model_semver
+# ModelSemVer and SEMVER_DEFAULT must be imported from omnibase_core.models.primitives
 # The local model_semver.py has been REMOVED and raises ImportError on import.
 # Import directly from omnibase_core:
-#   from omnibase_core.models.primitives.model_semver import ModelSemVer
+#   from omnibase_core.models.primitives import ModelSemVer
 # To create SEMVER_DEFAULT:
 #   SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 from omnibase_infra.models.projection import (

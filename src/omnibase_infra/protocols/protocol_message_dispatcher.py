@@ -32,9 +32,9 @@ __all__ = ["ProtocolMessageDispatcher"]
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.enums import EnumNodeKind
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 
 if TYPE_CHECKING:

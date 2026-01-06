@@ -11,6 +11,7 @@ node archetypes, and other infrastructure concerns.
 Exports:
     EnumChainViolationType: Chain violation types for correlation/causation validation
     EnumDispatchStatus: Dispatch operation status enumeration
+    EnumExecutionShapeViolation: Specific execution shape violation types
     EnumHandlerErrorType: Handler error types for validation and lifecycle
     EnumHandlerSourceType: Handler validation error source types
     EnumHandlerType: Handler architectural roles (INFRA_HANDLER, NODE_HANDLER)
@@ -30,6 +31,9 @@ from omnibase_core.enums import EnumTopicType
 
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
+from omnibase_infra.enums.enum_execution_shape_violation import (
+    EnumExecutionShapeViolation,
+)
 from omnibase_infra.enums.enum_handler_error_type import EnumHandlerErrorType
 from omnibase_infra.enums.enum_handler_source_type import EnumHandlerSourceType
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
@@ -48,6 +52,7 @@ from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 __all__: list[str] = [
     "EnumChainViolationType",
     "EnumDispatchStatus",
+    "EnumExecutionShapeViolation",
     "EnumHandlerErrorType",
     "EnumHandlerSourceType",
     "EnumHandlerType",

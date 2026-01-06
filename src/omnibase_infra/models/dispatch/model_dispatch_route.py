@@ -51,7 +51,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 
 

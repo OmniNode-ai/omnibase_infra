@@ -351,7 +351,8 @@ from omnibase_core.models.intents import (
     ModelConsulRegisterIntent,
     ModelPostgresUpsertRegistrationIntent,
 )
-from omnibase_core.models.reducer.model_intent import ModelIntent
+from omnibase_core.models.reducer import ModelIntent
+from omnibase_core.models.reducer.payloads import ModelPayloadExtension
 from omnibase_core.nodes import ModelReducerOutput
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -873,10 +874,16 @@ class RegistrationReducer:
             health_check=health_check,
         )
 
+        # Use ModelPayloadExtension for omnibase_core 0.6.x compatibility
+        payload = ModelPayloadExtension(
+            extension_type="infra.consul_register",
+            plugin_name="consul",
+            data=consul_intent.model_dump(mode="json"),
+        )
         return ModelIntent(
-            intent_type="consul.register",
+            intent_type="extension",
             target=f"consul://service/{service_name}",
-            payload=consul_intent.model_dump(mode="json"),
+            payload=payload,
         )
 
     def _build_postgres_intent(
@@ -921,13 +928,19 @@ class RegistrationReducer:
             record=record,
         )
 
+        # Use ModelPayloadExtension for omnibase_core 0.6.x compatibility
         # Use serialize_as_any=True because ModelPostgresUpsertRegistrationIntent.record
         # is typed as BaseModel (for flexibility), but we need to serialize the actual
         # subclass (ModelNodeRegistrationRecord) with all its fields
+        payload = ModelPayloadExtension(
+            extension_type="infra.postgres_upsert",
+            plugin_name="postgres",
+            data=postgres_intent.model_dump(mode="json", serialize_as_any=True),
+        )
         return ModelIntent(
-            intent_type="postgres.upsert_registration",
+            intent_type="extension",
             target=f"postgres://node_registrations/{event.node_id}",
-            payload=postgres_intent.model_dump(mode="json", serialize_as_any=True),
+            payload=payload,
         )
 
     # =========================================================================

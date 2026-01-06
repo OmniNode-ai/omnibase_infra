@@ -47,8 +47,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
+from omnibase_infra.enums import EnumMessageCategory, EnumNodeOutputType
 
 # Type alias for the category union - improves readability
 type CategoryType = EnumMessageCategory | EnumNodeOutputType

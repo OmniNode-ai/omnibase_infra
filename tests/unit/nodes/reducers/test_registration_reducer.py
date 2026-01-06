@@ -153,8 +153,8 @@ class TestBasicReduce:
 
         assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
         intent_types = {intent.intent_type for intent in output.intents}
-        assert "consul.register" in intent_types
-        assert "postgres.upsert_registration" in intent_types
+        assert "extension" in intent_types
+        assert "extension" in intent_types
 
     def test_reduce_valid_event_transitions_to_pending(
         self,
@@ -978,13 +978,19 @@ class TestConsulIntentBuilding:
         output = reducer.reduce(initial_state, event)
 
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
 
         # Service ID follows ONEX convention: onex-{node_type}-{node_id}
         expected_service_id = f"onex-effect-{node_id}"
-        assert consul_intent.payload["service_id"] == expected_service_id
+        assert consul_intent.payload.data["service_id"] == expected_service_id
 
     def test_consul_intent_has_correct_tags(
         self,
@@ -1004,11 +1010,17 @@ class TestConsulIntentBuilding:
         output = reducer.reduce(initial_state, event)
 
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
 
-        tags = consul_intent.payload["tags"]
+        tags = consul_intent.payload.data["tags"]
         assert "node_type:compute" in tags
         assert "node_version:2.3.4" in tags
 
@@ -1022,12 +1034,18 @@ class TestConsulIntentBuilding:
         output = reducer.reduce(initial_state, valid_event)
 
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
 
         assert "health_check" in consul_intent.payload
-        health_check = consul_intent.payload["health_check"]
+        health_check = consul_intent.payload.data["health_check"]
         assert health_check["HTTP"] == "http://localhost:8080/health"
         assert health_check["Interval"] == "10s"
         assert health_check["Timeout"] == "5s"
@@ -1042,12 +1060,18 @@ class TestConsulIntentBuilding:
         output = reducer.reduce(initial_state, event_without_health_endpoint)
 
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
 
         # health_check should be None when no health endpoint is provided
-        assert consul_intent.payload["health_check"] is None
+        assert consul_intent.payload.data["health_check"] is None
 
     def test_consul_intent_has_correct_target(
         self,
@@ -1060,7 +1084,13 @@ class TestConsulIntentBuilding:
         output = reducer.reduce(initial_state, event)
 
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
 
@@ -1078,10 +1108,16 @@ class TestConsulIntentBuilding:
         output = reducer.reduce(initial_state, event)
 
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
-        assert consul_intent.payload["service_name"] == "onex-reducer"
+        assert consul_intent.payload.data["service_name"] == "onex-reducer"
 
 
 # -----------------------------------------------------------------------------
@@ -1115,13 +1151,14 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
 
-        record = postgres_intent.payload["record"]
+        record = postgres_intent.payload.data["record"]
         assert record["node_id"] == str(node_id)
         assert record["node_type"] == "effect"
         assert record["node_version"] == "1.0.0"
@@ -1143,7 +1180,8 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
@@ -1165,7 +1203,8 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
@@ -1187,13 +1226,14 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
 
-        record = postgres_intent.payload["record"]
+        record = postgres_intent.payload.data["record"]
         assert "registered_at" in record
         assert "updated_at" in record
 
@@ -1210,13 +1250,14 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
 
-        record = postgres_intent.payload["record"]
+        record = postgres_intent.payload.data["record"]
         assert record["health_endpoint"] == "http://localhost:8080/health"
 
     def test_postgres_intent_record_no_health_endpoint_when_missing(
@@ -1232,13 +1273,14 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
 
-        record = postgres_intent.payload["record"]
+        record = postgres_intent.payload.data["record"]
         assert record["health_endpoint"] is None
 
     def test_postgres_intent_record_capabilities_serialized(
@@ -1263,13 +1305,14 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
 
-        record = postgres_intent.payload["record"]
+        record = postgres_intent.payload.data["record"]
         capabilities = record["capabilities"]
         assert isinstance(capabilities, dict)
         assert capabilities.get("postgres") is True
@@ -1581,13 +1624,14 @@ class TestEdgeCases:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
 
-        record = postgres_intent.payload["record"]
+        record = postgres_intent.payload.data["record"]
         assert record["node_type"] == "orchestrator"
         assert record["node_version"] == "3.2.1"
         assert len(record["endpoints"]) == 3
@@ -2584,17 +2628,18 @@ class TestCircuitBreakerNonApplicability:
         assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         for intent in output.intents:
-            # Intents are declarative descriptions
-            assert intent.intent_type in (
-                "consul.register",
-                "postgres.upsert_registration",
+            # Intents are declarative descriptions using extension payload
+            assert intent.intent_type == "extension"
+            assert intent.payload.extension_type in (
+                "infra.consul_register",
+                "infra.postgres_upsert",
             )
             assert intent.target is not None
             assert intent.payload is not None
 
             # Verify these are just intent descriptions, not executed operations
-            # (the payload is serialized data, not live connections)
-            assert isinstance(intent.payload, dict)
+            # (the payload data is serialized, not live connections)
+            assert isinstance(intent.payload.data, dict)
 
     def test_reducer_is_deterministic(
         self,
@@ -2761,7 +2806,10 @@ class TestDeterminismProperty:
             assert intent1.target == intent2.target
 
             # For postgres intents, exclude timestamp fields from comparison
-            if intent1.intent_type == "postgres.upsert_registration":
+            if (
+                intent1.intent_type == "extension"
+                and intent1.payload.extension_type == "infra.postgres_upsert"
+            ):
                 payload1 = dict(intent1.payload)
                 payload2 = dict(intent2.payload)
                 record1 = dict(payload1.get("record", {}))
@@ -2917,7 +2965,10 @@ class TestDeterminismProperty:
             assert intent1.target == intent2.target
 
             # For postgres intents, exclude timestamp fields from comparison
-            if intent1.intent_type == "postgres.upsert_registration":
+            if (
+                intent1.intent_type == "extension"
+                and intent1.payload.extension_type == "infra.postgres_upsert"
+            ):
                 payload1 = dict(intent1.payload)
                 payload2 = dict(intent2.payload)
                 record1 = dict(payload1.get("record", {}))
@@ -2982,7 +3033,10 @@ class TestDeterminismProperty:
                 assert intent1.target == intent2.target
 
                 # For postgres intents, exclude timestamp fields from comparison
-                if intent1.intent_type == "postgres.upsert_registration":
+                if (
+                    intent1.intent_type == "extension"
+                    and intent1.payload.extension_type == "infra.postgres_upsert"
+                ):
                     payload1 = dict(intent1.payload)
                     payload2 = dict(intent2.payload)
                     record1 = dict(payload1.get("record", {}))
@@ -3138,21 +3192,28 @@ class TestEdgeCasesComprehensive:
 
         # Verify intents are still built correctly with minimal data
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
-        assert consul_intent.payload["health_check"] is None
+        assert consul_intent.payload.data["health_check"] is None
 
         postgres_intent = next(
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
-        assert postgres_intent.payload["record"]["health_endpoint"] is None
+        assert postgres_intent.payload.data["record"]["health_endpoint"] is None
 
     def test_event_with_many_endpoints(
         self,
@@ -3196,13 +3257,14 @@ class TestEdgeCasesComprehensive:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
 
-        record_endpoints = postgres_intent.payload["record"]["endpoints"]
+        record_endpoints = postgres_intent.payload.data["record"]["endpoints"]
         assert len(record_endpoints) == 10
         for key in many_endpoints:
             assert key in record_endpoints
@@ -3236,10 +3298,16 @@ class TestEdgeCasesComprehensive:
 
         # Verify long version is preserved in tags
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
-        tags = consul_intent.payload["tags"]
+        tags = consul_intent.payload.data["tags"]
         assert f"node_version:{long_version}" in tags
 
     def test_rapid_state_transitions(
@@ -3383,10 +3451,16 @@ class TestEdgeCasesComprehensive:
 
         # Verify nil UUID appears in intents
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
-        assert str(nil_uuid) in consul_intent.payload["service_id"]
+        assert str(nil_uuid) in consul_intent.payload.data["service_id"]
 
     def test_unicode_in_endpoint_urls(
         self,
@@ -3419,13 +3493,14 @@ class TestEdgeCasesComprehensive:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
 
-        endpoints = postgres_intent.payload["record"]["endpoints"]
+        endpoints = postgres_intent.payload.data["record"]["endpoints"]
         assert endpoints["api"] == "http://localhost:8080/api/v1/donnees"
         assert endpoints["docs"] == "http://localhost:8080/wendang/index"
 
@@ -3907,7 +3982,9 @@ class TestCommandFoldingPrevention:
             )
 
             # Verify payload is data, not execution results
-            assert isinstance(intent.payload, dict), (
+            assert hasattr(intent.payload, "data") and isinstance(
+                intent.payload.data, dict
+            ), (
                 f"Intent payload should be a dict of data for Effect layer, "
                 f"found {type(intent.payload)}"
             )
@@ -3977,11 +4054,14 @@ class TestCommandFoldingPrevention:
         # The reducer treats the input as data and emits intents
         # (it doesn't "do" anything, it describes what should be done)
         for intent in output.intents:
-            # Intent types should be our standard declarative types
-            assert intent.intent_type in (
-                "consul.register",
-                "postgres.upsert_registration",
-            ), f"Unexpected intent type: {intent.intent_type}"
+            # Intent types should be extension with proper extension_type
+            assert intent.intent_type == "extension", (
+                f"Unexpected intent type: {intent.intent_type}"
+            )
+            assert intent.payload.extension_type in (
+                "infra.consul_register",
+                "infra.postgres_upsert",
+            ), f"Unexpected extension type: {intent.payload.extension_type}"
 
     def test_event_naming_convention_enforced(
         self,
@@ -4219,7 +4299,10 @@ class TestEventReplayDeterminism:
                 }
 
                 # For postgres intents, exclude timestamp fields
-                if intent.intent_type == "postgres.upsert_registration":
+                if (
+                    intent.intent_type == "extension"
+                    and intent.payload.extension_type == "infra.postgres_upsert"
+                ):
                     payload_copy = dict(intent.payload)
                     if "record" in payload_copy:
                         record_copy = dict(payload_copy["record"])
@@ -5149,21 +5232,28 @@ class TestBoundaryConditions:
 
         # Verify max UUID appears correctly in intents
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
-        assert str(max_uuid) in consul_intent.payload["service_id"]
+        assert str(max_uuid) in consul_intent.payload.data["service_id"]
 
         postgres_intent = next(
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
-        assert postgres_intent.payload["record"]["node_id"] == str(max_uuid)
+        assert postgres_intent.payload.data["record"]["node_id"] == str(max_uuid)
 
     def test_min_uuid_values(
         self,
@@ -5198,10 +5288,16 @@ class TestBoundaryConditions:
 
         # Verify min UUID appears correctly in intents
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
-        assert str(min_uuid) in consul_intent.payload["service_id"]
+        assert str(min_uuid) in consul_intent.payload.data["service_id"]
 
     def test_empty_string_version_rejected(
         self,
@@ -5257,10 +5353,16 @@ class TestBoundaryConditions:
 
         # Verify minimal version is preserved in intents
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
-        tags = consul_intent.payload["tags"]
+        tags = consul_intent.payload.data["tags"]
         assert "node_version:0.0.0" in tags
 
     def test_very_long_endpoint_url(
@@ -5308,10 +5410,16 @@ class TestBoundaryConditions:
 
         # Verify long URLs are preserved without truncation
         consul_intent = next(
-            (i for i in output.intents if i.intent_type == "consul.register"), None
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.consul_register"
+            ),
+            None,
         )
         assert consul_intent is not None
-        health_check = consul_intent.payload["health_check"]
+        health_check = consul_intent.payload.data["health_check"]
         assert health_check is not None
         assert health_check["HTTP"] == very_long_url
 
@@ -5319,13 +5427,19 @@ class TestBoundaryConditions:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
-        assert postgres_intent.payload["record"]["health_endpoint"] == very_long_url
-        assert postgres_intent.payload["record"]["endpoints"]["health"] == very_long_url
+        assert (
+            postgres_intent.payload.data["record"]["health_endpoint"] == very_long_url
+        )
+        assert (
+            postgres_intent.payload.data["record"]["endpoints"]["health"]
+            == very_long_url
+        )
 
     def test_special_characters_in_metadata(
         self,
@@ -5365,13 +5479,14 @@ class TestBoundaryConditions:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
 
-        record_metadata = postgres_intent.payload["record"]["metadata"]
+        record_metadata = postgres_intent.payload.data["record"]["metadata"]
         assert record_metadata is not None
 
         # Check that special characters are preserved
@@ -5487,13 +5602,14 @@ class TestBoundaryConditions:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "extension"
+                and i.payload.extension_type == "infra.postgres_upsert"
             ),
             None,
         )
         assert postgres_intent is not None
 
-        record = postgres_intent.payload["record"]
+        record = postgres_intent.payload.data["record"]
         assert len(record["endpoints"]) == 100
 
         # Verify all capabilities are preserved
@@ -5702,9 +5818,9 @@ class TestCommandFoldingProhibited:
         # Verify intents are data structures (dicts), not executable
         for intent in output.intents:
             # Intent payload should be a dict (data), not callable
-            assert isinstance(intent.payload, dict), (
-                f"Intent payload should be dict (data), not {type(intent.payload)}"
-            )
+            assert hasattr(intent.payload, "data") and isinstance(
+                intent.payload.data, dict
+            ), f"Intent payload should be dict (data), not {type(intent.payload)}"
 
             # Intent should not have execute/run methods
             assert not hasattr(intent, "execute"), (

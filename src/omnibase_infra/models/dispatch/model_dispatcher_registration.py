@@ -49,10 +49,10 @@ See Also:
 from datetime import UTC, datetime
 from uuid import UUID
 
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 
 

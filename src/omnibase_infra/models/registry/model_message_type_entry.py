@@ -22,10 +22,10 @@ Related:
 
 from datetime import datetime
 
-from omnibase_core.types import JsonValue
+from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.models.registry.model_domain_constraint import (
     ModelDomainConstraint,
 )
@@ -161,7 +161,7 @@ class ModelMessageTypeEntry(BaseModel):
         description="Timestamp when this entry was registered (UTC, must be explicitly provided).",
     )
 
-    metadata: JsonValue = Field(
+    metadata: JsonType = Field(
         default=None,
         description="Optional additional metadata. Accepts any JSON-serializable value.",
     )

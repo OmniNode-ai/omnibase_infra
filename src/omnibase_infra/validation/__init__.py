@@ -92,14 +92,13 @@ Security Design (Intentional Fail-Open Architecture):
 """
 
 from omnibase_core.validation import (
+    CircularImportValidator,
     validate_all,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage,
 )
-from omnibase_core.validation.circular_import_validator import CircularImportValidator
-from omnibase_core.validation.contract_validator import ProtocolContractValidator
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
@@ -145,6 +144,13 @@ from omnibase_infra.validation.infra_validators import (
     validate_infra_contracts,
     validate_infra_patterns,
     validate_infra_union_usage,
+)
+
+# ProtocolContractValidator compatibility shim for omnibase_core 0.6.x
+# This class was removed in omnibase_core 0.6.x. We provide a minimal shim
+# that uses the new validation API.
+from omnibase_infra.validation.protocol_contract_validator_shim import (
+    ProtocolContractValidator,
 )
 
 # Routing coverage validation for startup fail-fast (OMN-958)

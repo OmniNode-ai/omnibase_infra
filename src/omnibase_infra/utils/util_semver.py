@@ -11,7 +11,7 @@ This module provides two validation approaches:
 IMPORTANT: normalize_version() and normalize_version_cached() have been REMOVED.
 Use ModelSemVer directly for all version handling:
 
-    from omnibase_core.models.primitives.model_semver import ModelSemVer
+    from omnibase_core.models.primitives import ModelSemVer
 
     # For structured creation:
     version = ModelSemVer(major=1, minor=0, patch=0)
@@ -149,7 +149,7 @@ def normalize_version(version: str, *, _emit_warning: bool = True) -> str:
         version_str = normalize_version("1.0.0")
 
         # Use ModelSemVer directly:
-        from omnibase_core.models.primitives.model_semver import ModelSemVer
+        from omnibase_core.models.primitives import ModelSemVer
         version = ModelSemVer(major=1, minor=0, patch=0)
         version_str = version.to_string()  # "1.0.0"
 
@@ -181,7 +181,7 @@ def normalize_version_cached(version: str) -> str:
         version_str = normalize_version_cached("1.0.0")
 
         # Use ModelSemVer directly:
-        from omnibase_core.models.primitives.model_semver import ModelSemVer
+        from omnibase_core.models.primitives import ModelSemVer
         version = ModelSemVer(major=1, minor=0, patch=0)
         version_str = version.to_string()  # "1.0.0"
 

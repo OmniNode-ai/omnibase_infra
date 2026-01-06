@@ -27,9 +27,9 @@ python = "^3.12"
 # To update: 1) Review changes in target repo, 2) Update tag/SHA, 3) Run tests
 # NOTE: Tags are acceptable for development; consider commit SHAs for production deployments.
 #
-# omnibase-core v0.5.6: Fixes circular import bug in model_snapshot_payload.py.
-# Required by OMN-947 (ModelSnapshotPayload) and OMN-990 (MessageDispatchEngine).
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "v0.5.6" }
+# omnibase-core v0.6.2: Package-level imports recommended for forward compatibility.
+# Required by OMN-1258 (deep module import migration).
+omnibase-core = "^0.6.2"
 omnibase-spi = "^0.4.1"
 
 # Core dependencies
@@ -55,7 +55,7 @@ click = "^8.1.0"
 rich = "^13.7.0"
 
 # System utilities
-cryptography = "^44.0.1"
+cryptography = "^46.0.3"
 jinja2 = "^3.1.6"
 aiofiles = "^23.2.1"
 dependency-injector = "^4.48.1"  # Enhanced dependency injection

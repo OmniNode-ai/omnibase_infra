@@ -124,11 +124,9 @@ from typing import cast
 from uuid import UUID
 
 # ModelEventEnvelope is used at runtime in function parameter types, not just for type hints
-from omnibase_core.models.events.model_event_envelope import (
-    ModelEventEnvelope,
-)
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
-from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
+from omnibase_infra.enums import EnumChainViolationType
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,

@@ -53,7 +53,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_core.models.primitives import ModelSemVer
 
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
@@ -1133,7 +1133,7 @@ async def wire_registration_dispatchers(
         {'dispatchers': [...], 'routes': [...]}
         >>> engine.freeze()  # Must freeze after wiring
     """
-    from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+    from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,

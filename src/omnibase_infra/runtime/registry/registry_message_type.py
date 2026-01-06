@@ -46,10 +46,10 @@ import threading
 from collections import defaultdict
 from datetime import UTC, datetime
 
-from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.models.errors.model_onex_error import ModelOnexError
+from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.models.errors import ModelOnexError
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.registry.model_domain_constraint import (
     ModelDomainConstraint,

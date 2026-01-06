@@ -114,7 +114,7 @@ from typing import TYPE_CHECKING
 from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
 
 if TYPE_CHECKING:
-    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+    from omnibase_core.models.container import ModelONEXContainer
 
     from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (

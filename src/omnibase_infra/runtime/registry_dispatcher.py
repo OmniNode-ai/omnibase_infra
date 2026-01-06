@@ -44,11 +44,10 @@ import threading
 from collections import defaultdict
 from uuid import uuid4
 
-from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from omnibase_core.models.errors.model_onex_error import ModelOnexError
+from omnibase_core.enums import EnumCoreErrorCode, EnumNodeKind
+from omnibase_core.models.errors import ModelOnexError
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.models.validation.model_execution_shape_validation import (
     ModelExecutionShapeValidation,
 )

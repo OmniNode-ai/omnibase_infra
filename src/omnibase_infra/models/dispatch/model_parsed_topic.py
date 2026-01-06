@@ -7,11 +7,10 @@ Provides structured representation of parsed topic information for
 deterministic routing in the ONEX message dispatch engine.
 """
 
-from omnibase_core.enums.enum_topic_taxonomy import EnumTopicType
+from omnibase_core.enums import EnumTopicType
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
+from omnibase_infra.enums import EnumMessageCategory, EnumTopicStandard
 
 
 class ModelParsedTopic(BaseModel):

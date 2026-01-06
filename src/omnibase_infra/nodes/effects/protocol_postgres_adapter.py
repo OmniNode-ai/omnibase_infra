@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.enums import EnumNodeKind
 
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 

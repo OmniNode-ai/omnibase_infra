@@ -70,8 +70,8 @@ NOT_FOUND Classification Patterns:
 
 from uuid import uuid4
 
-from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.models.errors.model_onex_error import ModelOnexError
+from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.models.errors import ModelOnexError
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.models.errors.model_infra_error_context import (

@@ -156,15 +156,15 @@ from collections.abc import Callable
 from typing import TypeVar, cast
 from uuid import UUID
 
-from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.models.errors.model_onex_error import ModelOnexError
+from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.models.errors import ModelOnexError
 
-from omnibase_infra.enums.enum_execution_shape_violation import (
+from omnibase_infra.enums import (
     EnumExecutionShapeViolation,
+    EnumMessageCategory,
+    EnumNodeArchetype,
+    EnumNodeOutputType,
 )
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
-from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.validation.model_execution_shape_rule import (
     ModelExecutionShapeRule,
 )

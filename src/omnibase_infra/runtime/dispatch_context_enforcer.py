@@ -54,9 +54,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from omnibase_core.models.errors.model_onex_error import ModelOnexError
+from omnibase_core.enums import EnumCoreErrorCode, EnumNodeKind
+from omnibase_core.models.errors import ModelOnexError
 
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.runtime.registry_dispatcher import ProtocolMessageDispatcher

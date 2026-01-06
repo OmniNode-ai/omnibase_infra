@@ -34,21 +34,31 @@ from typing import Literal, TypedDict
 
 # Third-party imports
 import yaml
-from omnibase_core.models.common.model_validation_metadata import (
-    ModelValidationMetadata,
-)
+from omnibase_core.models.common import ModelValidationMetadata
 from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
 from omnibase_core.validation import (
-    CircularImportValidationResult,
     CircularImportValidator,
     ModelContractValidationResult,
     ModelValidationResult,
-    ProtocolContractValidator,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage_file,
 )
+
+# ProtocolContractValidator compatibility shim for omnibase_core 0.6.x
+from omnibase_infra.validation.protocol_contract_validator_shim import (
+    ProtocolContractValidator,
+)
+
+# Type alias for circular import validation result
+# This may have been renamed in omnibase_core 0.6.x
+try:
+    from omnibase_core.validation import CircularImportValidationResult
+except ImportError:
+    from omnibase_core.validation import (
+        ModelCycleDetectionResult as CircularImportValidationResult,
+    )
 
 # Module-level initialization (AFTER all imports)
 logger = logging.getLogger(__name__)
