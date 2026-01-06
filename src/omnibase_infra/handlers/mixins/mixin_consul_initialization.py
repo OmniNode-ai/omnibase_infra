@@ -33,7 +33,7 @@ from omnibase_infra.handlers.models.consul import ModelConsulHandlerConfig
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
 
-    from omnibase_infra.models.types import JsonValue
+    from omnibase_core.types import JsonType
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ class MixinConsulInitialization:
 
     def _validate_consul_config(
         self,
-        config: dict[str, JsonValue],
+        config: dict[str, JsonType],
         correlation_id: UUID,
     ) -> ModelConsulHandlerConfig:
         """Validate and parse Consul configuration.

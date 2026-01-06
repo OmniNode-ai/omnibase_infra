@@ -231,19 +231,11 @@ INTROSPECTION_TOPIC = "node.introspection"
 HEARTBEAT_TOPIC = "node.heartbeat"
 REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
 
-# Backward-compatible alias for CapabilitiesTypedDict
-# The canonical definition is in model_node_introspection_event.py
-# This provides a shorter name for internal use and maintains backward compatibility
-CapabilitiesDict = CapabilitiesTypedDict
-
 # Performance threshold constants (in milliseconds)
 PERF_THRESHOLD_GET_CAPABILITIES_MS = 50.0
 PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS = 30.0
 PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS = 50.0
 PERF_THRESHOLD_CACHE_HIT_MS = 1.0
-
-# Backwards compatibility alias (ModelIntrospectionPerformanceMetrics imported from models.discovery)
-IntrospectionPerformanceMetrics = ModelIntrospectionPerformanceMetrics
 
 
 class PerformanceMetricsCacheDict(TypedDict, total=False):
@@ -451,7 +443,7 @@ class MixinNodeIntrospection:
 
     # Performance metrics tracking (instance-level)
     # Stores the most recent performance metrics from introspection operations
-    _introspection_last_metrics: IntrospectionPerformanceMetrics | None
+    _introspection_last_metrics: ModelIntrospectionPerformanceMetrics | None
 
     # Active operations tracking (instance-level)
     # Thread-safe counter for tracking concurrent operations
@@ -671,24 +663,6 @@ class MixinNodeIntrospection:
                 "request_introspection_topic": self._request_introspection_topic,
             },
         )
-
-    def initialize_introspection_from_config(
-        self,
-        config: ModelIntrospectionConfig,
-    ) -> None:
-        """Alias for initialize_introspection for backward compatibility.
-
-        This method is provided for backward compatibility with code that
-        uses the more explicit name. New code should use
-        ``initialize_introspection()`` directly.
-
-        Args:
-            config: Configuration model containing all introspection settings.
-
-        See Also:
-            initialize_introspection: The canonical initialization method.
-        """
-        self.initialize_introspection(config)
 
     def _ensure_initialized(self) -> None:
         """Ensure introspection has been initialized.
@@ -968,7 +942,7 @@ class MixinNodeIntrospection:
             )
             return None
 
-    async def get_capabilities(self) -> CapabilitiesDict:
+    async def get_capabilities(self) -> CapabilitiesTypedDict:
         """Extract node capabilities via reflection.
 
         Uses the inspect module to discover:
@@ -1061,7 +1035,7 @@ class MixinNodeIntrospection:
                 operations.append(name)
 
         # Build capabilities dict
-        capabilities: CapabilitiesDict = {
+        capabilities: CapabilitiesTypedDict = {
             "operations": operations,
             "protocols": self._discover_protocols(),
             "has_fsm": self._has_fsm_state(),
@@ -1236,7 +1210,7 @@ class MixinNodeIntrospection:
                 slow_operations.append("cache_hit")
 
             # Create frozen metrics object with final values
-            metrics = IntrospectionPerformanceMetrics(
+            metrics = ModelIntrospectionPerformanceMetrics(
                 total_introspection_ms=elapsed_ms,
                 cache_hit=True,
                 threshold_exceeded=threshold_exceeded,
@@ -1318,7 +1292,7 @@ class MixinNodeIntrospection:
                 slow_operations.append("total_introspection")
 
         # Create frozen metrics object with final values
-        metrics = IntrospectionPerformanceMetrics(
+        metrics = ModelIntrospectionPerformanceMetrics(
             get_capabilities_ms=get_capabilities_ms,
             discover_capabilities_ms=discover_capabilities_ms,
             get_endpoints_ms=get_endpoints_ms,
@@ -2216,7 +2190,7 @@ class MixinNodeIntrospection:
             extra={"node_id": self._introspection_node_id},
         )
 
-    def get_performance_metrics(self) -> IntrospectionPerformanceMetrics | None:
+    def get_performance_metrics(self) -> ModelIntrospectionPerformanceMetrics | None:
         """Get the most recent performance metrics from introspection operations.
 
         Returns the performance metrics captured during the last call to
@@ -2224,7 +2198,7 @@ class MixinNodeIntrospection:
         performance and detect when operations exceed the <50ms threshold.
 
         Returns:
-            IntrospectionPerformanceMetrics if introspection has been called,
+            ModelIntrospectionPerformanceMetrics if introspection has been called,
             None if no introspection has been performed yet.
 
         Example:
@@ -2417,10 +2391,9 @@ __all__ = [
     "PERF_THRESHOLD_GET_CAPABILITIES_MS",
     "PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS",
     "REQUEST_INTROSPECTION_TOPIC",
-    "CapabilitiesDict",  # Backward-compatible alias for CapabilitiesTypedDict
     "CapabilitiesTypedDict",  # Re-export from model for convenience
     "IntrospectionCacheDict",
-    "IntrospectionPerformanceMetrics",
     "MixinNodeIntrospection",
+    "ModelIntrospectionPerformanceMetrics",
     "PerformanceMetricsCacheDict",  # TypedDict for cached performance metrics
 ]

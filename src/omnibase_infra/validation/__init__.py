@@ -91,21 +91,18 @@ Security Design (Intentional Fail-Open Architecture):
     - routing_coverage_validator.py: Routing gap detection (module docstring)
 """
 
-# Validators re-exported from omnibase_core.validation in 0.6.2+
+from omnibase_core.models.validation.model_import_validation_result import (
+    ModelImportValidationResult,
+)
+from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
     CircularImportValidator,
-    ServiceContractValidator,
     validate_all,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage,
 )
-
-# ONEX-compliant naming: Validator<Name> prefix pattern
-ValidatorCircularImport = CircularImportValidator
-ValidatorServiceContract = ServiceContractValidator
-
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
@@ -133,7 +130,7 @@ from omnibase_infra.validation.contract_linter import (
 from omnibase_infra.validation.execution_shape_validator import (
     EXECUTION_SHAPE_RULES,
     ExecutionShapeValidator,
-    HandlerInfo,
+    ModelDetectedNodeInfo,
     ModelExecutionShapeValidationResult,
     get_execution_shape_rules,
     validate_execution_shapes,
@@ -224,10 +221,12 @@ __all__: list[str] = [
     # AST-based execution shape validation (OMN-958)
     "ExecutionShapeValidator",
     "ExecutionShapeViolationError",
-    "HandlerInfo",
+    "ModelDetectedNodeInfo",
     "ModelContractLintResult",
     "ModelContractViolation",
     "ModelExecutionShapeValidationResult",
+    "ModelImportValidationResult",
+    "ServiceContractValidator",
     # Routing coverage validation (OMN-958)
     "RoutingCoverageError",
     "RoutingCoverageValidator",

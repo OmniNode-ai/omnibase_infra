@@ -8,13 +8,13 @@ from typing import TypedDict, cast
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
+from omnibase_core.types import JsonType
 
-from omnibase_infra.models.types import JsonValue
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (
-    PluginContext,
-    PluginInputData,
-    PluginOutputData,
+    ModelPluginContext,
+    ModelPluginInputData,
+    ModelPluginOutputData,
 )
 
 
@@ -25,7 +25,7 @@ class JsonNormalizerInput(TypedDict, total=False):
         json: The JSON-compatible data structure to normalize.
     """
 
-    json: JsonValue
+    json: JsonType
 
 
 class JsonNormalizerOutput(TypedDict):
@@ -35,7 +35,7 @@ class JsonNormalizerOutput(TypedDict):
         normalized: The normalized JSON structure with recursively sorted keys.
     """
 
-    normalized: JsonValue
+    normalized: JsonType
 
 
 class PluginJsonNormalizer(PluginComputeBase):
@@ -51,8 +51,8 @@ class PluginJsonNormalizer(PluginComputeBase):
     MAX_RECURSION_DEPTH: int = 100
 
     def execute(
-        self, input_data: PluginInputData, context: PluginContext
-    ) -> PluginOutputData:
+        self, input_data: ModelPluginInputData, context: ModelPluginContext
+    ) -> ModelPluginOutputData:
         """Execute JSON normalization with type-safe inputs and outputs.
 
         Args:
@@ -77,12 +77,12 @@ class PluginJsonNormalizer(PluginComputeBase):
             effective_max_depth = self.MAX_RECURSION_DEPTH
 
         try:
-            json_data = cast(JsonValue, input_data.get("json", {}))
-            normalized: JsonValue = self._sort_keys_recursively(
+            json_data = cast(JsonType, input_data.get("json", {}))
+            normalized: JsonType = self._sort_keys_recursively(
                 json_data, _max_depth=effective_max_depth
             )
             output: JsonNormalizerOutput = {"normalized": normalized}
-            return cast(PluginOutputData, output)
+            return cast(ModelPluginOutputData, output)
 
         except RecursionError as e:
             raise OnexError(
@@ -105,8 +105,8 @@ class PluginJsonNormalizer(PluginComputeBase):
             ) from e
 
     def _sort_keys_recursively(
-        self, obj: JsonValue, _depth: int = 0, _max_depth: int | None = None
-    ) -> JsonValue:
+        self, obj: JsonType, _depth: int = 0, _max_depth: int | None = None
+    ) -> JsonType:
         """Recursively sort dictionary keys with optimized performance and depth protection.
 
         Performance Characteristics:
@@ -177,7 +177,7 @@ class PluginJsonNormalizer(PluginComputeBase):
             for item in obj
         ]
 
-    def validate_input(self, input_data: PluginInputData) -> None:
+    def validate_input(self, input_data: ModelPluginInputData) -> None:
         """Validate input with runtime type checking and type guards.
 
         This method validates input structure before execution. By protocol design,
@@ -238,7 +238,7 @@ class PluginJsonNormalizer(PluginComputeBase):
         """Type guard to check if value is JSON-compatible."""
         return isinstance(value, dict | list | str | int | float | bool | type(None))
 
-    def _validate_json_structure(self, obj: JsonValue, _depth: int = 0) -> None:
+    def _validate_json_structure(self, obj: JsonType, _depth: int = 0) -> None:
         """Recursively validate JSON structure for non-JSON-compatible types.
 
         Args:

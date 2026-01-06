@@ -19,8 +19,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
+from omnibase_core.container import ModelONEXContainer
 
 from omnibase_infra.errors import ProtocolConfigurationError
+
+# Check if service_registry is available (circular import bug in omnibase_core 0.6.2)
+_test_container = ModelONEXContainer()
+_SERVICE_REGISTRY_AVAILABLE = _test_container.service_registry is not None
+_SKIP_REASON = (
+    "service_registry is None due to circular import bug in omnibase_core 0.6.2. "
+    "Upgrade to omnibase_core >= 0.6.3 to run these tests."
+)
 from omnibase_infra.runtime.kernel import (
     DEFAULT_GROUP_ID,
     DEFAULT_INPUT_TOPIC,
@@ -233,6 +242,7 @@ class TestLoadRuntimeConfig:
         assert error_context["error_count"] == 4
 
 
+@pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
 class TestBootstrap:
     """Tests for the bootstrap function."""
 
@@ -418,10 +428,11 @@ class TestBootstrap:
         mock_kafka_bus.assert_called_once()
         mock_inmemory_bus.assert_not_called()
 
-        # Verify correct parameters were passed
+        # Verify config was passed with correct parameters
         call_kwargs = mock_kafka_bus.call_args[1]
-        assert call_kwargs["bootstrap_servers"] == "kafka:9092"
-        assert call_kwargs["environment"] == "test-env"
+        config = call_kwargs["config"]
+        assert config.bootstrap_servers == "kafka:9092"
+        assert config.environment == "test-env"
 
     async def test_bootstrap_uses_contracts_dir_from_env(
         self,
@@ -432,11 +443,11 @@ class TestBootstrap:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """Test that bootstrap uses CONTRACTS_DIR from environment.
+        """Test that bootstrap uses ONEX_CONTRACTS_DIR from environment.
 
         Uses pytest's tmp_path fixture for automatic temporary directory cleanup.
         """
-        monkeypatch.setenv("CONTRACTS_DIR", str(tmp_path))
+        monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
         with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
@@ -649,6 +660,7 @@ class TestMain:
                 assert exc_info.value.code == 1
 
 
+@pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
 class TestIntegration:
     """Integration tests for kernel with real components."""
 
@@ -664,7 +676,7 @@ class TestIntegration:
         This test uses real components except for the shutdown wait and health server.
         Health server is mocked to avoid port conflicts in parallel tests.
         """
-        monkeypatch.setenv("CONTRACTS_DIR", str(tmp_path))
+        monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
 
         with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_health:
             mock_health_instance = MagicMock()
@@ -683,6 +695,7 @@ class TestIntegration:
         assert exit_code == 0
 
 
+@pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
 class TestHttpPortValidation:
     """Tests for HTTP port validation in bootstrap."""
 

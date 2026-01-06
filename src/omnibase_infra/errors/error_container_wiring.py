@@ -176,9 +176,69 @@ class ContainerValidationError(ContainerWiringError):
         )
 
 
+class ServiceRegistryUnavailableError(ContainerValidationError):
+    """Raised when container.service_registry is None.
+
+    This error indicates that the ModelONEXContainer was initialized
+    without a service registry, either because:
+    - enable_service_registry=False was passed
+    - The ServiceRegistry module is not installed/available
+    - Container initialization failed silently
+
+    This is a distinct error from generic ContainerValidationError to provide
+    clearer diagnostics and actionable error messages for service_registry issues.
+
+    Example:
+        >>> raise ServiceRegistryUnavailableError(
+        ...     "Container service_registry is None",
+        ...     operation="register PolicyRegistry",
+        ...     hint="Check that enable_service_registry=True",
+        ... )
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        operation: str | None = None,
+        hint: str | None = None,
+        context: ModelInfraErrorContext | None = None,
+        **extra_context: object,
+    ) -> None:
+        """Initialize ServiceRegistryUnavailableError.
+
+        Args:
+            message: Primary error message.
+            operation: The operation that was attempted (e.g., 'register_instance').
+            hint: Actionable hint for fixing the issue.
+            context: Bundled infrastructure context.
+            **extra_context: Additional context information.
+        """
+        # Build full message with operation and hint
+        full_message = message
+        if operation:
+            full_message = f"{message} (operation: {operation})"
+            extra_context["operation"] = operation
+
+        default_hint = (
+            "Ensure ModelONEXContainer is created with enable_service_registry=True "
+            "and that the ServiceRegistry module is installed."
+        )
+        actual_hint = hint or default_hint
+        full_message = f"{full_message}\nHint: {actual_hint}"
+        extra_context["hint"] = actual_hint
+
+        super().__init__(
+            message=full_message,
+            context=context,
+            **extra_context,
+        )
+
+
 __all__ = [
     "ContainerValidationError",
     "ContainerWiringError",
     "ServiceRegistrationError",
+    "ServiceRegistryUnavailableError",
     "ServiceResolutionError",
 ]

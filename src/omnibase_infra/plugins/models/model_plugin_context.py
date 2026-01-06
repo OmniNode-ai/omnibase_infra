@@ -14,9 +14,8 @@ Design Notes:
 
 from __future__ import annotations
 
+from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
-
-from omnibase_infra.models.types import JsonValue
 
 
 class ModelPluginContext(BaseModel):
@@ -68,8 +67,8 @@ class ModelPluginContext(BaseModel):
     correlation_id: str = ""
     execution_timestamp: str = ""
     random_seed: int | None = None  # Must stay nullable - 0 is a valid seed
-    plugin_config: dict[str, JsonValue] = Field(default_factory=dict)
-    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    plugin_config: dict[str, JsonType] = Field(default_factory=dict)
+    metadata: dict[str, JsonType] = Field(default_factory=dict)
 
     def get(self, key: str, default: object = None) -> object:
         """Get field value by key with optional default.

@@ -16,7 +16,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 from uuid import UUID
 
-from omnibase_infra.models.types import JsonValue
+from omnibase_core.types import JsonType
 
 T = TypeVar("T")
 
@@ -108,7 +108,7 @@ class MixinConsulKV:
 
     async def _kv_get(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
@@ -144,7 +144,7 @@ class MixinConsulKV:
             raise RuntimeError("Client not initialized")
 
         def get_func() -> tuple[
-            int, list[dict[str, JsonValue]] | dict[str, JsonValue] | None
+            int, list[dict[str, JsonType]] | dict[str, JsonType] | None
         ]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
@@ -152,9 +152,7 @@ class MixinConsulKV:
             return index, data
 
         # Type alias for KV get result
-        KVGetResult = tuple[
-            int, list[dict[str, JsonValue]] | dict[str, JsonValue] | None
-        ]
+        KVGetResult = tuple[int, list[dict[str, JsonType]] | dict[str, JsonType] | None]
         result = await self._execute_with_retry(
             "consul.kv_get",
             get_func,
@@ -225,7 +223,7 @@ class MixinConsulKV:
 
     async def _kv_put(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:

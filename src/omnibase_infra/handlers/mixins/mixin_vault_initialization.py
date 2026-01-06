@@ -28,7 +28,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
 if TYPE_CHECKING:
-    from omnibase_infra.models.types import JsonValue
+    from omnibase_core.types import JsonType
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class MixinVaultInitialization:
         )
 
     def _parse_vault_config(
-        self, config: dict[str, JsonValue], correlation_id: UUID
+        self, config: dict[str, JsonType], correlation_id: UUID
     ) -> ModelVaultHandlerConfig:
         """Parse and validate vault configuration.
 

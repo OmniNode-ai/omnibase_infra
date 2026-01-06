@@ -56,13 +56,13 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
-from omnibase_infra.models.types import JsonValue
 
 
 class ModelDispatchResult(BaseModel):
@@ -198,7 +198,7 @@ class ModelDispatchResult(BaseModel):
         default=None,
         description="Error code if the dispatch failed.",
     )
-    error_details: dict[str, JsonValue] = Field(
+    error_details: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Additional JSON-serializable error details for debugging.",
     )
@@ -305,7 +305,7 @@ class ModelDispatchResult(BaseModel):
         status: EnumDispatchStatus,
         message: str,
         code: EnumCoreErrorCode | None = None,
-        details: dict[str, JsonValue] | None = None,
+        details: dict[str, JsonType] | None = None,
     ) -> "ModelDispatchResult":
         """
         Create a new result with error information.

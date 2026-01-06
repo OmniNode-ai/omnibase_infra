@@ -47,7 +47,7 @@ from aiokafka.errors import KafkaConnectionError, KafkaError
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from omnibase_infra.dlq import (
-    DLQTrackingService,
+    DLQReplayTracker,
     EnumReplayStatus,
     ModelDlqReplayRecord,
     ModelDlqTrackingConfig,
@@ -1023,7 +1023,7 @@ class DLQReplayExecutor:
         self.consumer = DLQConsumer(config)
         self.producer = DLQProducer(config)
         self.results: list[ModelReplayResult] = []
-        self._tracking_service: DLQTrackingService | None = None
+        self._tracking_service: DLQReplayTracker | None = None
 
     @property
     def is_tracking_enabled(self) -> bool:
@@ -1050,7 +1050,7 @@ class DLQReplayExecutor:
         dsn = self.config.build_tracking_dsn()
         if dsn:
             tracking_config = ModelDlqTrackingConfig(dsn=dsn)
-            self._tracking_service = DLQTrackingService(tracking_config)
+            self._tracking_service = DLQReplayTracker(tracking_config)
             try:
                 await self._tracking_service.initialize()
                 logger.info("DLQ tracking service initialized")

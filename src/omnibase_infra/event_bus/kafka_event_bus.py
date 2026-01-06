@@ -133,13 +133,18 @@ Dual Retry Configuration:
 Usage:
     ```python
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
     # Option 1: Use defaults with environment variable overrides
     bus = KafkaEventBus.default()
     await bus.start()
 
-    # Option 2: Explicit configuration
-    bus = KafkaEventBus(bootstrap_servers="kafka:9092", environment="dev")
+    # Option 2: Explicit configuration via config model
+    config = ModelKafkaEventBusConfig(
+        bootstrap_servers="kafka:9092",
+        environment="dev",
+    )
+    bus = KafkaEventBus(config=config)
     await bus.start()
 
     # Subscribe to a topic
@@ -196,7 +201,7 @@ from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
-    from omnibase_infra.models.types import JsonValue
+    from omnibase_core.types import JsonType
 
 # Type alias for DLQ callback functions
 DlqCallbackType = Callable[[ModelDlqEvent], Awaitable[None]]
@@ -243,7 +248,11 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
 
     Example:
         ```python
-        bus = KafkaEventBus(bootstrap_servers="kafka:9092", environment="dev")
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers="kafka:9092",
+            environment="dev",
+        )
+        bus = KafkaEventBus(config=config)
         await bus.start()
 
         # Subscribe
@@ -263,45 +272,12 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     def __init__(
         self,
         config: ModelKafkaEventBusConfig | None = None,
-        # Backwards compatibility parameters (override config if provided)
-        bootstrap_servers: str | None = None,
-        environment: str | None = None,
-        group: str | None = None,
-        timeout_seconds: int | None = None,
-        max_retry_attempts: int | None = None,
-        retry_backoff_base: float | None = None,
-        circuit_breaker_threshold: int | None = None,
-        circuit_breaker_reset_timeout: float | None = None,
     ) -> None:
         """Initialize the Kafka event bus.
-
-        Design Note:
-            This __init__ method intentionally accepts 10 parameters (1 config + 8 overrides + self)
-            to maintain backwards compatibility while transitioning to config-driven initialization.
-            The parameters follow the ONEX config pattern:
-            - Primary: `config` parameter (ModelKafkaEventBusConfig) for modern usage
-            - Overrides: 8 optional parameters for backwards compatibility
-
-            This approach allows gradual migration from direct parameters to config objects
-            without breaking existing code. Recommended usage is factory methods:
-            - KafkaEventBus.default() for defaults with env var overrides
-            - KafkaEventBus.from_config(config) for config-driven initialization
-            - KafkaEventBus.from_yaml(path) for YAML-based configuration
-
-            The parameter count is acceptable for infrastructure components supporting
-            multiple initialization patterns during deprecation periods.
 
         Args:
             config: Configuration model containing all settings. If not provided,
                 defaults are used with environment variable overrides.
-            bootstrap_servers: Override bootstrap servers from config
-            environment: Override environment identifier from config
-            group: Override consumer group identifier from config
-            timeout_seconds: Override timeout from config
-            max_retry_attempts: Override max retry attempts from config
-            retry_backoff_base: Override retry backoff base from config
-            circuit_breaker_threshold: Override circuit breaker threshold from config
-            circuit_breaker_reset_timeout: Override circuit breaker reset timeout from config
 
         Raises:
             ProtocolConfigurationError: If circuit_breaker_threshold is not a positive integer
@@ -318,9 +294,6 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             # Using factory methods
             bus = KafkaEventBus.default()
             bus = KafkaEventBus.from_yaml(Path("kafka.yaml"))
-
-            # Backwards compatible direct parameters
-            bus = KafkaEventBus(bootstrap_servers="kafka:9092", environment="dev")
             ```
         """
         # Use provided config or create default with environment overrides
@@ -330,37 +303,16 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         # Store config reference
         self._config = config
 
-        # Apply parameter overrides for backwards compatibility
-        self._bootstrap_servers = (
-            bootstrap_servers
-            if bootstrap_servers is not None
-            else config.bootstrap_servers
-        )
-        self._environment = (
-            environment if environment is not None else config.environment
-        )
-        self._group = group if group is not None else config.group
-        self._timeout_seconds = (
-            timeout_seconds if timeout_seconds is not None else config.timeout_seconds
-        )
-        self._max_retry_attempts = (
-            max_retry_attempts
-            if max_retry_attempts is not None
-            else config.max_retry_attempts
-        )
-        self._retry_backoff_base = (
-            retry_backoff_base
-            if retry_backoff_base is not None
-            else config.retry_backoff_base
-        )
+        # Apply config values
+        self._bootstrap_servers = config.bootstrap_servers
+        self._environment = config.environment
+        self._group = config.group
+        self._timeout_seconds = config.timeout_seconds
+        self._max_retry_attempts = config.max_retry_attempts
+        self._retry_backoff_base = config.retry_backoff_base
 
-        # Circuit breaker configuration with override support
-        effective_threshold = (
-            circuit_breaker_threshold
-            if circuit_breaker_threshold is not None
-            else config.circuit_breaker_threshold
-        )
-        if effective_threshold < 1:
+        # Circuit breaker configuration
+        if config.circuit_breaker_threshold < 1:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="init",
@@ -368,21 +320,16 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
-                f"circuit_breaker_threshold must be a positive integer, got {effective_threshold}",
+                f"circuit_breaker_threshold must be a positive integer, got {config.circuit_breaker_threshold}",
                 context=context,
                 parameter="circuit_breaker_threshold",
-                value=effective_threshold,
+                value=config.circuit_breaker_threshold,
             )
-        effective_reset_timeout = (
-            circuit_breaker_reset_timeout
-            if circuit_breaker_reset_timeout is not None
-            else config.circuit_breaker_reset_timeout
-        )
 
         # Initialize circuit breaker mixin
         self._init_circuit_breaker(
-            threshold=effective_threshold,
-            reset_timeout=effective_reset_timeout,
+            threshold=config.circuit_breaker_threshold,
+            reset_timeout=config.circuit_breaker_reset_timeout,
             service_name=f"kafka.{self._environment}",
             transport_type=EnumInfraTransportType.KAFKA,
         )
@@ -728,7 +675,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     servers=sanitized_servers,
                 ) from e
 
-    async def initialize(self, config: dict[str, JsonValue]) -> None:
+    async def initialize(self, config: dict[str, JsonType]) -> None:
         """Initialize the event bus with configuration.
 
         Protocol method for compatibility with ProtocolEventBus.
@@ -1489,7 +1436,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     async def broadcast_to_environment(
         self,
         command: str,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         target_environment: str | None = None,
     ) -> None:
         """Broadcast command to environment.
@@ -1518,7 +1465,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     async def send_to_group(
         self,
         command: str,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         target_group: str,
     ) -> None:
         """Send command to specific group.
@@ -1543,7 +1490,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
 
         await self.publish(topic, None, value, headers)
 
-    async def health_check(self) -> dict[str, JsonValue]:
+    async def health_check(self) -> dict[str, JsonType]:
         """Check event bus health.
 
         Protocol method for ProtocolEventBus compatibility.

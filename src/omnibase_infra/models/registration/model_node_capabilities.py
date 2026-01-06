@@ -6,9 +6,8 @@ This module provides ModelNodeCapabilities for strongly-typed node capabilities
 in the ONEX 2-way registration pattern.
 """
 
+from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
-
-from omnibase_infra.models.types import JsonValue
 
 
 class ModelNodeCapabilities(BaseModel):
@@ -81,9 +80,9 @@ class ModelNodeCapabilities(BaseModel):
     # Generic feature flag (used in tests)
     feature: bool = Field(default=False, description="Generic feature flag")
 
-    # Configuration (nested) - uses JsonValue for strongly-typed JSON-serializable values.
+    # Configuration (nested) - uses JsonType for strongly-typed JSON-serializable values.
     # Supports primitives (str, int, float, bool, None), lists, and nested dicts.
-    config: dict[str, JsonValue] = Field(
+    config: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Nested configuration (JSON-serializable values)",
     )
