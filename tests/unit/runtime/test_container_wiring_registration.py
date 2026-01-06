@@ -132,15 +132,31 @@ class TestWireRegistrationHandlers:
             await wire_registration_handlers(mock_container, mock_pool)
 
     @pytest.mark.asyncio
-    async def test_raises_runtime_error_on_missing_service_registry(self) -> None:
-        """Test that RuntimeError is raised if container missing service_registry."""
-        mock_container = MagicMock(spec=[])  # No service_registry attribute
-        del mock_container.service_registry
+    async def test_raises_runtime_error_on_service_registry_init_failure(self) -> None:
+        """Test that RuntimeError is raised if service_registry auto-init fails.
+
+        In omnibase_core 0.6.2+, the service_registry may need to be lazy-initialized.
+        If the required omnibase_core components cannot be imported or initialization
+        fails, wire_registration_handlers should raise a RuntimeError.
+        """
+        # Create mock container with service_registry = None (triggers auto-init)
+        mock_container = MagicMock()
+        mock_container.service_registry = None
 
         mock_pool = MagicMock()
 
-        with pytest.raises(RuntimeError, match="Registration handler wiring failed"):
-            await wire_registration_handlers(mock_container, mock_pool)
+        # Patch the import to raise ImportError (simulating missing omnibase_core components)
+        with patch.dict(
+            "sys.modules",
+            {
+                "omnibase_core.container": None,  # Simulate missing module
+            },
+        ):
+            # The import inside _ensure_service_registry should fail
+            with pytest.raises(
+                RuntimeError, match="Failed to initialize service_registry"
+            ):
+                await wire_registration_handlers(mock_container, mock_pool)
 
 
 class TestGetProjectionReaderFromContainer:

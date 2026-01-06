@@ -232,10 +232,14 @@ class TestMultipleReconstructionScenarios:
         assert output.result.postgres_confirmed is False
         assert len(output.intents) == 2
 
-        # Verify intents for both backends
-        intent_types = {intent.intent_type for intent in output.intents}
-        assert "consul.register" in intent_types
-        assert "postgres.upsert_registration" in intent_types
+        # Verify intents for both backends (extension pattern)
+        extension_types = {
+            intent.payload.extension_type
+            for intent in output.intents
+            if intent.intent_type == "extension"
+        }
+        assert "infra.consul_register" in extension_types
+        assert "infra.postgres_upsert" in extension_types
 
     def test_node_update_scenario(
         self,
@@ -390,7 +394,10 @@ class TestMultipleReconstructionScenarios:
 
             # Verify intent targets include node type
             for intent in output.intents:
-                if intent.intent_type == "consul.register":
+                if (
+                    intent.intent_type == "extension"
+                    and intent.payload.extension_type == "infra.consul_register"
+                ):
                     assert node_type in intent.target
 
 

@@ -5903,7 +5903,7 @@ class TestCommandFoldingProhibited:
             ]
 
             for field in execution_result_fields:
-                assert field not in intent.payload, (
+                assert field not in intent.payload.data, (
                     f"Intent has execution result field '{field}'. "
                     f"Intents should be unevaluated; execution is Effect layer's job."
                 )

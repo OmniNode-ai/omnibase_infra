@@ -380,9 +380,9 @@ class TestA5NormalizedDeterminism:
             assert intent1.intent_type == intent2.intent_type
             assert intent1.target == intent2.target
 
-            # Normalize and compare payloads
-            payload1 = _normalize_dict(intent1.payload)
-            payload2 = _normalize_dict(intent2.payload)
+            # Normalize and compare payloads (payload.data is the dict)
+            payload1 = _normalize_dict(intent1.payload.data)
+            payload2 = _normalize_dict(intent2.payload.data)
             assert payload1 == payload2, (
                 f"Payload mismatch for {intent1.intent_type}:\n"
                 f"Run 1: {json.dumps(payload1, indent=2, default=str)}\n"

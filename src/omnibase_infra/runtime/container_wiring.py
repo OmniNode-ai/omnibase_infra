@@ -46,6 +46,7 @@ Integration Notes:
 - Services registered as global scope (singleton per container)
 - Type-safe resolution via interface types
 - Compatible with omnibase_core v0.5.6 and later (async service registry)
+- For omnibase_core v0.6.2+: Lazy-initializes service_registry if not enabled
 """
 
 from __future__ import annotations
@@ -80,6 +81,64 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_service_registry(container: ModelONEXContainer) -> None:
+    """Ensure container has an initialized service_registry.
+
+    In omnibase_core 0.6.2+, the service_registry is not auto-initialized
+    by default. This function lazily initializes it if None.
+
+    Args:
+        container: ONEX container instance to check/initialize.
+
+    Raises:
+        RuntimeError: If ServiceRegistry or config classes cannot be imported,
+            indicating incompatible omnibase_core version.
+
+    Note:
+        This function modifies the container in-place by setting _service_registry.
+        It's idempotent - calling multiple times has no effect if already initialized.
+    """
+    if container.service_registry is not None:
+        return  # Already initialized
+
+    try:
+        from omnibase_core.container import ServiceRegistry
+        from omnibase_core.models.container.model_registry_config import (
+            ModelServiceRegistryConfig,
+        )
+
+        # Create default config for service registry
+        config = ModelServiceRegistryConfig(
+            registry_name="omnibase_infra_registry",
+            lazy_loading_enabled=True,
+            health_monitoring_enabled=True,
+        )
+
+        # Initialize the service registry
+        service_registry = ServiceRegistry(config)
+
+        # Assign to container's internal attribute (service_registry is a property)
+        container._service_registry = service_registry
+
+        logger.debug(
+            "Lazy-initialized service_registry for container",
+            extra={"registry_name": config.registry_name},
+        )
+
+    except ImportError as e:
+        raise RuntimeError(
+            f"Failed to initialize service_registry - missing omnibase_core components.\n"
+            f"Required: omnibase_core.container.ServiceRegistry, "
+            f"omnibase_core.models.container.model_registry_config.ModelServiceRegistryConfig\n"
+            f"Original error: {e}"
+        ) from e
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to initialize service_registry: {e}\n"
+            f"This may indicate an incompatible omnibase_core version."
+        ) from e
 
 
 def _analyze_attribute_error(error_str: str) -> tuple[str, str]:
@@ -186,6 +245,9 @@ async def wire_infrastructure_services(
         >>> hasattr(compute_reg, 'register_plugin') and callable(compute_reg.register_plugin)
         True
     """
+    # Ensure service_registry is initialized (omnibase_core 0.6.2+ compatibility)
+    _ensure_service_registry(container)
+
     services_registered: list[str] = []
 
     try:
@@ -332,6 +394,9 @@ async def get_policy_registry_from_container(
         wire_infrastructure_services(). If not, it will raise RuntimeError.
         For auto-registration, use get_or_create_policy_registry() instead.
     """
+    # Ensure service_registry is initialized (omnibase_core 0.6.2+ compatibility)
+    _ensure_service_registry(container)
+
     try:
         registry: PolicyRegistry = await container.service_registry.resolve_service(
             PolicyRegistry
@@ -421,6 +486,9 @@ async def get_or_create_policy_registry(
         wire_infrastructure_services() for production code to ensure proper
         initialization order and error handling.
     """
+    # Ensure service_registry is initialized (omnibase_core 0.6.2+ compatibility)
+    _ensure_service_registry(container)
+
     try:
         # Try to resolve existing PolicyRegistry
         registry: PolicyRegistry = await container.service_registry.resolve_service(
@@ -489,6 +557,9 @@ async def get_handler_registry_from_container(
         This function assumes ProtocolBindingRegistry was registered via
         wire_infrastructure_services(). If not, it will raise RuntimeError.
     """
+    # Ensure service_registry is initialized (omnibase_core 0.6.2+ compatibility)
+    _ensure_service_registry(container)
+
     try:
         registry: ProtocolBindingRegistry = (
             await container.service_registry.resolve_service(ProtocolBindingRegistry)
@@ -574,6 +645,9 @@ async def get_compute_registry_from_container(
         wire_infrastructure_services(). If not, it will raise RuntimeError.
         For auto-registration, use get_or_create_compute_registry() instead.
     """
+    # Ensure service_registry is initialized (omnibase_core 0.6.2+ compatibility)
+    _ensure_service_registry(container)
+
     try:
         registry: RegistryCompute = await container.service_registry.resolve_service(
             RegistryCompute
@@ -663,6 +737,9 @@ async def get_or_create_compute_registry(
         wire_infrastructure_services() for production code to ensure proper
         initialization order and error handling.
     """
+    # Ensure service_registry is initialized (omnibase_core 0.6.2+ compatibility)
+    _ensure_service_registry(container)
+
     try:
         # Try to resolve existing RegistryCompute
         registry: RegistryCompute = await container.service_registry.resolve_service(
@@ -765,6 +842,9 @@ async def wire_registration_handlers(
         ProjectionReaderRegistration,
         ProjectorRegistration,
     )
+
+    # Ensure service_registry is initialized (omnibase_core 0.6.2+ compatibility)
+    _ensure_service_registry(container)
 
     # Resolve the actual liveness interval (from param, env var, or default)
     resolved_liveness_interval = get_liveness_interval_seconds(
@@ -935,6 +1015,9 @@ async def get_projection_reader_from_container(
     """
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
+    # Ensure service_registry is initialized (omnibase_core 0.6.2+ compatibility)
+    _ensure_service_registry(container)
+
     try:
         reader: ProjectionReaderRegistration = (
             await container.service_registry.resolve_service(
@@ -976,6 +1059,9 @@ async def get_handler_node_introspected_from_container(
         HandlerNodeIntrospected,
     )
 
+    # Ensure service_registry is initialized (omnibase_core 0.6.2+ compatibility)
+    _ensure_service_registry(container)
+
     try:
         handler: HandlerNodeIntrospected = (
             await container.service_registry.resolve_service(HandlerNodeIntrospected)
@@ -1015,6 +1101,9 @@ async def get_handler_runtime_tick_from_container(
         HandlerRuntimeTick,
     )
 
+    # Ensure service_registry is initialized (omnibase_core 0.6.2+ compatibility)
+    _ensure_service_registry(container)
+
     try:
         handler: HandlerRuntimeTick = await container.service_registry.resolve_service(
             HandlerRuntimeTick
@@ -1053,6 +1142,9 @@ async def get_handler_node_registration_acked_from_container(
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeRegistrationAcked,
     )
+
+    # Ensure service_registry is initialized (omnibase_core 0.6.2+ compatibility)
+    _ensure_service_registry(container)
 
     try:
         handler: HandlerNodeRegistrationAcked = (
@@ -1145,6 +1237,9 @@ async def wire_registration_dispatchers(
         DispatcherNodeRegistrationAcked,
         DispatcherRuntimeTick,
     )
+
+    # Ensure service_registry is initialized (omnibase_core 0.6.2+ compatibility)
+    _ensure_service_registry(container)
 
     dispatchers_registered: list[str] = []
     routes_registered: list[str] = []

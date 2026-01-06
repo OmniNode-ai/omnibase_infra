@@ -185,7 +185,7 @@ def compare_outputs(
                 differences.append(
                     f"Intent {i} target mismatch: {intent1.target} != {intent2.target}"
                 )
-            if intent1.payload.get("correlation_id") != intent2.payload.get(
+            if intent1.payload.data.get("correlation_id") != intent2.payload.data.get(
                 "correlation_id"
             ):
                 differences.append(f"Intent {i} correlation_id mismatch")

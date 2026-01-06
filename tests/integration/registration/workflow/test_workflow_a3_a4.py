@@ -162,10 +162,14 @@ class TestA3OrchestratedDualRegistration:
         assert consul_client.call_count == 0, "Reducer should NOT call Consul"
         assert postgres_adapter.call_count == 0, "Reducer should NOT call PostgreSQL"
 
-        # Verify intents are for correct backends
-        intent_types = {intent.intent_type for intent in reducer_output.intents}
-        assert "consul.register" in intent_types
-        assert "postgres.upsert_registration" in intent_types
+        # Verify intents are for correct backends (extension format)
+        extension_types = {
+            intent.payload.extension_type
+            for intent in reducer_output.intents
+            if intent.intent_type == "extension"
+        }
+        assert "infra.consul_register" in extension_types
+        assert "infra.postgres_upsert" in extension_types
 
         # === PHASE 3: Effect executes intents (DOES I/O) ===
         request = _convert_intents_to_request(event, reducer_output.intents)
@@ -227,23 +231,25 @@ class TestA3OrchestratedDualRegistration:
         assert len(reducer_output.intents) == 2
 
         for intent in reducer_output.intents:
-            assert intent.intent_type in (
-                "consul.register",
-                "postgres.upsert_registration",
-            )
+            # All intents use extension format
+            assert intent.intent_type == "extension"
             assert intent.target is not None
             assert intent.payload is not None
+            assert intent.payload.extension_type in (
+                "infra.consul_register",
+                "infra.postgres_upsert",
+            )
 
-            if intent.intent_type == "consul.register":
-                # Consul intent should have service registration payload
-                assert "correlation_id" in intent.payload
-                assert "service_id" in intent.payload
-                assert "service_name" in intent.payload
+            if intent.payload.extension_type == "infra.consul_register":
+                # Consul intent should have service registration payload in data
+                assert "correlation_id" in intent.payload.data
+                assert "service_id" in intent.payload.data
+                assert "service_name" in intent.payload.data
 
-            elif intent.intent_type == "postgres.upsert_registration":
-                # PostgreSQL intent should have record payload
-                assert "correlation_id" in intent.payload
-                assert "record" in intent.payload
+            elif intent.payload.extension_type == "infra.postgres_upsert":
+                # PostgreSQL intent should have record payload in data
+                assert "correlation_id" in intent.payload.data
+                assert "record" in intent.payload.data
 
     async def test_a3_multiple_node_types(
         self,
@@ -667,8 +673,8 @@ class TestOrchestratedWorkflowIntegration:
 
         # Verify correlation ID in intents
         for intent in reducer_output.intents:
-            # Payload is a dict with correlation_id - use equality check
-            payload_correlation_id = intent.payload.get("correlation_id")
+            # Payload is ModelPayloadExtension with data dict - use equality check
+            payload_correlation_id = intent.payload.data.get("correlation_id")
             # Handle both UUID and string representations
             if isinstance(payload_correlation_id, str):
                 assert payload_correlation_id == str(expected_correlation_id), (

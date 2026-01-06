@@ -965,12 +965,18 @@ class TestFullPipelineWithRealInfrastructure:
         state = ModelRegistrationState()
         output = reducer.reduce(state, event)
 
-        # Verify intents generated
+        # Verify intents generated (extension format)
         assert len(output.intents) == 2, "Should generate Consul and PostgreSQL intents"
 
-        intent_types = {intent.intent_type for intent in output.intents}
-        assert "consul.register" in intent_types, "Should include Consul intent"
-        assert "postgres.upsert_registration" in intent_types, (
+        extension_types = {
+            intent.payload.extension_type
+            for intent in output.intents
+            if intent.intent_type == "extension"
+        }
+        assert "infra.consul_register" in extension_types, (
+            "Should include Consul intent"
+        )
+        assert "infra.postgres_upsert" in extension_types, (
             "Should include PostgreSQL intent"
         )
 
