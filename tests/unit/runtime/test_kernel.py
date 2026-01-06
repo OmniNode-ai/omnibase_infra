@@ -237,40 +237,6 @@ class TestBootstrap:
     """Tests for the bootstrap function."""
 
     @pytest.fixture
-    def mock_wire_infrastructure(self) -> Generator[MagicMock, None, None]:
-        """Mock wire_infrastructure_services and container to avoid wiring errors in tests.
-
-        This fixture mocks both:
-        1. wire_infrastructure_services - to be a no-op async function
-        2. ModelONEXContainer - to have a mock service_registry with resolve_service
-        """
-
-        async def noop_wire(container: object) -> dict[str, list[str]]:
-            """Async no-op for wire_infrastructure_services."""
-            return {"services": []}
-
-        async def mock_resolve_service(service_class: type) -> MagicMock:
-            """Mock resolve_service to return a MagicMock for any service."""
-            return MagicMock()
-
-        with patch(
-            "omnibase_infra.runtime.kernel.wire_infrastructure_services"
-        ) as mock_wire:
-            mock_wire.side_effect = noop_wire
-
-            with patch(
-                "omnibase_infra.runtime.kernel.ModelONEXContainer"
-            ) as mock_container_cls:
-                mock_container = MagicMock()
-                mock_service_registry = MagicMock()
-                mock_service_registry.resolve_service = AsyncMock(
-                    side_effect=mock_resolve_service
-                )
-                mock_container.service_registry = mock_service_registry
-                mock_container_cls.return_value = mock_container
-                yield mock_wire
-
-    @pytest.fixture
     def mock_runtime_host(self) -> Generator[MagicMock, None, None]:
         """Create a mock RuntimeHostProcess.
 
@@ -686,40 +652,6 @@ class TestMain:
 class TestIntegration:
     """Integration tests for kernel with real components."""
 
-    @pytest.fixture
-    def mock_wire_infrastructure(self) -> Generator[MagicMock, None, None]:
-        """Mock wire_infrastructure_services and container to avoid wiring errors in tests.
-
-        This fixture mocks both:
-        1. wire_infrastructure_services - to be a no-op async function
-        2. ModelONEXContainer - to have a mock service_registry with resolve_service
-        """
-
-        async def noop_wire(container: object) -> dict[str, list[str]]:
-            """Async no-op for wire_infrastructure_services."""
-            return {"services": []}
-
-        async def mock_resolve_service(service_class: type) -> MagicMock:
-            """Mock resolve_service to return a MagicMock for any service."""
-            return MagicMock()
-
-        with patch(
-            "omnibase_infra.runtime.kernel.wire_infrastructure_services"
-        ) as mock_wire:
-            mock_wire.side_effect = noop_wire
-
-            with patch(
-                "omnibase_infra.runtime.kernel.ModelONEXContainer"
-            ) as mock_container_cls:
-                mock_container = MagicMock()
-                mock_service_registry = MagicMock()
-                mock_service_registry.resolve_service = AsyncMock(
-                    side_effect=mock_resolve_service
-                )
-                mock_container.service_registry = mock_service_registry
-                mock_container_cls.return_value = mock_container
-                yield mock_wire
-
     async def test_full_bootstrap_with_real_event_bus(
         self,
         mock_wire_infrastructure: MagicMock,
@@ -753,40 +685,6 @@ class TestIntegration:
 
 class TestHttpPortValidation:
     """Tests for HTTP port validation in bootstrap."""
-
-    @pytest.fixture
-    def mock_wire_infrastructure(self) -> Generator[MagicMock, None, None]:
-        """Mock wire_infrastructure_services and container to avoid wiring errors in tests.
-
-        This fixture mocks both:
-        1. wire_infrastructure_services - to be a no-op async function
-        2. ModelONEXContainer - to have a mock service_registry with resolve_service
-        """
-
-        async def noop_wire(container: object) -> dict[str, list[str]]:
-            """Async no-op for wire_infrastructure_services."""
-            return {"services": []}
-
-        async def mock_resolve_service(service_class: type) -> MagicMock:
-            """Mock resolve_service to return a MagicMock for any service."""
-            return MagicMock()
-
-        with patch(
-            "omnibase_infra.runtime.kernel.wire_infrastructure_services"
-        ) as mock_wire:
-            mock_wire.side_effect = noop_wire
-
-            with patch(
-                "omnibase_infra.runtime.kernel.ModelONEXContainer"
-            ) as mock_container_cls:
-                mock_container = MagicMock()
-                mock_service_registry = MagicMock()
-                mock_service_registry.resolve_service = AsyncMock(
-                    side_effect=mock_resolve_service
-                )
-                mock_container.service_registry = mock_service_registry
-                mock_container_cls.return_value = mock_container
-                yield mock_wire
 
     @pytest.fixture
     def mock_runtime_host(self) -> Generator[MagicMock, None, None]:

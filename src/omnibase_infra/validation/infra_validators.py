@@ -31,7 +31,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-# Backward-compatible type aliases for renamed types in omnibase_core 0.6.2
+# Forward migration type aliases for renamed types in omnibase_core 0.6.2
 # Using TypeAlias for mypy compatibility
 from typing import Literal, TypeAlias, TypedDict
 
