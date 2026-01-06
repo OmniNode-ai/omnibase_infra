@@ -53,11 +53,11 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     PERF_THRESHOLD_CACHE_HIT_MS,
     PERF_THRESHOLD_GET_CAPABILITIES_MS,
     PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS,
-    IntrospectionPerformanceMetrics,
     MixinNodeIntrospection,
 )
 from omnibase_infra.models.discovery import (
     ModelIntrospectionConfig,
+    ModelIntrospectionPerformanceMetrics,
     ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
@@ -1858,7 +1858,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestMixinNodeIntrospectionPerformanceMetrics:
+class TestMixinNodeModelIntrospectionPerformanceMetrics:
     """Tests for performance metrics tracking and retrieval."""
 
     async def test_get_performance_metrics_returns_none_before_introspection(
@@ -1892,7 +1892,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         metrics = node.get_performance_metrics()
 
         assert metrics is not None
-        assert isinstance(metrics, IntrospectionPerformanceMetrics)
+        assert isinstance(metrics, ModelIntrospectionPerformanceMetrics)
 
     async def test_performance_metrics_contains_expected_fields(self) -> None:
         """Test that performance metrics contain all expected fields."""
@@ -2691,7 +2691,7 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
     async def test_benchmark_performance_metrics_validation(self) -> None:
         """Verify that get_performance_metrics() returns valid timing data.
 
-        Validates that IntrospectionPerformanceMetrics captures accurate
+        Validates that ModelIntrospectionPerformanceMetrics captures accurate
         timing information that matches actual measured times.
         """
         node = MockNode()
@@ -2717,7 +2717,7 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
 
         # Validate metrics structure
         assert metrics is not None, "get_performance_metrics() should return metrics"
-        assert isinstance(metrics, IntrospectionPerformanceMetrics)
+        assert isinstance(metrics, ModelIntrospectionPerformanceMetrics)
 
         # Validate timing fields are populated
         assert metrics.total_introspection_ms > 0, (

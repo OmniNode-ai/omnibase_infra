@@ -25,9 +25,9 @@ from omnibase_core.types import JsonType
 
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (
-    PluginContext,
-    PluginInputData,
-    PluginOutputData,
+    ModelPluginContext,
+    ModelPluginInputData,
+    ModelPluginOutputData,
 )
 
 
@@ -41,8 +41,8 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
     __slots__ = ()  # Enforce statelessness - no instance attributes
 
     def execute(
-        self, input_data: PluginInputData, context: PluginContext
-    ) -> PluginOutputData:
+        self, input_data: ModelPluginInputData, context: ModelPluginContext
+    ) -> ModelPluginOutputData:
         """Execute JSON normalization with comprehensive error handling.
 
         Args:
@@ -89,7 +89,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
 
             # Return result with correlation_id for tracing
             return cast(
-                PluginOutputData,
+                ModelPluginOutputData,
                 {
                     "normalized": normalized,
                     "correlation_id": correlation_id,
@@ -162,7 +162,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
         # Primitive values (str, int, float, bool, None) returned unchanged
         return obj
 
-    def validate_input(self, input_data: PluginInputData) -> None:
+    def validate_input(self, input_data: ModelPluginInputData) -> None:
         """Validate that input contains JSON-compatible data.
 
         Args:

@@ -37,6 +37,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
 
 class SimulatedProducerError(Exception):
@@ -240,11 +241,11 @@ class TestKafkaEventBusThreadingSafety:
         This test verifies thread-safe circuit breaker behavior under concurrent
         failure conditions. All operations properly catch and suppress exceptions.
         """
-        bus = KafkaEventBus(
-            config=None,
+        config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
             circuit_breaker_threshold=3,
         )
+        bus = KafkaEventBus(config=config)
 
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"

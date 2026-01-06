@@ -402,14 +402,17 @@ async def container_with_registries() -> AsyncGenerator[ModelONEXContainer, None
 
     Note: This fixture is async because wire_infrastructure_services() is async.
 
-    Known Issue (omnibase_core 0.6.2):
-        Due to a circular import bug in omnibase_core 0.6.2, container.service_registry
-        may be None when ModelONEXContainer is instantiated. When this occurs, this
-        fixture will skip the test with a clear message. Upgrade to omnibase_core >= 0.6.3
-        once available to resolve this issue.
+    Important (OMN-1257):
+        In omnibase_core 0.6.2+, container.service_registry may return None if:
+        - enable_service_registry=False was passed to constructor
+        - The ServiceRegistry module is not installed/available
+        This fixture explicitly enables service_registry and validates it.
 
     Yields:
         ModelONEXContainer instance with infrastructure services wired.
+
+    Raises:
+        pytest.skip: If service_registry is None (ServiceRegistry module unavailable).
 
     Example:
         >>> async def test_with_real_container(container_with_registries):
@@ -427,22 +430,28 @@ async def container_with_registries() -> AsyncGenerator[ModelONEXContainer, None
     """
     from omnibase_core.container import ModelONEXContainer
 
-    from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+    from omnibase_infra.runtime.container_wiring import (
+        ServiceRegistryUnavailableError,
+        wire_infrastructure_services,
+    )
 
-    # Create real container
-    container = ModelONEXContainer()
+    # Create real container with service_registry explicitly enabled
+    # In omnibase_core 0.6.2+, this may still return None if module unavailable
+    container = ModelONEXContainer(enable_service_registry=True)
 
-    # Guard: Check for circular import bug in omnibase_core 0.6.2
-    # When service_registry is None, container wiring will fail.
-    # Skip the test gracefully with a clear message rather than failing.
+    # Check if service_registry is available (OMN-1257)
     if container.service_registry is None:
         pytest.skip(
-            "Skipping: container.service_registry is None due to circular import bug "
-            "in omnibase_core 0.6.2. Upgrade to omnibase_core >= 0.6.3 to fix."
+            "ServiceRegistry not available in omnibase_core. "
+            "Tests requiring container.service_registry will be skipped. "
+            "Check omnibase_core logs for 'ServiceRegistry not available' warnings."
         )
 
-    # Wire infrastructure services (async operation)
-    await wire_infrastructure_services(container)
+    try:
+        # Wire infrastructure services (async operation)
+        await wire_infrastructure_services(container)
+    except ServiceRegistryUnavailableError as e:
+        pytest.skip(f"ServiceRegistry unavailable: {e}")
 
     # Yield container for proper fixture teardown semantics.
     # ModelONEXContainer doesn't have explicit cleanup methods currently,
@@ -463,11 +472,6 @@ async def container_with_handler_registry(
 
     Note: This fixture is async because resolve_service() is async.
 
-    Known Issue (omnibase_core 0.6.2):
-        Due to a circular import bug in omnibase_core 0.6.2, container.service_registry
-        may be None. The parent fixture (container_with_registries) should skip in this
-        case, but we add a guard here as well for safety.
-
     Args:
         container_with_registries: Container fixture (automatically injected).
 
@@ -481,14 +485,6 @@ async def container_with_handler_registry(
         ...     assert container_with_handler_registry.is_registered(HANDLER_TYPE_HTTP)
     """
     from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
-
-    # Guard: Double-check service_registry availability (parent fixture should skip,
-    # but add defensive check in case fixture ordering changes)
-    if container_with_registries.service_registry is None:
-        pytest.skip(
-            "Skipping: container.service_registry is None due to circular import bug "
-            "in omnibase_core 0.6.2. Upgrade to omnibase_core >= 0.6.3 to fix."
-        )
 
     registry: ProtocolBindingRegistry = (
         await container_with_registries.service_registry.resolve_service(

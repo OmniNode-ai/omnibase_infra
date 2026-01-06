@@ -423,10 +423,11 @@ class TestBootstrap:
         mock_kafka_bus.assert_called_once()
         mock_inmemory_bus.assert_not_called()
 
-        # Verify correct parameters were passed
+        # Verify config was passed with correct parameters
         call_kwargs = mock_kafka_bus.call_args[1]
-        assert call_kwargs["bootstrap_servers"] == "kafka:9092"
-        assert call_kwargs["environment"] == "test-env"
+        config = call_kwargs["config"]
+        assert config.bootstrap_servers == "kafka:9092"
+        assert config.environment == "test-env"
 
     async def test_bootstrap_uses_contracts_dir_from_env(
         self,
@@ -436,11 +437,11 @@ class TestBootstrap:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """Test that bootstrap uses CONTRACTS_DIR from environment.
+        """Test that bootstrap uses ONEX_CONTRACTS_DIR from environment.
 
         Uses pytest's tmp_path fixture for automatic temporary directory cleanup.
         """
-        monkeypatch.setenv("CONTRACTS_DIR", str(tmp_path))
+        monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
         with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
@@ -663,7 +664,7 @@ class TestIntegration:
         This test uses real components except for the shutdown wait and health server.
         Health server is mocked to avoid port conflicts in parallel tests.
         """
-        monkeypatch.setenv("CONTRACTS_DIR", str(tmp_path))
+        monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
 
         with patch(
             "omnibase_infra.services.service_health.ServiceHealth"

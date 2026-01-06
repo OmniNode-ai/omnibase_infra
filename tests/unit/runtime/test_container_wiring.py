@@ -213,14 +213,23 @@ class TestAnalyzeAttributeError:
     """Test _analyze_attribute_error() helper function."""
 
     def test_service_registry_missing(self) -> None:
-        """Test detection of missing service_registry attribute."""
+        """Test detection of missing service_registry attribute.
+
+        Note: After OMN-1257 refactoring, service_registry missing/None cases
+        are handled by _validate_service_registry() which raises
+        ServiceRegistryUnavailableError before _analyze_attribute_error is called.
+        This test verifies the fallback behavior for service_registry when it
+        somehow reaches _analyze_attribute_error (returns generic hint).
+        """
         from omnibase_infra.runtime.container_wiring import _analyze_attribute_error
 
         error_str = "'MockContainer' object has no attribute 'service_registry'"
-        _missing_attr, hint = _analyze_attribute_error(error_str)
+        missing_attr, hint = _analyze_attribute_error(error_str)
 
+        # After refactoring, service_registry case returns generic hint
+        # (actual service_registry validation is in _validate_service_registry)
+        assert missing_attr == "service_registry"
         assert "service_registry" in hint
-        assert "ModelONEXContainer" in hint
 
     def test_register_instance_missing(self) -> None:
         """Test detection of missing register_instance method."""

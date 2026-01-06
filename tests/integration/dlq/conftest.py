@@ -42,8 +42,8 @@ import pytest_asyncio
 logger = logging.getLogger(__name__)
 
 from omnibase_infra.dlq import (
-    DLQTrackingService,
     ModelDlqTrackingConfig,
+    ServiceDlqTracking,
 )
 
 # =============================================================================
@@ -130,7 +130,7 @@ def dlq_tracking_config() -> ModelDlqTrackingConfig:
 @pytest_asyncio.fixture
 async def dlq_tracking_service(
     dlq_tracking_config: ModelDlqTrackingConfig,
-) -> AsyncGenerator[DLQTrackingService, None]:
+) -> AsyncGenerator[ServiceDlqTracking, None]:
     """Create and initialize DLQ tracking service for tests.
 
     This fixture handles the complete lifecycle of the DLQ tracking service:
@@ -148,7 +148,7 @@ async def dlq_tracking_service(
         dlq_tracking_config: Test configuration with unique table name.
 
     Yields:
-        Initialized DLQTrackingService ready for testing.
+        Initialized ServiceDlqTracking ready for testing.
 
     Example:
         >>> async def test_record_replay(dlq_tracking_service):
@@ -156,7 +156,7 @@ async def dlq_tracking_service(
         ...     await dlq_tracking_service.record_replay_attempt(record)
         ...     # Table is automatically cleaned up after test
     """
-    service = DLQTrackingService(dlq_tracking_config)
+    service = ServiceDlqTracking(dlq_tracking_config)
     await service.initialize()
 
     yield service
@@ -182,7 +182,7 @@ async def dlq_tracking_service(
         await service.shutdown()
     except Exception as e:
         logger.warning(
-            "Cleanup failed for DLQTrackingService shutdown: %s",
+            "Cleanup failed for ServiceDlqTracking shutdown: %s",
             e,
             exc_info=True,
         )
