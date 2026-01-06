@@ -66,7 +66,7 @@ from omnibase_infra.mixins import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_core.types import JsonType
 
 T = TypeVar("T")
 
@@ -319,7 +319,7 @@ class ConsulHandler(
             error_message=f"Unexpected error: {type(error).__name__}",
         )
 
-    async def initialize(self, config: dict[str, JsonValue]) -> None:
+    async def initialize(self, config: dict[str, JsonType]) -> None:
         """Initialize Consul client with configuration.
 
         Args:
@@ -440,7 +440,7 @@ class ConsulHandler(
         )
 
     async def execute(
-        self, envelope: dict[str, JsonValue]
+        self, envelope: dict[str, JsonType]
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Execute Consul operation from envelope.
 
@@ -690,7 +690,7 @@ class ConsulHandler(
 
             return None, new_state
 
-    def describe(self) -> dict[str, JsonValue]:
+    def describe(self) -> dict[str, JsonType]:
         """Return handler metadata and capabilities for introspection.
 
         This method exposes the handler's type classification along with its

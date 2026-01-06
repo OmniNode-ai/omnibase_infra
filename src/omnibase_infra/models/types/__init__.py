@@ -4,12 +4,12 @@
 
 This module re-exports core types from omnibase_core.types for convenience.
 
-Note: JsonPrimitive and JsonValue are imported from omnibase_core.types.
+Note: JsonPrimitive and JsonType are imported from omnibase_core.types.
 """
 
-from omnibase_core.types import JsonPrimitive, JsonValue
+from omnibase_core.types import JsonPrimitive, JsonType
 
 __all__ = [
     "JsonPrimitive",
-    "JsonValue",
+    "JsonType",
 ]

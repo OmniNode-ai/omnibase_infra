@@ -26,7 +26,7 @@ IMPORTANT - Union Sync Requirements (OMN-1007):
     over ModelRegistrationIntent (union-typed) when possible.
 
 Design Note:
-    Rather than using a loose dict[str, JsonValue] for payloads, we use
+    Rather than using a loose dict[str, JsonType] for payloads, we use
     typed payload models that match the exact structure expected by each
     infrastructure adapter. This follows the ONEX principle of "no Any types"
     and provides compile-time validation of intent payloads.

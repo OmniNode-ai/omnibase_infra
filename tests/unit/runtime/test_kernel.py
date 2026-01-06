@@ -19,8 +19,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
+from omnibase_core.container import ModelONEXContainer
 
 from omnibase_infra.errors import ProtocolConfigurationError
+
+# Check if service_registry is available (circular import bug in omnibase_core 0.6.2)
+_test_container = ModelONEXContainer()
+_SERVICE_REGISTRY_AVAILABLE = _test_container.service_registry is not None
+_SKIP_REASON = (
+    "service_registry is None due to circular import bug in omnibase_core 0.6.2. "
+    "Upgrade to omnibase_core >= 0.6.3 to run these tests."
+)
 from omnibase_infra.runtime.kernel import (
     DEFAULT_GROUP_ID,
     DEFAULT_INPUT_TOPIC,
@@ -233,6 +242,7 @@ class TestLoadRuntimeConfig:
         assert error_context["error_count"] == 4
 
 
+@pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
 class TestBootstrap:
     """Tests for the bootstrap function."""
 
@@ -641,6 +651,7 @@ class TestMain:
                 assert exc_info.value.code == 1
 
 
+@pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
 class TestIntegration:
     """Integration tests for kernel with real components."""
 
@@ -672,6 +683,7 @@ class TestIntegration:
         assert exit_code == 0
 
 
+@pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
 class TestHttpPortValidation:
     """Tests for HTTP port validation in bootstrap."""
 

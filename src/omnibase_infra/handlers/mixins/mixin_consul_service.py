@@ -36,7 +36,7 @@ from omnibase_infra.handlers.models.model_consul_handler_response import (
 
 if TYPE_CHECKING:
     import consul as consul_lib
-    from omnibase_core.types import JsonValue
+    from omnibase_core.types import JsonType
 
 
 class ProtocolConsulServiceDependencies(Protocol):
@@ -104,7 +104,7 @@ class MixinConsulService:
 
     async def _register_service(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
@@ -152,7 +152,7 @@ class MixinConsulService:
             tags_list = [str(t) for t in tags]
 
         check = payload.get("check")
-        check_dict: dict[str, JsonValue] | None = (
+        check_dict: dict[str, JsonType] | None = (
             check if isinstance(check, dict) else None
         )
 
@@ -187,7 +187,7 @@ class MixinConsulService:
 
     async def _deregister_service(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:

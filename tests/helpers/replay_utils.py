@@ -185,7 +185,10 @@ def compare_outputs(
                 differences.append(
                     f"Intent {i} target mismatch: {intent1.target} != {intent2.target}"
                 )
-            if intent1.payload.get("correlation_id") != intent2.payload.get(
+            # Use model_dump() since payload is now a Pydantic model, not a dict
+            payload1_dict = intent1.payload.model_dump()
+            payload2_dict = intent2.payload.model_dump()
+            if payload1_dict.get("correlation_id") != payload2_dict.get(
                 "correlation_id"
             ):
                 differences.append(f"Intent {i} correlation_id mismatch")

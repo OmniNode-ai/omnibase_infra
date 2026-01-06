@@ -98,7 +98,7 @@ from omnibase_infra.utils.correlation import generate_correlation_id
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_core.types import JsonType
 
 logger = logging.getLogger(__name__)
 
@@ -669,14 +669,14 @@ async def bootstrap() -> int:
 
         # 6. Create runtime host process with config and pre-resolved registry
         # RuntimeHostProcess accepts config as dict; cast model_dump() result to
-        # dict[str, JsonValue] to avoid implicit Any typing (Pydantic's model_dump()
+        # dict[str, JsonType] to avoid implicit Any typing (Pydantic's model_dump()
         # returns dict[str, Any] but all our model fields are strongly typed)
         runtime_create_start_time = time.time()
         runtime = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic=config.input_topic,
             output_topic=config.output_topic,
-            config=cast("dict[str, JsonValue]", config.model_dump()),
+            config=cast("dict[str, JsonType]", config.model_dump()),
             handler_registry=handler_registry,
         )
         runtime_create_duration = time.time() - runtime_create_start_time
