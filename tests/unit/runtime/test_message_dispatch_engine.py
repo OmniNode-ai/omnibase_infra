@@ -254,7 +254,7 @@ class TestHandlerRegistration:
             category=EnumMessageCategory.EVENT,
         )
 
-        assert dispatch_engine.handler_count == 1
+        assert dispatch_engine.dispatcher_count == 1
 
     def test_register_handler_valid_async(
         self, dispatch_engine: MessageDispatchEngine
@@ -270,7 +270,7 @@ class TestHandlerRegistration:
             category=EnumMessageCategory.EVENT,
         )
 
-        assert dispatch_engine.handler_count == 1
+        assert dispatch_engine.dispatcher_count == 1
 
     def test_register_handler_with_message_types(
         self, dispatch_engine: MessageDispatchEngine
@@ -287,7 +287,7 @@ class TestHandlerRegistration:
             message_types={"UserCreatedEvent", "UserUpdatedEvent"},
         )
 
-        assert dispatch_engine.handler_count == 1
+        assert dispatch_engine.dispatcher_count == 1
 
     def test_register_handler_multiple_categories(
         self, dispatch_engine: MessageDispatchEngine
@@ -319,7 +319,7 @@ class TestHandlerRegistration:
             category=EnumMessageCategory.INTENT,
         )
 
-        assert dispatch_engine.handler_count == 3
+        assert dispatch_engine.dispatcher_count == 3
 
     def test_register_handler_duplicate_raises_error(
         self, dispatch_engine: MessageDispatchEngine
@@ -525,7 +525,7 @@ class TestFreezePattern:
 
         assert dispatch_engine.is_frozen
         assert dispatch_engine.route_count == 0
-        assert dispatch_engine.handler_count == 0
+        assert dispatch_engine.dispatcher_count == 0
 
 
 # ============================================================================
@@ -1265,17 +1265,17 @@ class TestMetrics:
 
     def test_initial_metrics(self, dispatch_engine: MessageDispatchEngine) -> None:
         """Test initial metrics values."""
-        metrics = dispatch_engine.get_metrics()
+        metrics = dispatch_engine.get_structured_metrics()
 
-        assert metrics["dispatch_count"] == 0
-        assert metrics["dispatch_success_count"] == 0
-        assert metrics["dispatch_error_count"] == 0
-        assert metrics["total_latency_ms"] == 0.0
-        assert metrics["dispatcher_execution_count"] == 0
-        assert metrics["dispatcher_error_count"] == 0
-        assert metrics["routes_matched_count"] == 0
-        assert metrics["no_dispatcher_count"] == 0
-        assert metrics["category_mismatch_count"] == 0
+        assert metrics.total_dispatches == 0
+        assert metrics.successful_dispatches == 0
+        assert metrics.failed_dispatches == 0
+        assert metrics.total_latency_ms == 0.0
+        assert metrics.dispatcher_execution_count == 0
+        assert metrics.dispatcher_error_count == 0
+        assert metrics.routes_matched_count == 0
+        assert metrics.no_dispatcher_count == 0
+        assert metrics.category_mismatch_count == 0
 
     @pytest.mark.asyncio
     async def test_metrics_updated_on_success(
@@ -1305,13 +1305,13 @@ class TestMetrics:
 
         await dispatch_engine.dispatch("dev.user.events.v1", event_envelope)
 
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatch_count"] == 1
-        assert metrics["dispatch_success_count"] == 1
-        assert metrics["dispatch_error_count"] == 0
-        assert metrics["dispatcher_execution_count"] == 1
-        assert metrics["total_latency_ms"] > 0
-        assert metrics["routes_matched_count"] == 1
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.total_dispatches == 1
+        assert metrics.successful_dispatches == 1
+        assert metrics.failed_dispatches == 0
+        assert metrics.dispatcher_execution_count == 1
+        assert metrics.total_latency_ms > 0
+        assert metrics.routes_matched_count == 1
 
     @pytest.mark.asyncio
     async def test_metrics_updated_on_handler_error(
@@ -1341,11 +1341,11 @@ class TestMetrics:
 
         await dispatch_engine.dispatch("dev.user.events.v1", event_envelope)
 
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatch_count"] == 1
-        assert metrics["dispatch_error_count"] == 1
-        assert metrics["dispatcher_execution_count"] == 1
-        assert metrics["dispatcher_error_count"] == 1
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.total_dispatches == 1
+        assert metrics.failed_dispatches == 1
+        assert metrics.dispatcher_execution_count == 1
+        assert metrics.dispatcher_error_count == 1
 
     @pytest.mark.asyncio
     async def test_metrics_updated_on_no_dispatcher(
@@ -1358,10 +1358,10 @@ class TestMetrics:
 
         await dispatch_engine.dispatch("dev.user.events.v1", event_envelope)
 
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatch_count"] == 1
-        assert metrics["dispatch_error_count"] == 1
-        assert metrics["no_dispatcher_count"] == 1
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.total_dispatches == 1
+        assert metrics.failed_dispatches == 1
+        assert metrics.no_dispatcher_count == 1
 
     @pytest.mark.skip(
         reason="TODO(OMN-934): Re-enable when ModelEventEnvelope.infer_category() is implemented in omnibase_core"
@@ -1378,10 +1378,10 @@ class TestMetrics:
         # Sending COMMAND envelope to events topic
         await dispatch_engine.dispatch("dev.user.events.v1", command_envelope)
 
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatch_count"] == 1
-        assert metrics["dispatch_error_count"] == 1
-        assert metrics["category_mismatch_count"] == 1
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.total_dispatches == 1
+        assert metrics.failed_dispatches == 1
+        assert metrics.category_mismatch_count == 1
 
     @pytest.mark.asyncio
     async def test_metrics_accumulate_across_dispatches(
@@ -1413,10 +1413,10 @@ class TestMetrics:
         for _ in range(5):
             await dispatch_engine.dispatch("dev.user.events.v1", event_envelope)
 
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatch_count"] == 5
-        assert metrics["dispatch_success_count"] == 5
-        assert metrics["dispatcher_execution_count"] == 5
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.total_dispatches == 5
+        assert metrics.successful_dispatches == 5
+        assert metrics.dispatcher_execution_count == 5
 
 
 # ============================================================================
@@ -1715,27 +1715,27 @@ class TestProperties:
         )
         assert dispatch_engine.route_count == 2
 
-    def test_handler_count(self, dispatch_engine: MessageDispatchEngine) -> None:
-        """Test handler_count property."""
+    def test_dispatcher_count(self, dispatch_engine: MessageDispatchEngine) -> None:
+        """Test dispatcher_count property."""
 
         def handler(envelope: ModelEventEnvelope[object]) -> None:
             pass
 
-        assert dispatch_engine.handler_count == 0
+        assert dispatch_engine.dispatcher_count == 0
 
         dispatch_engine.register_dispatcher(
             dispatcher_id="handler-1",
             dispatcher=handler,
             category=EnumMessageCategory.EVENT,
         )
-        assert dispatch_engine.handler_count == 1
+        assert dispatch_engine.dispatcher_count == 1
 
         dispatch_engine.register_dispatcher(
             dispatcher_id="handler-2",
             dispatcher=handler,
             category=EnumMessageCategory.COMMAND,
         )
-        assert dispatch_engine.handler_count == 2
+        assert dispatch_engine.dispatcher_count == 2
 
 
 # ============================================================================
@@ -1997,11 +1997,11 @@ class TestMessageDispatchEngineConcurrency:
         assert len(results) == dispatch_count
 
         # Verify metrics match dispatch count
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatch_count"] == dispatch_count
-        assert metrics["dispatch_success_count"] == dispatch_count
-        assert metrics["dispatch_error_count"] == 0
-        assert metrics["dispatcher_execution_count"] == dispatch_count
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.total_dispatches == dispatch_count
+        assert metrics.successful_dispatches == dispatch_count
+        assert metrics.failed_dispatches == 0
+        assert metrics.dispatcher_execution_count == dispatch_count
 
     @pytest.mark.asyncio
     async def test_concurrent_dispatch_with_multiple_handlers(self) -> None:
@@ -2093,11 +2093,11 @@ class TestMessageDispatchEngineConcurrency:
         assert len(handler2_results) == dispatch_count
 
         # Verify metrics
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatch_count"] == dispatch_count
-        assert metrics["dispatch_success_count"] == dispatch_count
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.total_dispatches == dispatch_count
+        assert metrics.successful_dispatches == dispatch_count
         # Each dispatch invokes 2 handlers (fan-out)
-        assert metrics["dispatcher_execution_count"] == dispatch_count * 2
+        assert metrics.dispatcher_execution_count == dispatch_count * 2
 
     @pytest.mark.asyncio
     async def test_concurrent_dispatch_with_failures(self) -> None:
@@ -2196,14 +2196,14 @@ class TestMessageDispatchEngineConcurrency:
         assert len(failure_results) == dispatch_count
 
         # Verify metrics track both successes and failures
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatch_count"] == dispatch_count
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.total_dispatches == dispatch_count
         # All dispatches are marked as errors (due to partial failure)
-        assert metrics["dispatch_error_count"] == dispatch_count
+        assert metrics.failed_dispatches == dispatch_count
         # Each dispatch executes 2 handlers (1 success + 1 failure)
-        assert metrics["dispatcher_execution_count"] == dispatch_count * 2
+        assert metrics.dispatcher_execution_count == dispatch_count * 2
         # One handler fails per dispatch
-        assert metrics["dispatcher_error_count"] == dispatch_count
+        assert metrics.dispatcher_error_count == dispatch_count
 
     @pytest.mark.asyncio
     async def test_concurrent_dispatch_metrics_accuracy(self) -> None:
@@ -2258,20 +2258,20 @@ class TestMessageDispatchEngineConcurrency:
             concurrent.futures.wait(futures)
 
         # Verify metrics accuracy
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatch_count"] == dispatch_count, (
-            f"Expected {dispatch_count} dispatches, got {metrics['dispatch_count']}"
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.total_dispatches == dispatch_count, (
+            f"Expected {dispatch_count} dispatches, got {metrics.total_dispatches}"
         )
-        assert metrics["dispatch_success_count"] == dispatch_count, (
-            f"Expected {dispatch_count} successes, got {metrics['dispatch_success_count']}"
+        assert metrics.successful_dispatches == dispatch_count, (
+            f"Expected {dispatch_count} successes, got {metrics.successful_dispatches}"
         )
-        assert metrics["dispatcher_execution_count"] == dispatch_count, (
+        assert metrics.dispatcher_execution_count == dispatch_count, (
             f"Expected {dispatch_count} dispatcher executions, "
-            f"got {metrics['dispatcher_execution_count']}"
+            f"got {metrics.dispatcher_execution_count}"
         )
-        assert metrics["routes_matched_count"] == dispatch_count, (
+        assert metrics.routes_matched_count == dispatch_count, (
             f"Expected {dispatch_count} route matches, "
-            f"got {metrics['routes_matched_count']}"
+            f"got {metrics.routes_matched_count}"
         )
 
 
@@ -2367,9 +2367,9 @@ class TestConcurrentDispatchAdvanced:
         assert len(execution_order) == dispatch_count
 
         # Verify metrics
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatch_count"] == dispatch_count
-        assert metrics["dispatch_success_count"] == dispatch_count
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.total_dispatches == dispatch_count
+        assert metrics.successful_dispatches == dispatch_count
 
     @pytest.mark.asyncio
     async def test_concurrent_dispatch_metrics_lock_stress(self) -> None:
@@ -2428,25 +2428,13 @@ class TestConcurrentDispatchAdvanced:
             concurrent.futures.wait(futures)
 
         # Verify metrics accuracy after high-concurrency stress
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatch_count"] == dispatch_count, (
-            f"Expected {dispatch_count}, got {metrics['dispatch_count']}"
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.total_dispatches == dispatch_count, (
+            f"Expected {dispatch_count}, got {metrics.total_dispatches}"
         )
-        assert metrics["dispatch_success_count"] == dispatch_count
-        assert metrics["dispatcher_execution_count"] == dispatch_count
-
-        # Verify structured metrics consistency
-        # Note: Structured metrics track dispatcher executions in two places:
-        # 1. During individual dispatcher execution (in the loop)
-        # 2. During final record_dispatch call
-        # This results in dispatcher_execution_count being higher than legacy metrics
-        # The legacy metrics are the source of truth for simple counts
-        structured_metrics = dispatch_engine.get_structured_metrics()
-        assert structured_metrics.total_dispatches == dispatch_count
-        assert structured_metrics.successful_dispatches == dispatch_count
+        assert metrics.successful_dispatches == dispatch_count
         # dispatcher_execution_count is tracked per dispatcher call in the loop
-        # plus additional increments during per-dispatcher metrics updates
-        assert structured_metrics.dispatcher_execution_count >= dispatch_count
+        assert metrics.dispatcher_execution_count == dispatch_count
 
     @pytest.mark.asyncio
     async def test_concurrent_dispatch_with_message_type_filtering(self) -> None:
@@ -2629,9 +2617,9 @@ class TestConcurrentDispatchAdvanced:
         assert results_count == dispatch_count
 
         # Verify metrics after extended run
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatch_count"] == dispatch_count
-        assert metrics["dispatch_success_count"] == dispatch_count
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.total_dispatches == dispatch_count
+        assert metrics.successful_dispatches == dispatch_count
 
     @pytest.mark.asyncio
     async def test_concurrent_dispatch_with_sync_handlers(self) -> None:
@@ -2717,8 +2705,8 @@ class TestConcurrentDispatchAdvanced:
         assert len(async_results) == dispatch_count
 
         # Verify metrics
-        metrics = dispatch_engine.get_metrics()
-        assert metrics["dispatcher_execution_count"] == dispatch_count * 2
+        metrics = dispatch_engine.get_structured_metrics()
+        assert metrics.dispatcher_execution_count == dispatch_count * 2
 
     @pytest.mark.asyncio
     async def test_concurrent_dispatch_correlation_id_preservation(self) -> None:

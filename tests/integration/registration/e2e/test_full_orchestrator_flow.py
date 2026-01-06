@@ -968,15 +968,13 @@ class TestFullPipelineWithRealInfrastructure:
         # Verify intents generated (extension format)
         assert len(output.intents) == 2, "Should generate Consul and PostgreSQL intents"
 
-        extension_types = {
-            intent.payload.extension_type
+        intent_types = {
+            intent.payload.intent_type
             for intent in output.intents
             if intent.intent_type == "extension"
         }
-        assert "infra.consul_register" in extension_types, (
-            "Should include Consul intent"
-        )
-        assert "infra.postgres_upsert" in extension_types, (
+        assert "consul.register" in intent_types, "Should include Consul intent"
+        assert "postgres.upsert_registration" in intent_types, (
             "Should include PostgreSQL intent"
         )
 

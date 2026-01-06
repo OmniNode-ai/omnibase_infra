@@ -82,16 +82,16 @@ ONEX 4-Node Architecture Integration:
         ```python
         from omnibase_infra.plugins import PluginComputeBase
         from omnibase_infra.protocols.protocol_plugin_compute import (
-            PluginInputData,
-            PluginContext,
-            PluginOutputData,
+            ModelPluginInputData,
+            ModelPluginContext,
+            ModelPluginOutputData,
         )
 
         # Step 1: Implement plugin (pure computation)
         class DataValidatorPlugin(PluginComputeBase):
             def execute(
-                self, input_data: PluginInputData, context: PluginContext
-            ) -> PluginOutputData:
+                self, input_data: ModelPluginInputData, context: ModelPluginContext
+            ) -> ModelPluginOutputData:
                 # Pure validation logic (no I/O)
                 is_valid = self._validate_schema(input_data)
                 return {
@@ -99,7 +99,7 @@ ONEX 4-Node Architecture Integration:
                     "errors": [] if is_valid else self._get_errors(input_data),
                 }
 
-            def validate_input(self, input_data: PluginInputData) -> None:
+            def validate_input(self, input_data: ModelPluginInputData) -> None:
                 if "schema" not in input_data:
                     raise ValueError("schema field required")
 
@@ -165,11 +165,6 @@ from omnibase_infra.plugins.models.model_plugin_context import ModelPluginContex
 from omnibase_infra.plugins.models.model_plugin_input_data import ModelPluginInputData
 from omnibase_infra.plugins.models.model_plugin_output_data import ModelPluginOutputData
 
-# Type aliases for backwards compatibility with protocol imports
-PluginContext = ModelPluginContext
-PluginInputData = ModelPluginInputData
-PluginOutputData = ModelPluginOutputData
-
 
 class PluginComputeBase(ABC):
     """Abstract base class for compute plugins.
@@ -226,15 +221,15 @@ class PluginComputeBase(ABC):
     Example:
         ```python
         from omnibase_infra.protocols.protocol_plugin_compute import (
-            PluginInputData,
-            PluginContext,
-            PluginOutputData,
+            ModelPluginInputData,
+            ModelPluginContext,
+            ModelPluginOutputData,
         )
 
         class MyComputePlugin(PluginComputeBase):
             def execute(
-                self, input_data: PluginInputData, context: PluginContext
-            ) -> PluginOutputData:
+                self, input_data: ModelPluginInputData, context: ModelPluginContext
+            ) -> ModelPluginOutputData:
                 # Handle edge cases
                 if not input_data:
                     return {"result": None, "warning": "Empty input"}
@@ -252,7 +247,7 @@ class PluginComputeBase(ABC):
                 result = self._process(input_data)
                 return {"result": result}
 
-            def validate_input(self, input_data: PluginInputData) -> None:
+            def validate_input(self, input_data: ModelPluginInputData) -> None:
                 # Optional: Validate required fields upfront
                 if "required_field" not in input_data:
                     raise ValueError("Missing required_field")
@@ -267,8 +262,8 @@ class PluginComputeBase(ABC):
 
     @abstractmethod
     def execute(
-        self, input_data: PluginInputData, context: PluginContext
-    ) -> PluginOutputData:
+        self, input_data: ModelPluginInputData, context: ModelPluginContext
+    ) -> ModelPluginOutputData:
         """Execute computation. MUST be deterministic.
 
         Given the same input_data and context, this method MUST return
@@ -368,14 +363,14 @@ class PluginComputeBase(ABC):
         Example - Handling Edge Cases:
             ```python
             from omnibase_infra.protocols.protocol_plugin_compute import (
-                PluginInputData,
-                PluginContext,
-                PluginOutputData,
+                ModelPluginInputData,
+                ModelPluginContext,
+                ModelPluginOutputData,
             )
 
             def execute(
-                self, input_data: PluginInputData, context: PluginContext
-            ) -> PluginOutputData:
+                self, input_data: ModelPluginInputData, context: ModelPluginContext
+            ) -> ModelPluginOutputData:
                 # Edge Case 1 & 2: Handle None/empty inputs
                 if not input_data:
                     return {"result": None, "warning": "Empty input"}
@@ -411,7 +406,7 @@ class PluginComputeBase(ABC):
         """
         ...
 
-    def validate_input(self, input_data: PluginInputData) -> None:
+    def validate_input(self, input_data: ModelPluginInputData) -> None:
         """Optional input validation hook.
 
         Override this method to validate input_data before execution.
@@ -425,7 +420,7 @@ class PluginComputeBase(ABC):
         """
         return  # Default: no validation
 
-    def validate_output(self, output: PluginOutputData) -> None:
+    def validate_output(self, output: ModelPluginOutputData) -> None:
         """Optional output validation hook.
 
         Override this method to validate computation results after execution.

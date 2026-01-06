@@ -55,7 +55,7 @@ Performance:
 
     - The validator is stateless after initialization (only stores immutable rules)
     - AST parsing happens per-file with no shared mutable state
-    - Each validation creates fresh HandlerInfo and violation objects
+    - Each validation creates fresh ModelDetectedNodeInfo and violation objects
 
     For custom validation rules, create a new `ExecutionShapeValidator` instance.
     For repeated validation of the same files, the singleton pattern provides
@@ -277,10 +277,6 @@ class ModelDetectedNodeInfo(BaseModel):
     file_path: str
 
 
-# Backwards compatibility alias
-HandlerInfo = ModelDetectedNodeInfo
-
-
 class ExecutionShapeValidator:
     """AST-based validator for ONEX handler execution shapes.
 
@@ -429,7 +425,9 @@ class ExecutionShapeValidator:
 
         return violations
 
-    def _find_handlers(self, tree: ast.AST, file_path: str) -> list[HandlerInfo]:
+    def _find_handlers(
+        self, tree: ast.AST, file_path: str
+    ) -> list[ModelDetectedNodeInfo]:
         """Find all handler classes and functions in an AST.
 
         Detection methods:
@@ -444,14 +442,14 @@ class ExecutionShapeValidator:
         Returns:
             List of detected handlers with their archetype information.
         """
-        handlers: list[HandlerInfo] = []
+        handlers: list[ModelDetectedNodeInfo] = []
 
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
                 archetype = self._detect_node_archetype_from_class(node)
                 if archetype is not None:
                     handlers.append(
-                        HandlerInfo(
+                        ModelDetectedNodeInfo(
                             name=node.name,
                             node_archetype=archetype,
                             node=node,
@@ -463,7 +461,7 @@ class ExecutionShapeValidator:
                 archetype = self._detect_node_archetype_from_decorator(node)
                 if archetype is not None:
                     handlers.append(
-                        HandlerInfo(
+                        ModelDetectedNodeInfo(
                             name=node.name,
                             node_archetype=archetype,
                             node=node,
@@ -515,14 +513,8 @@ class ExecutionShapeValidator:
 
         Looks for patterns like:
             @node_archetype(EnumNodeArchetype.EFFECT)
-            @handler_type(EnumNodeArchetype.EFFECT)  # Backward compatible alias
             @effect_handler
             @reducer_handler
-
-        Note:
-            Both ``@node_archetype`` and ``@handler_type`` decorator names are
-            supported for backward compatibility during the migration from
-            handler-type to node-archetype terminology.
 
         Args:
             node: The AST node with decorators.
@@ -632,7 +624,7 @@ class ExecutionShapeValidator:
 
     def _validate_handler(
         self,
-        handler: HandlerInfo,
+        handler: ModelDetectedNodeInfo,
     ) -> list[ModelExecutionShapeViolationResult]:
         """Validate a single handler for execution shape violations.
 
@@ -679,7 +671,7 @@ class ExecutionShapeValidator:
     def _check_return_type_violations(
         self,
         method: ast.FunctionDef | ast.AsyncFunctionDef,
-        handler: HandlerInfo,
+        handler: ModelDetectedNodeInfo,
         rule: ModelExecutionShapeRule,
     ) -> list[ModelExecutionShapeViolationResult]:
         """Check for forbidden return type violations.
@@ -766,7 +758,7 @@ class ExecutionShapeValidator:
     def _analyze_return_value(
         self,
         return_node: ast.Return,
-        handler: HandlerInfo,
+        handler: ModelDetectedNodeInfo,
         rule: ModelExecutionShapeRule,
     ) -> list[ModelExecutionShapeViolationResult]:
         """Analyze a return statement for forbidden types.
@@ -917,7 +909,7 @@ class ExecutionShapeValidator:
 
     def _create_return_type_violation(
         self,
-        handler: HandlerInfo,
+        handler: ModelDetectedNodeInfo,
         line_number: int,
         category: EnumMessageCategory | EnumNodeOutputType,
         type_name: str,
@@ -1017,7 +1009,7 @@ class ExecutionShapeValidator:
     def _check_direct_publish_violations(
         self,
         method: ast.FunctionDef | ast.AsyncFunctionDef,
-        handler: HandlerInfo,
+        handler: ModelDetectedNodeInfo,
     ) -> list[ModelExecutionShapeViolationResult]:
         """Check for direct publish method calls.
 
@@ -1066,7 +1058,7 @@ class ExecutionShapeValidator:
     def _check_system_time_violations(
         self,
         method: ast.FunctionDef | ast.AsyncFunctionDef,
-        handler: HandlerInfo,
+        handler: ModelDetectedNodeInfo,
     ) -> list[ModelExecutionShapeViolationResult]:
         """Check for system time access in reducers.
 
@@ -1234,7 +1226,7 @@ def get_execution_shape_rules() -> dict[EnumNodeArchetype, ModelExecutionShapeRu
 # - The validator's rules dictionary is immutable after initialization
 # - No per-validation state is stored in the validator instance
 # - AST parsing happens per-file (no shared mutable state)
-# - The HandlerInfo and violations are created fresh for each file
+# - The ModelDetectedNodeInfo and violations are created fresh for each file
 #
 # Thread Safety:
 # - The singleton is created at module import time (before any threads)
@@ -1267,7 +1259,7 @@ _validator = ExecutionShapeValidator()
 __all__ = [
     "EXECUTION_SHAPE_RULES",
     "ExecutionShapeValidator",
-    "HandlerInfo",
+    "ModelDetectedNodeInfo",
     "ModelExecutionShapeValidationResult",
     "get_execution_shape_rules",
     "validate_execution_shapes",

@@ -665,13 +665,13 @@ class TestIntentEmissionControl:
         assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Verify extension intent types
-        extension_types = {
-            intent.payload.extension_type
+        intent_types = {
+            intent.payload.intent_type
             for intent in output.intents
             if intent.intent_type == "extension"
         }
-        assert "infra.consul_register" in extension_types
-        assert "infra.postgres_upsert" in extension_types
+        assert "consul.register" in intent_types
+        assert "postgres.upsert_registration" in intent_types
 
     def test_replay_never_emits_intents(
         self,

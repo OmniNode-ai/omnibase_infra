@@ -23,7 +23,7 @@ Intent Format Compatibility (OMN-1258):
 
     When the RegistrationReducer emits intents with:
         - intent_type="extension"
-        - payload.extension_type="infra.consul_register"
+        - payload.intent_type="consul.register"
 
     The Orchestrator/Runtime layer translates these to envelope format:
         {

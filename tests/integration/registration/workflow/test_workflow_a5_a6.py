@@ -380,9 +380,9 @@ class TestA5NormalizedDeterminism:
             assert intent1.intent_type == intent2.intent_type
             assert intent1.target == intent2.target
 
-            # Normalize and compare payloads (payload.data is the dict)
-            payload1 = _normalize_dict(intent1.payload.data)
-            payload2 = _normalize_dict(intent2.payload.data)
+            # Normalize and compare payloads (use model_dump for typed payload models)
+            payload1 = _normalize_dict(intent1.payload.model_dump(mode="json"))
+            payload2 = _normalize_dict(intent2.payload.model_dump(mode="json"))
             assert payload1 == payload2, (
                 f"Payload mismatch for {intent1.intent_type}:\n"
                 f"Run 1: {json.dumps(payload1, indent=2, default=str)}\n"
@@ -564,7 +564,13 @@ class TestA6Observability:
 
         # Assert - Check each intent payload
         for intent in result.intents:
-            payload_text = json.dumps(intent.payload, default=str)
+            # Convert Pydantic model to dict for JSON serialization
+            payload_dict = (
+                intent.payload.model_dump(mode="json")
+                if hasattr(intent.payload, "model_dump")
+                else intent.payload
+            )
+            payload_text = json.dumps(payload_dict, default=str)
             violations = check_log_for_secrets(payload_text)
 
             assert len(violations) == 0, (
@@ -755,7 +761,13 @@ class TestA6Observability:
 
         # Assert 3: No secrets in intent payloads
         for intent in result.intents:
-            payload_text = json.dumps(intent.payload, default=str)
+            # Convert Pydantic model to dict for JSON serialization
+            payload_dict = (
+                intent.payload.model_dump(mode="json")
+                if hasattr(intent.payload, "model_dump")
+                else intent.payload
+            )
+            payload_text = json.dumps(payload_dict, default=str)
             for secret in secret_values:
                 assert secret not in payload_text, (
                     f"SECRET LEAKED in intent payload ({intent.intent_type}): "

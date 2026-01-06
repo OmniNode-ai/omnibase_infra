@@ -24,14 +24,14 @@ Intent Format Compatibility (OMN-1258):
     NOT raw ModelIntent objects. The intent-to-request translation is handled by the
     Orchestrator layer.
 
-    The RegistrationReducer emits intents in the extension-type format:
+    The RegistrationReducer emits intents with typed payloads:
         - intent_type="extension"
-        - payload.extension_type="infra.consul_register" or "infra.postgres_upsert"
+        - payload.intent_type="consul.register" or "postgres.upsert_registration"
 
     The Orchestrator/Runtime layer is responsible for:
         1. Consuming ModelIntent objects from reducer output
         2. Checking intent_type == "extension"
-        3. Extracting payload.extension_type to determine target backend
+        3. Extracting payload.intent_type to determine target backend
         4. Building a ModelRegistryRequest from payload.data
         5. Calling NodeRegistryEffect.register_node(request)
 

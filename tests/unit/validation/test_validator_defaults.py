@@ -21,7 +21,7 @@ from omnibase_infra.validation.infra_validators import (
     INFRA_PATTERNS_STRICT,
     INFRA_SRC_PATH,
     INFRA_UNIONS_STRICT,
-    CircularImportValidationResult,
+    ModelImportValidationResult,
     ValidationResult,
     validate_infra_all,
     validate_infra_architecture,
@@ -876,7 +876,7 @@ class TestDefaultsConsistency:
         """Verify directory defaults are consistent across entry points."""
         # All validators using INFRA_SRC_PATH should default to same value
         validators: list[
-            Callable[..., ValidationResult | CircularImportValidationResult]
+            Callable[..., ValidationResult | ModelImportValidationResult]
         ] = [
             validate_infra_architecture,
             validate_infra_patterns,

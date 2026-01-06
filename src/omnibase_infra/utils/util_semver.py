@@ -25,7 +25,6 @@ Use ModelSemVer directly for all version handling:
 from __future__ import annotations
 
 import re
-import warnings
 
 # Semantic versioning pattern: MAJOR.MINOR.PATCH[-prerelease][+build]
 # See: https://semver.org/
@@ -66,8 +65,6 @@ def validate_version_lenient(v: str) -> str:
     """Validate version format with lenient parsing.
 
     Accepts flexible version formats including partial versions.
-    Used by compute registry models that need backward compatibility
-    with abbreviated version strings.
 
     Accepted formats:
         - "1" (major only)
@@ -202,26 +199,8 @@ def normalize_version_cached(version: str) -> str:
     )
 
 
-def clear_normalize_version_cache() -> None:
-    """REMOVED: Cache no longer exists since normalize_version_cached was removed.
-
-    This function is kept for API compatibility but does nothing.
-
-    .. deprecated::
-        This function is deprecated and will be removed in a future version.
-        Caching is now handled internally by ModelSemVer.
-    """
-    warnings.warn(
-        "clear_normalize_version_cache() is deprecated and does nothing. "
-        "Caching is handled internally by ModelSemVer.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-
 __all__: list[str] = [
     "SEMVER_PATTERN",
-    "clear_normalize_version_cache",
     "normalize_version",
     "normalize_version_cached",
     "validate_semver",

@@ -127,7 +127,7 @@ def validate_imports_cmd(directory: str) -> None:
     console.print(f"[bold blue]Checking circular imports in {directory}...[/bold blue]")
     result = validate_infra_circular_imports(directory)
 
-    # CircularImportValidationResult uses has_circular_imports property
+    # ModelImportValidationResult uses has_circular_imports property
     if not result.has_circular_imports:
         console.print("[bold green]Circular Imports: PASS[/bold green]")
         raise SystemExit(0)

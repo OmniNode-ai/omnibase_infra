@@ -91,6 +91,10 @@ Security Design (Intentional Fail-Open Architecture):
     - routing_coverage_validator.py: Routing gap detection (module docstring)
 """
 
+from omnibase_core.models.validation.model_import_validation_result import (
+    ModelImportValidationResult,
+)
+from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
     CircularImportValidator,
     validate_all,
@@ -126,7 +130,7 @@ from omnibase_infra.validation.contract_linter import (
 from omnibase_infra.validation.execution_shape_validator import (
     EXECUTION_SHAPE_RULES,
     ExecutionShapeValidator,
-    HandlerInfo,
+    ModelDetectedNodeInfo,
     ModelExecutionShapeValidationResult,
     get_execution_shape_rules,
     validate_execution_shapes,
@@ -215,10 +219,12 @@ __all__: list[str] = [
     # AST-based execution shape validation (OMN-958)
     "ExecutionShapeValidator",
     "ExecutionShapeViolationError",
-    "HandlerInfo",
+    "ModelDetectedNodeInfo",
     "ModelContractLintResult",
     "ModelContractViolation",
     "ModelExecutionShapeValidationResult",
+    "ModelImportValidationResult",
+    "ServiceContractValidator",
     # Routing coverage validation (OMN-958)
     "RoutingCoverageError",
     "RoutingCoverageValidator",

@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for extension-type intent flow [OMN-1258].
+"""Integration tests for intent_type-based intent flow [OMN-1258].
 
-This module validates the end-to-end flow of extension-type intents through
+This module validates the end-to-end flow of typed intents through
 the ONEX registration workflow:
 
     Reducer -> Runtime/Dispatcher -> Effect -> Confirmation
 
 Architecture:
-    The RegistrationReducer emits intents in the new extension-type format:
+    The RegistrationReducer emits intents with typed payloads:
         - intent_type="extension"
-        - payload.extension_type="infra.consul_register" or "infra.postgres_upsert"
+        - payload.intent_type="consul.register" or "postgres.upsert_registration"
         - payload.plugin_name="consul" or "postgres"
         - payload.data contains the serialized typed intent
 
@@ -20,10 +20,10 @@ Architecture:
     3. Type-safe intent payloads while maintaining flexibility
 
 Test Categories:
-    - TestReducerExtensionTypeEmission: Verify reducer uses extension-type format
-    - TestExtensionTypeIntentRouting: Test intent routing by extension_type
+    - TestReducerIntentTypeEmission: Verify reducer uses intent_type format
+    - TestIntentTypeRouting: Test intent routing by intent_type
     - TestEffectLayerRequestFormatting: Validate Effect receives formatted requests
-    - TestEndToEndExtensionTypeFlow: Full flow integration with mocks
+    - TestEndToEndIntentTypeFlow: Full flow integration with mocks
 
 Running Tests:
     # Run all intent flow tests:
@@ -33,14 +33,14 @@ Running Tests:
     pytest tests/integration/nodes/test_intent_flow_integration.py -v
 
     # Run specific test class:
-    pytest tests/integration/nodes/test_intent_flow_integration.py::TestReducerExtensionTypeEmission
+    pytest tests/integration/nodes/test_intent_flow_integration.py::TestReducerIntentTypeEmission
 
 Related:
-    - RegistrationReducer: Emits extension-type intents
+    - RegistrationReducer: Emits typed intents
     - NodeRegistryEffect: Consumes requests built from intents
     - omnibase_core ModelIntent: Intent model with intent_type field
-    - omnibase_core ModelPayloadExtension: Extension payload format
-    - PR #114: Migration to extension-type intents
+    - omnibase_core ModelPayloadConsulRegister/ModelPayloadPostgresUpsert: Typed payload models
+    - PR #114: Migration to intent_type-based intents
 """
 
 from __future__ import annotations
@@ -161,7 +161,7 @@ class TestReducerExtensionTypeEmission:
     correct extension-type format as documented in the migration.
     """
 
-    def test_reducer_emits_extension_type_intents(
+    def test_reducer_emits_intent_type_intents(
         self,
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
@@ -172,7 +172,7 @@ class TestReducerExtensionTypeEmission:
         Validates that:
         1. intent_type is "extension" for all emitted intents
         2. payload is ModelPayloadExtension instance
-        3. payload.extension_type contains proper backend identifier
+        3. payload.intent_type contains proper backend identifier
         """
         # Execute reducer
         output = reducer.reduce(initial_state, introspection_event)
@@ -195,13 +195,13 @@ class TestReducerExtensionTypeEmission:
                 f"payload should be ModelPayloadExtension, got {type(intent.payload).__name__}"
             )
 
-    def test_consul_intent_extension_type_format(
+    def test_consul_intent_intent_type_format(
         self,
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
         introspection_event: ModelNodeIntrospectionEvent,
     ) -> None:
-        """Verify Consul intent uses correct extension_type."""
+        """Verify Consul intent uses correct intent_type."""
         output = reducer.reduce(initial_state, introspection_event)
 
         # Find Consul intent
@@ -209,7 +209,7 @@ class TestReducerExtensionTypeEmission:
             i
             for i in output.intents
             if isinstance(i.payload, ModelPayloadExtension)
-            and i.payload.extension_type == "infra.consul_register"
+            and i.payload.intent_type == "consul.register"
         ]
 
         assert len(consul_intents) == 1, "Should have exactly one Consul intent"
@@ -218,19 +218,19 @@ class TestReducerExtensionTypeEmission:
         # Verify extension payload structure
         payload = consul_intent.payload
         assert isinstance(payload, ModelPayloadExtension)
-        assert payload.extension_type == "infra.consul_register"
+        assert payload.intent_type == "consul.register"
         assert payload.plugin_name == "consul"
         assert isinstance(payload.data, dict)
         assert "service_id" in payload.data
         assert "service_name" in payload.data
 
-    def test_postgres_intent_extension_type_format(
+    def test_postgres_intent_intent_type_format(
         self,
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
         introspection_event: ModelNodeIntrospectionEvent,
     ) -> None:
-        """Verify PostgreSQL intent uses correct extension_type."""
+        """Verify PostgreSQL intent uses correct intent_type."""
         output = reducer.reduce(initial_state, introspection_event)
 
         # Find PostgreSQL intent
@@ -238,7 +238,7 @@ class TestReducerExtensionTypeEmission:
             i
             for i in output.intents
             if isinstance(i.payload, ModelPayloadExtension)
-            and i.payload.extension_type == "infra.postgres_upsert"
+            and i.payload.intent_type == "postgres.upsert_registration"
         ]
 
         assert len(postgres_intents) == 1, "Should have exactly one PostgreSQL intent"
@@ -247,7 +247,7 @@ class TestReducerExtensionTypeEmission:
         # Verify extension payload structure
         payload = postgres_intent.payload
         assert isinstance(payload, ModelPayloadExtension)
-        assert payload.extension_type == "infra.postgres_upsert"
+        assert payload.intent_type == "postgres.upsert_registration"
         assert payload.plugin_name == "postgres"
         assert isinstance(payload.data, dict)
         assert "record" in payload.data
@@ -279,41 +279,41 @@ class TestReducerExtensionTypeEmission:
 
 
 class TestExtensionTypeIntentRouting:
-    """Tests for intent routing by extension_type.
+    """Tests for intent routing by intent_type.
 
     These tests verify that the Runtime/Dispatcher layer can correctly
     route extension-type intents to appropriate Effect handlers.
     """
 
-    def test_intent_can_be_routed_by_extension_type(
+    def test_intent_can_be_routed_by_intent_type(
         self,
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
         introspection_event: ModelNodeIntrospectionEvent,
     ) -> None:
-        """Verify runtime can route by payload.extension_type.
+        """Verify runtime can route by payload.intent_type.
 
         Simulates dispatcher routing logic that:
         1. Checks intent_type == "extension"
-        2. Extracts payload.extension_type
+        2. Extracts payload.intent_type
         3. Routes to appropriate backend handler
         """
         output = reducer.reduce(initial_state, introspection_event)
 
         # Simulate dispatcher routing
         routing_table: dict[str, str] = {
-            "infra.consul_register": "consul_handler",
-            "infra.postgres_upsert": "postgres_handler",
+            "consul.register": "consul_handler",
+            "postgres.upsert_registration": "postgres_handler",
         }
 
         routed_handlers: list[str] = []
         for intent in output.intents:
             # Dispatcher checks intent_type
             if intent.intent_type == "extension":
-                # Extract extension_type from payload
+                # Extract intent_type from payload
                 if isinstance(intent.payload, ModelPayloadExtension):
-                    extension_type = intent.payload.extension_type
-                    handler = routing_table.get(extension_type)
+                    intent_type = intent.payload.intent_type
+                    handler = routing_table.get(intent_type)
                     if handler:
                         routed_handlers.append(handler)
 
@@ -324,15 +324,15 @@ class TestExtensionTypeIntentRouting:
         )
         assert len(routed_handlers) == 2, "Should route to exactly 2 handlers"
 
-    def test_unknown_extension_type_routing(self) -> None:
-        """Verify routing handles unknown extension_type gracefully.
+    def test_unknown_intent_type_routing(self) -> None:
+        """Verify routing handles unknown intent_type gracefully.
 
-        When an unknown extension_type is encountered, the dispatcher
+        When an unknown intent_type is encountered, the dispatcher
         should be able to identify it as unrouteable.
         """
         # Create an intent with unknown extension type
         payload = ModelPayloadExtension(
-            extension_type="infra.unknown_operation",
+            intent_type="infra.unknown_operation",
             plugin_name="unknown",
             data={},
         )
@@ -344,14 +344,14 @@ class TestExtensionTypeIntentRouting:
 
         # Simulate routing
         routing_table = {
-            "infra.consul_register": "consul_handler",
-            "infra.postgres_upsert": "postgres_handler",
+            "consul.register": "consul_handler",
+            "postgres.upsert_registration": "postgres_handler",
         }
 
-        handler = routing_table.get(intent.payload.extension_type)
-        assert handler is None, "Unknown extension_type should not match any handler"
+        handler = routing_table.get(intent.payload.intent_type)
+        assert handler is None, "Unknown intent_type should not match any handler"
 
-    def test_extension_type_correlation_id_preservation(
+    def test_intent_type_correlation_id_preservation(
         self,
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
@@ -406,7 +406,7 @@ class TestEffectLayerRequestFormatting:
             i
             for i in output.intents
             if isinstance(i.payload, ModelPayloadExtension)
-            and i.payload.extension_type == "infra.postgres_upsert"
+            and i.payload.intent_type == "postgres.upsert_registration"
         )
 
         # Extract data from intent payload
@@ -496,7 +496,7 @@ class TestEffectLayerRequestFormatting:
             i
             for i in output.intents
             if isinstance(i.payload, ModelPayloadExtension)
-            and i.payload.extension_type == "infra.consul_register"
+            and i.payload.intent_type == "consul.register"
         )
 
         # Extract Consul registration data
@@ -549,7 +549,7 @@ class TestEndToEndExtensionTypeFlow:
 
         Simulates the full workflow:
         1. Reducer processes event and emits extension-type intents
-        2. Runtime routes intents by extension_type
+        2. Runtime routes intents by intent_type
         3. Runtime builds requests from intent data
         4. Effect executes requests against backends
         """
@@ -563,13 +563,13 @@ class TestEndToEndExtensionTypeFlow:
             i
             for i in output.intents
             if isinstance(i.payload, ModelPayloadExtension)
-            and i.payload.extension_type == "infra.consul_register"
+            and i.payload.intent_type == "consul.register"
         )
         postgres_intent = next(
             i
             for i in output.intents
             if isinstance(i.payload, ModelPayloadExtension)
-            and i.payload.extension_type == "infra.postgres_upsert"
+            and i.payload.intent_type == "postgres.upsert_registration"
         )
 
         # Step 3: Build request from intent data (simulating Runtime)
@@ -624,13 +624,13 @@ class TestEndToEndExtensionTypeFlow:
             i
             for i in output.intents
             if isinstance(i.payload, ModelPayloadExtension)
-            and i.payload.extension_type == "infra.postgres_upsert"
+            and i.payload.intent_type == "postgres.upsert_registration"
         )
         consul_intent = next(
             i
             for i in output.intents
             if isinstance(i.payload, ModelPayloadExtension)
-            and i.payload.extension_type == "infra.consul_register"
+            and i.payload.intent_type == "consul.register"
         )
 
         pg_payload = postgres_intent.payload.data
@@ -717,7 +717,7 @@ class TestIntentPayloadSerialization:
             # Deserialize and verify
             parsed = json.loads(json_str)
             assert parsed["intent_type"] == "extension"
-            assert "extension_type" in parsed["payload"]
+            assert "intent_type" in parsed["payload"]
             assert "plugin_name" in parsed["payload"]
             assert "data" in parsed["payload"]
 
@@ -740,7 +740,7 @@ class TestIntentPayloadSerialization:
             restored_payload = ModelPayloadExtension.model_validate(payload_dict)
 
             # Verify all fields preserved
-            assert restored_payload.extension_type == original_payload.extension_type
+            assert restored_payload.intent_type == original_payload.intent_type
             assert restored_payload.plugin_name == original_payload.plugin_name
             assert restored_payload.data == original_payload.data
 

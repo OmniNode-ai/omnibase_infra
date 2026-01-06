@@ -132,31 +132,44 @@ class TestWireRegistrationHandlers:
             await wire_registration_handlers(mock_container, mock_pool)
 
     @pytest.mark.asyncio
-    async def test_raises_runtime_error_on_service_registry_init_failure(self) -> None:
-        """Test that RuntimeError is raised if service_registry auto-init fails.
+    async def test_raises_error_on_missing_service_registry(self) -> None:
+        """Test that ServiceRegistryUnavailableError is raised if container missing service_registry.
 
-        In omnibase_core 0.6.2+, the service_registry may need to be lazy-initialized.
-        If the required omnibase_core components cannot be imported or initialization
-        fails, wire_registration_handlers should raise a RuntimeError.
+        OMN-1257: Changed from RuntimeError to ServiceRegistryUnavailableError
+        for clearer error messages when service_registry is missing or None.
         """
-        # Create mock container with service_registry = None (triggers auto-init)
-        mock_container = MagicMock()
-        mock_container.service_registry = None
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+
+        mock_container = MagicMock(spec=[])  # No service_registry attribute
+        del mock_container.service_registry
 
         mock_pool = MagicMock()
 
-        # Patch the import to raise ImportError (simulating missing omnibase_core components)
-        with patch.dict(
-            "sys.modules",
-            {
-                "omnibase_core.container": None,  # Simulate missing module
-            },
+        with pytest.raises(
+            ServiceRegistryUnavailableError,
+            match="Container missing 'service_registry' attribute",
         ):
-            # The import inside _ensure_service_registry should fail
-            with pytest.raises(
-                RuntimeError, match="Failed to initialize service_registry"
-            ):
-                await wire_registration_handlers(mock_container, mock_pool)
+            await wire_registration_handlers(mock_container, mock_pool)
+
+    @pytest.mark.asyncio
+    async def test_raises_error_on_none_service_registry(self) -> None:
+        """Test that ServiceRegistryUnavailableError is raised if service_registry is None.
+
+        OMN-1257: Tests the second validation branch where service_registry
+        attribute exists but is set to None (e.g., when enable_service_registry=False).
+        """
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+
+        mock_container = MagicMock()
+        mock_container.service_registry = None  # Exists but is None
+
+        mock_pool = MagicMock()
+
+        with pytest.raises(
+            ServiceRegistryUnavailableError,
+            match="Container service_registry is None",
+        ):
+            await wire_registration_handlers(mock_container, mock_pool)
 
 
 class TestGetProjectionReaderFromContainer:
@@ -311,3 +324,217 @@ class TestGetHandlerNodeRegistrationAckedFromContainer:
             RuntimeError, match="HandlerNodeRegistrationAcked not registered"
         ):
             await get_handler_node_registration_acked_from_container(mock_container)
+
+
+class TestWireInfrastructureServicesValidation:
+    """Tests for wire_infrastructure_services service_registry validation."""
+
+    @pytest.mark.asyncio
+    async def test_raises_error_on_missing_service_registry(self) -> None:
+        """Test ServiceRegistryUnavailableError when service_registry attribute is missing."""
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+        from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+
+        mock_container = MagicMock(spec=[])  # No service_registry attribute
+        del mock_container.service_registry
+
+        with pytest.raises(
+            ServiceRegistryUnavailableError,
+            match="Container missing 'service_registry' attribute",
+        ):
+            await wire_infrastructure_services(mock_container)
+
+    @pytest.mark.asyncio
+    async def test_raises_error_on_none_service_registry(self) -> None:
+        """Test ServiceRegistryUnavailableError when service_registry is None."""
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+        from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+
+        mock_container = MagicMock()
+        mock_container.service_registry = None
+
+        with pytest.raises(
+            ServiceRegistryUnavailableError,
+            match="Container service_registry is None",
+        ):
+            await wire_infrastructure_services(mock_container)
+
+    @pytest.mark.asyncio
+    async def test_error_contains_operation_name(self) -> None:
+        """Test that error message includes operation context."""
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+        from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+
+        mock_container = MagicMock()
+        mock_container.service_registry = None
+
+        with pytest.raises(ServiceRegistryUnavailableError) as exc_info:
+            await wire_infrastructure_services(mock_container)
+
+        # Verify operation name is in the error message
+        assert "wire_infrastructure_services" in str(exc_info.value)
+
+
+class TestGetPolicyRegistryFromContainerValidation:
+    """Tests for get_policy_registry_from_container service_registry validation."""
+
+    @pytest.mark.asyncio
+    async def test_raises_error_on_missing_service_registry(self) -> None:
+        """Test ServiceRegistryUnavailableError when service_registry attribute is missing."""
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+        from omnibase_infra.runtime.container_wiring import (
+            get_policy_registry_from_container,
+        )
+
+        mock_container = MagicMock(spec=[])
+        del mock_container.service_registry
+
+        with pytest.raises(
+            ServiceRegistryUnavailableError,
+            match="Container missing 'service_registry' attribute",
+        ):
+            await get_policy_registry_from_container(mock_container)
+
+    @pytest.mark.asyncio
+    async def test_raises_error_on_none_service_registry(self) -> None:
+        """Test ServiceRegistryUnavailableError when service_registry is None."""
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+        from omnibase_infra.runtime.container_wiring import (
+            get_policy_registry_from_container,
+        )
+
+        mock_container = MagicMock()
+        mock_container.service_registry = None
+
+        with pytest.raises(
+            ServiceRegistryUnavailableError,
+            match="Container service_registry is None",
+        ):
+            await get_policy_registry_from_container(mock_container)
+
+    @pytest.mark.asyncio
+    async def test_error_contains_operation_name(self) -> None:
+        """Test that error message includes operation context."""
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+        from omnibase_infra.runtime.container_wiring import (
+            get_policy_registry_from_container,
+        )
+
+        mock_container = MagicMock()
+        mock_container.service_registry = None
+
+        with pytest.raises(ServiceRegistryUnavailableError) as exc_info:
+            await get_policy_registry_from_container(mock_container)
+
+        # Verify operation name is in the error message
+        assert "resolve PolicyRegistry" in str(exc_info.value)
+
+
+class TestGetComputeRegistryFromContainerValidation:
+    """Tests for get_compute_registry_from_container service_registry validation."""
+
+    @pytest.mark.asyncio
+    async def test_raises_error_on_missing_service_registry(self) -> None:
+        """Test ServiceRegistryUnavailableError when service_registry attribute is missing."""
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+        from omnibase_infra.runtime.container_wiring import (
+            get_compute_registry_from_container,
+        )
+
+        mock_container = MagicMock(spec=[])
+        del mock_container.service_registry
+
+        with pytest.raises(
+            ServiceRegistryUnavailableError,
+            match="Container missing 'service_registry' attribute",
+        ):
+            await get_compute_registry_from_container(mock_container)
+
+    @pytest.mark.asyncio
+    async def test_raises_error_on_none_service_registry(self) -> None:
+        """Test ServiceRegistryUnavailableError when service_registry is None."""
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+        from omnibase_infra.runtime.container_wiring import (
+            get_compute_registry_from_container,
+        )
+
+        mock_container = MagicMock()
+        mock_container.service_registry = None
+
+        with pytest.raises(
+            ServiceRegistryUnavailableError,
+            match="Container service_registry is None",
+        ):
+            await get_compute_registry_from_container(mock_container)
+
+    @pytest.mark.asyncio
+    async def test_error_contains_operation_name(self) -> None:
+        """Test that error message includes operation context."""
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+        from omnibase_infra.runtime.container_wiring import (
+            get_compute_registry_from_container,
+        )
+
+        mock_container = MagicMock()
+        mock_container.service_registry = None
+
+        with pytest.raises(ServiceRegistryUnavailableError) as exc_info:
+            await get_compute_registry_from_container(mock_container)
+
+        # Verify operation name is in the error message
+        assert "resolve RegistryCompute" in str(exc_info.value)
+
+
+class TestGetHandlerRegistryFromContainerValidation:
+    """Tests for get_handler_registry_from_container service_registry validation."""
+
+    @pytest.mark.asyncio
+    async def test_raises_error_on_missing_service_registry(self) -> None:
+        """Test ServiceRegistryUnavailableError when service_registry attribute is missing."""
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+        from omnibase_infra.runtime.container_wiring import (
+            get_handler_registry_from_container,
+        )
+
+        mock_container = MagicMock(spec=[])
+        del mock_container.service_registry
+
+        with pytest.raises(
+            ServiceRegistryUnavailableError,
+            match="Container missing 'service_registry' attribute",
+        ):
+            await get_handler_registry_from_container(mock_container)
+
+    @pytest.mark.asyncio
+    async def test_raises_error_on_none_service_registry(self) -> None:
+        """Test ServiceRegistryUnavailableError when service_registry is None."""
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+        from omnibase_infra.runtime.container_wiring import (
+            get_handler_registry_from_container,
+        )
+
+        mock_container = MagicMock()
+        mock_container.service_registry = None
+
+        with pytest.raises(
+            ServiceRegistryUnavailableError,
+            match="Container service_registry is None",
+        ):
+            await get_handler_registry_from_container(mock_container)
+
+    @pytest.mark.asyncio
+    async def test_error_contains_operation_name(self) -> None:
+        """Test that error message includes operation context."""
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
+        from omnibase_infra.runtime.container_wiring import (
+            get_handler_registry_from_container,
+        )
+
+        mock_container = MagicMock()
+        mock_container.service_registry = None
+
+        with pytest.raises(ServiceRegistryUnavailableError) as exc_info:
+            await get_handler_registry_from_container(mock_container)
+
+        # Verify operation name is in the error message
+        assert "resolve ProtocolBindingRegistry" in str(exc_info.value)

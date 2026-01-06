@@ -664,13 +664,11 @@ class TestDeterminismGates:
             assert i1.intent_type == i2.intent_type
             assert i1.target == i2.target
             # Compare payload structure (excluding runtime-generated fields)
-            # Use .data for ModelPayloadExtension
-            assert i1.payload.data.get("correlation_id") == i2.payload.data.get(
-                "correlation_id"
-            )
-            assert i1.payload.data.get("service_id") == i2.payload.data.get(
-                "service_id"
-            )
+            # Use direct attribute access for typed payload models
+            assert i1.payload.correlation_id == i2.payload.correlation_id
+            # For Consul intents, compare service_id; skip for Postgres intents
+            if hasattr(i1.payload, "service_id"):
+                assert i1.payload.service_id == i2.payload.service_id
 
     def test_reducer_input_state_is_not_mutated(self) -> None:
         """Verify reduce() does not mutate the input state object.
@@ -840,16 +838,15 @@ class TestDeterminismGates:
                     f"{intent.target} != {first_intent.target}"
                 )
                 # Compare payload correlation_id and service_id
-                assert intent.payload.data.get(
-                    "correlation_id"
-                ) == first_intent.payload.data.get("correlation_id"), (
-                    f"Thread {i}, intent {j}: correlation_id mismatch"
-                )
-                assert intent.payload.data.get(
-                    "service_id"
-                ) == first_intent.payload.data.get("service_id"), (
-                    f"Thread {i}, intent {j}: service_id mismatch"
-                )
+                # Use direct attribute access for typed payload models
+                assert (
+                    intent.payload.correlation_id == first_intent.payload.correlation_id
+                ), f"Thread {i}, intent {j}: correlation_id mismatch"
+                # For Consul intents, compare service_id; skip for Postgres intents
+                if hasattr(intent.payload, "service_id"):
+                    assert (
+                        intent.payload.service_id == first_intent.payload.service_id
+                    ), f"Thread {i}, intent {j}: service_id mismatch"
 
 
 # =============================================================================

@@ -14,7 +14,7 @@ Intent Format Compatibility (OMN-1258):
 
     When the RegistrationReducer emits intents with:
         - intent_type="extension"
-        - payload.extension_type="infra.postgres_upsert"
+        - payload.intent_type="postgres.upsert_registration"
 
     The Orchestrator/Runtime layer translates these to envelope format:
         {

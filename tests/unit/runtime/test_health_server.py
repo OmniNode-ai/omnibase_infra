@@ -203,8 +203,9 @@ class TestHealthServerEndpoints:
         assert response.content_type == "application/json"
         response_text = response.text
         assert response_text is not None
-        assert '"status": "healthy"' in response_text
-        assert '"version": "1.0.0"' in response_text
+        # Pydantic model_dump_json() uses compact JSON format (no space after colon)
+        assert '"status":"healthy"' in response_text
+        assert '"version":"1.0.0"' in response_text
 
     async def test_health_endpoint_degraded(self) -> None:
         """Test /health returns 200 when runtime is degraded.
@@ -229,7 +230,8 @@ class TestHealthServerEndpoints:
         assert response.status == 200
         response_text = response.text
         assert response_text is not None
-        assert '"status": "degraded"' in response_text
+        # Pydantic model_dump_json() uses compact JSON format (no space after colon)
+        assert '"status":"degraded"' in response_text
 
     async def test_health_endpoint_unhealthy(self) -> None:
         """Test /health returns 503 when runtime is unhealthy."""
@@ -250,7 +252,8 @@ class TestHealthServerEndpoints:
         assert response.status == 503
         response_text = response.text
         assert response_text is not None
-        assert '"status": "unhealthy"' in response_text
+        # Pydantic model_dump_json() uses compact JSON format (no space after colon)
+        assert '"status":"unhealthy"' in response_text
 
     async def test_health_endpoint_exception(self) -> None:
         """Test /health returns 503 on exception."""
@@ -267,7 +270,8 @@ class TestHealthServerEndpoints:
         assert response.status == 503
         response_text = response.text
         assert response_text is not None
-        assert '"status": "unhealthy"' in response_text
+        # Pydantic model_dump_json() uses compact JSON format (no space after colon)
+        assert '"status":"unhealthy"' in response_text
         assert "Health check failed" in response_text
 
 

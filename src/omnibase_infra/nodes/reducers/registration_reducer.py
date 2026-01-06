@@ -347,18 +347,19 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind, EnumReductionType, EnumStreamingMode
-from omnibase_core.models.intents import (
-    ModelConsulRegisterIntent,
-    ModelPostgresUpsertRegistrationIntent,
-)
-from omnibase_core.models.reducer import ModelIntent
-from omnibase_core.models.reducer.payloads import ModelPayloadExtension
+from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeRegistrationRecord,
+)
+from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
+    ModelPayloadConsulRegister,
+)
+from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
+    ModelPayloadPostgresUpsertRegistration,
 )
 from omnibase_infra.nodes.reducers.models.model_registration_state import (
     ModelRegistrationState,
@@ -497,10 +498,6 @@ class ModelValidationResult(BaseModel):
             field_name=field_name,
             error_message=error_message,
         )
-
-
-# Backwards compatibility alias
-ValidationResult = ModelValidationResult
 
 
 # TODO(OMN-889): Complete pure reducer implementation - add reduce_confirmation() method
@@ -722,7 +719,9 @@ class RegistrationReducer:
         """
         return self._validate_event(event).is_valid
 
-    def _validate_event(self, event: ModelNodeIntrospectionEvent) -> ValidationResult:
+    def _validate_event(
+        self, event: ModelNodeIntrospectionEvent
+    ) -> ModelValidationResult:
         """Validate introspection event with detailed error information.
 
         Validates that required fields are present for registration workflow.
@@ -752,7 +751,7 @@ class RegistrationReducer:
         """
         # Validate node_id: required for registration identity
         if event.node_id is None:
-            return ValidationResult.failure(
+            return ModelValidationResult.failure(
                 error_code="missing_node_id",
                 field_name="node_id",
                 error_message="node_id is required for registration identity",
@@ -760,7 +759,7 @@ class RegistrationReducer:
 
         # Validate node_type: must be present
         if not hasattr(event, "node_type") or event.node_type is None:
-            return ValidationResult.failure(
+            return ModelValidationResult.failure(
                 error_code="missing_node_type",
                 field_name="node_type",
                 error_message="node_type is required for service categorization",
@@ -775,7 +774,7 @@ class RegistrationReducer:
             EnumNodeKind.ORCHESTRATOR.value,
         }
         if event.node_type not in valid_node_types:
-            return ValidationResult.failure(
+            return ModelValidationResult.failure(
                 error_code="invalid_node_type",
                 field_name="node_type",
                 error_message=(
@@ -783,7 +782,7 @@ class RegistrationReducer:
                 ),
             )
 
-        return ValidationResult.success()
+        return ModelValidationResult.success()
 
     def _derive_deterministic_event_id(
         self, event: ModelNodeIntrospectionEvent
@@ -865,8 +864,8 @@ class RegistrationReducer:
                 "Timeout": "5s",
             }
 
-        # Build typed Consul registration intent, then serialize for ModelIntent payload
-        consul_intent = ModelConsulRegisterIntent(
+        # Build typed Consul registration payload (implements ProtocolIntentPayload)
+        consul_payload = ModelPayloadConsulRegister(
             correlation_id=correlation_id,
             service_id=service_id,
             service_name=service_name,
@@ -874,16 +873,10 @@ class RegistrationReducer:
             health_check=health_check,
         )
 
-        # Use ModelPayloadExtension for omnibase_core 0.6.x compatibility
-        payload = ModelPayloadExtension(
-            extension_type="infra.consul_register",
-            plugin_name="consul",
-            data=consul_intent.model_dump(mode="json"),
-        )
         return ModelIntent(
             intent_type="extension",
             target=f"consul://service/{service_name}",
-            payload=payload,
+            payload=consul_payload,
         )
 
     def _build_postgres_intent(
@@ -922,43 +915,16 @@ class RegistrationReducer:
             updated_at=now,
         )
 
-        # Build typed PostgreSQL upsert intent, then serialize for ModelIntent payload
-        postgres_intent = ModelPostgresUpsertRegistrationIntent(
+        # Build typed PostgreSQL upsert payload (implements ProtocolIntentPayload)
+        postgres_payload = ModelPayloadPostgresUpsertRegistration(
             correlation_id=correlation_id,
             record=record,
         )
 
-        # Use ModelPayloadExtension for omnibase_core 0.6.x compatibility
-        #
-        # TODO(omnibase_core): Remove serialize_as_any=True workaround once
-        # omnibase_core fixes the typing of ModelPostgresUpsertRegistrationIntent.record
-        #
-        # Root Cause: ModelPostgresUpsertRegistrationIntent.record is typed as BaseModel
-        # (for generic flexibility) but actually contains ModelNodeRegistrationRecord.
-        # Without serialize_as_any=True, Pydantic only serializes BaseModel fields,
-        # losing all subclass-specific data (node_id, node_type, etc.).
-        #
-        # Security/Validation Risk: serialize_as_any=True bypasses Pydantic's type
-        # validation during serialization, meaning any object could be serialized
-        # without type checking. This is acceptable here because:
-        #   1. We control the input (record is built from validated event data above)
-        #   2. The record is immediately serialized, not stored
-        #
-        # Upstream Fix: omnibase_core should either:
-        #   - Use a TypeVar bound or generic for the record field, OR
-        #   - Make record typed as ModelNodeRegistrationRecord directly, OR
-        #   - Provide a protocol-based serialization pattern
-        #
-        # Tracking: Create upstream ticket in omnibase_core to fix intent model typing
-        payload = ModelPayloadExtension(
-            extension_type="infra.postgres_upsert",
-            plugin_name="postgres",
-            data=postgres_intent.model_dump(mode="json", serialize_as_any=True),
-        )
         return ModelIntent(
             intent_type="extension",
             target=f"postgres://node_registrations/{event.node_id}",
-            payload=payload,
+            payload=postgres_payload,
         )
 
     # =========================================================================
@@ -1218,8 +1184,7 @@ __all__ = [
     # Performance threshold constants (for tests and monitoring)
     "PERF_THRESHOLD_REDUCE_MS",
     # Validation types (for tests and custom validators)
-    "ModelValidationResult",  # Canonical ONEX name (Model* convention)
+    "ModelValidationResult",
     "RegistrationReducer",
     "ValidationErrorCode",
-    "ValidationResult",  # Backwards compatibility alias
 ]
