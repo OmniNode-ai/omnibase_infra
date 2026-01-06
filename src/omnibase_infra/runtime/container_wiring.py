@@ -82,6 +82,44 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class ServiceRegistryUnavailableError(RuntimeError):
+    """Raised when container.service_registry is None due to circular import."""
+
+
+def _check_service_registry_available(
+    container: ModelONEXContainer,
+    operation: str,
+) -> None:
+    """Check if container.service_registry is available and raise clear error if not.
+
+    This function provides an early, clear error message when the service_registry
+    is None, which can happen due to circular import issues in omnibase_core.
+
+    Args:
+        container: The ONEX container to check.
+        operation: Name of the operation being attempted (for error message).
+
+    Raises:
+        ServiceRegistryUnavailableError: If service_registry is None, with a clear
+            message explaining the circular import issue and remediation steps.
+    """
+    if container.service_registry is None:
+        raise ServiceRegistryUnavailableError(
+            f"Cannot {operation}: container.service_registry is None.\n\n"
+            f"Root Cause:\n"
+            f"  This is likely due to a circular import bug in omnibase_core.\n"
+            f"  The ModelONEXContainer was instantiated before its ServiceRegistry\n"
+            f"  dependency was fully initialized.\n\n"
+            f"How to Fix:\n"
+            f"  1. Upgrade omnibase_core to a version >= 0.6.3 that fixes circular imports\n"
+            f"  2. File a bug at https://github.com/omninode/omnibase_core/issues if not already reported\n\n"
+            f"Workaround for Tests:\n"
+            f"  - Use a mock container with a properly initialized service_registry\n"
+            f"  - Or skip container wiring for unit tests that don't require service resolution\n"
+            f"  - Example: container.service_registry = MockServiceRegistry()"
+        )
+
+
 def _analyze_attribute_error(error_str: str) -> tuple[str, str]:
     """Analyze AttributeError and return (missing_attribute, hint).
 
@@ -186,6 +224,9 @@ async def wire_infrastructure_services(
         >>> hasattr(compute_reg, 'register_plugin') and callable(compute_reg.register_plugin)
         True
     """
+    # Early check for None service_registry (circular import bug in omnibase_core)
+    _check_service_registry_available(container, "wire infrastructure services")
+
     services_registered: list[str] = []
 
     try:
@@ -332,6 +373,9 @@ async def get_policy_registry_from_container(
         wire_infrastructure_services(). If not, it will raise RuntimeError.
         For auto-registration, use get_or_create_policy_registry() instead.
     """
+    # Early check for None service_registry (circular import bug in omnibase_core)
+    _check_service_registry_available(container, "resolve PolicyRegistry")
+
     try:
         registry: PolicyRegistry = await container.service_registry.resolve_service(
             PolicyRegistry
@@ -421,6 +465,9 @@ async def get_or_create_policy_registry(
         wire_infrastructure_services() for production code to ensure proper
         initialization order and error handling.
     """
+    # Early check for None service_registry (circular import bug in omnibase_core)
+    _check_service_registry_available(container, "get or create PolicyRegistry")
+
     try:
         # Try to resolve existing PolicyRegistry
         registry: PolicyRegistry = await container.service_registry.resolve_service(
@@ -489,6 +536,9 @@ async def get_handler_registry_from_container(
         This function assumes ProtocolBindingRegistry was registered via
         wire_infrastructure_services(). If not, it will raise RuntimeError.
     """
+    # Early check for None service_registry (circular import bug in omnibase_core)
+    _check_service_registry_available(container, "resolve ProtocolBindingRegistry")
+
     try:
         registry: ProtocolBindingRegistry = (
             await container.service_registry.resolve_service(ProtocolBindingRegistry)
@@ -574,6 +624,9 @@ async def get_compute_registry_from_container(
         wire_infrastructure_services(). If not, it will raise RuntimeError.
         For auto-registration, use get_or_create_compute_registry() instead.
     """
+    # Early check for None service_registry (circular import bug in omnibase_core)
+    _check_service_registry_available(container, "resolve RegistryCompute")
+
     try:
         registry: RegistryCompute = await container.service_registry.resolve_service(
             RegistryCompute
@@ -663,6 +716,9 @@ async def get_or_create_compute_registry(
         wire_infrastructure_services() for production code to ensure proper
         initialization order and error handling.
     """
+    # Early check for None service_registry (circular import bug in omnibase_core)
+    _check_service_registry_available(container, "get or create RegistryCompute")
+
     try:
         # Try to resolve existing RegistryCompute
         registry: RegistryCompute = await container.service_registry.resolve_service(
@@ -770,6 +826,9 @@ async def wire_registration_handlers(
     resolved_liveness_interval = get_liveness_interval_seconds(
         liveness_interval_seconds
     )
+
+    # Early check for None service_registry (circular import bug in omnibase_core)
+    _check_service_registry_available(container, "wire registration handlers")
 
     services_registered: list[str] = []
 
@@ -935,6 +994,9 @@ async def get_projection_reader_from_container(
     """
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
+    # Early check for None service_registry (circular import bug in omnibase_core)
+    _check_service_registry_available(container, "resolve ProjectionReaderRegistration")
+
     try:
         reader: ProjectionReaderRegistration = (
             await container.service_registry.resolve_service(
@@ -976,6 +1038,9 @@ async def get_handler_node_introspected_from_container(
         HandlerNodeIntrospected,
     )
 
+    # Early check for None service_registry (circular import bug in omnibase_core)
+    _check_service_registry_available(container, "resolve HandlerNodeIntrospected")
+
     try:
         handler: HandlerNodeIntrospected = (
             await container.service_registry.resolve_service(HandlerNodeIntrospected)
@@ -1015,6 +1080,9 @@ async def get_handler_runtime_tick_from_container(
         HandlerRuntimeTick,
     )
 
+    # Early check for None service_registry (circular import bug in omnibase_core)
+    _check_service_registry_available(container, "resolve HandlerRuntimeTick")
+
     try:
         handler: HandlerRuntimeTick = await container.service_registry.resolve_service(
             HandlerRuntimeTick
@@ -1053,6 +1121,9 @@ async def get_handler_node_registration_acked_from_container(
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeRegistrationAcked,
     )
+
+    # Early check for None service_registry (circular import bug in omnibase_core)
+    _check_service_registry_available(container, "resolve HandlerNodeRegistrationAcked")
 
     try:
         handler: HandlerNodeRegistrationAcked = (
@@ -1145,6 +1216,9 @@ async def wire_registration_dispatchers(
         DispatcherNodeRegistrationAcked,
         DispatcherRuntimeTick,
     )
+
+    # Early check for None service_registry (circular import bug in omnibase_core)
+    _check_service_registry_available(container, "wire registration dispatchers")
 
     dispatchers_registered: list[str] = []
     routes_registered: list[str] = []
@@ -1264,6 +1338,9 @@ async def wire_registration_dispatchers(
 
 
 __all__: list[str] = [
+    # Exception for circular import issues
+    "ServiceRegistryUnavailableError",
+    # Container wiring functions
     "get_compute_registry_from_container",
     "get_handler_node_introspected_from_container",
     "get_handler_node_registration_acked_from_container",

@@ -91,6 +91,9 @@ Security Design (Intentional Fail-Open Architecture):
     - routing_coverage_validator.py: Routing gap detection (module docstring)
 """
 
+from omnibase_core.models.validation.model_import_validation_result import (
+    ModelImportValidationResult,
+)
 from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
     CircularImportValidator,
@@ -101,8 +104,11 @@ from omnibase_core.validation import (
     validate_union_usage,
 )
 
-# Backwards compatibility type alias (Python 3.12+ type keyword)
-type ProtocolContractValidator = ServiceContractValidator
+# Backwards compatibility aliases for omnibase_core 0.6.2 renames
+# ProtocolContractValidator -> ServiceContractValidator
+# CircularImportValidationResult -> ModelImportValidationResult
+ProtocolContractValidator = ServiceContractValidator
+CircularImportValidationResult = ModelImportValidationResult
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
@@ -213,6 +219,7 @@ __all__: list[str] = [
     "ChainPropagationError",
     "ChainPropagationValidator",
     "CircularImportValidator",
+    "CircularImportValidationResult",  # Backwards compatibility alias
     # Contract linting (PR #57)
     "ContractLinter",
     "EnumContractViolationSeverity",
@@ -223,6 +230,7 @@ __all__: list[str] = [
     "ModelContractLintResult",
     "ModelContractViolation",
     "ModelExecutionShapeValidationResult",
+    "ModelImportValidationResult",  # New name (omnibase_core 0.6.2)
     "ProtocolContractValidator",  # Backwards compatibility alias
     "ServiceContractValidator",
     # Routing coverage validation (OMN-958)
