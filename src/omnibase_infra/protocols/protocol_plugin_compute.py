@@ -52,13 +52,13 @@ Example Usage:
 
     @runtime_checkable
     class ProtocolPluginCompute(Protocol):
-        def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+        def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
             '''Execute deterministic computation.'''
             ...
 
     # Example plugin implementation
     class JsonSchemaValidator:
-        def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+        def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
             '''Validate JSON data against schema.'''
             schema = context.get("schema", {})
             data = input_data.get("data", {})
@@ -116,37 +116,8 @@ __all__ = [
     "ModelPluginContext",
     "ModelPluginInputData",
     "ModelPluginOutputData",
-    "PluginContext",
-    "PluginInputData",
-    "PluginOutputData",
     "ProtocolPluginCompute",
 ]
-
-# Type aliases for backwards compatibility
-# These map the legacy TypedDict names to their Pydantic model replacements
-PluginInputData = ModelPluginInputData
-"""Type alias for backwards compatibility.
-
-Deprecated: Use ModelPluginInputData directly for new code.
-This alias maps to ModelPluginInputData Pydantic model which replaces
-the former TypedDict definition.
-"""
-
-PluginContext = ModelPluginContext
-"""Type alias for backwards compatibility.
-
-Deprecated: Use ModelPluginContext directly for new code.
-This alias maps to ModelPluginContext Pydantic model which replaces
-the former TypedDict definition.
-"""
-
-PluginOutputData = ModelPluginOutputData
-"""Type alias for backwards compatibility.
-
-Deprecated: Use ModelPluginOutputData directly for new code.
-This alias maps to ModelPluginOutputData Pydantic model which replaces
-the former TypedDict definition.
-"""
 
 
 @runtime_checkable
@@ -171,7 +142,7 @@ class ProtocolPluginCompute(Protocol):
     Example:
         ```python
         class DataNormalizer:
-            def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+            def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
                 '''Normalize numeric data to [0, 1] range.'''
                 values: list[float] = input_data.get("values", [])
                 min_val: float = context.get("min_value", 0.0)
@@ -192,8 +163,8 @@ class ProtocolPluginCompute(Protocol):
     """
 
     def execute(
-        self, input_data: PluginInputData, context: PluginContext
-    ) -> PluginOutputData:
+        self, input_data: ModelPluginInputData, context: ModelPluginContext
+    ) -> ModelPluginOutputData:
         """Execute deterministic computation on input data.
 
         This method must be deterministic: given the same input_data and context,
@@ -231,7 +202,7 @@ class ProtocolPluginCompute(Protocol):
 
             Example - Input Validation Error:
                 ```python
-                def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+                def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
                     from omnibase_core.errors import OnexError
                     from omnibase_core.enums import CoreErrorCode
 
@@ -257,7 +228,7 @@ class ProtocolPluginCompute(Protocol):
 
             Example - Computation Error with Context:
                 ```python
-                def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+                def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
                     from omnibase_core.errors import OnexError
                     from omnibase_core.enums import CoreErrorCode
 
@@ -295,7 +266,7 @@ class ProtocolPluginCompute(Protocol):
 
             Example - Type Validation Error:
                 ```python
-                def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+                def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
                     from omnibase_core.errors import OnexError
                     from omnibase_core.enums import CoreErrorCode
 
@@ -327,7 +298,7 @@ class ProtocolPluginCompute(Protocol):
 
             Example - Fallback Values:
                 ```python
-                def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+                def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
                     from omnibase_core.errors import OnexError
                     from omnibase_core.enums import CoreErrorCode
 

@@ -91,6 +91,7 @@ from omnibase_infra.errors.error_container_wiring import (
     ContainerValidationError,
     ContainerWiringError,
     ServiceRegistrationError,
+    ServiceRegistryUnavailableError,
     ServiceResolutionError,
 )
 from omnibase_infra.errors.error_infra import (
@@ -128,6 +129,7 @@ __all__: list[str] = [
     "RuntimeHostError",
     "SecretResolutionError",
     "ServiceRegistrationError",
+    "ServiceRegistryUnavailableError",
     "ServiceResolutionError",
     "UnknownHandlerTypeError",
 ]

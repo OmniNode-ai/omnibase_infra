@@ -11,10 +11,6 @@ Note:
     type for the `reason` field to constrain valid status values. For
     general-purpose handler health checks, see
     ``omnibase_infra.runtime.models.ModelHealthCheckResult``.
-
-.. versionadded:: 0.7.0
-    Renamed from ModelHealthCheckResult to avoid naming conflicts
-    with runtime.models.ModelHealthCheckResult (PR #91 feedback).
 """
 
 from __future__ import annotations
@@ -80,10 +76,6 @@ class ModelIdempotencyStoreHealthCheckResult(BaseModel):
     )
 
 
-# Backward compatibility alias
-ModelHealthCheckResult = ModelIdempotencyStoreHealthCheckResult
-
 __all__: list[str] = [
-    "ModelHealthCheckResult",  # Backward compatibility
     "ModelIdempotencyStoreHealthCheckResult",
 ]

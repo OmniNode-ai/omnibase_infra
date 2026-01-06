@@ -130,7 +130,7 @@ from omnibase_infra.validation.contract_linter import (
 from omnibase_infra.validation.execution_shape_validator import (
     EXECUTION_SHAPE_RULES,
     ExecutionShapeValidator,
-    HandlerInfo,
+    ModelDetectedNodeInfo,
     ModelExecutionShapeValidationResult,
     get_execution_shape_rules,
     validate_execution_shapes,
@@ -219,7 +219,7 @@ __all__: list[str] = [
     # AST-based execution shape validation (OMN-958)
     "ExecutionShapeValidator",
     "ExecutionShapeViolationError",
-    "HandlerInfo",
+    "ModelDetectedNodeInfo",
     "ModelContractLintResult",
     "ModelContractViolation",
     "ModelExecutionShapeValidationResult",

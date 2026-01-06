@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Integration tests for DLQ PostgreSQL tracking service.
 
-These tests validate DLQTrackingService behavior against actual PostgreSQL
+These tests validate ServiceDlqTracking behavior against actual PostgreSQL
 infrastructure running on the remote infrastructure server. They require
 proper database credentials and will be skipped gracefully if the database
 is not available.
@@ -51,10 +51,10 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_infra.dlq import (
-    DLQTrackingService,
     EnumReplayStatus,
     ModelDlqReplayRecord,
     ModelDlqTrackingConfig,
+    ServiceDlqTracking,
 )
 
 from .conftest import POSTGRES_AVAILABLE
@@ -77,13 +77,13 @@ pytestmark = [
 # =============================================================================
 
 
-class TestDLQTrackingServiceInitialization:
-    """Tests for DLQTrackingService initialization and lifecycle."""
+class TestServiceDlqTrackingInitialization:
+    """Tests for ServiceDlqTracking initialization and lifecycle."""
 
     @pytest.mark.asyncio
     async def test_initialize_creates_table(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
         dlq_tracking_config: ModelDlqTrackingConfig,
     ) -> None:
         """Test that initialize creates the tracking table.
@@ -109,7 +109,7 @@ class TestDLQTrackingServiceInitialization:
     @pytest.mark.asyncio
     async def test_initialize_creates_indexes(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
         dlq_tracking_config: ModelDlqTrackingConfig,
     ) -> None:
         """Test that initialize creates required indexes.
@@ -144,7 +144,7 @@ class TestDLQTrackingServiceInitialization:
     @pytest.mark.asyncio
     async def test_initialize_idempotent(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
     ) -> None:
         """Test that calling initialize multiple times is safe.
 
@@ -168,13 +168,13 @@ class TestDLQTrackingServiceInitialization:
 # =============================================================================
 
 
-class TestDLQTrackingServiceRecord:
+class TestServiceDlqTrackingRecord:
     """Tests for recording replay attempts."""
 
     @pytest.mark.asyncio
     async def test_record_replay_attempt_success(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
     ) -> None:
         """Test recording a successful replay attempt.
 
@@ -216,7 +216,7 @@ class TestDLQTrackingServiceRecord:
     @pytest.mark.asyncio
     async def test_record_replay_attempt_failure(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
     ) -> None:
         """Test recording a failed replay attempt.
 
@@ -254,7 +254,7 @@ class TestDLQTrackingServiceRecord:
     @pytest.mark.asyncio
     async def test_record_replay_attempt_skipped(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
     ) -> None:
         """Test recording a skipped replay attempt.
 
@@ -289,7 +289,7 @@ class TestDLQTrackingServiceRecord:
     @pytest.mark.asyncio
     async def test_record_replay_attempt_pending(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
     ) -> None:
         """Test recording a pending replay attempt.
 
@@ -322,7 +322,7 @@ class TestDLQTrackingServiceRecord:
     @pytest.mark.asyncio
     async def test_record_replay_different_topics(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
     ) -> None:
         """Test recording a replay with different original and target topics.
 
@@ -359,13 +359,13 @@ class TestDLQTrackingServiceRecord:
 # =============================================================================
 
 
-class TestDLQTrackingServiceQuery:
+class TestServiceDlqTrackingQuery:
     """Tests for querying replay history."""
 
     @pytest.mark.asyncio
     async def test_get_replay_history_multiple_attempts(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
     ) -> None:
         """Test getting history with multiple replay attempts.
 
@@ -413,7 +413,7 @@ class TestDLQTrackingServiceQuery:
     @pytest.mark.asyncio
     async def test_get_replay_history_empty(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
     ) -> None:
         """Test getting history for non-existent message returns empty list.
 
@@ -427,7 +427,7 @@ class TestDLQTrackingServiceQuery:
     @pytest.mark.asyncio
     async def test_get_replay_history_isolation(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
     ) -> None:
         """Test that history queries are properly isolated by message ID.
 
@@ -471,7 +471,7 @@ class TestDLQTrackingServiceQuery:
     @pytest.mark.asyncio
     async def test_get_replay_history_preserves_uuids(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
     ) -> None:
         """Test that UUID fields are correctly preserved through storage.
 
@@ -517,13 +517,13 @@ class TestDLQTrackingServiceQuery:
 # =============================================================================
 
 
-class TestDLQTrackingServiceHealth:
+class TestServiceDlqTrackingHealth:
     """Tests for health check functionality."""
 
     @pytest.mark.asyncio
     async def test_health_check_success(
         self,
-        dlq_tracking_service: DLQTrackingService,
+        dlq_tracking_service: ServiceDlqTracking,
     ) -> None:
         """Test health check returns True when service is healthy.
 
@@ -545,7 +545,7 @@ class TestDLQTrackingServiceHealth:
         A service that has not been initialized should report unhealthy
         since it cannot perform any operations.
         """
-        service = DLQTrackingService(dlq_tracking_config)
+        service = ServiceDlqTracking(dlq_tracking_config)
         # Not initialized
 
         result = await service.health_check()
@@ -561,7 +561,7 @@ class TestDLQTrackingServiceHealth:
         After shutdown, the service should report unhealthy since
         the connection pool is closed.
         """
-        service = DLQTrackingService(dlq_tracking_config)
+        service = ServiceDlqTracking(dlq_tracking_config)
         await service.initialize()
 
         # Verify healthy before shutdown
@@ -580,7 +580,7 @@ class TestDLQTrackingServiceHealth:
 # =============================================================================
 
 
-class TestDLQTrackingServiceLifecycle:
+class TestServiceDlqTrackingLifecycle:
     """Tests for service lifecycle management."""
 
     @pytest.mark.asyncio
@@ -593,7 +593,7 @@ class TestDLQTrackingServiceLifecycle:
         The service should handle repeated shutdown calls gracefully
         without raising errors.
         """
-        service = DLQTrackingService(dlq_tracking_config)
+        service = ServiceDlqTracking(dlq_tracking_config)
         await service.initialize()
 
         # First shutdown
@@ -614,7 +614,7 @@ class TestDLQTrackingServiceLifecycle:
         dlq_tracking_config: ModelDlqTrackingConfig,
     ) -> None:
         """Test that shutdown properly closes the connection pool."""
-        service = DLQTrackingService(dlq_tracking_config)
+        service = ServiceDlqTracking(dlq_tracking_config)
         await service.initialize()
 
         # Verify pool exists

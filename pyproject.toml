@@ -28,6 +28,10 @@ python = "^3.12"
 # NOTE: Tags are acceptable for development; consider commit SHAs for production deployments.
 #
 # omnibase-core v0.6.2: Latest release with updated models and enums.
+# Note (OMN-1257): In omnibase_core v0.6.2+, ModelONEXContainer.service_registry
+# returns None when enable_service_registry=False was passed to constructor or
+# ServiceRegistry module is unavailable. container_wiring.py now raises
+# ServiceRegistryUnavailableError with actionable hints instead of cryptic AttributeError.
 omnibase-core = "^0.6.2"
 omnibase-spi = "^0.4.1"
 
