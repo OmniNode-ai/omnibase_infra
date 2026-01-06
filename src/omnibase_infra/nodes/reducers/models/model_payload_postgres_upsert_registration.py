@@ -18,7 +18,7 @@ from typing import Literal
 from uuid import UUID
 
 from omnibase_core.models.reducer.payloads import ModelIntentPayloadBase
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializeAsAny
 
 
 class ModelPayloadPostgresUpsertRegistration(ModelIntentPayloadBase):
@@ -27,14 +27,14 @@ class ModelPayloadPostgresUpsertRegistration(ModelIntentPayloadBase):
     This payload extends ModelIntentPayloadBase to satisfy ProtocolIntentPayload,
     enabling use with ModelIntent for reducer output.
 
-    Uses serialize_as_any=True semantics: the `record` field is typed as BaseModel
-    to accept any registration record type, but serialization preserves subclass
-    fields via Pydantic's serialize_as_any configuration.
+    Uses SerializeAsAny wrapper: the `record` field accepts any BaseModel subclass,
+    and serialization preserves all subclass fields via Pydantic's SerializeAsAny
+    type wrapper.
 
     Attributes:
         intent_type: Discriminator literal for intent routing. Always "postgres.upsert_registration".
         correlation_id: Correlation ID for distributed tracing.
-        record: The registration record to upsert (typed as BaseModel for flexibility).
+        record: The registration record to upsert (uses SerializeAsAny for subclass preservation).
     """
 
     intent_type: Literal["postgres.upsert_registration"] = Field(
@@ -47,7 +47,7 @@ class ModelPayloadPostgresUpsertRegistration(ModelIntentPayloadBase):
         description="Correlation ID for distributed tracing.",
     )
 
-    record: BaseModel = Field(
+    record: SerializeAsAny[BaseModel] = Field(
         ...,
         description="Registration record to upsert. Accepts any BaseModel subclass.",
     )
