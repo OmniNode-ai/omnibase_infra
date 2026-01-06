@@ -55,9 +55,8 @@ import pytest
 from tests.integration.handlers.conftest import CONSUL_AVAILABLE
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
     from omnibase_infra.handlers import ConsulHandler
+    from omnibase_infra.models.types import JsonValue
 
 # =============================================================================
 # Test Configuration and Skip Conditions

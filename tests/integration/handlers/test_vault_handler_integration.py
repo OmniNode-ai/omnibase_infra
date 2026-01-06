@@ -63,9 +63,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
     from omnibase_infra.handlers import VaultHandler
+    from omnibase_infra.models.types import JsonValue
 
 # Import fixture availability flags from conftest
 from tests.integration.handlers.conftest import VAULT_AVAILABLE, VAULT_REACHABLE

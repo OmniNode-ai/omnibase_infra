@@ -91,12 +91,19 @@ Security Design (Intentional Fail-Open Architecture):
     - routing_coverage_validator.py: Routing gap detection (module docstring)
 """
 
+import warnings
+
 # Validators re-exported from omnibase_core.validation in 0.6.2+
 # (moved from omnibase_core.validation.circular_import_validator to validator_circular_import)
 # ServiceContractValidator replaced ProtocolContractValidator in 0.6.2
+# NOTE: Internal names (prefixed with _) are used so __getattr__ can intercept deprecated names
 from omnibase_core.validation import (
-    CircularImportValidator,
-    ServiceContractValidator,
+    CircularImportValidator as _CircularImportValidator,
+)
+from omnibase_core.validation import (
+    ServiceContractValidator as _ServiceContractValidator,
+)
+from omnibase_core.validation import (
     validate_all,
     validate_architecture,
     validate_contracts,
@@ -105,11 +112,40 @@ from omnibase_core.validation import (
 )
 
 # ONEX-compliant naming: Validator<Name> prefix pattern
-ValidatorCircularImport = CircularImportValidator
-ValidatorServiceContract = ServiceContractValidator
+ValidatorCircularImport = _CircularImportValidator
+ValidatorServiceContract = _ServiceContractValidator
 
-# Backward-compatible aliases (deprecated - use Validator* names)
-ProtocolContractValidator = ServiceContractValidator
+
+def __getattr__(name: str) -> type:
+    """Emit deprecation warnings for deprecated validator aliases.
+
+    This function intercepts access to deprecated names and emits a
+    DeprecationWarning before returning the appropriate class.
+
+    Deprecated aliases:
+        - ProtocolContractValidator -> ValidatorServiceContract
+        - CircularImportValidator -> ValidatorCircularImport
+    """
+    deprecated_aliases: dict[str, tuple[str, type]] = {
+        "ProtocolContractValidator": (
+            "ValidatorServiceContract",
+            _ServiceContractValidator,
+        ),
+        "CircularImportValidator": (
+            "ValidatorCircularImport",
+            _CircularImportValidator,
+        ),
+    }
+    if name in deprecated_aliases:
+        new_name, obj = deprecated_aliases[name]
+        warnings.warn(
+            f"{name} is deprecated, use {new_name} instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return obj
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (

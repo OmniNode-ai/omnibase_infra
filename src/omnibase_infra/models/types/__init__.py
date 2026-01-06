@@ -20,16 +20,12 @@ from __future__ import annotations
 
 # JSON type definitions
 # JsonValue and JsonPrimitive represent JSON-compatible values.
-# Using typing.Any as the underlying type because JSON values can be any of:
-# str, int, float, bool, None, dict, list (recursive structure).
-# This matches the original omnibase_core.types definition and is required
-# for compatibility with existing code that uses .get(), indexing, .items(), etc.
-# Note: ONEX normally discourages Any, but this is a semantic type alias for
-# "any JSON-compatible value" which is fundamentally dynamic.
-from typing import Any
+# Using `object` as the underlying type per ONEX guidelines (Any is forbidden).
+# This provides type safety while allowing JSON's dynamic nature.
+# Note: `object` is the ONEX-preferred alternative to Any for generic payloads.
 
-JsonPrimitive = Any  # Represents atomic JSON values (str, int, float, bool, None)
-JsonValue = Any  # Represents any valid JSON value (primitive, dict, or list)
+JsonPrimitive = object  # Represents atomic JSON values (str, int, float, bool, None)
+JsonValue = object  # Represents any valid JSON value (primitive, dict, or list)
 
 __all__ = [
     "JsonPrimitive",
