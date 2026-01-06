@@ -13,12 +13,30 @@ Exports:
     ServiceTimeoutEmitter: Emitter for timeout events with markers
     ServiceTimeoutScanner: Scanner for querying overdue registration entities
 
-Note:
-    ServiceHealth is NOT exported here to avoid circular imports with runtime.
-    Import directly: from omnibase_infra.services.service_health import ServiceHealth
+ServiceHealth Import Guide
+--------------------------
+ServiceHealth and related constants are NOT exported from this __init__.py
+to avoid circular imports with the runtime module.
+
+**Direct import (REQUIRED)**::
+
+    from omnibase_infra.services.service_health import ServiceHealth
+    from omnibase_infra.services.service_health import DEFAULT_HTTP_HOST
+    from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
+
+**MIGRATION NOTE (OMN-529)**:
+    If you are importing from ``omnibase_infra.runtime``, update your imports:
+
+    Before (deprecated - will be removed in v0.5.0)::
+
+        from omnibase_infra.runtime import ServiceHealth  # DeprecationWarning
+
+    After (recommended)::
+
+        from omnibase_infra.services.service_health import ServiceHealth
 
 Related Tickets:
-    - OMN-529: ONEX Compliance container injection
+    - OMN-529: ONEX Compliance container injection (ServiceHealth moved here)
     - OMN-932 (C2): Durable Timeout Handling
 """
 

@@ -875,9 +875,16 @@ class RuntimeHostProcess:
         """Get handler registry (pre-resolved, container, or singleton).
 
         Resolution order:
-            1. If handler_registry was provided to __init__, uses it
+            1. If handler_registry was provided to __init__, uses it (cached)
             2. If container was provided and has ProtocolBindingRegistry, resolves from container
             3. Falls back to singleton via get_handler_registry()
+
+        Caching Behavior:
+            The resolved registry is cached after the first successful resolution.
+            Subsequent calls return the cached instance without re-resolving from
+            the container or re-fetching the singleton. This ensures consistent
+            registry usage throughout the runtime's lifecycle and avoids redundant
+            resolution operations.
 
         Returns:
             ProtocolBindingRegistry instance.

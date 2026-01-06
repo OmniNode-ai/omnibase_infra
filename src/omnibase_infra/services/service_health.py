@@ -6,6 +6,13 @@ This module provides a minimal HTTP service for exposing health check endpoints.
 It is designed to run alongside the ONEX runtime kernel to satisfy Docker/K8s
 health check requirements.
 
+.. important::
+    **Canonical Location (OMN-529)**
+
+    This is the canonical location for ServiceHealth as of v0.4.x.
+    Imports from ``omnibase_infra.runtime`` are deprecated and will be
+    removed in v0.5.0.
+
 The service exposes:
     - GET /health: Returns runtime health status as JSON
     - GET /ready: Returns readiness status as JSON (alias for /health)
@@ -13,7 +20,12 @@ The service exposes:
 Configuration:
     ONEX_HTTP_PORT: Port to listen on (default: 8085)
 
-Example:
+Exports:
+    ServiceHealth: HTTP health check service class
+    DEFAULT_HTTP_HOST: Default bind address ("0.0.0.0")
+    DEFAULT_HTTP_PORT: Default HTTP port (8085)
+
+Example (Direct Runtime Injection):
     >>> from omnibase_infra.services.service_health import ServiceHealth
     >>> from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
     >>>
@@ -24,9 +36,36 @@ Example:
     ...     # Server is now running
     ...     await server.stop()
 
+Example (Container-Based Injection - ONEX-Compliant):
+    >>> from omnibase_infra.services.service_health import ServiceHealth
+    >>> from omnibase_core.container import ModelONEXContainer
+    >>>
+    >>> async def main():
+    ...     container = ModelONEXContainer()
+    ...     # Wire infrastructure services to register RuntimeHostProcess
+    ...     await wire_infrastructure_services(container)
+    ...     # Create ServiceHealth using async factory method
+    ...     server = await ServiceHealth.create_from_container(container)
+    ...     await server.start()
+    ...     # Server is now running with container-resolved runtime
+    ...     await server.stop()
+
+Migration from omnibase_infra.runtime (BREAKING CHANGE in v0.5.0):
+    If you are migrating from the old import location, update your imports::
+
+        # Before (deprecated - emits DeprecationWarning, removed in v0.5.0)
+        from omnibase_infra.runtime import ServiceHealth, DEFAULT_HTTP_PORT
+
+        # After (recommended - canonical location)
+        from omnibase_infra.services.service_health import ServiceHealth, DEFAULT_HTTP_PORT
+
 Note:
     This service uses aiohttp for async HTTP handling, which is already a
     dependency of omnibase_infra for other infrastructure operations.
+
+See Also:
+    - :class:`ServiceHealth` for initialization modes and container integration
+    - :meth:`ServiceHealth.create_from_container` for ONEX-compliant factory method
 """
 
 from __future__ import annotations
@@ -102,28 +141,60 @@ class ServiceHealth:
     liveness/readiness probes. It delegates health status to the RuntimeHostProcess.
 
     Attributes:
-        runtime: The RuntimeHostProcess instance to query for health status
-        port: Port to listen on
-        host: Host to bind to
-        version: Runtime version string to include in health response
-        container: Optional ONEX dependency injection container
+        runtime: The RuntimeHostProcess instance to query for health status.
+            Accessed via the :attr:`runtime` property, which raises
+            :exc:`ProtocolConfigurationError` if not available.
+        port: Port to listen on (default: 8085 or ONEX_HTTP_PORT env var).
+        host: Host to bind to (default: 0.0.0.0 for container networking).
+        version: Runtime version string to include in health response.
+        container: Optional ONEX dependency injection container for ONEX compliance.
 
     Container Integration (OMN-529):
-        ServiceHealth supports two initialization modes:
+        ServiceHealth supports two initialization modes to accommodate both
+        legacy code and ONEX-compliant container-based dependency injection:
 
-        1. Direct runtime injection (original pattern):
-            >>> server = ServiceHealth(runtime=runtime, port=8085)
+        **Mode 1: Direct Runtime Injection (Legacy/Simple)**
 
-        2. Container-based injection (ONEX-compliant):
-            >>> server = ServiceHealth(container=container, runtime=runtime)
-            >>> # Or use the async factory method:
-            >>> server = await ServiceHealth.create_from_container(container)
+        For simple use cases or legacy code, provide the runtime directly::
+
+            runtime = RuntimeHostProcess()
+            server = ServiceHealth(runtime=runtime, port=8085)
+            await server.start()
+
+        **Mode 2: Container-Based Injection (ONEX-Compliant)**
+
+        For ONEX-compliant applications using dependency injection, use the
+        async factory method which resolves RuntimeHostProcess from the container::
+
+            container = ModelONEXContainer()
+            await wire_infrastructure_services(container)
+            server = await ServiceHealth.create_from_container(container)
+            await server.start()
+
+        **Mode 3: Hybrid (Container + Explicit Runtime)**
+
+        When you have a container but want to provide a specific runtime instance::
+
+            server = ServiceHealth(container=container, runtime=my_runtime)
+
+        This is useful for testing or when the container's registered runtime
+        differs from the one you want to use for health checks.
+
+    Validation:
+        The constructor requires at least one of ``container`` or ``runtime`` to be
+        provided. If neither is provided, a :exc:`ProtocolConfigurationError` is raised.
+        When only ``container`` is provided, use :meth:`create_from_container` to
+        resolve the runtime, or access the :attr:`runtime` property will raise.
 
     Example:
         >>> server = ServiceHealth(runtime=runtime, port=8085)
         >>> await server.start()
         >>> # curl http://localhost:8085/health
         >>> await server.stop()
+
+    See Also:
+        - :meth:`create_from_container`: Async factory for container-based initialization
+        - :attr:`runtime`: Property that returns RuntimeHostProcess or raises if unavailable
     """
 
     def __init__(
@@ -136,25 +207,76 @@ class ServiceHealth:
     ) -> None:
         """Initialize the health server.
 
+        This constructor validates that at least one dependency source is provided,
+        but it does NOT resolve the runtime from the container. For container-based
+        initialization with automatic runtime resolution, use the async factory
+        method :meth:`create_from_container` instead.
+
         Args:
-            container: Optional ONEX dependency injection container.
+            container: Optional ONEX dependency injection container. When provided
+                alone (without runtime), the :attr:`runtime` property will raise
+                :exc:`ProtocolConfigurationError` until runtime is resolved via
+                :meth:`create_from_container` or set explicitly.
             runtime: RuntimeHostProcess instance to delegate health checks to.
-                     Required if container is not provided.
+                When provided, this instance is used directly for health checks.
             port: Port to listen on. If None, uses ONEX_HTTP_PORT env var or 8085.
             host: Host to bind to (default: 0.0.0.0 for container networking).
             version: Runtime version string for health response.
 
         Raises:
-            ProtocolConfigurationError: If neither container nor runtime is provided.
+            ProtocolConfigurationError: If neither ``container`` nor ``runtime``
+                is provided. At least one must be specified. The error includes
+                :class:`ModelInfraErrorContext` with transport type and operation.
+
+        Note:
+            **Why both container and runtime can be provided:**
+
+            The constructor accepts both parameters to support multiple use cases:
+
+            1. **Runtime-only** (``runtime=runtime``): Legacy/simple initialization.
+               The runtime is used directly without container involvement.
+
+            2. **Container-only** (``container=container``): ONEX-compliant pattern.
+               Use :meth:`create_from_container` to resolve runtime from container.
+               Direct ``__init__`` with container-only stores the container but
+               leaves runtime unresolved (accessing :attr:`runtime` will raise).
+
+            3. **Both provided** (``container=container, runtime=runtime``): Hybrid
+               pattern for testing or custom runtime selection. The container is
+               stored for ONEX compliance, but the explicit runtime is used.
+
+            **Container-only initialization pattern:**
+
+            If you only have a container, use the async factory method::
+
+                # Correct: Use factory method to resolve runtime
+                server = await ServiceHealth.create_from_container(container)
+
+                # Incorrect: Runtime will be None, accessing it will raise
+                server = ServiceHealth(container=container)  # Works, but...
+                server.runtime  # Raises ProtocolConfigurationError!
+
+        Warning:
+            When initializing with ``container`` only (no ``runtime``), the
+            :attr:`runtime` property will raise :exc:`ProtocolConfigurationError`
+            when accessed. This is by design - synchronous ``__init__`` cannot
+            perform async service resolution. Use :meth:`create_from_container`
+            for automatic runtime resolution from the container's service registry.
         """
         # Store container for ONEX compliance (OMN-529)
         self._container: ModelONEXContainer | None = container
 
         # Validate that at least one dependency source is provided
         if container is None and runtime is None:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="initialize_health_server",
+                target_name="ServiceHealth",
+            )
             raise ProtocolConfigurationError(
                 "ServiceHealth requires either 'container' or 'runtime' to be provided. "
-                "Use ServiceHealth(runtime=runtime) or ServiceHealth(container=container)."
+                "Use ServiceHealth(runtime=runtime) or ServiceHealth(container=container).",
+                context=context,
             )
 
         self._runtime: RuntimeHostProcess | None = runtime
@@ -209,19 +331,53 @@ class ServiceHealth:
 
     @property
     def runtime(self) -> RuntimeHostProcess:
-        """Return the RuntimeHostProcess instance.
+        """Return the RuntimeHostProcess instance used for health checks.
+
+        This property provides access to the RuntimeHostProcess that handles
+        the actual health status determination. The runtime must be provided
+        either directly via ``__init__`` or resolved from a container via
+        :meth:`create_from_container`.
 
         Returns:
-            The RuntimeHostProcess used for health checks.
+            The RuntimeHostProcess instance used to determine health status.
 
         Raises:
-            ProtocolConfigurationError: If runtime was not provided during initialization
-                and has not been resolved from the container.
+            ProtocolConfigurationError: If runtime is not available. This occurs when:
+
+                1. ``ServiceHealth(container=container)`` was called without runtime
+                   and :meth:`create_from_container` was not used.
+
+                2. The runtime was never provided or resolved.
+
+                The error includes :class:`ModelInfraErrorContext` with transport
+                type (HTTP), operation name, and target for debugging.
+
+        Example:
+            >>> # Runtime provided directly - property works
+            >>> server = ServiceHealth(runtime=runtime)
+            >>> server.runtime  # Returns RuntimeHostProcess
+
+            >>> # Container-only without factory - property raises
+            >>> server = ServiceHealth(container=container)
+            >>> server.runtime  # Raises ProtocolConfigurationError!
+
+            >>> # Container with factory - property works
+            >>> server = await ServiceHealth.create_from_container(container)
+            >>> server.runtime  # Returns RuntimeHostProcess
+
+        See Also:
+            :meth:`create_from_container`: Factory method that resolves runtime
         """
         if self._runtime is None:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="get_runtime",
+                target_name="ServiceHealth.runtime",
+            )
             raise ProtocolConfigurationError(
                 "RuntimeHostProcess not available. "
-                "Either provide runtime during __init__ or use create_from_container()."
+                "Either provide runtime during __init__ or use create_from_container().",
+                context=context,
             )
         return self._runtime
 

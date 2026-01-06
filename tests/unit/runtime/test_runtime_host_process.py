@@ -2767,6 +2767,109 @@ class TestRuntimeHostProcessContainerInjection:
         # Verify container service_registry was NOT called
         mock_service_registry.resolve_service.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_handler_registry_caches_container_resolution(self) -> None:
+        """Handler registry should cache result after container resolution.
+
+        When _get_handler_registry() resolves from container, the result should
+        be cached so subsequent calls do not re-resolve from container.
+        """
+        from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+
+        # Create mock registry
+        mock_registry = ProtocolBindingRegistry()
+
+        # Create mock service_registry that returns our mock registry
+        mock_service_registry = AsyncMock()
+        mock_service_registry.resolve_service = AsyncMock(return_value=mock_registry)
+
+        # Create mock container with service_registry
+        mock_container = AsyncMock()
+        mock_container.service_registry = mock_service_registry
+
+        # Create process with container
+        process = RuntimeHostProcess(container=mock_container)
+
+        # First call - should resolve from container
+        resolved_registry_1 = await process._get_handler_registry()
+
+        # Second call - should return cached result
+        resolved_registry_2 = await process._get_handler_registry()
+
+        # Third call - should still return cached result
+        resolved_registry_3 = await process._get_handler_registry()
+
+        # All calls should return the same registry instance
+        assert resolved_registry_1 is mock_registry
+        assert resolved_registry_2 is mock_registry
+        assert resolved_registry_3 is mock_registry
+
+        # resolve_service should only be called once (first call)
+        assert mock_service_registry.resolve_service.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_handler_registry_caches_singleton_fallback(self) -> None:
+        """Handler registry should cache singleton fallback result.
+
+        When _get_handler_registry() falls back to singleton, the result should
+        be cached so subsequent calls return the same instance without re-calling
+        get_handler_registry().
+        """
+        # Create process without container (will use singleton fallback)
+        process = RuntimeHostProcess()
+
+        # First call - should get singleton
+        resolved_registry_1 = await process._get_handler_registry()
+
+        # Second call - should return cached result
+        resolved_registry_2 = await process._get_handler_registry()
+
+        # Third call - should still return cached result
+        resolved_registry_3 = await process._get_handler_registry()
+
+        # All calls should return the same registry instance
+        assert resolved_registry_1 is resolved_registry_2
+        assert resolved_registry_2 is resolved_registry_3
+
+        # Verify the internal cache is set
+        assert process._handler_registry is resolved_registry_1
+
+    @pytest.mark.asyncio
+    async def test_handler_registry_caches_after_container_failure(self) -> None:
+        """Handler registry should cache singleton result after container resolution fails.
+
+        When container resolution fails and we fall back to singleton, that singleton
+        should be cached for subsequent calls.
+        """
+        # Create mock service_registry that raises an error
+        mock_service_registry = AsyncMock()
+        mock_service_registry.resolve_service = AsyncMock(
+            side_effect=Exception("Resolution failed")
+        )
+
+        # Create mock container with failing service_registry
+        mock_container = AsyncMock()
+        mock_container.service_registry = mock_service_registry
+
+        # Create process with container
+        process = RuntimeHostProcess(container=mock_container)
+
+        # First call - should fall back to singleton and cache it
+        resolved_registry_1 = await process._get_handler_registry()
+
+        # Second call - should return cached singleton
+        resolved_registry_2 = await process._get_handler_registry()
+
+        # Third call - should still return cached singleton
+        resolved_registry_3 = await process._get_handler_registry()
+
+        # All calls should return the same registry instance
+        assert resolved_registry_1 is resolved_registry_2
+        assert resolved_registry_2 is resolved_registry_3
+
+        # resolve_service should only be called once (first call before fallback)
+        assert mock_service_registry.resolve_service.call_count == 1
+
 
 # =============================================================================
 # Module Exports

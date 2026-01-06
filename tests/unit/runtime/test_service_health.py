@@ -18,7 +18,7 @@ import pytest
 from aiohttp import web
 from omnibase_core.container import ModelONEXContainer
 
-from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
 from omnibase_infra.services.service_health import (
     DEFAULT_HTTP_HOST,
     DEFAULT_HTTP_PORT,
@@ -381,12 +381,33 @@ class TestServiceHealthContainerInjection:
 
         assert server.container is None
 
-    def test_raises_value_error_when_no_container_or_runtime(self) -> None:
-        """Should raise ValueError when neither container nor runtime provided."""
-        with pytest.raises(ValueError) as exc_info:
+    def test_raises_protocol_configuration_error_when_no_container_or_runtime(
+        self,
+    ) -> None:
+        """Should raise ProtocolConfigurationError when neither container nor runtime provided.
+
+        Per ONEX error conventions, missing required initialization parameters
+        is a configuration error, not a generic ValueError.
+        """
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             ServiceHealth()
 
         assert "requires either 'container' or 'runtime'" in str(exc_info.value)
+
+    def test_runtime_property_raises_when_not_available(self) -> None:
+        """Should raise ProtocolConfigurationError when accessing runtime property without runtime.
+
+        When ServiceHealth is initialized with only container (no runtime), accessing
+        the runtime property should raise ProtocolConfigurationError since the runtime
+        was never resolved from the container.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        server = ServiceHealth(container=mock_container)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            _ = server.runtime
+
+        assert "RuntimeHostProcess not available" in str(exc_info.value)
 
     def test_instantiation_with_container_only(self) -> None:
         """Test that ServiceHealth can be instantiated with container parameter only.
@@ -503,3 +524,228 @@ class TestServiceHealthContainerInjection:
         assert response_text is not None
         assert '"status":"healthy"' in response_text
         assert '"version":"container-1.0.0"' in response_text
+
+    def test_container_storage_with_container_only_init(self) -> None:
+        """Container should be properly stored and accessible with container-only init.
+
+        When ServiceHealth is initialized with only a container (no runtime),
+        the container should be stored and accessible via the property.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+
+        server = ServiceHealth(container=mock_container)
+
+        # Verify container is stored
+        assert server.container is mock_container
+        # Verify runtime is None (not resolved yet)
+        assert server._runtime is None
+        # Verify other defaults are set correctly
+        assert server._port == DEFAULT_HTTP_PORT
+        assert server._host == DEFAULT_HTTP_HOST
+        assert server._version == "unknown"
+        assert not server.is_running
+
+    @pytest.mark.asyncio
+    async def test_create_from_container_factory_resolution_failure(self) -> None:
+        """Factory method should propagate exception when container resolution fails.
+
+        When container.service_registry.resolve_service() raises an exception,
+        the create_from_container() factory should propagate that exception
+        rather than silently failing.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_container.service_registry = MagicMock()
+        mock_container.service_registry.resolve_service = AsyncMock(
+            side_effect=Exception("Service resolution failed")
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            await ServiceHealth.create_from_container(container=mock_container)
+
+        assert "Service resolution failed" in str(exc_info.value)
+
+    def test_container_accessible_after_initialization_with_runtime(self) -> None:
+        """Container should be accessible even when runtime is also provided.
+
+        When both container and runtime are provided, the container should
+        still be stored and accessible via the property.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_runtime = MagicMock()
+
+        server = ServiceHealth(container=mock_container, runtime=mock_runtime)
+
+        # Both should be accessible
+        assert server.container is mock_container
+        assert server._runtime is mock_runtime
+        # runtime property should return the runtime (not raise)
+        assert server.runtime is mock_runtime
+
+    @pytest.mark.asyncio
+    async def test_container_based_server_with_resolved_runtime(self) -> None:
+        """ServiceHealth should work correctly with container-resolved runtime.
+
+        This tests the full container injection flow where runtime is resolved
+        from the container via the factory method.
+        """
+        mock_runtime = MagicMock()
+        mock_runtime.health_check = AsyncMock(
+            return_value={
+                "healthy": True,
+                "degraded": False,
+                "is_running": True,
+            }
+        )
+
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_container.service_registry = MagicMock()
+        mock_container.service_registry.resolve_service = AsyncMock(
+            return_value=mock_runtime
+        )
+
+        # Use factory to create server
+        server = await ServiceHealth.create_from_container(
+            container=mock_container,
+            version="resolved-1.0.0",
+        )
+
+        # Verify both container and runtime are accessible
+        assert server.container is mock_container
+        assert server.runtime is mock_runtime
+
+        # Verify health endpoint works
+        mock_request = MagicMock(spec=web.Request)
+        response = await server._handle_health(mock_request)
+
+        assert response.status == 200
+        response_text = response.text
+        assert response_text is not None
+        assert '"status":"healthy"' in response_text
+        assert '"version":"resolved-1.0.0"' in response_text
+
+
+class TestServiceHealthDeprecation:
+    """Tests for ServiceHealth deprecation warnings (OMN-529).
+
+    These tests verify that importing ServiceHealth and related constants
+    from omnibase_infra.runtime emits proper deprecation warnings and still
+    works until removal in v0.5.0.
+
+    BREAKING CHANGE Timeline:
+        - v0.4.x: Deprecated with DeprecationWarning (current)
+        - v0.5.0: Will be removed entirely
+    """
+
+    def test_deprecated_import_servicehealth_emits_warning(self) -> None:
+        """Importing ServiceHealth from runtime should emit DeprecationWarning.
+
+        Old path (deprecated): from omnibase_infra.runtime import ServiceHealth
+        New path (canonical): from omnibase_infra.services.service_health import ServiceHealth
+        """
+        import warnings
+
+        import omnibase_infra.runtime as runtime_module
+
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+
+            # Access the deprecated symbol through __getattr__
+            deprecated_service_health = runtime_module.ServiceHealth
+
+            # Verify warning was emitted
+            assert len(caught_warnings) == 1
+            warning = caught_warnings[0]
+            assert issubclass(warning.category, DeprecationWarning)
+            assert "'ServiceHealth' is deprecated" in str(warning.message)
+            assert "omnibase_infra.runtime" in str(warning.message)
+            assert "omnibase_infra.services.service_health" in str(warning.message)
+            assert "v0.5.0" in str(warning.message)
+
+            # Verify the symbol still works (backward compatibility)
+            assert deprecated_service_health is ServiceHealth
+
+    def test_deprecated_import_default_http_port_emits_warning(self) -> None:
+        """Importing DEFAULT_HTTP_PORT from runtime should emit DeprecationWarning."""
+        import warnings
+
+        import omnibase_infra.runtime as runtime_module
+
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+
+            deprecated_port = runtime_module.DEFAULT_HTTP_PORT
+
+            assert len(caught_warnings) == 1
+            warning = caught_warnings[0]
+            assert issubclass(warning.category, DeprecationWarning)
+            assert "'DEFAULT_HTTP_PORT' is deprecated" in str(warning.message)
+            assert "v0.5.0" in str(warning.message)
+
+            # Verify the value is correct (backward compatibility)
+            assert deprecated_port == DEFAULT_HTTP_PORT
+
+    def test_deprecated_import_default_http_host_emits_warning(self) -> None:
+        """Importing DEFAULT_HTTP_HOST from runtime should emit DeprecationWarning."""
+        import warnings
+
+        import omnibase_infra.runtime as runtime_module
+
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+
+            deprecated_host = runtime_module.DEFAULT_HTTP_HOST
+
+            assert len(caught_warnings) == 1
+            warning = caught_warnings[0]
+            assert issubclass(warning.category, DeprecationWarning)
+            assert "'DEFAULT_HTTP_HOST' is deprecated" in str(warning.message)
+            assert "v0.5.0" in str(warning.message)
+
+            # Verify the value is correct (backward compatibility)
+            assert deprecated_host == DEFAULT_HTTP_HOST
+
+    def test_direct_import_from_services_no_warning(self) -> None:
+        """Importing from canonical location should NOT emit warnings.
+
+        New path (canonical): from omnibase_infra.services.service_health import ServiceHealth
+        """
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+
+            # Direct import from canonical location
+            from omnibase_infra.services.service_health import (
+                DEFAULT_HTTP_HOST as CANONICAL_HOST,
+            )
+            from omnibase_infra.services.service_health import (
+                DEFAULT_HTTP_PORT as CANONICAL_PORT,
+            )
+            from omnibase_infra.services.service_health import (
+                ServiceHealth as CanonicalServiceHealth,
+            )
+
+            # Filter out any unrelated warnings
+            service_health_warnings = [
+                w
+                for w in caught_warnings
+                if "ServiceHealth" in str(w.message) or "DEFAULT_HTTP" in str(w.message)
+            ]
+
+            # Should be no deprecation warnings for canonical import
+            assert len(service_health_warnings) == 0
+
+            # Verify values are correct
+            assert CANONICAL_PORT == 8085
+            assert CANONICAL_HOST == "0.0.0.0"  # noqa: S104
+            assert CanonicalServiceHealth is ServiceHealth
+
+    def test_nonexistent_attribute_raises_attribute_error(self) -> None:
+        """Accessing non-existent attribute on runtime module should raise AttributeError."""
+        import omnibase_infra.runtime as runtime_module
+
+        with pytest.raises(AttributeError) as exc_info:
+            _ = runtime_module.NonExistentSymbol
+
+        assert "NonExistentSymbol" in str(exc_info.value)
+        assert "omnibase_infra.runtime" in str(exc_info.value)

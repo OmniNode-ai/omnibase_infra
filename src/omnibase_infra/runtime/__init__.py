@@ -8,7 +8,7 @@ including three SINGLE SOURCE OF TRUTH registries and the runtime execution host
 Core Registries
 ---------------
 - **PolicyRegistry**: SINGLE SOURCE OF TRUTH for policy plugin registration
-    - Container-based dependency injection support (preferred) or singleton accessor (legacy)
+    - Container-based DI support (preferred) or singleton accessor (legacy)
     - Thread-safe registration by (policy_id, policy_type, version)
     - Enforces synchronous-by-default execution (async must be explicit)
     - Supports orchestrator and reducer policy types with version resolution
@@ -29,14 +29,34 @@ Runtime Components
 ------------------
 - **Kernel**: Contract-driven bootstrap entrypoint for the ONEX runtime
 - **RuntimeHostProcess**: Infrastructure-specific runtime host process implementation
-- **ServiceHealth**: HTTP health check endpoint for container orchestration
 - **Wiring functions**: Register handlers and event buses with registries
 - **Envelope validation**: Validate event envelope structures
+
+BREAKING CHANGE (v0.5.0)
+------------------------
+The following symbols have been moved and will be removed from this module in v0.5.0:
+
+- **ServiceHealth**: Moved to ``omnibase_infra.services.service_health``
+- **DEFAULT_HTTP_HOST**: Moved to ``omnibase_infra.services.service_health``
+- **DEFAULT_HTTP_PORT**: Moved to ``omnibase_infra.services.service_health``
+
+Migration:
+    Before (deprecated)::
+
+        from omnibase_infra.runtime import ServiceHealth, DEFAULT_HTTP_PORT
+
+    After (recommended)::
+
+        from omnibase_infra.services.service_health import (
+            ServiceHealth, DEFAULT_HTTP_PORT
+        )
+
+The deprecated imports will emit DeprecationWarning until removal in v0.5.0.
 
 Message Dispatch Engine
 -----------------------
 - **MessageDispatchEngine**: Runtime dispatch engine for message routing
-- **DispatcherRegistry**: Thread-safe registry for message dispatchers with freeze pattern
+- **DispatcherRegistry**: Thread-safe registry for dispatchers with freeze pattern
 - **ProtocolMessageDispatcher**: Protocol for category-based message dispatchers
 
 Chain-Aware Dispatch (OMN-951)
@@ -156,9 +176,28 @@ from omnibase_infra.runtime.chain_aware_dispatch import (
 # isort: on
 
 # =============================================================================
-# DEPRECATION ALIASES (OMN-529)
-# These symbols were moved to omnibase_infra.services.service_health
-# Re-exported here for backward compatibility - will be removed in v0.5.0
+# DEPRECATION ALIASES (OMN-529) - BREAKING CHANGE in v0.5.0
+# =============================================================================
+#
+# The following symbols have been MOVED to a new location:
+#
+#   OLD LOCATION (deprecated):
+#       from omnibase_infra.runtime import ServiceHealth
+#       from omnibase_infra.runtime import DEFAULT_HTTP_HOST
+#       from omnibase_infra.runtime import DEFAULT_HTTP_PORT
+#
+#   NEW LOCATION (use this):
+#       from omnibase_infra.services.service_health import ServiceHealth
+#       from omnibase_infra.services.service_health import DEFAULT_HTTP_HOST
+#       from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
+#
+# REMOVAL TIMELINE:
+#   - v0.4.x: Deprecated with warning (current behavior)
+#   - v0.5.0: Removed entirely (breaking change)
+#
+# MIGRATION ACTION REQUIRED:
+#   Update all imports before upgrading to v0.5.0.
+#
 # =============================================================================
 _DEPRECATED_SYMBOLS: dict[str, str] = {
     "ServiceHealth": "omnibase_infra.services.service_health",
@@ -217,8 +256,13 @@ def __getattr__(name: str) -> object:
 
 
 __all__: list[str] = [
-    # Deprecated re-exports (OMN-529) - will be removed in v0.5.0
-    # Import from omnibase_infra.services.service_health instead
+    # ==========================================================================
+    # DEPRECATED EXPORTS (OMN-529) - BREAKING CHANGE in v0.5.0
+    # These will be REMOVED in v0.5.0. Migrate imports to:
+    #   from omnibase_infra.services.service_health import ServiceHealth
+    #   from omnibase_infra.services.service_health import DEFAULT_HTTP_HOST
+    #   from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
+    # ==========================================================================
     "DEFAULT_HTTP_HOST",
     "DEFAULT_HTTP_PORT",
     "ServiceHealth",
