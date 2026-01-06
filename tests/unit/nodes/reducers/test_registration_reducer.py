@@ -2796,8 +2796,8 @@ class TestDeterminismProperty:
 
             # For postgres intents, exclude timestamp fields from comparison
             if intent1.intent_type == "postgres.upsert_registration":
-                payload1 = dict(intent1.payload.data)
-                payload2 = dict(intent2.payload.data)
+                payload1 = dict(intent1.payload.model_dump())
+                payload2 = dict(intent2.payload.model_dump())
                 record1 = dict(payload1.get("record", {}))
                 record2 = dict(payload2.get("record", {}))
                 # Remove timestamps before comparison
@@ -2808,7 +2808,7 @@ class TestDeterminismProperty:
                 payload2["record"] = record2
                 assert payload1 == payload2
             else:
-                assert intent1.payload.data == intent2.payload.data
+                assert intent1.payload.model_dump() == intent2.payload.model_dump()
 
         # Items processed must match
         assert output1.items_processed == output2.items_processed
@@ -2952,8 +2952,8 @@ class TestDeterminismProperty:
 
             # For postgres intents, exclude timestamp fields from comparison
             if intent1.intent_type == "postgres.upsert_registration":
-                payload1 = dict(intent1.payload.data)
-                payload2 = dict(intent2.payload.data)
+                payload1 = dict(intent1.payload.model_dump())
+                payload2 = dict(intent2.payload.model_dump())
                 record1 = dict(payload1.get("record", {}))
                 record2 = dict(payload2.get("record", {}))
                 # Remove timestamps before comparison
@@ -2966,7 +2966,7 @@ class TestDeterminismProperty:
                     f"Payload mismatch for intent_type={intent1.intent_type}"
                 )
             else:
-                assert intent1.payload.data == intent2.payload.data, (
+                assert intent1.payload.model_dump() == intent2.payload.model_dump(), (
                     f"Payload mismatch for intent_type={intent1.intent_type}"
                 )
 
@@ -3017,8 +3017,8 @@ class TestDeterminismProperty:
 
                 # For postgres intents, exclude timestamp fields from comparison
                 if intent1.intent_type == "postgres.upsert_registration":
-                    payload1 = dict(intent1.payload.data)
-                    payload2 = dict(intent2.payload.data)
+                    payload1 = dict(intent1.payload.model_dump())
+                    payload2 = dict(intent2.payload.model_dump())
                     record1 = dict(payload1.get("record", {}))
                     record2 = dict(payload2.get("record", {}))
                     # Remove timestamps before comparison
@@ -3031,9 +3031,9 @@ class TestDeterminismProperty:
                         f"Intent {j} payload mismatch between reducer 1 and {i}"
                     )
                 else:
-                    assert intent1.payload.data == intent2.payload.data, (
-                        f"Intent {j} payload mismatch between reducer 1 and {i}"
-                    )
+                    assert (
+                        intent1.payload.model_dump() == intent2.payload.model_dump()
+                    ), f"Intent {j} payload mismatch between reducer 1 and {i}"
 
     @given(
         reset_attempts=st.integers(min_value=1, max_value=5),
@@ -4270,7 +4270,7 @@ class TestEventReplayDeterminism:
 
                 # For postgres intents, exclude timestamp fields
                 if intent.intent_type == "postgres.upsert_registration":
-                    payload_copy = dict(intent.payload.data)
+                    payload_copy = dict(intent.payload.model_dump())
                     if "record" in payload_copy:
                         record_copy = dict(payload_copy["record"])
                         record_copy.pop("registered_at", None)
@@ -4278,7 +4278,7 @@ class TestEventReplayDeterminism:
                         payload_copy["record"] = record_copy
                     fingerprint["payload"] = payload_copy
                 else:
-                    fingerprint["payload"] = dict(intent.payload.data)
+                    fingerprint["payload"] = dict(intent.payload.model_dump())
 
                 fingerprints.append(fingerprint)
             return fingerprints
