@@ -225,8 +225,7 @@ class ServiceRegistryUnavailableError(ContainerValidationError):
             "and that the ServiceRegistry module is installed."
         )
         actual_hint = hint or default_hint
-        if hint:
-            full_message = f"{full_message}\nHint: {hint}"
+        full_message = f"{full_message}\nHint: {actual_hint}"
         extra_context["hint"] = actual_hint
 
         super().__init__(

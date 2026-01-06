@@ -135,6 +135,10 @@ def _analyze_attribute_error(error_str: str) -> tuple[str, str]:
     Extracts the missing attribute name from the error string and provides
     a user-friendly hint for common container API issues.
 
+    Note: service_registry missing/None cases are handled by _validate_service_registry()
+    which is called before operations. This function handles other AttributeErrors
+    (e.g., missing register_instance method).
+
     Args:
         error_str: The string representation of the AttributeError.
 
@@ -143,12 +147,7 @@ def _analyze_attribute_error(error_str: str) -> tuple[str, str]:
     """
     missing_attr = error_str.split("'")[-2] if "'" in error_str else "unknown"
 
-    if "service_registry" in error_str:
-        hint = (
-            "Container missing 'service_registry' attribute. "
-            "Expected ModelONEXContainer from omnibase_core."
-        )
-    elif "register_instance" in error_str:
+    if "register_instance" in error_str:
         hint = (
             "Container.service_registry missing 'register_instance' method. "
             "Check omnibase_core version compatibility (requires v0.5.6 or later)."
