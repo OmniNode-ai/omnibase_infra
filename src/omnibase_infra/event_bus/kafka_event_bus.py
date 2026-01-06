@@ -180,7 +180,7 @@ from aiokafka.errors import KafkaError
 from omnibase_infra.enums import EnumInfraTransportType
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_core.types import JsonType
 
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -721,7 +721,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     servers=sanitized_servers,
                 ) from e
 
-    async def initialize(self, config: dict[str, JsonValue]) -> None:
+    async def initialize(self, config: dict[str, JsonType]) -> None:
         """Initialize the event bus with configuration.
 
         Protocol method for compatibility with ProtocolEventBus.
@@ -1464,7 +1464,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     async def broadcast_to_environment(
         self,
         command: str,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         target_environment: str | None = None,
     ) -> None:
         """Broadcast command to environment.
@@ -1493,7 +1493,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     async def send_to_group(
         self,
         command: str,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         target_group: str,
     ) -> None:
         """Send command to specific group.
@@ -1518,7 +1518,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
 
         await self.publish(topic, None, value, headers)
 
-    async def health_check(self) -> dict[str, JsonValue]:
+    async def health_check(self) -> dict[str, JsonType]:
         """Check event bus health.
 
         Protocol method for ProtocolEventBus compatibility.

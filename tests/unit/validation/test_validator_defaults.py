@@ -21,7 +21,7 @@ from omnibase_infra.validation.infra_validators import (
     INFRA_PATTERNS_STRICT,
     INFRA_SRC_PATH,
     INFRA_UNIONS_STRICT,
-    CircularImportValidationResult,
+    ModelImportValidationResult,
     ValidationResult,
     validate_infra_all,
     validate_infra_architecture,
@@ -61,7 +61,7 @@ class TestInfraValidatorConstants:
         - 626 (2025-12-25): OMN-952 + OMN-949 + OMN-1006 merge (~6 unions from combined changes)
 
         Threshold: 630 (buffer above ~626 baseline for codebase growth)
-        Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
+        Target: Reduce to <200 through ongoing dict[str, object] -> JsonType migration.
         """
         assert INFRA_MAX_UNIONS == 630, (
             "INFRA_MAX_UNIONS should be 630 (OMN-952 + OMN-949 + OMN-1006 merge)"
@@ -524,7 +524,7 @@ class TestUnionCountRegressionGuard:
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
         Threshold: INFRA_MAX_UNIONS (555) - buffer above baseline.
-        Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
+        Target: Reduce to <200 through ongoing dict[str, object] -> JsonType migration.
         """
         result = validate_infra_union_usage()
 
@@ -789,7 +789,7 @@ class TestDefaultsConsistency:
         """Verify directory defaults are consistent across entry points."""
         # All validators using INFRA_SRC_PATH should default to same value
         validators: list[
-            Callable[..., ValidationResult | CircularImportValidationResult]
+            Callable[..., ValidationResult | ModelImportValidationResult]
         ] = [
             validate_infra_architecture,
             validate_infra_patterns,

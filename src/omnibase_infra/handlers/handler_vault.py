@@ -14,7 +14,7 @@ Security Features:
 All secret operations MUST use proper authentication and authorization.
 
 Return Type:
-    All operations return ModelHandlerOutput[dict[str, JsonValue]] per OMN-975.
+    All operations return ModelHandlerOutput[dict[str, JsonType]] per OMN-975.
     Uses ModelHandlerOutput.for_compute() since handlers return synchronous results
     rather than emitting events to the event bus.
 """
@@ -32,7 +32,7 @@ from uuid import UUID, uuid4
 from omnibase_core.models.dispatch import ModelHandlerOutput
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_core.types import JsonType
 
 T = TypeVar("T")
 
@@ -148,7 +148,7 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         """Return maximum queue size (public API for tests)."""
         return self._max_queue_size
 
-    async def initialize(self, config: dict[str, JsonValue]) -> None:
+    async def initialize(self, config: dict[str, JsonType]) -> None:
         """Initialize Vault client with configuration.
 
         Args:
@@ -466,8 +466,8 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         logger.info("VaultHandler shutdown complete")
 
     async def execute(
-        self, envelope: dict[str, JsonValue]
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+        self, envelope: dict[str, JsonType]
+    ) -> ModelHandlerOutput[dict[str, JsonType]]:
         """Execute Vault operation from envelope.
 
         Args:
@@ -478,7 +478,7 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 - envelope_id: Optional envelope ID for causality tracking
 
         Returns:
-            ModelHandlerOutput[dict[str, JsonValue]] with status, payload, and correlation_id
+            ModelHandlerOutput[dict[str, JsonType]] with status, payload, and correlation_id
             per OMN-975 handler output standardization.
 
         Raises:
@@ -847,10 +847,10 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def _read_secret(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[dict[str, JsonType]]:
         """Read secret from Vault KV v2 secrets engine.
 
         Args:
@@ -884,10 +884,10 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def read_func() -> dict[str, JsonValue]:
+        def read_func() -> dict[str, JsonType]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, JsonValue] = (
+            result: dict[str, JsonType] = (
                 self._client.secrets.kv.v2.read_secret_version(
                     path=path,
                     mount_point=mount_point,
@@ -923,10 +923,10 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def _write_secret(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[dict[str, JsonType]]:
         """Write secret to Vault KV v2 secrets engine.
 
         Args:
@@ -975,10 +975,10 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def write_func() -> dict[str, JsonValue]:
+        def write_func() -> dict[str, JsonType]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, JsonValue] = (
+            result: dict[str, JsonType] = (
                 self._client.secrets.kv.v2.create_or_update_secret(
                     path=path,
                     secret=data,
@@ -1013,10 +1013,10 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def _delete_secret(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[dict[str, JsonType]]:
         """Delete secret from Vault KV v2 secrets engine.
 
         Args:
@@ -1078,10 +1078,10 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def _list_secrets(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[dict[str, JsonType]]:
         """List secrets at path in Vault KV v2 secrets engine.
 
         Args:
@@ -1115,10 +1115,10 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def list_func() -> dict[str, JsonValue]:
+        def list_func() -> dict[str, JsonType]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, JsonValue] = self._client.secrets.kv.v2.list_secrets(
+            result: dict[str, JsonType] = self._client.secrets.kv.v2.list_secrets(
                 path=path,
                 mount_point=mount_point,
             )
@@ -1148,7 +1148,7 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def renew_token(
         self, correlation_id: UUID | None = None
-    ) -> dict[str, JsonValue]:
+    ) -> dict[str, JsonType]:
         """Renew Vault authentication token.
 
         Token TTL Extraction Logic:
@@ -1184,10 +1184,10 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 context=ctx,
             )
 
-        def renew_func() -> dict[str, JsonValue]:
+        def renew_func() -> dict[str, JsonType]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, JsonValue] = self._client.auth.token.renew_self()
+            result: dict[str, JsonType] = self._client.auth.token.renew_self()
             return result
 
         try:
@@ -1276,7 +1276,7 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         self,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[dict[str, JsonType]]:
         """Execute token renewal operation from envelope.
 
         Args:
@@ -1306,7 +1306,7 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             },
         )
 
-    def describe(self) -> dict[str, JsonValue]:
+    def describe(self) -> dict[str, JsonType]:
         """Return handler metadata and capabilities.
 
         Returns:

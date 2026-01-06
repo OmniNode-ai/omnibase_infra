@@ -14,7 +14,7 @@ Usage Pattern:
     - VaultHandler: ModelHandlerResponse[ModelVaultHandlerPayload]
     - HttpRestHandler: ModelHandlerResponse[ModelHttpHandlerPayload]
 
-This replaces raw dict[str, JsonValue] responses with strongly-typed models,
+This replaces raw dict[str, JsonType] responses with strongly-typed models,
 ensuring consistent access patterns (response.status, response.payload, etc.)
 across all handlers.
 """

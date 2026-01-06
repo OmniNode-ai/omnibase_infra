@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_core.types import JsonType
 
 import consul
 from omnibase_core.models.dispatch import ModelHandlerOutput
@@ -202,7 +202,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         """Return maximum queue size (public API for tests)."""
         return self._max_queue_size
 
-    async def initialize(self, config: dict[str, JsonValue]) -> None:
+    async def initialize(self, config: dict[str, JsonType]) -> None:
         """Initialize Consul client with configuration.
 
         Args:
@@ -459,7 +459,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         )
 
     async def execute(
-        self, envelope: dict[str, JsonValue]
+        self, envelope: dict[str, JsonType]
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Execute Consul operation from envelope.
 
@@ -769,7 +769,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def _kv_get(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
@@ -805,7 +805,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             raise RuntimeError("Client not initialized")
 
         def get_func() -> tuple[
-            int, list[dict[str, JsonValue]] | dict[str, JsonValue] | None
+            int, list[dict[str, JsonType]] | dict[str, JsonType] | None
         ]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
@@ -879,7 +879,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def _kv_put(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
@@ -952,7 +952,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def _register_service(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
@@ -1000,7 +1000,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             tags_list = [str(t) for t in tags]
 
         check = payload.get("check")
-        check_dict: dict[str, JsonValue] | None = (
+        check_dict: dict[str, JsonType] | None = (
             check if isinstance(check, dict) else None
         )
 
@@ -1035,7 +1035,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def _deregister_service(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, JsonType],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
@@ -1084,7 +1084,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         )
         return self._build_response(typed_payload, correlation_id, input_envelope_id)
 
-    def describe(self) -> dict[str, JsonValue]:
+    def describe(self) -> dict[str, JsonType]:
         """Return handler metadata and capabilities.
 
         Returns:

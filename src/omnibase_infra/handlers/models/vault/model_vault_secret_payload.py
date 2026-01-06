@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from omnibase_core.types import JsonValue
+from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
@@ -48,10 +48,10 @@ class ModelVaultSecretPayload(BaseModel):
         default=EnumVaultOperationType.READ_SECRET,
         description="Operation type discriminator",
     )
-    data: dict[str, JsonValue] = Field(
+    data: dict[str, JsonType] = Field(
         description="Secret data as key-value dictionary",
     )
-    metadata: dict[str, JsonValue] = Field(
+    metadata: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Vault metadata about the secret",
     )

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from omnibase_core.types import JsonValue
+from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.handlers.models.http.enum_http_operation_type import (
@@ -59,7 +59,7 @@ class ModelHttpPostPayload(BaseModel):
         default_factory=dict,
         description="Response headers as key-value dictionary",
     )
-    body: JsonValue = Field(
+    body: JsonType = Field(
         description="Response body",
     )
 

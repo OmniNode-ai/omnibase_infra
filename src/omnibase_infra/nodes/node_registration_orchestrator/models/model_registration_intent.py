@@ -7,7 +7,7 @@ payload models into discriminated unions. These aliases enable type narrowing
 based on the `kind` field in intent models.
 
 Design Note:
-    Rather than using a loose dict[str, JsonValue] for payloads, we use
+    Rather than using a loose dict[str, JsonType] for payloads, we use
     typed payload models that match the exact structure expected by each
     infrastructure adapter. This follows the ONEX principle of "no Any types"
     and provides compile-time validation of intent payloads.

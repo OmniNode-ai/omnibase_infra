@@ -6,8 +6,8 @@ This module provides the typed payload model for PostgreSQL registration intents
 
 Design Note:
     This model uses strongly-typed ModelNodeCapabilities and ModelNodeMetadata
-    instead of generic dict[str, JsonValue] to adhere to ONEX "no Any types"
-    principle. The JsonValue type alias contains list[Any] and dict[str, Any]
+    instead of generic dict[str, JsonType] to adhere to ONEX "no Any types"
+    principle. The JsonType type alias contains list[Any] and dict[str, Any]
     internally, which violates strict typing requirements.
 
     Using the same typed models as ModelNodeIntrospectionEvent ensures:

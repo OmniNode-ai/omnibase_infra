@@ -380,9 +380,9 @@ class TestA5NormalizedDeterminism:
             assert intent1.intent_type == intent2.intent_type
             assert intent1.target == intent2.target
 
-            # Normalize and compare payloads
-            payload1 = _normalize_dict(intent1.payload)
-            payload2 = _normalize_dict(intent2.payload)
+            # Normalize and compare payloads (payload is a wrapper with .data dict)
+            payload1 = _normalize_dict(intent1.payload.data)
+            payload2 = _normalize_dict(intent2.payload.data)
             assert payload1 == payload2, (
                 f"Payload mismatch for {intent1.intent_type}:\n"
                 f"Run 1: {json.dumps(payload1, indent=2, default=str)}\n"
@@ -562,9 +562,9 @@ class TestA6Observability:
         # Act
         result = registration_reducer.reduce(ModelRegistrationState(), event)
 
-        # Assert - Check each intent payload
+        # Assert - Check each intent payload (payload is wrapper with .data dict)
         for intent in result.intents:
-            payload_text = json.dumps(intent.payload, default=str)
+            payload_text = json.dumps(intent.payload.data, default=str)
             violations = check_log_for_secrets(payload_text)
 
             assert len(violations) == 0, (
@@ -753,9 +753,9 @@ class TestA6Observability:
                 f"SECRET LEAKED in log message: {secret[:20]}..."
             )
 
-        # Assert 3: No secrets in intent payloads
+        # Assert 3: No secrets in intent payloads (payload is wrapper with .data dict)
         for intent in result.intents:
-            payload_text = json.dumps(intent.payload, default=str)
+            payload_text = json.dumps(intent.payload.data, default=str)
             for secret in secret_values:
                 assert secret not in payload_text, (
                     f"SECRET LEAKED in intent payload ({intent.intent_type}): "

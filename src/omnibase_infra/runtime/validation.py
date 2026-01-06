@@ -41,7 +41,7 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_core.types import JsonType
 
 # Topic name pattern: alphanumeric, underscores, and hyphens only
 # This matches Kafka/Redpanda topic naming conventions
@@ -56,7 +56,7 @@ MAX_GRACE_PERIOD_SECONDS = 300
 
 
 def validate_runtime_config(
-    config: JsonValue,
+    config: JsonType,
     contract_path: Path | None = None,
 ) -> list[str]:
     """Validate runtime configuration against contract schema.
@@ -212,7 +212,7 @@ def validate_runtime_config(
 def load_and_validate_config(
     config_path: Path,
     contract_path: Path | None = None,
-) -> JsonValue:
+) -> JsonType:
     """Load and validate runtime configuration from a YAML file.
 
     Loads a YAML configuration file and performs contract validation.

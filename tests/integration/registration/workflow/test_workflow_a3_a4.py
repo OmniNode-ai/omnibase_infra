@@ -234,15 +234,17 @@ class TestA3OrchestratedDualRegistration:
             assert intent.payload is not None
 
             if intent.intent_type == "consul.register":
-                # Consul intent should have service registration payload
-                assert "correlation_id" in intent.payload
-                assert "service_id" in intent.payload
-                assert "service_name" in intent.payload
+                # Consul intent should have service registration payload in data
+                payload_data = intent.payload.data
+                assert "correlation_id" in payload_data
+                assert "service_id" in payload_data
+                assert "service_name" in payload_data
 
             elif intent.intent_type == "postgres.upsert_registration":
-                # PostgreSQL intent should have record payload
-                assert "correlation_id" in intent.payload
-                assert "record" in intent.payload
+                # PostgreSQL intent should have record payload in data
+                payload_data = intent.payload.data
+                assert "correlation_id" in payload_data
+                assert "record" in payload_data
 
     async def test_a3_multiple_node_types(
         self,
@@ -666,8 +668,9 @@ class TestOrchestratedWorkflowIntegration:
 
         # Verify correlation ID in intents
         for intent in reducer_output.intents:
-            # Payload is a dict with correlation_id - use equality check
-            payload_correlation_id = intent.payload.get("correlation_id")
+            # Payload is a wrapper with data dict containing correlation_id
+            payload_data = intent.payload.data
+            payload_correlation_id = payload_data.get("correlation_id")
             # Handle both UUID and string representations
             if isinstance(payload_correlation_id, str):
                 assert payload_correlation_id == str(expected_correlation_id), (

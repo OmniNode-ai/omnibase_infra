@@ -36,11 +36,10 @@ import yaml
 # Module-level logger for validation operations
 logger = logging.getLogger(__name__)
 from omnibase_core.validation import (
-    CircularImportValidationResult,
     CircularImportValidator,
     ModelContractValidationResult,
+    ModelImportValidationResult,
     ModelValidationResult,
-    ProtocolContractValidator,
     validate_architecture,
     validate_contracts,
     validate_patterns,
@@ -377,7 +376,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 626 (2025-12-25): OMN-952 + OMN-949 + OMN-1006 merge (~6 unions from combined changes)
 #
 # Threshold: 630 (buffer above ~626 baseline for codebase growth)
-# Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
+# Target: Reduce to <200 through dict[str, object] -> JsonType migration.
 INFRA_MAX_UNIONS = 630
 
 # Maximum allowed architecture violations in infrastructure code.
@@ -667,13 +666,9 @@ def validate_infra_contract_deep(
     """
     Perform deep contract validation for ONEX compliance.
 
-    Uses ProtocolContractValidator for comprehensive contract checking
-    suitable for autonomous code generation.
-
-    Performance Note:
-        This function uses a cached singleton ProtocolContractValidator instance
-        for optimal performance in hot paths. The validator is stateless after
-        initialization, making it safe to reuse across calls.
+    .. deprecated::
+        ProtocolContractValidator was removed in omnibase_core 0.6.2.
+        This function is temporarily stubbed. See OMN-1021 for migration status.
 
     Args:
         contract_path: Path to the contract YAML file.
@@ -681,26 +676,15 @@ def validate_infra_contract_deep(
 
     Returns:
         ModelContractValidationResult with validation status, score, and any errors.
+
+    Raises:
+        NotImplementedError: Always raised until migration is complete.
     """
-    return _contract_validator.validate_contract_file(
-        Path(contract_path), contract_type
+    raise NotImplementedError(
+        "validate_infra_contract_deep is temporarily unavailable. "
+        "ProtocolContractValidator was removed in omnibase_core 0.6.2. "
+        "See OMN-1021 for migration status."
     )
-
-
-# ==============================================================================
-# Module-Level Singleton Validators
-# ==============================================================================
-#
-# Performance Optimization: The ProtocolContractValidator is stateless after
-# initialization. Creating new instances on every validation call is wasteful
-# in hot paths. Instead, we use a module-level singleton.
-#
-# Why a singleton is safe here:
-# - The validator has no mutable state after initialization
-# - All validation state is created fresh for each file
-# - No per-validation state is stored in the validator instance
-
-_contract_validator = ProtocolContractValidator()
 
 
 def validate_infra_union_usage(
@@ -746,7 +730,7 @@ def validate_infra_union_usage(
 
 def validate_infra_circular_imports(
     directory: str | Path = INFRA_SRC_PATH,
-) -> CircularImportValidationResult:
+) -> ModelImportValidationResult:
     """
     Check for circular imports in infrastructure code.
 
@@ -757,7 +741,7 @@ def validate_infra_circular_imports(
         directory: Directory to check. Defaults to infrastructure source.
 
     Returns:
-        CircularImportValidationResult with detailed import validation results.
+        ModelImportValidationResult with detailed import validation results.
         Use result.has_circular_imports to check for issues.
     """
     validator = CircularImportValidator(source_path=Path(directory))
@@ -767,7 +751,7 @@ def validate_infra_circular_imports(
 def validate_infra_all(
     directory: str | Path = INFRA_SRC_PATH,
     nodes_directory: str | Path = INFRA_NODES_PATH,
-) -> dict[str, ValidationResult | CircularImportValidationResult]:
+) -> dict[str, ValidationResult | ModelImportValidationResult]:
     """
     Run all validations on infrastructure code.
 
@@ -785,7 +769,7 @@ def validate_infra_all(
     Returns:
         Dictionary mapping validator name to result.
     """
-    results: dict[str, ValidationResult | CircularImportValidationResult] = {}
+    results: dict[str, ValidationResult | ModelImportValidationResult] = {}
 
     # HIGH priority validators
     results["architecture"] = validate_infra_architecture(directory)
@@ -800,7 +784,7 @@ def validate_infra_all(
 
 
 def get_validation_summary(
-    results: dict[str, ValidationResult | CircularImportValidationResult],
+    results: dict[str, ValidationResult | ModelImportValidationResult],
 ) -> dict[str, int | list[str]]:
     """
     Generate a summary of validation results.
@@ -830,7 +814,7 @@ def get_validation_summary(
         if not isinstance(name, str):
             continue
         # Use duck typing to determine result API:
-        # - CircularImportValidationResult has 'has_circular_imports' attribute
+        # - ModelImportValidationResult has 'has_circular_imports' attribute
         # - ModelValidationResult has 'is_valid' attribute
         # This follows ONEX convention of duck typing over isinstance for protocols.
         if hasattr(result, "has_circular_imports"):
@@ -861,7 +845,7 @@ __all__ = [
     "ValidationResult",
     "ExemptionPattern",
     # Re-exported types from omnibase_core.validation
-    "CircularImportValidationResult",
+    "ModelImportValidationResult",
     # Constants
     "INFRA_SRC_PATH",
     "INFRA_NODES_PATH",

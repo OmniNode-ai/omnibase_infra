@@ -29,11 +29,11 @@ Adding New Handlers:
         class MyCustomHandler:
             '''Handler for custom protocol operations.'''
 
-            async def initialize(self, config: dict[str, JsonValue]) -> None:
+            async def initialize(self, config: dict[str, JsonType]) -> None:
                 '''Initialize handler with configuration.'''
                 self._config = config
 
-            async def execute(self, envelope: dict[str, JsonValue]) -> dict[str, JsonValue]:
+            async def execute(self, envelope: dict[str, JsonType]) -> dict[str, JsonType]:
                 '''Execute operation from envelope and return response.'''
                 # Handle the envelope and return response dict
                 return {"success": True, "data": ...}
@@ -127,7 +127,7 @@ from omnibase_infra.runtime.handler_registry import (
 
 if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
-    from omnibase_core.types import JsonValue
+    from omnibase_core.types import JsonType
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
 logger = logging.getLogger(__name__)
@@ -251,7 +251,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
 
 
 def wire_handlers_from_contract(
-    contract_config: JsonValue,
+    contract_config: JsonType,
 ) -> dict[str, list[str]]:
     """Register handlers and event buses based on contract configuration.
 

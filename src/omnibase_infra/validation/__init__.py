@@ -92,15 +92,16 @@ Security Design (Intentional Fail-Open Architecture):
 """
 
 from omnibase_core.validation import (
+    CircularImportValidator,
     validate_all,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage,
 )
-from omnibase_core.validation.circular_import_validator import CircularImportValidator
-from omnibase_core.validation.contract_validator import ProtocolContractValidator
 
+# NOTE: ProtocolContractValidator was removed in omnibase_core 0.6.2
+# See infra_validators.py for the stub implementation
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
     ChainPropagationError,
@@ -186,7 +187,6 @@ __all__ = [
     "validate_patterns",
     "validate_union_usage",
     "validate_all",
-    "ProtocolContractValidator",
     "CircularImportValidator",
     # Infrastructure-specific wrappers
     "INFRA_MAX_UNIONS",

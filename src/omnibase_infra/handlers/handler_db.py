@@ -68,7 +68,7 @@ from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import EnumInfraTransportType
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_core.types import JsonType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -131,7 +131,7 @@ class DbHandler(MixinEnvelopeExtraction):
         """Return EnumHandlerType.DATABASE."""
         return EnumHandlerType.DATABASE
 
-    async def initialize(self, config: dict[str, JsonValue]) -> None:
+    async def initialize(self, config: dict[str, JsonType]) -> None:
         """Initialize database connection pool with fixed size (5).
 
         Args:
@@ -243,7 +243,7 @@ class DbHandler(MixinEnvelopeExtraction):
         logger.info("DbHandler shutdown complete")
 
     async def execute(
-        self, envelope: dict[str, JsonValue]
+        self, envelope: dict[str, JsonType]
     ) -> ModelHandlerOutput[ModelDbQueryResponse]:
         """Execute database operation (db.query or db.execute) from envelope.
 
@@ -366,7 +366,7 @@ class DbHandler(MixinEnvelopeExtraction):
         return re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", dsn)
 
     def _extract_parameters(
-        self, payload: dict[str, JsonValue], operation: str, correlation_id: UUID
+        self, payload: dict[str, JsonType], operation: str, correlation_id: UUID
     ) -> list[object]:
         """Extract and validate parameters from payload."""
         params_raw = payload.get("parameters")
@@ -529,7 +529,7 @@ class DbHandler(MixinEnvelopeExtraction):
 
     def _build_response(
         self,
-        rows: list[dict[str, JsonValue]],
+        rows: list[dict[str, JsonType]],
         row_count: int,
         correlation_id: UUID,
         input_envelope_id: UUID,

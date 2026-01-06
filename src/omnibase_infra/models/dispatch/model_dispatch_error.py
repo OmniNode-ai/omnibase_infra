@@ -61,7 +61,7 @@ from __future__ import annotations
 from omnibase_core.enums.enum_core_error_code import (
     EnumCoreErrorCode,
 )
-from omnibase_core.types import JsonValue
+from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Sentinel values for "not set" state
@@ -118,7 +118,7 @@ class ModelDispatchError(BaseModel):
         default=None,
         description="Typed error code from EnumCoreErrorCode. None if not set.",
     )
-    error_details: dict[str, JsonValue] = Field(
+    error_details: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Additional JSON-serializable error context.",
     )
@@ -177,7 +177,7 @@ class ModelDispatchError(BaseModel):
         cls,
         exception: Exception,
         code: EnumCoreErrorCode | None = None,
-        details: dict[str, JsonValue] | None = None,
+        details: dict[str, JsonType] | None = None,
     ) -> ModelDispatchError:
         """Create error info from an exception.
 
@@ -213,7 +213,7 @@ class ModelDispatchError(BaseModel):
         cls,
         message: str,
         code: EnumCoreErrorCode | None = None,
-        details: dict[str, JsonValue] | None = None,
+        details: dict[str, JsonType] | None = None,
     ) -> ModelDispatchError:
         """Create error info from a message string.
 
@@ -244,7 +244,7 @@ class ModelDispatchError(BaseModel):
             error_details=details or {},
         )
 
-    def with_details(self, **kwargs: JsonValue) -> ModelDispatchError:
+    def with_details(self, **kwargs: JsonType) -> ModelDispatchError:
         """Create a copy with additional error details.
 
         Merges the provided kwargs with existing error_details.
@@ -266,7 +266,7 @@ class ModelDispatchError(BaseModel):
         merged_details = {**self.error_details, **kwargs}
         return self.model_copy(update={"error_details": merged_details})
 
-    def to_dict(self) -> dict[str, str | int | dict[str, JsonValue]]:
+    def to_dict(self) -> dict[str, str | int | dict[str, JsonType]]:
         """Convert to dictionary with only set fields.
 
         Returns a dictionary containing only fields that are set (non-sentinel),
@@ -289,7 +289,7 @@ class ModelDispatchError(BaseModel):
 
         .. versionadded:: 0.7.0
         """
-        result: dict[str, str | int | dict[str, JsonValue]] = {}
+        result: dict[str, str | int | dict[str, JsonType]] = {}
         if self.has_message:
             result["error_message"] = self.error_message
         if self.has_code:
