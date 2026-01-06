@@ -66,7 +66,6 @@ Note:
 from __future__ import annotations
 
 import logging
-from typing import Any
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -226,7 +225,7 @@ class DbHandler(MixinEnvelopeExtraction):
         """
         return EnumHandlerTypeCategory.EFFECT
 
-    async def initialize(self, config: dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize database connection pool with fixed size (5).
 
         Args:
@@ -338,7 +337,7 @@ class DbHandler(MixinEnvelopeExtraction):
         logger.info("DbHandler shutdown complete")
 
     async def execute(
-        self, envelope: dict[str, Any]
+        self, envelope: dict[str, object]
     ) -> ModelHandlerOutput[ModelDbQueryResponse]:
         """Execute database operation (db.query or db.execute) from envelope.
 
@@ -465,7 +464,7 @@ class DbHandler(MixinEnvelopeExtraction):
         return sanitize_dsn(dsn)
 
     def _extract_parameters(
-        self, payload: dict[str, Any], operation: str, correlation_id: UUID
+        self, payload: dict[str, object], operation: str, correlation_id: UUID
     ) -> list[object]:
         """Extract and validate parameters from payload."""
         params_raw = payload.get("parameters")
@@ -633,7 +632,7 @@ class DbHandler(MixinEnvelopeExtraction):
 
     def _build_response(
         self,
-        rows: list[dict[str, Any]],
+        rows: list[dict[str, object]],
         row_count: int,
         correlation_id: UUID,
         input_envelope_id: UUID,

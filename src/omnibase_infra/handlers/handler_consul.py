@@ -23,7 +23,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, NamedTuple, TypeVar
 from uuid import UUID, uuid4
 
 import consul
@@ -319,7 +319,7 @@ class ConsulHandler(
             error_message=f"Unexpected error: {type(error).__name__}",
         )
 
-    async def initialize(self, config: dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize Consul client with configuration.
 
         Args:
@@ -440,7 +440,7 @@ class ConsulHandler(
         )
 
     async def execute(
-        self, envelope: dict[str, Any]
+        self, envelope: dict[str, object]
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Execute Consul operation from envelope.
 
@@ -690,7 +690,7 @@ class ConsulHandler(
 
             return None, new_state
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         """Return handler metadata and capabilities for introspection.
 
         This method exposes the handler's type classification along with its

@@ -25,9 +25,7 @@ from omnibase_infra.errors import (
 )
 
 if TYPE_CHECKING:
-    from typing import Any
-
-    # NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
+    # NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
     # recursion issues with recursive type aliases.
     from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
@@ -98,7 +96,7 @@ PAYLOAD_REQUIRED_OPERATIONS: frozenset[str] = frozenset(
 
 
 def validate_envelope(
-    envelope: dict[str, Any],
+    envelope: dict[str, object],
     registry: ProtocolBindingRegistry,
 ) -> None:
     """Validate envelope before dispatch to handler.

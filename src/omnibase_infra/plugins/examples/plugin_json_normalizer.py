@@ -4,12 +4,12 @@ This plugin recursively sorts JSON object keys to enable consistent comparison
 and hashing. It demonstrates a pure, deterministic compute plugin with no side effects.
 """
 
-from typing import Any, TypedDict, cast
+from typing import TypedDict, cast
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
 
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
+# NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
 # recursion issues with recursive type aliases.
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (
@@ -26,7 +26,7 @@ class JsonNormalizerInput(TypedDict, total=False):
         json: The JSON-compatible data structure to normalize.
     """
 
-    json: Any
+    json: object
 
 
 class JsonNormalizerOutput(TypedDict):
@@ -36,7 +36,7 @@ class JsonNormalizerOutput(TypedDict):
         normalized: The normalized JSON structure with recursively sorted keys.
     """
 
-    normalized: Any
+    normalized: object
 
 
 class PluginJsonNormalizer(PluginComputeBase):
@@ -78,8 +78,8 @@ class PluginJsonNormalizer(PluginComputeBase):
             effective_max_depth = self.MAX_RECURSION_DEPTH
 
         try:
-            json_data = cast(Any, input_data.get("json", {}))
-            normalized: Any = self._sort_keys_recursively(
+            json_data = cast(object, input_data.get("json", {}))
+            normalized: object = self._sort_keys_recursively(
                 json_data, _max_depth=effective_max_depth
             )
             output: JsonNormalizerOutput = {"normalized": normalized}
@@ -106,8 +106,8 @@ class PluginJsonNormalizer(PluginComputeBase):
             ) from e
 
     def _sort_keys_recursively(
-        self, obj: Any, _depth: int = 0, _max_depth: int | None = None
-    ) -> Any:
+        self, obj: object, _depth: int = 0, _max_depth: int | None = None
+    ) -> object:
         """Recursively sort dictionary keys with optimized performance and depth protection.
 
         Performance Characteristics:
@@ -239,7 +239,7 @@ class PluginJsonNormalizer(PluginComputeBase):
         """Type guard to check if value is JSON-compatible."""
         return isinstance(value, dict | list | str | int | float | bool | type(None))
 
-    def _validate_json_structure(self, obj: Any, _depth: int = 0) -> None:
+    def _validate_json_structure(self, obj: object, _depth: int = 0) -> None:
         """Recursively validate JSON structure for non-JSON-compatible types.
 
         Args:

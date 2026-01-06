@@ -15,7 +15,7 @@ Provides:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 import consul
@@ -33,8 +33,8 @@ from omnibase_infra.handlers.models.consul import ModelConsulHandlerConfig
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
 
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
+# ONEX: Using object instead of Any per ADR guidelines. JsonType from omnibase_core
+# has Pydantic 2.x recursion issues with recursive type aliases.
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ class MixinConsulInitialization:
 
     def _validate_consul_config(
         self,
-        config: dict[str, Any],
+        config: dict[str, object],
         correlation_id: UUID,
     ) -> ModelConsulHandlerConfig:
         """Validate and parse Consul configuration.

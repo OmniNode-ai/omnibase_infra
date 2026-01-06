@@ -292,3 +292,4 @@ metadata:
   related_tickets:
     - "OMN-889"
     - "OMN-1104"
+    - "OMN-1263" # Pre-existing test failures and integration test coverage tracking

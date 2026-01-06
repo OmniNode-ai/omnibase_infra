@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
@@ -197,7 +196,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         """
         return EnumInfraTransportType.HTTP
 
-    async def initialize(self, config: dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize HTTP client with configurable timeout and size limits.
 
         Args:
@@ -301,8 +300,8 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         logger.info("HttpRestHandler shutdown complete")
 
     async def execute(
-        self, envelope: dict[str, Any]
-    ) -> ModelHandlerOutput[dict[str, Any]]:
+        self, envelope: dict[str, object]
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Execute HTTP operation (http.get or http.post) from envelope.
 
         Args:
@@ -405,7 +404,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
 
     def _extract_headers(
         self,
-        payload: dict[str, Any],
+        payload: dict[str, object],
         operation: str,
         url: str,
         correlation_id: UUID,
@@ -638,7 +637,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         headers: dict[str, str],
         body_content: ModelHttpBodyContent,
         ctx: ModelInfraErrorContext,
-    ) -> tuple[bytes | str | None, dict[str, Any] | None, dict[str, str]]:
+    ) -> tuple[bytes | str | None, dict[str, object] | None, dict[str, str]]:
         """Prepare request content for HTTP request.
 
         Handles body serialization for POST requests, managing pre-serialized bytes
@@ -660,7 +659,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             ProtocolConfigurationError: If body is not JSON-serializable.
         """
         request_content: bytes | str | None = None
-        request_json: dict[str, Any] | None = None
+        request_json: dict[str, object] | None = None
         request_headers = dict(headers)  # Copy to avoid mutating caller's headers
 
         body = body_content.body
@@ -702,7 +701,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         correlation_id: UUID,
         input_envelope_id: UUID,
         pre_serialized: bytes | None = None,
-    ) -> ModelHandlerOutput[dict[str, Any]]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Execute HTTP request with pre-read response size validation.
 
         Uses httpx streaming to validate Content-Length header BEFORE reading
@@ -791,7 +790,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         body_bytes: bytes,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, Any]]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Build response envelope from httpx Response and pre-read body bytes.
 
         This method is used with streaming responses where the body has already
@@ -861,7 +860,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             },
         )
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         """Return handler metadata and capabilities for introspection.
 
         This method exposes the handler's three-dimensional type classification

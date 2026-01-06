@@ -31,9 +31,7 @@ Example:
 
 from __future__ import annotations
 
-from typing import Any
-
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
+# NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
 # recursion issues with recursive type aliases.
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -66,7 +64,7 @@ class ModelHealthCheckResult(BaseModel):
         ...,
         description="Whether the handler is healthy",
     )
-    details: dict[str, Any] = Field(
+    details: dict[str, object] = Field(
         default_factory=dict,
         description="Detailed health check data from the handler",
     )
@@ -91,7 +89,7 @@ class ModelHealthCheckResult(BaseModel):
             >>> result.healthy
             True
         """
-        details: dict[str, Any] = {"healthy": True}
+        details: dict[str, object] = {"healthy": True}
         if note:
             details["note"] = note
         return cls(handler_type=handler_type, healthy=True, details=details)
@@ -181,7 +179,7 @@ class ModelHealthCheckResult(BaseModel):
     def from_handler_response(
         cls,
         handler_type: str,
-        health_response: Any,
+        health_response: object,
     ) -> ModelHealthCheckResult:
         """Create a result from a raw handler health check response.
 

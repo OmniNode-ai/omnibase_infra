@@ -94,18 +94,69 @@ This decision explicitly deviates from the CLAUDE.md "NEVER use Any" rule due to
 
 ### Scope of Deviation
 
+**CRITICAL: `Any` is ONLY permitted in Pydantic `Field()` definitions.**
+
 The `Any` type is permitted ONLY for:
 
-1. Fields that previously used `JsonType`
-2. Fields representing arbitrary JSON-serializable data
-3. Pydantic model field type annotations
+1. **Pydantic model field type annotations** (the `Field()` definition context)
+2. Fields that previously used `JsonType`
+3. Fields representing arbitrary JSON-serializable data
 
-The `Any` type is NOT permitted for:
+**Examples of PERMITTED usage (inside Pydantic models only):**
 
-1. Function signatures (use `object` instead)
-2. Non-Pydantic data structures
-3. Return types where a more specific type is known
-4. Generic containers (use `object` for unknown payload types)
+```python
+from typing import Any
+from pydantic import BaseModel, Field
+
+# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
+
+class ModelDLQEvent(BaseModel):
+    """Dead letter queue event with arbitrary payload."""
+    payload: Any = Field(default=None, description="Original event payload")
+    metadata: Any = Field(default=None, description="Event metadata")
+```
+
+The `Any` type is **STRICTLY FORBIDDEN** for:
+
+1. **Function parameter types** - use `object` instead
+2. **Function return types** - use `object` or specific types
+3. **Variable type annotations** - use `object` for unknown types
+4. **Type aliases** - use `object` in union types
+5. **Generic containers** - use `object` for unknown payload types
+6. **Non-Pydantic data structures** (dataclasses, TypedDicts, etc.)
+
+**Examples of FORBIDDEN usage:**
+
+```python
+# WRONG: Any in function signature
+def process_event(payload: Any) -> Any:  # FORBIDDEN
+    ...
+
+# CORRECT: Use object for generic payloads
+def process_event(payload: object) -> object:  # CORRECT
+    ...
+
+# WRONG: Any in variable annotation
+result: Any = some_function()  # FORBIDDEN
+
+# CORRECT: Use object or specific type
+result: object = some_function()  # CORRECT
+result: ModelSpecificType = some_function()  # BEST
+
+# WRONG: Any in type alias
+PayloadType = dict[str, Any]  # FORBIDDEN outside Pydantic
+
+# CORRECT: Use object in type aliases
+PayloadType = dict[str, object]  # CORRECT
+```
+
+**Why This Distinction Matters:**
+
+- Pydantic's `Field()` context has runtime validation that provides type safety
+- Function signatures/return types rely solely on static type checking
+- Using `Any` outside Pydantic defeats the purpose of type hints entirely
+- `object` is the proper "unknown type" marker in Python's type system
 
 ### Annotation Pattern
 
@@ -314,6 +365,71 @@ The following 33 files use `Any` as a workaround for `JsonType`:
 - `src/omnibase_infra/runtime/validation.py`
 - `src/omnibase_infra/runtime/wiring.py`
 
+## Migration Execution Plan
+
+### Prerequisites for Migration
+
+Before migrating away from `Any`, the following must be complete:
+
+1. **omnibase_core Fix**: New `JsonType` implementation using PEP 695 or TypeAlias
+2. **omnibase_core Release**: Published version 0.7.x or later with the fix
+3. **Dependency Update**: `omnibase_infra` updated to depend on fixed version
+
+### Migration Steps (Per File)
+
+For each of the 33 affected files:
+
+1. **Update imports**: Replace `from typing import Any` with `from omnibase_core.types import JsonType`
+2. **Replace type annotations**: Change `: Any` to `: JsonType` in Pydantic fields
+3. **Remove workaround comments**: Delete the `NOTE: Using Any instead of JsonType` comment
+4. **Run type checker**: Verify with `mypy` and `pyright`
+5. **Run tests**: Ensure all unit and integration tests pass
+
+### Migration Priority Order
+
+**Phase 1 - Core Models** (High Risk):
+1. `models/registration/model_node_capabilities.py`
+2. `models/registry/model_message_type_entry.py`
+3. `event_bus/models/model_dlq_event.py`
+4. `event_bus/models/model_dlq_metrics.py`
+
+**Phase 2 - Handlers** (Medium Risk):
+1. All files in `handlers/` directory
+2. All files in `handlers/mixins/` directory
+3. All files in `handlers/models/` directory
+
+**Phase 3 - Runtime** (High Integration Risk):
+1. `runtime/envelope_validator.py`
+2. `runtime/kernel.py`
+3. `runtime/runtime_host_process.py`
+4. Remaining runtime files
+
+**Phase 4 - Plugins & Nodes** (Lower Risk):
+1. Plugin files (may need separate testing)
+2. Node handler files
+
+### Test Coverage Requirements
+
+**Integration tests required before migration is complete:**
+
+| Test Area | Status | Tracking |
+|-----------|--------|----------|
+| Intent emission from declarative reducer | TODO | OMN-1263 |
+| Envelope validation with JsonType fields | TODO | OMN-1263 |
+| RuntimeHostProcess with typed payloads | TODO | OMN-1263 |
+| DLQ event handling with JsonType | TODO | OMN-1263 |
+| Kafka event bus serialization | TODO | OMN-1263 |
+
+**Pre-existing test failures**: See [OMN-1263](https://linear.app/omninode/issue/OMN-1263) for tracking of test failures that existed before this ADR was implemented. These failures are NOT caused by the `Any` workaround but should be resolved as part of the overall migration effort.
+
+### Rollback Plan
+
+If migration causes issues:
+
+1. Revert `omnibase_core` dependency to pre-fix version
+2. Re-apply `Any` workaround with comment pattern
+3. Document specific failure in this ADR under "Migration Attempts" section
+
 ## Verification
 
 ### Identifying Affected Files
@@ -338,9 +454,29 @@ New uses of `Any` without the required comment should be flagged in code review.
 When reviewing PRs with `Any` usage:
 
 - [ ] Is the `NOTE:` comment present exactly as specified?
+- [ ] Is `Any` used ONLY for Pydantic model field type annotations?
 - [ ] Is `Any` used ONLY for JSON-serializable fields?
+- [ ] Is `Any` NOT used in function signatures, return types, or variable annotations?
 - [ ] Could a more specific type be used instead?
 - [ ] Is this a new occurrence or modification of existing workaround?
+
+**Automatic rejection criteria:**
+
+- `Any` in function parameter types (use `object`)
+- `Any` in function return types (use `object` or specific type)
+- `Any` in variable annotations outside Pydantic models
+- `Any` without the required `NOTE:` comment
+- `Any` in non-Pydantic data structures (dataclasses, TypedDicts)
+
+### Known Policy Violations
+
+The following patterns in the codebase may violate the strict `Any` policy and should be reviewed during migration:
+
+1. **Function signatures with `Any`**: Some handler methods may use `Any` for payload parameters
+2. **Return types with `Any`**: Some utility functions may return `Any`
+3. **Type aliases with `Any`**: Some internal type definitions may use `Any`
+
+These violations are tracked under [OMN-1262](https://linear.app/omninode/issue/OMN-1262) for cleanup.
 
 ## References
 
@@ -352,3 +488,4 @@ When reviewing PRs with `Any` usage:
 - PR #116: Initial introduction of this workaround
 - OMN-1104: Refactor RegistrationReducer to be fully declarative
 - [OMN-1262](https://linear.app/omninode/issue/OMN-1262): Migration tracking issue for Any type cleanup
+- [OMN-1263](https://linear.app/omninode/issue/OMN-1263): Pre-existing test failures and integration test coverage

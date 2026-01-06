@@ -17,12 +17,12 @@ Example Error Scenarios:
     3. Malformed input data structures
 """
 
-from typing import Any, cast
+from typing import cast
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
 
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
+# NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
 # recursion issues with recursive type aliases.
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (
@@ -83,7 +83,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
 
         try:
             # Retrieve JSON data with safe default
-            json_data = cast(Any, input_data.get("json", {}))
+            json_data = cast(object, input_data.get("json", {}))
 
             # Perform pure deterministic computation
             normalized = self._sort_keys_recursively(json_data)
@@ -129,7 +129,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
                 exception_type=type(e).__name__,
             ) from e
 
-    def _sort_keys_recursively(self, obj: Any) -> Any:
+    def _sort_keys_recursively(self, obj: object) -> object:
         """Recursively sort dictionary keys.
 
         Args:

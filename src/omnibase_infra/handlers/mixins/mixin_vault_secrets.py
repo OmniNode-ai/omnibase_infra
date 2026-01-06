@@ -8,7 +8,7 @@ Provides CRUD operations for secrets in Vault KV v2 secrets engine.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import TypeVar
 from uuid import UUID
 
 import hvac
@@ -18,8 +18,8 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
+# ONEX: Using object instead of Any per ADR guidelines. JsonType from omnibase_core
+# has Pydantic 2.x recursion issues with recursive type aliases.
 
 T = TypeVar("T")
 
@@ -55,10 +55,10 @@ class MixinVaultSecrets:
 
     async def _read_secret(
         self,
-        payload: dict[str, Any],
+        payload: dict[str, object],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, Any]]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Read secret from Vault KV v2 secrets engine.
 
         Args:
@@ -92,10 +92,10 @@ class MixinVaultSecrets:
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def read_func() -> dict[str, Any]:
+        def read_func() -> dict[str, object]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, Any] = self._client.secrets.kv.v2.read_secret_version(
+            result: dict[str, object] = self._client.secrets.kv.v2.read_secret_version(
                 path=path,
                 mount_point=mount_point,
             )
@@ -129,10 +129,10 @@ class MixinVaultSecrets:
 
     async def _write_secret(
         self,
-        payload: dict[str, Any],
+        payload: dict[str, object],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, Any]]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Write secret to Vault KV v2 secrets engine.
 
         Args:
@@ -181,13 +181,15 @@ class MixinVaultSecrets:
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def write_func() -> dict[str, Any]:
+        def write_func() -> dict[str, object]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, Any] = self._client.secrets.kv.v2.create_or_update_secret(
-                path=path,
-                secret=data,
-                mount_point=mount_point,
+            result: dict[str, object] = (
+                self._client.secrets.kv.v2.create_or_update_secret(
+                    path=path,
+                    secret=data,
+                    mount_point=mount_point,
+                )
             )
             return result
 
@@ -217,10 +219,10 @@ class MixinVaultSecrets:
 
     async def _delete_secret(
         self,
-        payload: dict[str, Any],
+        payload: dict[str, object],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, Any]]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Delete secret from Vault KV v2 secrets engine.
 
         Args:
@@ -282,10 +284,10 @@ class MixinVaultSecrets:
 
     async def _list_secrets(
         self,
-        payload: dict[str, Any],
+        payload: dict[str, object],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, Any]]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """List secrets at path in Vault KV v2 secrets engine.
 
         Args:
@@ -319,10 +321,10 @@ class MixinVaultSecrets:
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def list_func() -> dict[str, Any]:
+        def list_func() -> dict[str, object]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, Any] = self._client.secrets.kv.v2.list_secrets(
+            result: dict[str, object] = self._client.secrets.kv.v2.list_secrets(
                 path=path,
                 mount_point=mount_point,
             )

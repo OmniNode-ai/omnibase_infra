@@ -12,21 +12,31 @@ validation using the validation functions from omnibase_core.validation.
 Migration Path:
     All code should migrate to using omnibase_core.validation API directly.
     See OMN-1104 for the migration tracking and context.
+
+Security Note:
+    This stub may MASK REAL VALIDATION FAILURES by returning success for
+    contracts that would fail full ONEX compliance validation. Do not rely
+    on this validator for production contract verification.
 """
 
 from __future__ import annotations
 
+import logging
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
 from omnibase_core.enums import EnumNodeType
+from omnibase_core.errors import OnexError
 from omnibase_core.models.contracts import ModelContractBase
 from omnibase_core.validation import ModelContractValidationResult
 from omnibase_core.validation.contract_validator import ProtocolContractValidator
 
 if TYPE_CHECKING:
     from omnibase_core.models import ModelSemVer
+
+logger = logging.getLogger(__name__)
 
 # Module-level flag to track if warning has been shown (avoid spam)
 # Mutable container for warning state (avoids global statement)
@@ -152,8 +162,6 @@ class StubContractValidator:
                     compliance_score=0.0,
                 )
 
-            import yaml
-
             with contract_path.open("r", encoding="utf-8") as f:
                 contract_data = yaml.safe_load(f)
 
@@ -198,19 +206,76 @@ class StubContractValidator:
                         compliance_score=75.0,
                     )
 
+            # WARNING: Stub validator returns reduced compliance score (85%) to indicate
+            # that FULL ONEX compliance validation has NOT been performed. A score of
+            # 100% should only be returned by the real validator after complete checks.
+            # TODO(OMN-1104): Implement real validator that performs full ONEX checks
             return ModelContractValidationResult(
                 valid=True,
-                score=100.0,
+                score=85.0,
                 errors=[],
-                warnings=[],
-                compliance_score=100.0,
+                warnings=[
+                    "STUB VALIDATOR: Only basic checks performed. "
+                    "Full ONEX compliance validation was NOT executed. "
+                    "See OMN-1104 for migration to real validator."
+                ],
+                compliance_score=85.0,
             )
 
-        except Exception as e:
+        except yaml.YAMLError as e:
+            # ONEX Error Pattern: Log with context and return structured error
+            # NOTE: Stub validator catches exceptions to return results rather than raise,
+            # as this allows callers to collect multiple validation results. However, we
+            # still follow ONEX patterns for logging and error context.
+            logger.warning(
+                "Contract YAML parsing failed: %s (path=%s)",
+                str(e),
+                contract_path,
+                exc_info=True,
+            )
             return ModelContractValidationResult(
                 valid=False,
                 score=0.0,
-                errors=[f"Validation error: {e!s}"],
+                errors=[f"YAML parsing error: {e!s}"],
+                warnings=[],
+                compliance_score=0.0,
+            )
+
+        except OSError as e:
+            # File system errors (permissions, disk issues, etc.)
+            logger.warning(
+                "Contract file access error: %s (path=%s)",
+                str(e),
+                contract_path,
+                exc_info=True,
+            )
+            return ModelContractValidationResult(
+                valid=False,
+                score=0.0,
+                errors=[f"File access error: {e!s}"],
+                warnings=[],
+                compliance_score=0.0,
+            )
+
+        except Exception as e:
+            # ONEX Error Pattern: Catch-all with proper logging and context
+            # NOTE: In a real validator, we would use `raise OnexError(...) from e`.
+            # The stub validator returns errors in results to allow batch validation,
+            # but still logs with full context for debugging.
+            logger.exception(
+                "Unexpected validation error: %s (path=%s, type=%s)",
+                str(e),
+                contract_path,
+                type(e).__name__,
+            )
+            return ModelContractValidationResult(
+                valid=False,
+                score=0.0,
+                errors=[
+                    f"Validation error ({type(e).__name__}): {e!s}. "
+                    "This may indicate a bug in the stub validator or an unexpected "
+                    "contract format. See logs for full traceback."
+                ],
                 warnings=[],
                 compliance_score=0.0,
             )

@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
 from uuid import uuid4
 
 import hvac
@@ -198,7 +197,7 @@ class VaultHandler(
         """Return maximum queue size (public API for tests)."""
         return self._max_queue_size
 
-    async def initialize(self, config: dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize Vault client with configuration.
 
         Args:
@@ -285,8 +284,8 @@ class VaultHandler(
         logger.info("VaultHandler shutdown complete")
 
     async def execute(
-        self, envelope: dict[str, Any]
-    ) -> ModelHandlerOutput[dict[str, Any]]:
+        self, envelope: dict[str, object]
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Execute Vault operation from envelope.
 
         Args:
@@ -379,7 +378,7 @@ class VaultHandler(
         else:  # vault.renew_token
             return await self._renew_token_operation(correlation_id, input_envelope_id)
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         """Return handler metadata and capabilities for introspection.
 
         This method exposes the handler's type classification along with its

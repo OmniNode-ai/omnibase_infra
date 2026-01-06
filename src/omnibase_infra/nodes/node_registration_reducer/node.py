@@ -33,6 +33,18 @@ Related Modules:
     - contract.yaml: FSM state machine and intent emission configuration
     - models/: Validation result and state models
     - registry/: Dependency injection registry
+
+Testing Notes:
+    - Unit tests: tests/unit/nodes/node_registration_reducer/
+    - Integration tests: TODO (OMN-1263) - Need tests for:
+        * Intent emission through RuntimeHostProcess
+        * End-to-end registration workflow with Consul/PostgreSQL mocks
+        * FSM state persistence via RegistrationProjector
+    - See ADR: docs/decisions/adr-any-type-pydantic-workaround.md for test coverage matrix
+
+Tracking:
+    - OMN-1104: Declarative reducer refactoring
+    - OMN-1263: Pre-existing test failures and integration test coverage
 """
 
 from __future__ import annotations
