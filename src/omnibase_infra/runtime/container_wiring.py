@@ -82,6 +82,91 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class ServiceRegistryUnavailableError(RuntimeError):
+    """Raised when container.service_registry is None.
+
+    This error indicates that the ModelONEXContainer was initialized
+    without a service registry, either because:
+    - enable_service_registry=False was passed
+    - The ServiceRegistry module is not installed/available
+    - Container initialization failed silently
+
+    This is a distinct error from AttributeError to provide clearer
+    diagnostics and actionable error messages.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        operation: str | None = None,
+        hint: str | None = None,
+    ) -> None:
+        """Initialize ServiceRegistryUnavailableError.
+
+        Args:
+            message: Primary error message.
+            operation: The operation that was attempted (e.g., 'register_instance').
+            hint: Actionable hint for fixing the issue.
+        """
+        self.operation = operation
+        self.hint = hint or (
+            "Ensure ModelONEXContainer is created with enable_service_registry=True "
+            "and that the ServiceRegistry module is installed."
+        )
+        full_message = message
+        if operation:
+            full_message = f"{message} (operation: {operation})"
+        if hint:
+            full_message = f"{full_message}\nHint: {hint}"
+        super().__init__(full_message)
+
+
+def _validate_service_registry(
+    container: ModelONEXContainer,
+    operation: str,
+) -> None:
+    """Validate that container.service_registry is not None.
+
+    This validation should be called before any operation that uses
+    container.service_registry to provide clear error messages when
+    the service registry is unavailable.
+
+    Args:
+        container: The ONEX container to validate.
+        operation: Description of the operation being attempted.
+
+    Raises:
+        ServiceRegistryUnavailableError: If service_registry is None.
+
+    Example:
+        >>> _validate_service_registry(container, "register PolicyRegistry")
+        >>> # Proceed with registration...
+    """
+    if not hasattr(container, "service_registry"):
+        raise ServiceRegistryUnavailableError(
+            "Container missing 'service_registry' attribute",
+            operation=operation,
+            hint=(
+                "Expected ModelONEXContainer from omnibase_core. "
+                "Check that omnibase_core is properly installed."
+            ),
+        )
+
+    if container.service_registry is None:
+        raise ServiceRegistryUnavailableError(
+            "Container service_registry is None",
+            operation=operation,
+            hint=(
+                "ModelONEXContainer.service_registry returns None when:\n"
+                "  1. enable_service_registry=False was passed to constructor\n"
+                "  2. ServiceRegistry module is not available/installed\n"
+                "  3. Container initialization encountered an import error\n"
+                "Check container logs for 'ServiceRegistry not available' warnings."
+            ),
+        )
+
+
 def _analyze_attribute_error(error_str: str) -> tuple[str, str]:
     """Analyze AttributeError and return (missing_attribute, hint).
 
@@ -186,6 +271,9 @@ async def wire_infrastructure_services(
         >>> hasattr(compute_reg, 'register_plugin') and callable(compute_reg.register_plugin)
         True
     """
+    # Validate service_registry is available before attempting registration
+    _validate_service_registry(container, "wire_infrastructure_services")
+
     services_registered: list[str] = []
 
     try:
@@ -332,6 +420,9 @@ async def get_policy_registry_from_container(
         wire_infrastructure_services(). If not, it will raise RuntimeError.
         For auto-registration, use get_or_create_policy_registry() instead.
     """
+    # Validate service_registry is available
+    _validate_service_registry(container, "resolve PolicyRegistry")
+
     try:
         registry: PolicyRegistry = await container.service_registry.resolve_service(
             PolicyRegistry
@@ -421,6 +512,9 @@ async def get_or_create_policy_registry(
         wire_infrastructure_services() for production code to ensure proper
         initialization order and error handling.
     """
+    # Validate service_registry is available
+    _validate_service_registry(container, "get_or_create PolicyRegistry")
+
     try:
         # Try to resolve existing PolicyRegistry
         registry: PolicyRegistry = await container.service_registry.resolve_service(
@@ -489,6 +583,9 @@ async def get_handler_registry_from_container(
         This function assumes ProtocolBindingRegistry was registered via
         wire_infrastructure_services(). If not, it will raise RuntimeError.
     """
+    # Validate service_registry is available
+    _validate_service_registry(container, "resolve ProtocolBindingRegistry")
+
     try:
         registry: ProtocolBindingRegistry = (
             await container.service_registry.resolve_service(ProtocolBindingRegistry)
@@ -574,6 +671,9 @@ async def get_compute_registry_from_container(
         wire_infrastructure_services(). If not, it will raise RuntimeError.
         For auto-registration, use get_or_create_compute_registry() instead.
     """
+    # Validate service_registry is available
+    _validate_service_registry(container, "resolve RegistryCompute")
+
     try:
         registry: RegistryCompute = await container.service_registry.resolve_service(
             RegistryCompute
@@ -663,6 +763,9 @@ async def get_or_create_compute_registry(
         wire_infrastructure_services() for production code to ensure proper
         initialization order and error handling.
     """
+    # Validate service_registry is available
+    _validate_service_registry(container, "get_or_create RegistryCompute")
+
     try:
         # Try to resolve existing RegistryCompute
         registry: RegistryCompute = await container.service_registry.resolve_service(
@@ -765,6 +868,9 @@ async def wire_registration_handlers(
         ProjectionReaderRegistration,
         ProjectorRegistration,
     )
+
+    # Validate service_registry is available before attempting registration
+    _validate_service_registry(container, "wire_registration_handlers")
 
     # Resolve the actual liveness interval (from param, env var, or default)
     resolved_liveness_interval = get_liveness_interval_seconds(
@@ -935,6 +1041,9 @@ async def get_projection_reader_from_container(
     """
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
+    # Validate service_registry is available
+    _validate_service_registry(container, "resolve ProjectionReaderRegistration")
+
     try:
         reader: ProjectionReaderRegistration = (
             await container.service_registry.resolve_service(
@@ -976,6 +1085,9 @@ async def get_handler_node_introspected_from_container(
         HandlerNodeIntrospected,
     )
 
+    # Validate service_registry is available
+    _validate_service_registry(container, "resolve HandlerNodeIntrospected")
+
     try:
         handler: HandlerNodeIntrospected = (
             await container.service_registry.resolve_service(HandlerNodeIntrospected)
@@ -1015,6 +1127,9 @@ async def get_handler_runtime_tick_from_container(
         HandlerRuntimeTick,
     )
 
+    # Validate service_registry is available
+    _validate_service_registry(container, "resolve HandlerRuntimeTick")
+
     try:
         handler: HandlerRuntimeTick = await container.service_registry.resolve_service(
             HandlerRuntimeTick
@@ -1053,6 +1168,9 @@ async def get_handler_node_registration_acked_from_container(
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeRegistrationAcked,
     )
+
+    # Validate service_registry is available
+    _validate_service_registry(container, "resolve HandlerNodeRegistrationAcked")
 
     try:
         handler: HandlerNodeRegistrationAcked = (
@@ -1145,6 +1263,9 @@ async def wire_registration_dispatchers(
         DispatcherNodeRegistrationAcked,
         DispatcherRuntimeTick,
     )
+
+    # Validate service_registry is available
+    _validate_service_registry(container, "wire_registration_dispatchers")
 
     dispatchers_registered: list[str] = []
     routes_registered: list[str] = []
@@ -1264,6 +1385,9 @@ async def wire_registration_dispatchers(
 
 
 __all__: list[str] = [
+    # Error class for None service_registry (OMN-1257)
+    "ServiceRegistryUnavailableError",
+    # Container wiring functions
     "get_compute_registry_from_container",
     "get_handler_node_introspected_from_container",
     "get_handler_node_registration_acked_from_container",
