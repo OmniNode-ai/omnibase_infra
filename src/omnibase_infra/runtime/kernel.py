@@ -601,8 +601,13 @@ async def bootstrap() -> int:
                 # Check if service_registry is available (may be None in omnibase_core 0.6.x)
                 if container.service_registry is None:
                     logger.warning(
-                        "ServiceRegistry not available, skipping introspection dispatcher creation (correlation_id=%s)",
+                        "DEGRADED_MODE: ServiceRegistry not available, skipping introspection dispatcher creation (correlation_id=%s)",
                         correlation_id,
+                        extra={
+                            "degraded_mode": True,
+                            "degraded_reason": "service_registry_unavailable",
+                            "component": "introspection_dispatcher",
+                        },
                     )
                     # Set introspection_dispatcher to None and continue without it
                     introspection_dispatcher = None
@@ -681,9 +686,14 @@ async def bootstrap() -> int:
             )
         else:
             # ServiceRegistry not available, create a new ProtocolBindingRegistry directly
-            logger.debug(
-                "ServiceRegistry not available, creating ProtocolBindingRegistry directly (correlation_id=%s)",
+            logger.warning(
+                "DEGRADED_MODE: ServiceRegistry not available, creating ProtocolBindingRegistry directly (correlation_id=%s)",
                 correlation_id,
+                extra={
+                    "degraded_mode": True,
+                    "degraded_reason": "service_registry_unavailable",
+                    "component": "handler_registry",
+                },
             )
             handler_registry = ProtocolBindingRegistry()
 

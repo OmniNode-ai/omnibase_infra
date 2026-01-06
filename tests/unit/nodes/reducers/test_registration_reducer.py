@@ -5954,3 +5954,81 @@ class TestCommandFoldingProhibited:
                 f"Intent target scheme '{scheme}' not recognized. "
                 f"Expected one of: {valid_schemes}"
             )
+
+
+# -----------------------------------------------------------------------------
+# Confirmation Event Handling Tests (Phase 2 Placeholder)
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestReduceConfirmation:
+    """Tests for reduce_confirmation() method.
+
+    The reduce_confirmation() method is a Phase 2 placeholder that raises
+    NotImplementedError until OMN-996 is implemented. This test validates
+    the expected behavior of the placeholder.
+
+    Related:
+        - OMN-996: Implement Confirmation Event Handling
+        - ModelRegistrationConfirmation: Confirmation event model
+    """
+
+    def test_reduce_confirmation_raises_not_implemented_error(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test that reduce_confirmation raises NotImplementedError until implemented.
+
+        This test ensures:
+        1. The placeholder method exists and is callable
+        2. NotImplementedError is raised with appropriate message
+        3. The error message references OMN-996 for tracking
+
+        This prevents accidental regression when implementing the method
+        and ensures developers are directed to the tracking ticket.
+        """
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        # Create a valid confirmation event
+        confirmation = ModelRegistrationConfirmation(
+            event_type="consul.registered",
+            correlation_id=uuid4(),
+            node_id=uuid4(),
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        # Verify NotImplementedError is raised with OMN-996 reference
+        with pytest.raises(NotImplementedError, match="OMN-996"):
+            reducer.reduce_confirmation(initial_state, confirmation)
+
+    def test_reduce_confirmation_error_message_includes_ticket_url(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test that error message includes the Linear ticket URL.
+
+        This ensures developers can easily find the implementation
+        tracking ticket when encountering the NotImplementedError.
+        """
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type="postgres.registration_upserted",
+            correlation_id=uuid4(),
+            node_id=uuid4(),
+            success=False,
+            error_message="Connection refused",
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        with pytest.raises(NotImplementedError) as exc_info:
+            reducer.reduce_confirmation(initial_state, confirmation)
+
+        error_message = str(exc_info.value)
+        assert "linear.app/omninode/issue/OMN-996" in error_message, (
+            "Error message should include the Linear ticket URL for tracking"
+        )
