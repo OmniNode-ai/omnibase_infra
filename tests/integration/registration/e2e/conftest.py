@@ -322,8 +322,10 @@ async def wired_container(
     # Skip the test gracefully with a clear message rather than failing.
     if container.service_registry is None:
         pytest.skip(
-            "Skipping: container.service_registry is None due to circular import bug "
-            "in omnibase_core 0.6.2. Upgrade to omnibase_core >= 0.6.3 to fix."
+            "Skipped: omnibase_core circular import bug - service_registry is None. "
+            "See: model_onex_container.py -> container_service_registry.py -> "
+            "container/__init__.py -> container_service_resolver.py -> ModelONEXContainer. "
+            "Upgrade to omnibase_core >= 0.6.3 to fix."
         )
 
     # Wire infrastructure services

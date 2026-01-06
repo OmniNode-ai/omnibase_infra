@@ -1588,6 +1588,7 @@ class TestSecurityGates:
         )
 
         # Check each intent payload for sensitive data
+        # Access .data since payload is ModelPayloadExtension
         all_violations: list[str] = []
 
         for intent in result.intents:

@@ -108,10 +108,10 @@ import pytest
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
     from pytest_httpserver import HTTPServer
 
     from omnibase_infra.handlers import ConsulHandler, DbHandler, VaultHandler
+    from omnibase_infra.models.types import JsonValue
 
 
 # =============================================================================
@@ -253,7 +253,7 @@ def small_response_config() -> dict[str, object]:
 
 
 @pytest.fixture
-def db_config() -> dict[str, JsonType]:
+def db_config() -> dict[str, JsonValue]:
     """Provide database configuration for DbHandler.
 
     This fixture enables graceful skip behavior for CI/CD environments
@@ -302,7 +302,7 @@ def unique_table_name() -> str:
 
 @pytest.fixture
 async def initialized_db_handler(
-    db_config: dict[str, JsonType],
+    db_config: dict[str, JsonValue],
 ) -> AsyncGenerator[DbHandler, None]:
     """Provide an initialized DbHandler instance with automatic cleanup.
 
@@ -508,7 +508,7 @@ def vault_available() -> bool:
 
 
 @pytest.fixture
-def vault_config() -> dict[str, JsonType]:
+def vault_config() -> dict[str, JsonValue]:
     """Get Vault configuration from environment variables.
 
     Returns:
@@ -519,7 +519,7 @@ def vault_config() -> dict[str, JsonType]:
         Use the vault_available fixture or module-level pytestmark
         for skipping tests.
     """
-    config: dict[str, JsonType] = {
+    config: dict[str, JsonValue] = {
         "url": VAULT_ADDR,
         "token": VAULT_TOKEN,
         "timeout_seconds": 30.0,
@@ -537,7 +537,7 @@ def vault_config() -> dict[str, JsonType]:
 
 @pytest.fixture
 async def vault_handler(
-    vault_config: dict[str, JsonType],
+    vault_config: dict[str, JsonValue],
 ) -> AsyncGenerator[VaultHandler, None]:
     """Create and initialize VaultHandler for integration testing with automatic cleanup.
 
@@ -650,13 +650,13 @@ def consul_available() -> bool:
 
 
 @pytest.fixture
-def consul_config() -> dict[str, JsonType]:
+def consul_config() -> dict[str, JsonValue]:
     """Provide Consul configuration for ConsulHandler.
 
     Returns:
         Configuration dict for ConsulHandler.initialize()
     """
-    config: dict[str, JsonType] = {
+    config: dict[str, JsonValue] = {
         "host": CONSUL_HOST,
         "port": CONSUL_PORT,
         "scheme": CONSUL_SCHEME,
@@ -696,7 +696,7 @@ def unique_service_name() -> str:
 
 @pytest.fixture
 async def initialized_consul_handler(
-    consul_config: dict[str, JsonType],
+    consul_config: dict[str, JsonValue],
 ) -> AsyncGenerator[ConsulHandler, None]:
     """Provide an initialized ConsulHandler instance with automatic cleanup.
 

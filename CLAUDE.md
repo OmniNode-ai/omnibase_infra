@@ -31,8 +31,23 @@
 - Parallel execution: call multiple Task tools in a **single message**
 
 ### No Backwards Compatibility
-- Breaking changes are always acceptable
-- Remove old patterns immediately
+
+**ALL changes are breaking changes. NO backwards compatibility is maintained.**
+
+- Breaking changes are **always** acceptable and encouraged
+- Remove old patterns **immediately** - do not leave deprecated code
+- **NO** backwards compatibility documentation required
+- **NO** migration guides needed
+- **NO** deprecation periods - old APIs are simply removed
+- Downstream consumers are expected to update immediately
+- Version bumps may contain any breaking change without warning
+
+This policy applies to:
+- API changes (function signatures, class interfaces)
+- Model changes (Pydantic field additions/removals/renames)
+- Import path changes (module reorganization)
+- Type changes (type aliases, generics)
+- Configuration changes (environment variables, settings)
 
 ### No Versioned Directories
 - **NEVER** create `v1_0_0/`, `v2/` directories

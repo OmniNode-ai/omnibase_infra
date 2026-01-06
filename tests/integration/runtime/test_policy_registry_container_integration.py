@@ -23,14 +23,20 @@ from __future__ import annotations
 import pytest
 from omnibase_core.container import ModelONEXContainer
 
-# Skip entire module if service_registry is None (circular import bug in omnibase_core 0.6.2)
-_container = ModelONEXContainer()
-if _container.service_registry is None:
-    pytest.skip(
-        "service_registry is None due to circular import bug in omnibase_core 0.6.2. "
-        "Upgrade to omnibase_core >= 0.6.3 to run these tests.",
-        allow_module_level=True,
-    )
+# Skip message for omnibase_core 0.6.2 circular import bug
+_SKIP_SERVICE_REGISTRY_NONE = (
+    "Skipped: omnibase_core circular import bug - service_registry is None. "
+    "See: model_onex_container.py -> container_service_registry.py -> "
+    "container/__init__.py -> container_service_resolver.py -> ModelONEXContainer. "
+    "Upgrade to omnibase_core >= 0.6.3 to run these tests."
+)
+
+
+def _skip_if_service_registry_none(container: ModelONEXContainer) -> None:
+    """Skip test if container.service_registry is None due to circular import bug."""
+    if container.service_registry is None:
+        pytest.skip(_SKIP_SERVICE_REGISTRY_NONE)
+
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.runtime.container_wiring import (
@@ -65,6 +71,9 @@ class TestPolicyRegistryContainerIntegration:
         # Create real container
         container = ModelONEXContainer()
 
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
+
         # Wire infrastructure services (async operation)
         summary = await wire_infrastructure_services(container)
 
@@ -91,6 +100,10 @@ class TestPolicyRegistryContainerIntegration:
         """
         # Wire container
         container = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
+
         await wire_infrastructure_services(container)
 
         # Resolve registry
@@ -146,11 +159,19 @@ class TestPolicyRegistryContainerIntegration:
         """
         # Create first container and wire it
         container1 = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container1)
+
         await wire_infrastructure_services(container1)
         registry1 = await get_policy_registry_from_container(container1)
 
         # Create second container and wire it
         container2 = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container2)
+
         await wire_infrastructure_services(container2)
         registry2 = await get_policy_registry_from_container(container2)
 
@@ -223,6 +244,9 @@ class TestPolicyRegistryContainerIntegration:
         # Create real container WITHOUT wiring
         container = ModelONEXContainer()
 
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
+
         # get_or_create should create and register PolicyRegistry
         registry1 = await get_or_create_policy_registry(container)
 
@@ -263,6 +287,10 @@ class TestPolicyRegistryContainerIntegration:
         """
         # Create and wire container
         container = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
+
         summary = await wire_infrastructure_services(container)
 
         # Verify both services are registered
@@ -290,6 +318,10 @@ class TestPolicyRegistryContainerIntegration:
         4. Verify same instances returned each time
         """
         container = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
+
         await wire_infrastructure_services(container)
 
         # Resolve PolicyRegistry twice
@@ -312,6 +344,10 @@ class TestPolicyRegistryContainerIntegration:
         3. Verify specific version can be retrieved
         """
         container = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
+
         await wire_infrastructure_services(container)
         registry = await get_policy_registry_from_container(container)
 
@@ -383,6 +419,9 @@ class TestContainerWiringErrorHandling:
         """
         container = ModelONEXContainer()
 
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
+
         # Attempt to resolve without wiring should fail
         # Error may indicate PolicyRegistry not registered OR container missing resolve_service
         with pytest.raises(
@@ -400,6 +439,9 @@ class TestContainerWiringErrorHandling:
         This is the expected behavior for global-scoped services.
         """
         container = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
 
         # First wire
         await wire_infrastructure_services(container)

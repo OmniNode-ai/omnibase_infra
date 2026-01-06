@@ -29,10 +29,9 @@ python = "^3.12"
 #
 # omnibase-core v0.6.2: Package-level imports recommended for forward compatibility.
 # Required by OMN-1258 (deep module import migration).
-# Note (OMN-1257): In omnibase_core v0.6.2+, ModelONEXContainer.service_registry
-# returns None when enable_service_registry=False was passed to constructor or
-# ServiceRegistry module is unavailable. container_wiring.py now raises
-# ServiceRegistryUnavailableError with actionable hints instead of cryptic AttributeError.
+# - Handler security models and EnumHandlerTypeCategory (OMN-1137)
+# - Note (OMN-1257): ModelONEXContainer.service_registry may be None due to
+#   circular import bug. container_wiring.py handles this gracefully.
 omnibase-core = "^0.6.2"
 omnibase-spi = "^0.4.1"
 

@@ -30,19 +30,20 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, TypedDict
+
+# Forward migration type aliases for renamed types in omnibase_core 0.6.2
+# Using TypeAlias for mypy compatibility
+from typing import Literal, TypeAlias, TypedDict
 
 # Third-party imports
 import yaml
 from omnibase_core.models.common import ModelValidationMetadata
-from omnibase_core.models.validation.model_import_validation_result import (
-    ModelImportValidationResult,
-)
 from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
 from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
     CircularImportValidator,
     ModelContractValidationResult,
+    ModelImportValidationResult,
     ModelValidationResult,
     validate_architecture,
     validate_contracts,

@@ -348,6 +348,7 @@ from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind, EnumReductionType, EnumStreamingMode
 from omnibase_core.models.reducer.model_intent import ModelIntent
+from omnibase_core.models.reducer.payloads import ModelPayloadExtension
 from omnibase_core.nodes import ModelReducerOutput
 from pydantic import BaseModel, ConfigDict, field_validator
 

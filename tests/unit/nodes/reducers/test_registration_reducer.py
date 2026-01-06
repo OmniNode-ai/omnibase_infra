@@ -2851,7 +2851,7 @@ class TestDeterminismProperty:
                 data2["record"] = record2
                 assert data1 == data2
             else:
-                assert intent1.payload == intent2.payload
+                assert intent1.payload.model_dump() == intent2.payload.model_dump()
 
         # Items processed must match
         assert output1.items_processed == output2.items_processed
@@ -3012,7 +3012,7 @@ class TestDeterminismProperty:
                     f"Payload mismatch for intent_type={intent1.intent_type}"
                 )
             else:
-                assert intent1.payload == intent2.payload, (
+                assert intent1.payload.model_dump() == intent2.payload.model_dump(), (
                     f"Payload mismatch for intent_type={intent1.intent_type}"
                 )
 
@@ -3080,9 +3080,9 @@ class TestDeterminismProperty:
                         f"Intent {j} payload mismatch between reducer 1 and {i}"
                     )
                 else:
-                    assert intent1.payload == intent2.payload, (
-                        f"Intent {j} payload mismatch between reducer 1 and {i}"
-                    )
+                    assert (
+                        intent1.payload.model_dump() == intent2.payload.model_dump()
+                    ), f"Intent {j} payload mismatch between reducer 1 and {i}"
 
     @given(
         reset_attempts=st.integers(min_value=1, max_value=5),
