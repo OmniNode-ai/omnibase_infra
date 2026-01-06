@@ -1,0 +1,177 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Registry for Service Discovery Node Dependencies.
+
+This module provides RegistryInfraServiceDiscovery for registering
+service discovery node dependencies with the ONEX container.
+
+Architecture:
+    RegistryInfraServiceDiscovery handles dependency injection setup
+    for the NodeServiceDiscoveryEffect node:
+    - Registers protocol implementations (Consul, K8s, Etcd handlers)
+    - Configures handler resolution based on environment/configuration
+    - Provides factory methods for handler instantiation
+
+Usage:
+    The registry is typically called during application bootstrap:
+
+    .. code-block:: python
+
+        from omnibase_core.models.container import ModelONEXContainer
+        from omnibase_infra.nodes.node_service_discovery_effect.registry import (
+            RegistryInfraServiceDiscovery,
+        )
+
+        container = ModelONEXContainer()
+        RegistryInfraServiceDiscovery.register(container)
+
+        # Or with specific handler configuration
+        RegistryInfraServiceDiscovery.register_with_handler(
+            container,
+            handler=consul_handler_instance,
+        )
+
+Related:
+    - NodeServiceDiscoveryEffect: Node that consumes registered dependencies
+    - ProtocolServiceDiscoveryHandler: Protocol for handlers
+    - ModelONEXContainer: DI container for dependency resolution
+    - OMN-1131: Capability-oriented node architecture
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+
+    from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
+        ProtocolServiceDiscoveryHandler,
+    )
+
+
+class RegistryInfraServiceDiscovery:
+    """Registry for service discovery node dependencies.
+
+    Provides static methods for registering service discovery
+    dependencies with the ONEX container. Supports both default
+    registration and explicit handler configuration.
+
+    Class Methods:
+        register: Register with default/environment-based configuration.
+        register_with_handler: Register with explicit handler instance.
+
+    Example:
+        .. code-block:: python
+
+            from omnibase_core.models.container import ModelONEXContainer
+
+            # Default registration (uses environment configuration)
+            container = ModelONEXContainer()
+            RegistryInfraServiceDiscovery.register(container)
+
+            # Explicit handler registration
+            consul_handler = ConsulServiceDiscoveryHandler(config)
+            RegistryInfraServiceDiscovery.register_with_handler(
+                container,
+                handler=consul_handler,
+            )
+    """
+
+    @staticmethod
+    def register(container: ModelONEXContainer) -> None:
+        """Register service discovery dependencies with default configuration.
+
+        Registers service discovery dependencies using environment-based
+        or default configuration. The specific handler implementation
+        is determined by configuration at runtime.
+
+        Args:
+            container: ONEX dependency injection container.
+
+        Note:
+            This method registers a factory function that creates the
+            appropriate handler based on configuration. The actual
+            handler is not instantiated until resolution time.
+
+        Example:
+            >>> container = ModelONEXContainer()
+            >>> RegistryInfraServiceDiscovery.register(container)
+        """
+        # Import here to avoid circular imports
+        from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
+            ProtocolServiceDiscoveryHandler,
+        )
+
+        # Register protocol with lazy resolution
+        # The actual implementation is determined at resolution time
+        # based on configuration (CONSUL_AGENT_URL, K8S_NAMESPACE, etc.)
+        container.register_factory(
+            ProtocolServiceDiscoveryHandler,
+            RegistryInfraServiceDiscovery._create_handler_from_config,
+        )
+
+    @staticmethod
+    def register_with_handler(
+        container: ModelONEXContainer,
+        handler: ProtocolServiceDiscoveryHandler,
+    ) -> None:
+        """Register service discovery dependencies with explicit handler.
+
+        Registers the provided handler implementation directly.
+        Use this method when you have a pre-configured handler instance.
+
+        Args:
+            container: ONEX dependency injection container.
+            handler: Pre-configured handler implementation.
+
+        Example:
+            >>> container = ModelONEXContainer()
+            >>> handler = ConsulServiceDiscoveryHandler(config)
+            >>> RegistryInfraServiceDiscovery.register_with_handler(
+            ...     container,
+            ...     handler=handler,
+            ... )
+        """
+        from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
+            ProtocolServiceDiscoveryHandler,
+        )
+
+        container.register_instance(ProtocolServiceDiscoveryHandler, handler)
+
+    @staticmethod
+    def _create_handler_from_config(
+        _container: ModelONEXContainer,
+    ) -> ProtocolServiceDiscoveryHandler:
+        """Create handler based on configuration.
+
+        Factory function that creates the appropriate handler
+        implementation based on environment/configuration.
+
+        Args:
+            container: ONEX container (for accessing configuration).
+
+        Returns:
+            Configured handler implementation.
+
+        Raises:
+            RuntimeError: If no handler can be configured.
+
+        Note:
+            This is a placeholder implementation. Actual handler
+            creation depends on available backend implementations
+            (Consul, Kubernetes, Etcd adapters).
+        """
+        # Placeholder implementation
+        # In production, this would:
+        # 1. Read configuration (CONSUL_AGENT_URL, K8S_NAMESPACE, etc.)
+        # 2. Instantiate appropriate handler (ConsulHandler, K8sHandler, etc.)
+        # 3. Return the configured handler
+        raise RuntimeError(
+            "No service discovery handler configured. "
+            "Use register_with_handler() to provide a handler, "
+            "or implement handler auto-configuration."
+        )
+
+
+__all__ = ["RegistryInfraServiceDiscovery"]

@@ -1,0 +1,246 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Protocol for Registration Storage Handlers.
+
+This module defines ProtocolRegistrationStorageHandler, the interface for
+pluggable storage backends in the registration storage effect node.
+
+Architecture:
+    The protocol defines a capability-oriented interface for storage operations:
+    - store_registration: Idempotent upsert operation
+    - query_registrations: Flexible query with filtering and pagination
+    - update_registration: Partial update of specific fields
+    - delete_registration: Delete by node ID
+    - health_check: Backend health and connectivity check
+
+    Implementations include:
+    - HandlerPostgresRegistrationStorage: PostgreSQL backend
+    - HandlerMongoRegistrationStorage: MongoDB backend
+
+    The handler_type property identifies the backend for routing.
+
+Thread Safety:
+    Handler implementations may be invoked concurrently. Implementations
+    should be stateless or use appropriate synchronization.
+
+Related:
+    - NodeRegistrationStorageEffect: Effect node that uses this protocol
+    - ModelRegistrationRecord: Record type for storage operations
+    - ModelStorageQuery: Query parameters for retrieval
+    - ModelStorageResult: Query result container
+    - ModelUpsertResult: Insert/update result
+"""
+
+from __future__ import annotations
+
+__all__ = ["ProtocolRegistrationStorageHandler"]
+
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from uuid import UUID
+
+if TYPE_CHECKING:
+    from omnibase_infra.nodes.node_registration_storage_effect.models import (
+        ModelRegistrationRecord,
+        ModelStorageQuery,
+        ModelStorageResult,
+        ModelUpsertResult,
+    )
+
+
+@runtime_checkable
+class ProtocolRegistrationStorageHandler(Protocol):
+    """Protocol for registration storage backend handlers.
+
+    Defines the interface for pluggable storage backends (PostgreSQL, MongoDB).
+    Each implementation provides the same operations but uses different
+    storage technology.
+
+    Core Principle:
+        "I'm interested in what you do, not what you are"
+
+        The protocol is named by capability (registration storage), not by
+        implementation (PostgreSQL/MongoDB). Consumers interact with the
+        protocol interface without knowing the underlying storage technology.
+
+    Protocol Verification:
+        Per ONEX conventions, protocol compliance is verified via duck typing
+        rather than isinstance checks. Verify required methods exist:
+
+        .. code-block:: python
+
+            # Duck typing check
+            if (hasattr(handler, 'handler_type') and
+                hasattr(handler, 'store_registration') and
+                callable(handler.store_registration)):
+                registry.register_handler(handler)
+
+    Implementations:
+        - HandlerPostgresRegistrationStorage: PostgreSQL backend
+        - HandlerMongoRegistrationStorage: MongoDB backend
+
+    Example:
+        .. code-block:: python
+
+            class HandlerPostgresRegistrationStorage:
+                '''PostgreSQL implementation of registration storage.'''
+
+                @property
+                def handler_type(self) -> str:
+                    return "postgresql"
+
+                async def store_registration(
+                    self,
+                    record: ModelRegistrationRecord,
+                    correlation_id: UUID,
+                ) -> ModelUpsertResult:
+                    # PostgreSQL-specific implementation
+                    ...
+
+            # Usage
+            handler = HandlerPostgresRegistrationStorage(pool, config)
+            result = await handler.store_registration(record, correlation_id)
+
+    Attributes:
+        handler_type: Identifier for the storage backend ("postgresql", "mongodb").
+
+    Note:
+        Method bodies in this Protocol use ``...`` (Ellipsis) rather than
+        ``raise NotImplementedError()``. This is the standard Python convention
+        for ``typing.Protocol`` classes per PEP 544.
+    """
+
+    @property
+    def handler_type(self) -> str:
+        """Return the storage backend type identifier.
+
+        Used for handler routing and observability. Common values:
+        - "postgresql": PostgreSQL relational database
+        - "mongodb": MongoDB document database
+
+        Returns:
+            str: Handler type identifier (e.g., "postgresql", "mongodb")
+        """
+        ...
+
+    async def store_registration(
+        self,
+        record: ModelRegistrationRecord,
+        correlation_id: UUID,
+    ) -> ModelUpsertResult:
+        """Store a registration record (idempotent upsert).
+
+        If a record with the same node_id exists, it is updated.
+        Otherwise, a new record is inserted. This operation is idempotent.
+
+        Args:
+            record: The registration record to store.
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            ModelUpsertResult: Result indicating success/failure and operation type.
+
+        Raises:
+            InfraConnectionError: If unable to connect to storage backend.
+            InfraTimeoutError: If operation times out.
+            InfraUnavailableError: If circuit breaker is open.
+        """
+        ...
+
+    async def query_registrations(
+        self,
+        query: ModelStorageQuery,
+        correlation_id: UUID,
+    ) -> ModelStorageResult:
+        """Query registration records with optional filters.
+
+        Supports filtering by node_id, node_type, and capabilities.
+        Supports pagination via limit and offset.
+
+        Args:
+            query: Query parameters including filters and pagination.
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            ModelStorageResult: Result containing matching records and total count.
+
+        Raises:
+            InfraConnectionError: If unable to connect to storage backend.
+            InfraTimeoutError: If operation times out.
+            InfraUnavailableError: If circuit breaker is open.
+        """
+        ...
+
+    async def update_registration(
+        self,
+        node_id: UUID,
+        updates: dict[str, object],
+        correlation_id: UUID,
+    ) -> ModelUpsertResult:
+        """Update specific fields of a registration record.
+
+        Performs a partial update, modifying only the specified fields.
+        The node_id identifies the record to update.
+
+        Args:
+            node_id: UUID of the registration record to update.
+            updates: Dict of field names to new values.
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            ModelUpsertResult: Result indicating success/failure.
+
+        Raises:
+            InfraConnectionError: If unable to connect to storage backend.
+            InfraTimeoutError: If operation times out.
+            InfraUnavailableError: If circuit breaker is open.
+        """
+        ...
+
+    async def delete_registration(
+        self,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> bool:
+        """Delete a registration record by node ID.
+
+        Removes the registration record if it exists. Returns True if
+        a record was deleted, False if no record was found.
+
+        Args:
+            node_id: UUID of the registration record to delete.
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            bool: True if record was deleted, False if not found.
+
+        Raises:
+            InfraConnectionError: If unable to connect to storage backend.
+            InfraTimeoutError: If operation times out.
+            InfraUnavailableError: If circuit breaker is open.
+        """
+        ...
+
+    async def health_check(self) -> dict[str, object]:
+        """Check storage backend health and connectivity.
+
+        Performs a lightweight connectivity check to verify the storage
+        backend is reachable and responsive.
+
+        Returns:
+            dict[str, object]: Health status including:
+                - healthy: bool indicating overall health
+                - handler_type: str identifying the backend
+                - latency_ms: float connection latency
+                - details: dict with backend-specific info
+
+        Example:
+            >>> health = await handler.health_check()
+            >>> health
+            {
+                "healthy": True,
+                "handler_type": "postgresql",
+                "latency_ms": 2.5,
+                "details": {"pool_size": 10, "active_connections": 3}
+            }
+        """
+        ...
