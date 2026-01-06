@@ -7,17 +7,11 @@ including records, check results, configuration, and metrics models.
 
 Exports:
     ModelIdempotencyStoreHealthCheckResult: Result of an idempotency store health check
-    ModelHealthCheckResult: Backward compatibility alias for ModelIdempotencyStoreHealthCheckResult
     ModelIdempotencyRecord: Represents a stored idempotency record
     ModelIdempotencyCheckResult: Result of an idempotency check operation
     ModelIdempotencyGuardConfig: Configuration for idempotency guard middleware
     ModelIdempotencyStoreMetrics: Metrics for store observability
     ModelPostgresIdempotencyStoreConfig: Configuration for PostgreSQL store
-
-.. versionchanged:: 0.7.0
-    Renamed ModelHealthCheckResult to ModelIdempotencyStoreHealthCheckResult
-    to avoid naming conflicts with runtime.models.ModelHealthCheckResult.
-    The old name is preserved as a backward compatibility alias.
 """
 
 from omnibase_infra.idempotency.models.model_idempotency_check_result import (
@@ -30,7 +24,6 @@ from omnibase_infra.idempotency.models.model_idempotency_record import (
     ModelIdempotencyRecord,
 )
 from omnibase_infra.idempotency.models.model_idempotency_store_health_check_result import (
-    ModelHealthCheckResult,  # Backward compatibility alias
     ModelIdempotencyStoreHealthCheckResult,
 )
 from omnibase_infra.idempotency.models.model_idempotency_store_metrics import (
@@ -41,7 +34,6 @@ from omnibase_infra.idempotency.models.model_postgres_idempotency_store_config i
 )
 
 __all__ = [
-    "ModelHealthCheckResult",  # Backward compatibility alias
     "ModelIdempotencyCheckResult",
     "ModelIdempotencyGuardConfig",
     "ModelIdempotencyRecord",

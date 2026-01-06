@@ -35,17 +35,15 @@ Message ID Semantics:
     - causation_id: Optional field referencing parent's envelope_id
 
     For envelopes without an explicit causation_id field, the validator
-    checks the metadata for a 'causation_id' key or 'parent_message_id' key.
+    checks the metadata for a 'causation_id' key.
 
 Causation ID Semantics:
     **Canonical Location**: When producing child messages, set causation_id in
-    ``metadata.tags["causation_id"]`` as a string UUID. This is the preferred
-    location for new ONEX implementations.
+    ``metadata.tags["causation_id"]`` as a string UUID. For HTTP transports,
+    use ``metadata.headers["x-causation-id"]``.
 
     **Why metadata.tags?** The ModelEventEnvelope's metadata.tags dict provides
-    a flexible, schema-stable location for tracing metadata. Unlike first-class
-    envelope fields (which require schema changes), tags can be extended without
-    breaking compatibility.
+    a flexible, schema-stable location for tracing metadata.
 
     **Producer Responsibility**: When creating a child envelope from a parent:
 
@@ -60,19 +58,6 @@ Causation ID Semantics:
                 },
             ),
         )
-
-    **Fallback Locations**: The validator also checks these locations for
-    backwards compatibility with legacy systems and external integrations:
-
-    - ``envelope.causation_id`` - Direct attribute (if envelope model has it)
-    - ``metadata.tags["parent_message_id"]`` - Legacy terminology alias
-    - ``metadata.headers["x-causation-id"]`` - HTTP transport convention
-    - ``metadata.headers["causation-id"]`` - Alternate HTTP header name
-    - ``metadata.headers["x-parent-message-id"]`` - Legacy HTTP header
-
-    These fallbacks exist to support interoperability with older ONEX versions,
-    HTTP-based message transports, and external event producers that may use
-    different naming conventions.
 
 Thread Safety:
     The ChainPropagationValidator is stateless and thread-safe. All validation
@@ -156,26 +141,18 @@ __all__ = [
 # Causation ID Lookup Keys
 # ==============================================================================
 # These constants define the keys checked when resolving causation_id from
-# envelope metadata. The canonical location is metadata.tags["causation_id"],
-# but other keys are checked for backwards compatibility.
+# envelope metadata.
 
-CAUSATION_ID_TAG_KEYS: tuple[str, ...] = ("causation_id", "parent_message_id")
-"""Keys checked in metadata.tags for causation_id (in priority order).
+CAUSATION_ID_TAG_KEYS: tuple[str, ...] = ("causation_id",)
+"""Keys checked in metadata.tags for causation_id.
 
-The first key ("causation_id") is the canonical location for new implementations.
-The second key ("parent_message_id") is a legacy alias maintained for backwards
-compatibility with older ONEX versions.
+The canonical location for causation_id is metadata.tags["causation_id"].
 """
 
-CAUSATION_ID_HEADER_KEYS: tuple[str, ...] = (
-    "x-causation-id",
-    "causation-id",
-    "x-parent-message-id",
-)
-"""Keys checked in metadata.headers for causation_id (in priority order).
+CAUSATION_ID_HEADER_KEYS: tuple[str, ...] = ("x-causation-id",)
+"""Keys checked in metadata.headers for causation_id.
 
-These HTTP-style header keys support interoperability with HTTP-based message
-transports and external event producers that may use different naming conventions.
+The canonical HTTP header for causation_id is "x-causation-id".
 """
 
 # ==============================================================================
@@ -219,10 +196,12 @@ def get_correlation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
 def get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
     """Get the causation_id from an envelope.
 
-    Canonical Location:
+    Canonical Locations:
         The **canonical location** for causation_id is ``metadata.tags["causation_id"]``
-        stored as a string UUID. When creating child envelopes, producers SHOULD set
+        stored as a string UUID. When creating child envelopes, producers MUST set
         causation_id in this location for consistency across the ONEX ecosystem.
+
+        For HTTP transports, use ``metadata.headers["x-causation-id"]``.
 
         Example of canonical usage when producing a child message::
 
@@ -235,29 +214,15 @@ def get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
                 ),
             )
 
-    Fallback Locations (Backwards Compatibility):
-        This function checks multiple locations for interoperability with legacy
-        systems and external message producers that may use different conventions:
-
-        1. **Direct attribute** ``envelope.causation_id`` (UUID) - Some envelope
-           implementations may expose causation_id as a first-class attribute.
+    Lookup Order:
+        1. **Direct attribute** ``envelope.causation_id`` (UUID) - If envelope
+           exposes causation_id as a first-class attribute.
 
         2. **Metadata tags** ``metadata.tags["causation_id"]`` (string -> UUID) -
-           **Canonical location**. Preferred for new implementations.
+           Canonical location.
 
-        3. **Metadata tags** ``metadata.tags["parent_message_id"]`` (string -> UUID) -
-           Legacy alias. Some systems use "parent_message_id" terminology.
-
-        4. **Metadata headers** with keys ``x-causation-id``, ``causation-id``,
-           ``x-parent-message-id`` (string -> UUID) - HTTP-style headers for
-           interoperability with HTTP-based message transports.
-
-    Best Practices:
-        - **Producers**: Always set ``metadata.tags["causation_id"]`` when creating
-          child envelopes. This ensures consistent behavior across validators.
-        - **Consumers**: Use this function for extraction - it handles all formats.
-        - **Migrations**: When migrating from legacy formats, populate both the
-          canonical location and the legacy location during the transition period.
+        3. **Metadata headers** ``metadata.headers["x-causation-id"]`` (string -> UUID) -
+           Canonical HTTP header.
 
     Args:
         envelope: The event envelope.
@@ -275,13 +240,11 @@ def get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
         if isinstance(causation_id, UUID):
             return causation_id
 
-    # Check metadata for causation_id or parent_message_id
-    # Note: metadata.headers or metadata.tags might contain this info
+    # Check metadata for causation_id
     if hasattr(envelope, "metadata") and envelope.metadata is not None:
         metadata = envelope.metadata
 
-        # Check if metadata has a tags dict with causation info
-        # Uses CAUSATION_ID_TAG_KEYS constant for lookup priority
+        # Check metadata.tags for causation_id (canonical location)
         if hasattr(metadata, "tags") and metadata.tags:
             tags = metadata.tags
             for key in CAUSATION_ID_TAG_KEYS:
@@ -299,8 +262,7 @@ def get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
                                 value,
                             )
 
-        # Check headers dict as well
-        # Uses CAUSATION_ID_HEADER_KEYS constant for lookup priority
+        # Check metadata.headers for x-causation-id (HTTP transport)
         if hasattr(metadata, "headers") and metadata.headers:
             headers = metadata.headers
             for key in CAUSATION_ID_HEADER_KEYS:

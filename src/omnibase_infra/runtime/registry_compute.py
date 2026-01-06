@@ -150,20 +150,17 @@ _SEMVER_SORT_SENTINEL = chr(127)
 
 # Environment variable for configuring the semver LRU cache size
 # Set ONEX_COMPUTE_REGISTRY_CACHE_SIZE to tune cache size for large deployments
-# Falls back to legacy COMPUTE_REGISTRY_CACHE_SIZE for backward compatibility
 ENV_COMPUTE_REGISTRY_CACHE_SIZE = "ONEX_COMPUTE_REGISTRY_CACHE_SIZE"
-ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY = "COMPUTE_REGISTRY_CACHE_SIZE"
 
 # Default cache size when environment variable is not set
 _DEFAULT_SEMVER_CACHE_SIZE = 128
 
 
 def _get_compute_registry_cache_size() -> int:
-    """Get compute registry cache size from environment with legacy fallback.
+    """Get compute registry cache size from environment.
 
-    Checks for the ONEX_COMPUTE_REGISTRY_CACHE_SIZE environment variable first.
-    If not set, falls back to the legacy COMPUTE_REGISTRY_CACHE_SIZE for
-    backward compatibility. Logs an info message when legacy variable is used.
+    Reads the ONEX_COMPUTE_REGISTRY_CACHE_SIZE environment variable.
+    If not set, returns the default cache size.
 
     Range validation: Cache size must be between 1 and 10000.
     - Below 1: Uses default (logged as warning)
@@ -179,7 +176,6 @@ def _get_compute_registry_cache_size() -> int:
     from omnibase_infra.enums import EnumInfraTransportType
     from omnibase_infra.utils.util_env_parsing import parse_env_int
 
-    # Prefer ONEX_ prefix
     if os.environ.get(ENV_COMPUTE_REGISTRY_CACHE_SIZE) is not None:
         return parse_env_int(
             ENV_COMPUTE_REGISTRY_CACHE_SIZE,
@@ -190,23 +186,6 @@ def _get_compute_registry_cache_size() -> int:
             service_name="compute_registry",
         )
 
-    # Fall back to legacy name for backward compatibility
-    if os.environ.get(ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY) is not None:
-        logger.info(
-            "Using legacy %s; consider migrating to %s",
-            ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY,
-            ENV_COMPUTE_REGISTRY_CACHE_SIZE,
-        )
-        return parse_env_int(
-            ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY,
-            _DEFAULT_SEMVER_CACHE_SIZE,
-            min_value=1,
-            max_value=10000,
-            transport_type=EnumInfraTransportType.HTTP,
-            service_name="compute_registry",
-        )
-
-    # Default
     return _DEFAULT_SEMVER_CACHE_SIZE
 
 
@@ -299,7 +278,6 @@ class RegistryCompute:
         ONEX_COMPUTE_REGISTRY_CACHE_SIZE: Configure the semver LRU cache size for large
             deployments. Set to a higher value (e.g., 256, 512) if you have many
             unique version strings. Default: 128.
-            Falls back to legacy COMPUTE_REGISTRY_CACHE_SIZE if not set.
 
     Attributes:
         _registry: Internal dictionary mapping ModelComputeKey instances to plugin classes
@@ -327,7 +305,6 @@ class RegistryCompute:
     # ==========================================================================
 
     # Semver cache size - configurable via ONEX_COMPUTE_REGISTRY_CACHE_SIZE env var
-    # Falls back to legacy COMPUTE_REGISTRY_CACHE_SIZE for backward compatibility
     # Read at class definition time; can be overridden via class attribute before first parse
     SEMVER_CACHE_SIZE: int = _get_compute_registry_cache_size()
 
@@ -1091,7 +1068,6 @@ class RegistryCompute:
 __all__: list[str] = [
     # Environment variable constants
     "ENV_COMPUTE_REGISTRY_CACHE_SIZE",
-    "ENV_COMPUTE_REGISTRY_CACHE_SIZE_LEGACY",
     # Re-export models for convenience
     "ModelComputeKey",
     "ModelComputeRegistration",

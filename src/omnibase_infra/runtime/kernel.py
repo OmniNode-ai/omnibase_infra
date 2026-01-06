@@ -35,7 +35,6 @@ Usage:
 
 Environment Variables:
     ONEX_CONTRACTS_DIR: Path to contracts directory (default: ./contracts)
-        Falls back to legacy CONTRACTS_DIR if ONEX_CONTRACTS_DIR is not set.
     ONEX_HTTP_PORT: Port for health check HTTP server (default: 8085)
     ONEX_LOG_LEVEL: Logging level (default: INFO)
     ONEX_ENVIRONMENT: Runtime environment name (default: local)
@@ -77,6 +76,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
@@ -115,9 +115,7 @@ DEFAULT_CONTRACTS_DIR = "./contracts"
 DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 
 # Environment variable names for contracts directory
-# Prefer ONEX_ prefix, fall back to legacy name for backward compatibility
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
-ENV_CONTRACTS_DIR_LEGACY = "CONTRACTS_DIR"
 DEFAULT_INPUT_TOPIC = "requests"
 DEFAULT_OUTPUT_TOPIC = "responses"
 DEFAULT_GROUP_ID = "onex-runtime"
@@ -128,31 +126,18 @@ MAX_PORT = 65535
 
 
 def _get_contracts_dir() -> Path:
-    """Get contracts directory from environment with legacy fallback.
+    """Get contracts directory from environment.
 
-    Checks for the ONEX_CONTRACTS_DIR environment variable first. If not set,
-    falls back to the legacy CONTRACTS_DIR for backward compatibility.
-    Logs an info message when legacy variable is used.
+    Reads the ONEX_CONTRACTS_DIR environment variable. If not set,
+    returns the default contracts directory.
 
     Returns:
         Path to the contracts directory.
     """
-    # Prefer ONEX_ prefix
     onex_value = os.environ.get(ENV_CONTRACTS_DIR)
     if onex_value:
         return Path(onex_value)
 
-    # Fall back to legacy name for backward compatibility
-    legacy_value = os.environ.get(ENV_CONTRACTS_DIR_LEGACY)
-    if legacy_value:
-        logger.info(
-            "Using legacy %s; consider migrating to %s",
-            ENV_CONTRACTS_DIR_LEGACY,
-            ENV_CONTRACTS_DIR,
-        )
-        return Path(legacy_value)
-
-    # Default
     return Path(DEFAULT_CONTRACTS_DIR)
 
 
@@ -328,7 +313,6 @@ async def bootstrap() -> int:
 
     Bootstrap Sequence:
         1. Determine contracts directory from ONEX_CONTRACTS_DIR environment variable
-           (falls back to legacy CONTRACTS_DIR if ONEX_CONTRACTS_DIR is not set)
         2. Load and validate runtime configuration from contracts or environment
         3. Create and initialize event bus (InMemoryEventBus or KafkaEventBus based on config)
         4. Create ModelONEXContainer and wire infrastructure services (async)
@@ -359,7 +343,6 @@ async def bootstrap() -> int:
 
     Environment Variables:
         ONEX_CONTRACTS_DIR: Path to contracts directory (default: ./contracts)
-            Falls back to legacy CONTRACTS_DIR if ONEX_CONTRACTS_DIR is not set.
         ONEX_HTTP_PORT: Port for health check server (default: 8085)
         ONEX_LOG_LEVEL: Logging level (default: INFO)
         ONEX_ENVIRONMENT: Environment name (default: local)
@@ -394,7 +377,7 @@ async def bootstrap() -> int:
     bootstrap_start_time = time.time()
 
     try:
-        # 1. Determine contracts directory (with legacy fallback)
+        # 1. Determine contracts directory
         contracts_dir = _get_contracts_dir()
         logger.info(
             "ONEX Kernel starting with contracts_dir=%s (correlation_id=%s)",
@@ -432,13 +415,13 @@ async def bootstrap() -> int:
 
         if use_kafka:
             # Use KafkaEventBus for production/integration testing
-            # KafkaEventBus.default() picks up KAFKA_BOOTSTRAP_SERVERS from environment
-            event_bus = KafkaEventBus(
+            kafka_config = ModelKafkaEventBusConfig(
                 bootstrap_servers=kafka_bootstrap_servers or "localhost:9092",
                 environment=environment,
                 group=config.consumer_group,
                 circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
             )
+            event_bus = KafkaEventBus(config=kafka_config)
             event_bus_type = "kafka"
 
             # Start KafkaEventBus to connect to Kafka/Redpanda and enable consumers
@@ -1218,7 +1201,6 @@ if __name__ == "__main__":
 
 __all__: list[str] = [
     "ENV_CONTRACTS_DIR",
-    "ENV_CONTRACTS_DIR_LEGACY",
     "bootstrap",
     "load_runtime_config",
     "main",

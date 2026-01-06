@@ -380,9 +380,19 @@ class TestA5NormalizedDeterminism:
             assert intent1.intent_type == intent2.intent_type
             assert intent1.target == intent2.target
 
-            # Normalize and compare payloads (payload is a wrapper with .data dict)
-            payload1 = _normalize_dict(intent1.payload.data)
-            payload2 = _normalize_dict(intent2.payload.data)
+            # Normalize and compare payloads (convert Pydantic models to dicts first)
+            payload1_dict = (
+                intent1.payload.model_dump(mode="json")
+                if hasattr(intent1.payload, "model_dump")
+                else dict(intent1.payload)
+            )
+            payload2_dict = (
+                intent2.payload.model_dump(mode="json")
+                if hasattr(intent2.payload, "model_dump")
+                else dict(intent2.payload)
+            )
+            payload1 = _normalize_dict(payload1_dict)
+            payload2 = _normalize_dict(payload2_dict)
             assert payload1 == payload2, (
                 f"Payload mismatch for {intent1.intent_type}:\n"
                 f"Run 1: {json.dumps(payload1, indent=2, default=str)}\n"
@@ -564,7 +574,13 @@ class TestA6Observability:
 
         # Assert - Check each intent payload (payload is wrapper with .data dict)
         for intent in result.intents:
-            payload_text = json.dumps(intent.payload.data, default=str)
+            # Convert Pydantic model to dict for JSON serialization
+            payload_dict = (
+                intent.payload.model_dump(mode="json")
+                if hasattr(intent.payload, "model_dump")
+                else intent.payload
+            )
+            payload_text = json.dumps(payload_dict, default=str)
             violations = check_log_for_secrets(payload_text)
 
             assert len(violations) == 0, (
@@ -755,7 +771,13 @@ class TestA6Observability:
 
         # Assert 3: No secrets in intent payloads (payload is wrapper with .data dict)
         for intent in result.intents:
-            payload_text = json.dumps(intent.payload.data, default=str)
+            # Convert Pydantic model to dict for JSON serialization
+            payload_dict = (
+                intent.payload.model_dump(mode="json")
+                if hasattr(intent.payload, "model_dump")
+                else intent.payload
+            )
+            payload_text = json.dumps(payload_dict, default=str)
             for secret in secret_values:
                 assert secret not in payload_text, (
                     f"SECRET LEAKED in intent payload ({intent.intent_type}): "

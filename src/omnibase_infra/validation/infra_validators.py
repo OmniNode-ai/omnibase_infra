@@ -38,12 +38,12 @@ from omnibase_core.models.common.model_validation_metadata import (
     ModelValidationMetadata,
 )
 from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
+from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
     CircularImportValidator,
     ModelContractValidationResult,
     ModelImportValidationResult,
     ModelValidationResult,
-    ServiceContractValidator,
     validate_architecture,
     validate_contracts,
     validate_patterns,

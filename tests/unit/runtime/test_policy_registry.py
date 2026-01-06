@@ -2368,6 +2368,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
     # Partial Version Normalization Tests
     # =========================================================================
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_partial_version_major_only_registers_and_retrieves(
         self, policy_registry: PolicyRegistry
     ) -> None:
@@ -2377,6 +2378,9 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         - Registration with "1" succeeds
         - Lookup with "1" finds the policy
         - Lookup with "1.0.0" also finds the policy (normalized match)
+
+        Note: This test intentionally uses non-normalized versions ('1') to verify
+        normalization behavior. The DeprecationWarning is expected and suppressed.
         """
         policy_registry.register_policy(
             policy_id="partial-major",
@@ -2399,6 +2403,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         policy_cls_normalized = policy_registry.get("partial-major", version="1.0.0")
         assert policy_cls_normalized is MockSyncPolicy
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_partial_version_major_minor_registers_and_retrieves(
         self, policy_registry: PolicyRegistry
     ) -> None:
@@ -2408,6 +2413,9 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         - Registration with "1.2" succeeds
         - Lookup with "1.2" finds the policy
         - Lookup with "1.2.0" also finds the policy (normalized match)
+
+        Note: This test intentionally uses non-normalized versions ('1.2') to verify
+        normalization behavior. The DeprecationWarning is expected and suppressed.
         """
         policy_registry.register_policy(
             policy_id="partial-major-minor",
@@ -2431,12 +2439,16 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         )
         assert policy_cls_normalized is MockSyncPolicy
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_partial_version_zero_normalizes_correctly(
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test edge case: version '0' normalizes to '0.0.0'.
 
         This is an important edge case as zero versions are valid in semver.
+
+        Note: This test intentionally uses non-normalized versions ('0') to verify
+        normalization behavior. The DeprecationWarning is expected and suppressed.
         """
         policy_registry.register_policy(
             policy_id="zero-version",
@@ -2455,10 +2467,15 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         policy_cls_normalized = policy_registry.get("zero-version", version="0.0.0")
         assert policy_cls_normalized is MockSyncPolicy
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_partial_version_zero_major_minor_normalizes_correctly(
         self, policy_registry: PolicyRegistry
     ) -> None:
-        """Test edge case: version '0.1' normalizes to '0.1.0'."""
+        """Test edge case: version '0.1' normalizes to '0.1.0'.
+
+        Note: This test intentionally uses non-normalized versions ('0.1') to verify
+        normalization behavior. The DeprecationWarning is expected and suppressed.
+        """
         policy_registry.register_policy(
             policy_id="zero-minor-version",
             policy_class=MockSyncPolicy,  # type: ignore[arg-type]
@@ -2476,12 +2493,16 @@ class TestPolicyRegistryVersionNormalizationIntegration:
     # Whitespace Trimming Integration Tests
     # =========================================================================
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_whitespace_trimming_space_padded_version(
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that ' 1.0.0 ' is trimmed and matches '1.0.0'.
 
         Verifies full integration: register with whitespace, lookup without.
+
+        Note: This test intentionally uses non-normalized versions (' 1.0.0 ') to verify
+        normalization behavior. The DeprecationWarning is expected and suppressed.
         """
         policy_registry.register_policy(
             policy_id="space-padded",
@@ -2500,12 +2521,16 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         policy_cls_with_spaces = policy_registry.get("space-padded", version=" 1.0.0 ")
         assert policy_cls_with_spaces is MockSyncPolicy
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_whitespace_trimming_tab_newline_version(
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that tab and newline characters are trimmed from versions.
 
         Verifies: '\\t1.0.0\\n' normalizes to '1.0.0'.
+
+        Note: This test intentionally uses non-normalized versions with whitespace to
+        verify normalization behavior. The DeprecationWarning is expected and suppressed.
         """
         policy_registry.register_policy(
             policy_id="tab-newline",
@@ -2522,12 +2547,16 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         # Lookup with different whitespace patterns
         assert policy_registry.is_registered("tab-newline", version=" 1.0.0 ")
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_whitespace_with_partial_version_combined(
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test combined whitespace trimming and partial version normalization.
 
         Verifies: ' 2 ' normalizes to '2.0.0'.
+
+        Note: This test intentionally uses non-normalized versions (' 2 ') to verify
+        normalization behavior. The DeprecationWarning is expected and suppressed.
         """
         policy_registry.register_policy(
             policy_id="whitespace-partial",
@@ -2549,6 +2578,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
     # ModelPolicyKey Lookup Equivalence Tests
     # =========================================================================
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_model_policy_key_equivalence_partial_versions(
         self, policy_registry: PolicyRegistry
     ) -> None:
@@ -2556,6 +2586,9 @@ class TestPolicyRegistryVersionNormalizationIntegration:
 
         This tests the core of ModelPolicyKey normalization - that registering
         with '1' and looking up with '1.0.0' uses the same key internally.
+
+        Note: This test intentionally uses non-normalized versions ('1') to verify
+        normalization behavior. The DeprecationWarning is expected and suppressed.
         """
         # Register with partial version
         policy_registry.register_policy(
@@ -2575,12 +2608,16 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         policy_cls_full = policy_registry.get("key-equiv-partial", version="1.0.0")
         assert policy_cls_partial is policy_cls_full is MockPolicyV1
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_model_policy_key_equivalence_whitespace_versions(
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that ModelPolicyKey treats whitespace-padded versions equivalently.
 
         Registering with ' 1.0.0 ' and looking up with '1.0.0' should match.
+
+        Note: This test intentionally uses non-normalized versions ('  1.0.0  ') to
+        verify normalization behavior. The DeprecationWarning is expected and suppressed.
         """
         policy_registry.register_policy(
             policy_id="key-equiv-whitespace",
@@ -2595,12 +2632,16 @@ class TestPolicyRegistryVersionNormalizationIntegration:
             policy_cls = policy_registry.get("key-equiv-whitespace", version=version)
             assert policy_cls is MockPolicyV1, f"Failed for version: {version!r}"
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_multiple_versions_with_normalization(
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that multiple normalized versions don't collide unexpectedly.
 
         Registering '1' and '1.0.0' should be treated as the same version.
+
+        Note: This test intentionally uses non-normalized versions ('1') to verify
+        normalization behavior. The DeprecationWarning is expected and suppressed.
         """
         policy_registry.register_policy(
             policy_id="multi-norm",
@@ -2625,12 +2666,16 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         policy_cls = policy_registry.get("multi-norm")
         assert policy_cls is MockPolicyV2
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_latest_version_selection_with_partial_versions(
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that get() returns latest version with mixed partial/full formats.
 
         Register '1', '2.0', '3.0.0' - get() should return the policy for '3.0.0'.
+
+        Note: This test intentionally uses non-normalized versions ('1', '2.0') to
+        verify normalization behavior. The DeprecationWarning is expected and suppressed.
         """
         policy_registry.register_policy(
             policy_id="latest-partial",
@@ -2702,12 +2747,16 @@ class TestPolicyRegistryVersionNormalizationIntegration:
     # v-prefix Normalization Tests
     # =========================================================================
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_v_prefix_stripped_during_normalization(
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that 'v1.0.0' is normalized to '1.0.0'.
 
         Common in git tags but not strictly semver.
+
+        Note: This test intentionally uses non-normalized versions ('v1.0.0') to
+        verify normalization behavior. The DeprecationWarning is expected and suppressed.
         """
         policy_registry.register_policy(
             policy_id="v-prefix",
@@ -2724,10 +2773,15 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         # Should also work with v prefix in lookup (both normalized)
         assert policy_registry.is_registered("v-prefix", version="v1.0.0")
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_v_prefix_with_partial_version(
         self, policy_registry: PolicyRegistry
     ) -> None:
-        """Test that 'v2' normalizes to '2.0.0'."""
+        """Test that 'v2' normalizes to '2.0.0'.
+
+        Note: This test intentionally uses non-normalized versions ('v2') to
+        verify normalization behavior. The DeprecationWarning is expected and suppressed.
+        """
         policy_registry.register_policy(
             policy_id="v-partial",
             policy_class=MockSyncPolicy,  # type: ignore[arg-type]

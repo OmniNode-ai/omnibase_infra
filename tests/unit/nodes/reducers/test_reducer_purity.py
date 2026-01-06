@@ -664,19 +664,11 @@ class TestDeterminismGates:
             assert i1.intent_type == i2.intent_type
             assert i1.target == i2.target
             # Compare payload structure (excluding runtime-generated fields)
-            # Handle both dict and Pydantic model payloads
-            p1 = (
-                i1.payload.model_dump()
-                if hasattr(i1.payload, "model_dump")
-                else i1.payload
-            )
-            p2 = (
-                i2.payload.model_dump()
-                if hasattr(i2.payload, "model_dump")
-                else i2.payload
-            )
-            assert p1.get("correlation_id") == p2.get("correlation_id")
-            assert p1.get("service_id") == p2.get("service_id")
+            # Use model_dump() since payload is now a Pydantic model, not a dict
+            i1_payload = i1.payload.model_dump()
+            i2_payload = i2.payload.model_dump()
+            assert i1_payload.get("correlation_id") == i2_payload.get("correlation_id")
+            assert i1_payload.get("service_id") == i2_payload.get("service_id")
 
     def test_reducer_input_state_is_not_mutated(self) -> None:
         """Verify reduce() does not mutate the input state object.
@@ -846,17 +838,9 @@ class TestDeterminismGates:
                     f"{intent.target} != {first_intent.target}"
                 )
                 # Compare payload correlation_id and service_id
-                # Handle both dict and Pydantic model payloads
-                intent_payload = (
-                    intent.payload.model_dump()
-                    if hasattr(intent.payload, "model_dump")
-                    else intent.payload
-                )
-                first_intent_payload = (
-                    first_intent.payload.model_dump()
-                    if hasattr(first_intent.payload, "model_dump")
-                    else first_intent.payload
-                )
+                # Use model_dump() since payload is now a Pydantic model, not a dict
+                intent_payload = intent.payload.model_dump()
+                first_intent_payload = first_intent.payload.model_dump()
                 assert intent_payload.get("correlation_id") == first_intent_payload.get(
                     "correlation_id"
                 ), f"Thread {i}, intent {j}: correlation_id mismatch"
@@ -1605,14 +1589,9 @@ class TestSecurityGates:
         all_violations: list[str] = []
 
         for intent in result.intents:
-            # Handle both dict and Pydantic model payloads
-            payload_dict = (
-                intent.payload.model_dump()
-                if hasattr(intent.payload, "model_dump")
-                else intent.payload
-            )
+            # Use model_dump() since payload is now a Pydantic model, not a dict
             intent_violations = self._check_dict_for_sensitive_fields(
-                payload_dict, f"intent[{intent.intent_type}]"
+                intent.payload.model_dump(), f"intent[{intent.intent_type}]"
             )
             all_violations.extend(intent_violations)
 

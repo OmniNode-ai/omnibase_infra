@@ -237,10 +237,10 @@ pattern_exemptions:
       - CLAUDE.md (ONEX Architecture - Handler Classification)
     ticket: OMN-1092
   - file_pattern: 'execution_shape_validator\.py'
-    class_pattern: "Class name 'HandlerInfo'"
-    violation_pattern: "contains anti-pattern 'Handler'"
+    class_pattern: "Class name 'ModelDetectedNodeInfo'"
+    violation_pattern: "contains anti-pattern 'Model'"
     reason: >
-      HandlerInfo is a validation data class for describing handler information during AST analysis - it describes handlers, not implements handler behavior.
+      ModelDetectedNodeInfo is a validation data class for describing detected node information during AST analysis - follows Model* naming convention.
 
     documentation:
       - docs/validation/validator_reference.md

@@ -347,10 +347,6 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind, EnumReductionType, EnumStreamingMode
-from omnibase_core.models.intents import (
-    ModelConsulRegisterIntent,
-    ModelPostgresUpsertRegistrationIntent,
-)
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -359,11 +355,11 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeRegistrationRecord,
 )
-from omnibase_infra.nodes.reducers.models.model_consul_register_payload import (
-    ModelConsulRegisterPayload,
+from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
+    ModelPayloadConsulRegister,
 )
-from omnibase_infra.nodes.reducers.models.model_postgres_upsert_payload import (
-    ModelPostgresUpsertPayload,
+from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
+    ModelPayloadPostgresUpsertRegistration,
 )
 from omnibase_infra.nodes.reducers.models.model_registration_confirmation import (
     ModelRegistrationConfirmation,
@@ -505,10 +501,6 @@ class ModelValidationResult(BaseModel):
             field_name=field_name,
             error_message=error_message,
         )
-
-
-# Backwards compatibility alias
-ValidationResult = ModelValidationResult
 
 
 # TODO(OMN-889): Complete pure reducer implementation - add reduce_confirmation() method
@@ -730,7 +722,9 @@ class RegistrationReducer:
         """
         return self._validate_event(event).is_valid
 
-    def _validate_event(self, event: ModelNodeIntrospectionEvent) -> ValidationResult:
+    def _validate_event(
+        self, event: ModelNodeIntrospectionEvent
+    ) -> ModelValidationResult:
         """Validate introspection event with detailed error information.
 
         Validates that required fields are present for registration workflow.
@@ -760,7 +754,7 @@ class RegistrationReducer:
         """
         # Validate node_id: required for registration identity
         if event.node_id is None:
-            return ValidationResult.failure(
+            return ModelValidationResult.failure(
                 error_code="missing_node_id",
                 field_name="node_id",
                 error_message="node_id is required for registration identity",
@@ -768,7 +762,7 @@ class RegistrationReducer:
 
         # Validate node_type: must be present
         if not hasattr(event, "node_type") or event.node_type is None:
-            return ValidationResult.failure(
+            return ModelValidationResult.failure(
                 error_code="missing_node_type",
                 field_name="node_type",
                 error_message="node_type is required for service categorization",
@@ -783,7 +777,7 @@ class RegistrationReducer:
             EnumNodeKind.ORCHESTRATOR.value,
         }
         if event.node_type not in valid_node_types:
-            return ValidationResult.failure(
+            return ModelValidationResult.failure(
                 error_code="invalid_node_type",
                 field_name="node_type",
                 error_message=(
@@ -791,7 +785,7 @@ class RegistrationReducer:
                 ),
             )
 
-        return ValidationResult.success()
+        return ModelValidationResult.success()
 
     def _derive_deterministic_event_id(
         self, event: ModelNodeIntrospectionEvent
@@ -873,8 +867,8 @@ class RegistrationReducer:
                 "Timeout": "5s",
             }
 
-        # Build typed Consul registration intent, then wrap in ModelPayloadExtension
-        consul_intent = ModelConsulRegisterIntent(
+        # Build typed Consul registration payload (implements ProtocolIntentPayload)
+        consul_payload = ModelPayloadConsulRegister(
             correlation_id=correlation_id,
             service_id=service_id,
             service_name=service_name,
@@ -882,15 +876,10 @@ class RegistrationReducer:
             health_check=health_check,
         )
 
-        # Wrap in payload class for ProtocolIntentPayload compliance
-        payload = ModelConsulRegisterPayload(
-            data=consul_intent.model_dump(mode="json"),
-        )
-
         return ModelIntent(
             intent_type="consul.register",
             target=f"consul://service/{service_name}",
-            payload=payload,
+            payload=consul_payload,
         )
 
     def _build_postgres_intent(
@@ -929,22 +918,16 @@ class RegistrationReducer:
             updated_at=now,
         )
 
-        # Build typed PostgreSQL upsert intent, then wrap in ModelPayloadExtension
-        postgres_intent = ModelPostgresUpsertRegistrationIntent(
+        # Build typed PostgreSQL upsert payload (implements ProtocolIntentPayload)
+        postgres_payload = ModelPayloadPostgresUpsertRegistration(
             correlation_id=correlation_id,
             record=record,
-        )
-
-        # Wrap in payload class for ProtocolIntentPayload compliance
-        # Use serialize_as_any=True because record is typed as BaseModel
-        payload = ModelPostgresUpsertPayload(
-            data=postgres_intent.model_dump(mode="json", serialize_as_any=True),
         )
 
         return ModelIntent(
             intent_type="postgres.upsert_registration",
             target=f"postgres://node_registrations/{event.node_id}",
-            payload=payload,
+            payload=postgres_payload,
         )
 
     # =========================================================================
@@ -1222,8 +1205,7 @@ __all__ = [
     # Performance threshold constants (for tests and monitoring)
     "PERF_THRESHOLD_REDUCE_MS",
     # Validation types (for tests and custom validators)
-    "ModelValidationResult",  # Canonical ONEX name (Model* convention)
+    "ModelValidationResult",
     "RegistrationReducer",
     "ValidationErrorCode",
-    "ValidationResult",  # Backwards compatibility alias
 ]

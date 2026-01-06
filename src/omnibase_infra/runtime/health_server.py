@@ -31,14 +31,14 @@ Note:
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from aiohttp import web
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.runtime.models import ModelHealthCheckResponse
 from omnibase_infra.utils.correlation import generate_correlation_id
 
 if TYPE_CHECKING:
@@ -514,7 +514,7 @@ class HealthServer:
             is_degraded = bool(health_details.get("degraded", False))
 
             if is_healthy:
-                status = "healthy"
+                status: Literal["healthy", "degraded", "unhealthy"] = "healthy"
                 http_status = 200
             elif is_degraded:
                 # DESIGN DECISION: Degraded status returns HTTP 200 (not 503)
@@ -545,14 +545,14 @@ class HealthServer:
                 status = "unhealthy"
                 http_status = 503
 
-            response_body = {
-                "status": status,
-                "version": self._version,
-                "details": health_details,
-            }
+            response = ModelHealthCheckResponse.success(
+                status=status,
+                version=self._version,
+                details=health_details,
+            )
 
             return web.Response(
-                text=json.dumps(response_body),
+                text=response.model_dump_json(exclude_none=True),
                 status=http_status,
                 content_type="application/json",
             )
@@ -569,16 +569,15 @@ class HealthServer:
                 },
             )
 
-            error_response = {
-                "status": "unhealthy",
-                "version": self._version,
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "correlation_id": str(correlation_id),
-            }
+            error_response = ModelHealthCheckResponse.failure(
+                version=self._version,
+                error=str(e),
+                error_type=type(e).__name__,
+                correlation_id=str(correlation_id),
+            )
 
             return web.Response(
-                text=json.dumps(error_response),
+                text=error_response.model_dump_json(exclude_none=True),
                 status=503,
                 content_type="application/json",
             )
