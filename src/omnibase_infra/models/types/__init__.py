@@ -27,7 +27,13 @@ from __future__ import annotations
 JsonPrimitive = object  # Represents atomic JSON values (str, int, float, bool, None)
 JsonValue = object  # Represents any valid JSON value (primitive, dict, or list)
 
+# JsonDict is a more specific type for functions that work with JSON objects.
+# Use this when you need dict operations like .get(), indexing, or `in` checks.
+# This is compatible with mypy while still using `object` for nested values.
+JsonDict = dict[str, object]
+
 __all__ = [
+    "JsonDict",
     "JsonPrimitive",
     "JsonValue",
 ]

@@ -80,6 +80,8 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.models.types import JsonValue
 
+from omnibase_infra.models.types import JsonDict
+
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
 # Tests patch "omnibase_infra.runtime.runtime_host_process.wire_handlers"
 wire_handlers = wire_default_handlers
@@ -170,7 +172,7 @@ class RuntimeHostProcess:
         event_bus: InMemoryEventBus | KafkaEventBus | None = None,
         input_topic: str = DEFAULT_INPUT_TOPIC,
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
-        config: JsonValue | None = None,
+        config: JsonDict | None = None,
         handler_registry: ProtocolBindingRegistry | None = None,
     ) -> None:
         """Initialize the runtime host process.
@@ -340,7 +342,7 @@ class RuntimeHostProcess:
         )
 
         # Store full config for handler initialization
-        self._config: JsonValue = config
+        self._config: JsonDict = config
 
         # Runtime state
         self._is_running: bool = False
@@ -905,7 +907,7 @@ class RuntimeHostProcess:
             async with self._pending_lock:
                 self._pending_message_count -= 1
 
-    async def _handle_envelope(self, envelope: JsonValue) -> None:
+    async def _handle_envelope(self, envelope: JsonDict) -> None:
         """Route envelope to appropriate handler.
 
         Validates envelope before dispatch and routes it to the appropriate
@@ -1085,7 +1087,7 @@ class RuntimeHostProcess:
         self,
         error: str,
         correlation_id: UUID | None,
-    ) -> JsonValue:
+    ) -> JsonDict:
         """Create a standardized error response envelope.
 
         Args:
@@ -1104,7 +1106,7 @@ class RuntimeHostProcess:
             "correlation_id": final_correlation_id,
         }
 
-    def _serialize_envelope(self, envelope: JsonValue | BaseModel) -> JsonValue:
+    def _serialize_envelope(self, envelope: JsonDict | BaseModel) -> JsonDict:
         """Recursively convert UUID objects to strings for JSON serialization.
 
         Handles both dict envelopes and Pydantic models (e.g., ModelDuplicateResponse).
@@ -1115,9 +1117,10 @@ class RuntimeHostProcess:
         Returns:
             New dict with all UUIDs converted to strings.
         """
-        # Convert Pydantic models to dict first
-        if isinstance(envelope, BaseModel):
-            envelope = envelope.model_dump()
+        # Convert Pydantic models to dict first, ensuring type safety
+        envelope_dict: JsonDict = (
+            envelope.model_dump() if isinstance(envelope, BaseModel) else envelope
+        )
 
         def convert_value(value: object) -> object:
             if isinstance(value, UUID):
@@ -1128,10 +1131,10 @@ class RuntimeHostProcess:
                 return [convert_value(item) for item in value]
             return value
 
-        return {k: convert_value(v) for k, v in envelope.items()}
+        return {k: convert_value(v) for k, v in envelope_dict.items()}
 
     async def _publish_envelope_safe(
-        self, envelope: JsonValue | BaseModel, topic: str
+        self, envelope: JsonDict | BaseModel, topic: str
     ) -> None:
         """Publish envelope with UUID serialization support.
 

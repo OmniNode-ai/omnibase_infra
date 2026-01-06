@@ -237,6 +237,40 @@ class TestBootstrap:
     """Tests for the bootstrap function."""
 
     @pytest.fixture
+    def mock_wire_infrastructure(self) -> Generator[MagicMock, None, None]:
+        """Mock wire_infrastructure_services and container to avoid wiring errors in tests.
+
+        This fixture mocks both:
+        1. wire_infrastructure_services - to be a no-op async function
+        2. ModelONEXContainer - to have a mock service_registry with resolve_service
+        """
+
+        async def noop_wire(container: object) -> dict[str, list[str]]:
+            """Async no-op for wire_infrastructure_services."""
+            return {"services": []}
+
+        async def mock_resolve_service(service_class: type) -> MagicMock:
+            """Mock resolve_service to return a MagicMock for any service."""
+            return MagicMock()
+
+        with patch(
+            "omnibase_infra.runtime.kernel.wire_infrastructure_services"
+        ) as mock_wire:
+            mock_wire.side_effect = noop_wire
+
+            with patch(
+                "omnibase_infra.runtime.kernel.ModelONEXContainer"
+            ) as mock_container_cls:
+                mock_container = MagicMock()
+                mock_service_registry = MagicMock()
+                mock_service_registry.resolve_service = AsyncMock(
+                    side_effect=mock_resolve_service
+                )
+                mock_container.service_registry = mock_service_registry
+                mock_container_cls.return_value = mock_container
+                yield mock_wire
+
+    @pytest.fixture
     def mock_runtime_host(self) -> Generator[MagicMock, None, None]:
         """Create a mock RuntimeHostProcess.
 
@@ -293,6 +327,7 @@ class TestBootstrap:
 
     async def test_bootstrap_starts_and_stops_runtime(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -322,6 +357,7 @@ class TestBootstrap:
 
     async def test_bootstrap_returns_error_on_unexpected_exception(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -344,6 +380,7 @@ class TestBootstrap:
 
     async def test_bootstrap_returns_error_on_config_error(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -362,6 +399,7 @@ class TestBootstrap:
 
     async def test_bootstrap_creates_event_bus_with_environment(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -385,6 +423,7 @@ class TestBootstrap:
 
     async def test_bootstrap_creates_kafka_event_bus_when_configured(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
@@ -420,6 +459,7 @@ class TestBootstrap:
 
     async def test_bootstrap_uses_contracts_dir_from_env(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -442,6 +482,7 @@ class TestBootstrap:
 
     async def test_bootstrap_handles_windows_signal_setup(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -466,6 +507,7 @@ class TestBootstrap:
 
     async def test_bootstrap_shutdown_timeout_logs_warning(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -521,6 +563,7 @@ class TestBootstrap:
 
     async def test_bootstrap_uses_config_grace_period(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -643,8 +686,45 @@ class TestMain:
 class TestIntegration:
     """Integration tests for kernel with real components."""
 
+    @pytest.fixture
+    def mock_wire_infrastructure(self) -> Generator[MagicMock, None, None]:
+        """Mock wire_infrastructure_services and container to avoid wiring errors in tests.
+
+        This fixture mocks both:
+        1. wire_infrastructure_services - to be a no-op async function
+        2. ModelONEXContainer - to have a mock service_registry with resolve_service
+        """
+
+        async def noop_wire(container: object) -> dict[str, list[str]]:
+            """Async no-op for wire_infrastructure_services."""
+            return {"services": []}
+
+        async def mock_resolve_service(service_class: type) -> MagicMock:
+            """Mock resolve_service to return a MagicMock for any service."""
+            return MagicMock()
+
+        with patch(
+            "omnibase_infra.runtime.kernel.wire_infrastructure_services"
+        ) as mock_wire:
+            mock_wire.side_effect = noop_wire
+
+            with patch(
+                "omnibase_infra.runtime.kernel.ModelONEXContainer"
+            ) as mock_container_cls:
+                mock_container = MagicMock()
+                mock_service_registry = MagicMock()
+                mock_service_registry.resolve_service = AsyncMock(
+                    side_effect=mock_resolve_service
+                )
+                mock_container.service_registry = mock_service_registry
+                mock_container_cls.return_value = mock_container
+                yield mock_wire
+
     async def test_full_bootstrap_with_real_event_bus(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        mock_wire_infrastructure: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """Test bootstrap with real InMemoryEventBus but mocked wait and health server.
 
@@ -673,6 +753,40 @@ class TestIntegration:
 
 class TestHttpPortValidation:
     """Tests for HTTP port validation in bootstrap."""
+
+    @pytest.fixture
+    def mock_wire_infrastructure(self) -> Generator[MagicMock, None, None]:
+        """Mock wire_infrastructure_services and container to avoid wiring errors in tests.
+
+        This fixture mocks both:
+        1. wire_infrastructure_services - to be a no-op async function
+        2. ModelONEXContainer - to have a mock service_registry with resolve_service
+        """
+
+        async def noop_wire(container: object) -> dict[str, list[str]]:
+            """Async no-op for wire_infrastructure_services."""
+            return {"services": []}
+
+        async def mock_resolve_service(service_class: type) -> MagicMock:
+            """Mock resolve_service to return a MagicMock for any service."""
+            return MagicMock()
+
+        with patch(
+            "omnibase_infra.runtime.kernel.wire_infrastructure_services"
+        ) as mock_wire:
+            mock_wire.side_effect = noop_wire
+
+            with patch(
+                "omnibase_infra.runtime.kernel.ModelONEXContainer"
+            ) as mock_container_cls:
+                mock_container = MagicMock()
+                mock_service_registry = MagicMock()
+                mock_service_registry.resolve_service = AsyncMock(
+                    side_effect=mock_resolve_service
+                )
+                mock_container.service_registry = mock_service_registry
+                mock_container_cls.return_value = mock_container
+                yield mock_wire
 
     @pytest.fixture
     def mock_runtime_host(self) -> Generator[MagicMock, None, None]:
@@ -736,6 +850,7 @@ class TestHttpPortValidation:
 
     async def test_bootstrap_rejects_port_zero(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -770,6 +885,7 @@ class TestHttpPortValidation:
 
     async def test_bootstrap_rejects_port_above_max(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -804,6 +920,7 @@ class TestHttpPortValidation:
 
     async def test_bootstrap_accepts_min_port(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -827,6 +944,7 @@ class TestHttpPortValidation:
 
     async def test_bootstrap_accepts_max_port(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -850,6 +968,7 @@ class TestHttpPortValidation:
 
     async def test_bootstrap_rejects_negative_port(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -884,6 +1003,7 @@ class TestHttpPortValidation:
 
     async def test_bootstrap_rejects_very_large_port(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -909,6 +1029,7 @@ class TestHttpPortValidation:
 
     async def test_bootstrap_rejects_non_numeric_port(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -954,6 +1075,7 @@ class TestHttpPortValidation:
     )
     async def test_bootstrap_rejects_non_numeric_port_edge_cases(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,

@@ -122,6 +122,7 @@ from omnibase_infra.handlers.handler_consul import ConsulHandler
 from omnibase_infra.handlers.handler_db import DbHandler
 from omnibase_infra.handlers.handler_http import HttpRestHandler
 from omnibase_infra.handlers.handler_vault import VaultHandler
+from omnibase_infra.models.types import JsonDict
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     HANDLER_TYPE_CONSUL,
@@ -137,8 +138,6 @@ from omnibase_infra.runtime.handler_registry import (
 if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
-
-    from omnibase_infra.models.types import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +274,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
 
 
 def wire_handlers_from_contract(
-    contract_config: JsonValue,
+    contract_config: JsonDict,
 ) -> dict[str, list[str]]:
     """Register handlers and event buses based on contract configuration.
 
