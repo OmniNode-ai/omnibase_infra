@@ -80,6 +80,8 @@ if TYPE_CHECKING:
         ProtocolIdempotencyStore,
     )
 
+from omnibase_infra.models.types import JsonDict
+
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
 # Tests patch "omnibase_infra.runtime.runtime_host_process.wire_handlers"
 wire_handlers = wire_default_handlers
@@ -1115,9 +1117,10 @@ class RuntimeHostProcess:
         Returns:
             New dict with all UUIDs converted to strings.
         """
-        # Convert Pydantic models to dict first
-        if isinstance(envelope, BaseModel):
-            envelope = envelope.model_dump()
+        # Convert Pydantic models to dict first, ensuring type safety
+        envelope_dict: JsonDict = (
+            envelope.model_dump() if isinstance(envelope, BaseModel) else envelope
+        )
 
         def convert_value(value: object) -> object:
             if isinstance(value, UUID):
@@ -1128,7 +1131,7 @@ class RuntimeHostProcess:
                 return [convert_value(item) for item in value]
             return value
 
-        return {k: convert_value(v) for k, v in envelope.items()}
+        return {k: convert_value(v) for k, v in envelope_dict.items()}
 
     async def _publish_envelope_safe(
         self, envelope: JsonType | BaseModel, topic: str

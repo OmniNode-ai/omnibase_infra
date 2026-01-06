@@ -108,10 +108,10 @@ import pytest
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
     from pytest_httpserver import HTTPServer
 
     from omnibase_infra.handlers import ConsulHandler, DbHandler, VaultHandler
+    from omnibase_infra.models.types import JsonValue
 
 
 # =============================================================================
