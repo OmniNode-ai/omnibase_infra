@@ -26,7 +26,9 @@ from omnibase_infra.utils.util_env_parsing import (
     parse_env_int,
 )
 from omnibase_infra.utils.util_error_sanitization import (
+    SAFE_ERROR_PATTERNS,
     SENSITIVE_PATTERNS,
+    sanitize_backend_error,
     sanitize_error_message,
 )
 from omnibase_infra.utils.util_semver import (
@@ -37,6 +39,7 @@ from omnibase_infra.utils.util_semver import (
 
 __all__: list[str] = [
     "CorrelationContext",
+    "SAFE_ERROR_PATTERNS",
     "SEMVER_PATTERN",
     "SENSITIVE_PATTERNS",
     "clear_correlation_id",
@@ -45,6 +48,7 @@ __all__: list[str] = [
     "parse_and_validate_dsn",
     "parse_env_float",
     "parse_env_int",
+    "sanitize_backend_error",
     "sanitize_dsn",
     "sanitize_error_message",
     "set_correlation_id",
