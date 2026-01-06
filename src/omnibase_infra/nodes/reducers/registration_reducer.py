@@ -347,10 +347,6 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind, EnumReductionType, EnumStreamingMode
-from omnibase_core.models.intents import (
-    ModelConsulRegisterIntent,
-    ModelPostgresUpsertRegistrationIntent,
-)
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -358,6 +354,12 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeRegistrationRecord,
+)
+from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
+    ModelPayloadConsulRegister,
+)
+from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
+    ModelPayloadPostgresUpsertRegistration,
 )
 from omnibase_infra.nodes.reducers.models.model_registration_state import (
     ModelRegistrationState,
@@ -864,8 +866,8 @@ class RegistrationReducer:
                 "Timeout": "5s",
             }
 
-        # Build typed Consul registration intent, then serialize for ModelIntent payload
-        consul_intent = ModelConsulRegisterIntent(
+        # Build typed Consul registration payload (implements ProtocolIntentPayload)
+        consul_payload = ModelPayloadConsulRegister(
             correlation_id=correlation_id,
             service_id=service_id,
             service_name=service_name,
@@ -876,7 +878,7 @@ class RegistrationReducer:
         return ModelIntent(
             intent_type="consul.register",
             target=f"consul://service/{service_name}",
-            payload=consul_intent.model_dump(mode="json"),
+            payload=consul_payload,
         )
 
     def _build_postgres_intent(
@@ -915,19 +917,16 @@ class RegistrationReducer:
             updated_at=now,
         )
 
-        # Build typed PostgreSQL upsert intent, then serialize for ModelIntent payload
-        postgres_intent = ModelPostgresUpsertRegistrationIntent(
+        # Build typed PostgreSQL upsert payload (implements ProtocolIntentPayload)
+        postgres_payload = ModelPayloadPostgresUpsertRegistration(
             correlation_id=correlation_id,
             record=record,
         )
 
-        # Use serialize_as_any=True because ModelPostgresUpsertRegistrationIntent.record
-        # is typed as BaseModel (for flexibility), but we need to serialize the actual
-        # subclass (ModelNodeRegistrationRecord) with all its fields
         return ModelIntent(
             intent_type="postgres.upsert_registration",
             target=f"postgres://node_registrations/{event.node_id}",
-            payload=postgres_intent.model_dump(mode="json", serialize_as_any=True),
+            payload=postgres_payload,
         )
 
     # =========================================================================

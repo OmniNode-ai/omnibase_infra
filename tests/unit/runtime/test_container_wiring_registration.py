@@ -133,13 +133,23 @@ class TestWireRegistrationHandlers:
 
     @pytest.mark.asyncio
     async def test_raises_runtime_error_on_missing_service_registry(self) -> None:
-        """Test that RuntimeError is raised if container missing service_registry."""
-        mock_container = MagicMock(spec=[])  # No service_registry attribute
-        del mock_container.service_registry
+        """Test that ServiceRegistryUnavailableError is raised if service_registry is None.
+
+        Note: This tests the new behavior in omnibase_core 0.6.2+ where service_registry
+        may be None due to circular import issues.
+        """
+        from omnibase_infra.runtime.container_wiring import (
+            ServiceRegistryUnavailableError,
+        )
+
+        mock_container = MagicMock()
+        mock_container.service_registry = None  # Simulate circular import issue
 
         mock_pool = MagicMock()
 
-        with pytest.raises(RuntimeError, match="Registration handler wiring failed"):
+        with pytest.raises(
+            ServiceRegistryUnavailableError, match="service_registry is None"
+        ):
             await wire_registration_handlers(mock_container, mock_pool)
 
 
