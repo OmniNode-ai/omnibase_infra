@@ -212,7 +212,9 @@ __all__: list[str] = [
     # Chain propagation validation (OMN-951)
     "ChainPropagationError",
     "ChainPropagationValidator",
-    "CircularImportValidator",
+    # ONEX-compliant validator names
+    "ValidatorCircularImport",
+    "ValidatorServiceContract",
     # Contract linting (PR #57)
     "ContractLinter",
     "EnumContractViolationSeverity",
