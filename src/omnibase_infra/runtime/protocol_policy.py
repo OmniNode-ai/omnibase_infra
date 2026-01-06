@@ -48,7 +48,11 @@ Policy Types and Use Cases:
 
 Example Usage:
     ```python
-    from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
+    from omnibase_infra.runtime.protocol_policy import (
+        PolicyContext,
+        PolicyResult,
+        ProtocolPolicy,
+    )
     from omnibase_infra.enums import EnumPolicyType
 
     class ExponentialBackoffPolicy:
@@ -62,25 +66,26 @@ Example Usage:
         def policy_type(self) -> EnumPolicyType:
             return EnumPolicyType.ORCHESTRATOR  # Recommended for type safety
 
-        def evaluate(self, context: JsonType) -> JsonType:
+        def evaluate(self, context: PolicyContext) -> PolicyResult:
             '''Calculate backoff delay based on retry attempt.'''
             attempt = int(context.get("attempt", 0))
             base_delay = float(context.get("base_delay_seconds", 1.0))
             max_delay = float(context.get("max_delay_seconds", 60.0))
 
             delay = min(base_delay * (2 ** attempt), max_delay)
-            return {
-                "delay_seconds": delay,
-                "should_retry": attempt < 10,
-            }
+            return PolicyResult(
+                delay_seconds=delay,
+                should_retry=attempt < 10,
+            )
 
-        def decide(self, context: JsonType) -> JsonType:
+        def decide(self, context: PolicyContext) -> PolicyResult:
             '''Alias for evaluate() - delegates to evaluate().'''
             return self.evaluate(context)
 
     # Type checking works via Protocol
     policy: ProtocolPolicy = ExponentialBackoffPolicy()
-    result = policy.evaluate({"attempt": 3, "base_delay_seconds": 1.0})
+    context = PolicyContext(attempt=3, base_delay_seconds=1.0)
+    result = policy.evaluate(context)
     ```
 
 Integration with PolicyRegistry:
@@ -110,12 +115,37 @@ See Also:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from omnibase_infra.enums import EnumPolicyType
+from omnibase_infra.runtime.models.model_policy_context import ModelPolicyContext
+from omnibase_infra.runtime.models.model_policy_result import ModelPolicyResult
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
+__all__ = [
+    "ModelPolicyContext",
+    "ModelPolicyResult",
+    "PolicyContext",
+    "PolicyResult",
+    "ProtocolPolicy",
+]
+
+# Type aliases for backwards compatibility
+# These map legacy names to their Pydantic model replacements
+PolicyContext = ModelPolicyContext
+"""Type alias for backwards compatibility.
+
+Deprecated: Use ModelPolicyContext directly for new code.
+This alias maps to ModelPolicyContext Pydantic model which replaces
+the former JsonType definition for policy evaluation context.
+"""
+
+PolicyResult = ModelPolicyResult
+"""Type alias for backwards compatibility.
+
+Deprecated: Use ModelPolicyResult directly for new code.
+This alias maps to ModelPolicyResult Pydantic model which replaces
+the former JsonType definition for policy evaluation results.
+"""
 
 
 @runtime_checkable
@@ -174,13 +204,13 @@ class ProtocolPolicy(Protocol):
             def policy_type(self) -> str:
                 return "orchestrator"
 
-            def evaluate(self, context: JsonType) -> JsonType:
+            def evaluate(self, context: PolicyContext) -> PolicyResult:
                 failure_count = int(context.get("failure_count", 0))
                 threshold = int(context.get("threshold", 5))
-                return {
-                    "circuit_open": failure_count >= threshold,
-                    "failure_count": failure_count,
-                }
+                return PolicyResult(
+                    circuit_open=failure_count >= threshold,
+                    failure_count=failure_count,
+                )
         ```
     """
 
@@ -247,11 +277,11 @@ class ProtocolPolicy(Protocol):
         """
         ...
 
-    def evaluate(self, context: JsonType) -> JsonType:
+    def evaluate(self, context: PolicyContext) -> PolicyResult:
         """Evaluate the policy with the given context and return a decision.
 
         This is the primary method for policy execution. It receives contextual
-        information and returns a decision dictionary that the caller can act upon.
+        information and returns a decision model that the caller can act upon.
 
         **CRITICAL: This method MUST be pure.**
 
@@ -263,21 +293,23 @@ class ProtocolPolicy(Protocol):
             - Thread-safe for concurrent calls
 
         Args:
-            context: Dictionary containing evaluation context. Keys and values
-                depend on the specific policy type and use case. Common keys:
-                - For orchestrator policies: "attempt", "error_type", "elapsed_ms"
-                - For reducer policies: "current_state", "event", "timestamp"
+            context: ModelPolicyContext containing evaluation context.
+                Supports arbitrary fields via extra="allow". Common fields:
+                - For orchestrator policies: attempt, error_type, elapsed_ms
+                - For reducer policies: current_state, event, timestamp
+                Access fields via attribute access or dict-like get():
+                    context.attempt or context.get("attempt", 0)
 
         Returns:
-            Dictionary containing the policy decision. Keys and values depend
-            on the specific policy. Common patterns:
-            - For retry policies: {"should_retry": bool, "delay_seconds": float}
-            - For routing policies: {"target_handler": str, "priority": int}
-            - For merge policies: {"merged_state": dict, "conflicts": list}
+            ModelPolicyResult containing the policy decision.
+                Supports arbitrary fields via extra="allow". Common patterns:
+                - For retry policies: should_retry, delay_seconds
+                - For routing policies: target_handler, priority
+                - For merge policies: merged_state, conflicts
 
         Example:
             ```python
-            def evaluate(self, context: JsonType) -> JsonType:
+            def evaluate(self, context: PolicyContext) -> PolicyResult:
                 '''Decide retry behavior based on error type.'''
                 error_type = str(context.get("error_type", "unknown"))
                 attempt = int(context.get("attempt", 0))
@@ -285,15 +317,15 @@ class ProtocolPolicy(Protocol):
                 retryable_errors = {"timeout", "connection_error", "rate_limit"}
                 should_retry = error_type in retryable_errors and attempt < 3
 
-                return {
-                    "should_retry": should_retry,
-                    "reason": f"error_type={error_type}, attempt={attempt}",
-                }
+                return PolicyResult(
+                    should_retry=should_retry,
+                    reason=f"error_type={error_type}, attempt={attempt}",
+                )
             ```
         """
         ...
 
-    def decide(self, context: JsonType) -> JsonType:
+    def decide(self, context: PolicyContext) -> PolicyResult:
         """Alias for evaluate() - provided for semantic clarity.
 
         Some use cases read more naturally with "decide" rather than "evaluate".
@@ -304,10 +336,10 @@ class ProtocolPolicy(Protocol):
         a convenience for policies that prefer this semantic naming.
 
         Args:
-            context: Dictionary containing evaluation context.
+            context: ModelPolicyContext containing evaluation context.
 
         Returns:
-            Dictionary containing the policy decision.
+            ModelPolicyResult containing the policy decision.
 
         Example:
             ```python
@@ -319,13 +351,8 @@ class ProtocolPolicy(Protocol):
         Note:
             Default implementations should delegate to evaluate():
             ```python
-            def decide(self, context: JsonType) -> JsonType:
+            def decide(self, context: PolicyContext) -> PolicyResult:
                 return self.evaluate(context)
             ```
         """
         ...
-
-
-__all__: list[str] = [
-    "ProtocolPolicy",
-]

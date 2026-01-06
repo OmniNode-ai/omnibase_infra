@@ -454,11 +454,14 @@ class TestReducerPerformanceEdgeCases:
             failure_reason="consul_failed",
             node_id=uuid4(),
         )
-        reset_event_id = uuid4()
 
         elapsed_times: list[float] = []
 
         for _ in range(TIMING_ITERATIONS):
+            # Generate fresh reset_event_id per iteration to avoid idempotency
+            # early-exit bias (duplicate detection would skip full reset)
+            reset_event_id = uuid4()
+
             start = time.perf_counter()
             output = reducer.reduce_reset(failed_state, reset_event_id)
             elapsed_ms = (time.perf_counter() - start) * 1000

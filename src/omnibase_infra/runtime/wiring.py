@@ -274,7 +274,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
 
 
 def wire_handlers_from_contract(
-    contract_config: JsonType,
+    contract_config: dict[str, JsonType],
 ) -> dict[str, list[str]]:
     """Register handlers and event buses based on contract configuration.
 

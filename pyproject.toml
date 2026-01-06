@@ -56,7 +56,8 @@ rich = "^13.7.0"
 
 # System utilities
 # cryptography 46.0.3: Required by omnibase_core 0.6.2 transitive dependency chain.
-# Upgrade from 44.0.1 addresses CVE-2024-12797 (OpenSSL vulnerability in 42.0.0-44.0.0).
+# Note: CVE-2024-12797 (OpenSSL vulnerability) was fixed in 44.0.1. The 46.x series
+# provides API updates, performance improvements, and continued security maintenance.
 # See: https://github.com/pyca/cryptography/blob/main/CHANGELOG.rst
 cryptography = "^46.0.3"
 jinja2 = "^3.1.6"
