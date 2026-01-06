@@ -148,7 +148,7 @@ def _analyze_type_error(error_str: str) -> tuple[str, str]:
 
 async def wire_infrastructure_services(
     container: ModelONEXContainer,
-) -> dict[str, list[str]]:
+) -> dict[str, list[str] | str]:
     """Register infrastructure services with the container.
 
     Registers PolicyRegistry, ProtocolBindingRegistry, and RegistryCompute as global
@@ -158,12 +158,16 @@ async def wire_infrastructure_services(
     Note: This function is async because ModelONEXContainer.service_registry.register_instance()
     is async in omnibase_core v0.5.6 and later (see omnibase_core.container.ModelONEXContainer).
 
+    If the container's service_registry is None (e.g., in omnibase_core 0.6.x when not
+    configured), this function will log a warning and return early with status="skipped".
+
     Args:
         container: ONEX container instance to register services in.
 
     Returns:
         Summary dict with:
             - services: List of registered service class names
+            - status: "skipped" if service_registry was unavailable
 
     Raises:
         RuntimeError: If service registration fails
@@ -185,6 +189,14 @@ async def wire_infrastructure_services(
         >>> hasattr(compute_reg, 'register_plugin') and callable(compute_reg.register_plugin)
         True
     """
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        logger.warning(
+            "ServiceRegistry not available in container - skipping infrastructure wiring. "
+            "This may indicate omnibase_core was initialized without service registry support."
+        )
+        return {"services": [], "status": "skipped"}
+
     services_registered: list[str] = []
 
     try:
@@ -331,6 +343,13 @@ async def get_policy_registry_from_container(
         wire_infrastructure_services(). If not, it will raise RuntimeError.
         For auto-registration, use get_or_create_policy_registry() instead.
     """
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        raise RuntimeError(
+            "Failed to resolve PolicyRegistry - ServiceRegistry not available in container. "
+            "This may indicate omnibase_core was initialized without service registry support."
+        )
+
     try:
         registry: PolicyRegistry = await container.service_registry.resolve_service(
             PolicyRegistry
@@ -420,6 +439,13 @@ async def get_or_create_policy_registry(
         wire_infrastructure_services() for production code to ensure proper
         initialization order and error handling.
     """
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        raise RuntimeError(
+            "Failed to get or create PolicyRegistry - ServiceRegistry not available in container. "
+            "This may indicate omnibase_core was initialized without service registry support."
+        )
+
     try:
         # Try to resolve existing PolicyRegistry
         registry: PolicyRegistry = await container.service_registry.resolve_service(
@@ -488,6 +514,13 @@ async def get_handler_registry_from_container(
         This function assumes ProtocolBindingRegistry was registered via
         wire_infrastructure_services(). If not, it will raise RuntimeError.
     """
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        raise RuntimeError(
+            "Failed to resolve ProtocolBindingRegistry - ServiceRegistry not available in container. "
+            "This may indicate omnibase_core was initialized without service registry support."
+        )
+
     try:
         registry: ProtocolBindingRegistry = (
             await container.service_registry.resolve_service(ProtocolBindingRegistry)
@@ -573,6 +606,13 @@ async def get_compute_registry_from_container(
         wire_infrastructure_services(). If not, it will raise RuntimeError.
         For auto-registration, use get_or_create_compute_registry() instead.
     """
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        raise RuntimeError(
+            "Failed to resolve RegistryCompute - ServiceRegistry not available in container. "
+            "This may indicate omnibase_core was initialized without service registry support."
+        )
+
     try:
         registry: RegistryCompute = await container.service_registry.resolve_service(
             RegistryCompute
@@ -662,6 +702,13 @@ async def get_or_create_compute_registry(
         wire_infrastructure_services() for production code to ensure proper
         initialization order and error handling.
     """
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        raise RuntimeError(
+            "Failed to get or create RegistryCompute - ServiceRegistry not available in container. "
+            "This may indicate omnibase_core was initialized without service registry support."
+        )
+
     try:
         # Try to resolve existing RegistryCompute
         registry: RegistryCompute = await container.service_registry.resolve_service(
@@ -703,7 +750,7 @@ async def wire_registration_handlers(
     liveness_interval_seconds: int | None = None,
     projector: ProjectorRegistration | None = None,
     consul_handler: ConsulHandler | None = None,
-) -> dict[str, list[str]]:
+) -> dict[str, list[str] | str]:
     """Register registration orchestrator handlers with the container.
 
     Registers ProjectionReaderRegistration and the three registration handlers:
@@ -714,6 +761,9 @@ async def wire_registration_handlers(
     All handlers depend on ProjectionReaderRegistration, which is registered first.
     This enables declarative dependency resolution when constructing the
     NodeRegistrationOrchestrator.
+
+    If the container's service_registry is None (e.g., in omnibase_core 0.6.x when not
+    configured), this function will log a warning and return early with status="skipped".
 
     Args:
         container: ONEX container instance to register services in.
@@ -731,6 +781,7 @@ async def wire_registration_handlers(
     Returns:
         Summary dict with:
             - services: List of registered service class names
+            - status: "skipped" if service_registry was unavailable
 
     Raises:
         RuntimeError: If service registration fails
@@ -748,6 +799,14 @@ async def wire_registration_handlers(
         >>> # Resolve handlers from container
         >>> handler = await container.service_registry.resolve_service(HandlerNodeIntrospected)
     """
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        logger.warning(
+            "ServiceRegistry not available in container - skipping registration handler wiring. "
+            "This may indicate omnibase_core was initialized without service registry support."
+        )
+        return {"services": [], "status": "skipped"}
+
     # Deferred imports: These imports are placed inside the function to avoid circular
     # import issues and to delay loading registration infrastructure until this function
     # is actually called (which requires a PostgreSQL pool). This follows the pattern
@@ -934,6 +993,13 @@ async def get_projection_reader_from_container(
     """
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        raise RuntimeError(
+            "Failed to resolve ProjectionReaderRegistration - ServiceRegistry not available in container. "
+            "This may indicate omnibase_core was initialized without service registry support."
+        )
+
     try:
         reader: ProjectionReaderRegistration = (
             await container.service_registry.resolve_service(
@@ -975,6 +1041,13 @@ async def get_handler_node_introspected_from_container(
         HandlerNodeIntrospected,
     )
 
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        raise RuntimeError(
+            "Failed to resolve HandlerNodeIntrospected - ServiceRegistry not available in container. "
+            "This may indicate omnibase_core was initialized without service registry support."
+        )
+
     try:
         handler: HandlerNodeIntrospected = (
             await container.service_registry.resolve_service(HandlerNodeIntrospected)
@@ -1013,6 +1086,13 @@ async def get_handler_runtime_tick_from_container(
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerRuntimeTick,
     )
+
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        raise RuntimeError(
+            "Failed to resolve HandlerRuntimeTick - ServiceRegistry not available in container. "
+            "This may indicate omnibase_core was initialized without service registry support."
+        )
 
     try:
         handler: HandlerRuntimeTick = await container.service_registry.resolve_service(
@@ -1053,6 +1133,13 @@ async def get_handler_node_registration_acked_from_container(
         HandlerNodeRegistrationAcked,
     )
 
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        raise RuntimeError(
+            "Failed to resolve HandlerNodeRegistrationAcked - ServiceRegistry not available in container. "
+            "This may indicate omnibase_core was initialized without service registry support."
+        )
+
     try:
         handler: HandlerNodeRegistrationAcked = (
             await container.service_registry.resolve_service(
@@ -1079,7 +1166,7 @@ async def get_handler_node_registration_acked_from_container(
 async def wire_registration_dispatchers(
     container: ModelONEXContainer,
     engine: MessageDispatchEngine,
-) -> dict[str, list[str]]:
+) -> dict[str, list[str] | str]:
     """Wire registration dispatchers into MessageDispatchEngine.
 
     Creates dispatcher adapters for the registration handlers and registers
@@ -1093,6 +1180,9 @@ async def wire_registration_dispatchers(
           frozen, dispatcher registration will fail with a RuntimeError from the
           engine's register_dispatcher() method.
 
+    If the container's service_registry is None (e.g., in omnibase_core 0.6.x when not
+    configured), this function will log a warning and return early with status="skipped".
+
     Args:
         container: ONEX container with registered handlers.
         engine: MessageDispatchEngine instance to register dispatchers with.
@@ -1105,6 +1195,7 @@ async def wire_registration_dispatchers(
             - routes: List of registered route IDs (e.g.,
               ['route.registration.node-introspection', 'route.registration.runtime-tick',
                'route.registration.node-registration-acked'])
+            - status: "skipped" if service_registry was unavailable
 
         This diagnostic output can be logged or used to verify correct wiring.
 
@@ -1132,6 +1223,14 @@ async def wire_registration_dispatchers(
         {'dispatchers': [...], 'routes': [...]}
         >>> engine.freeze()  # Must freeze after wiring
     """
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        logger.warning(
+            "ServiceRegistry not available in container - skipping registration dispatcher wiring. "
+            "This may indicate omnibase_core was initialized without service registry support."
+        )
+        return {"dispatchers": [], "routes": [], "status": "skipped"}
+
     from omnibase_infra.enums.enum_message_category import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (

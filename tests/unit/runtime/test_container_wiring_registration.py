@@ -132,15 +132,23 @@ class TestWireRegistrationHandlers:
             await wire_registration_handlers(mock_container, mock_pool)
 
     @pytest.mark.asyncio
-    async def test_raises_runtime_error_on_missing_service_registry(self) -> None:
-        """Test that RuntimeError is raised if container missing service_registry."""
-        mock_container = MagicMock(spec=[])  # No service_registry attribute
-        del mock_container.service_registry
+    async def test_skips_when_service_registry_is_none(self) -> None:
+        """Test that wiring is skipped if service_registry is None.
+
+        In omnibase_core 0.6.x, service_registry may be None when the ServiceRegistry
+        module is not installed. The wire function should handle this gracefully by
+        returning status="skipped" instead of failing.
+        """
+        mock_container = MagicMock()
+        mock_container.service_registry = None  # Explicitly set to None
 
         mock_pool = MagicMock()
 
-        with pytest.raises(RuntimeError, match="Registration handler wiring failed"):
-            await wire_registration_handlers(mock_container, mock_pool)
+        # Should return gracefully with status="skipped", not raise
+        result = await wire_registration_handlers(mock_container, mock_pool)
+
+        assert result.get("status") == "skipped"
+        assert result.get("services") == []
 
 
 class TestGetProjectionReaderFromContainer:

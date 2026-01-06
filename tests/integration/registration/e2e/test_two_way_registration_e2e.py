@@ -57,6 +57,13 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
 )
 
+from .conftest import (
+    ALL_INFRA_AVAILABLE,
+    CONSUL_AVAILABLE,
+    KAFKA_AVAILABLE,
+    POSTGRES_AVAILABLE,
+    SERVICE_REGISTRY_AVAILABLE,
+)
 from .performance_utils import (
     PerformanceThresholds,
     assert_heartbeat_interval,
@@ -99,6 +106,16 @@ if TYPE_CHECKING:
 # Module-level markers
 pytestmark = [
     pytest.mark.e2e,
+    pytest.mark.skipif(
+        not ALL_INFRA_AVAILABLE,
+        reason=(
+            "Full infrastructure required for E2E tests. "
+            f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS)'}. "
+            f"Consul: {'available' if CONSUL_AVAILABLE else 'MISSING (set CONSUL_HOST or unreachable)'}. "
+            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
+            f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
+        ),
+    ),
 ]
 
 

@@ -47,7 +47,10 @@ _service_registry_available = False
 try:
     _test_container = ModelONEXContainer()
     _service_registry_available = _test_container.service_registry is not None
-except Exception:
+except (AttributeError, ImportError, TypeError):
+    # AttributeError: service_registry attribute doesn't exist
+    # ImportError: omnibase_core not available
+    # TypeError: ModelONEXContainer initialization changed
     pass
 
 

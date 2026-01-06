@@ -183,8 +183,32 @@ def _check_consul_reachable() -> bool:
 
 CONSUL_AVAILABLE = _check_consul_reachable()
 
+
+def _check_service_registry_available() -> bool:
+    """Check if ServiceRegistry is available in ModelONEXContainer.
+
+    omnibase_core 0.6.x has a circular import issue that causes
+    ServiceRegistry to not be available when the container is initialized.
+    Tests requiring ServiceRegistry should skip gracefully when this occurs.
+    """
+    try:
+        from omnibase_core.container import ModelONEXContainer
+
+        container = ModelONEXContainer()
+        return container.service_registry is not None
+    except Exception:
+        return False
+
+
+SERVICE_REGISTRY_AVAILABLE = _check_service_registry_available()
+
 # Combined availability check
-ALL_INFRA_AVAILABLE = KAFKA_AVAILABLE and CONSUL_AVAILABLE and POSTGRES_AVAILABLE
+ALL_INFRA_AVAILABLE = (
+    KAFKA_AVAILABLE
+    and CONSUL_AVAILABLE
+    and POSTGRES_AVAILABLE
+    and SERVICE_REGISTRY_AVAILABLE
+)
 
 
 # =============================================================================
@@ -201,7 +225,8 @@ pytestmark = [
             "Full infrastructure required for E2E tests. "
             f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS)'}. "
             f"Consul: {'available' if CONSUL_AVAILABLE else 'MISSING (set CONSUL_HOST or unreachable)'}. "
-            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set POSTGRES_HOST and POSTGRES_PASSWORD)'}."
+            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
+            f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
         ),
     ),
 ]
@@ -969,6 +994,7 @@ __all__ = [
     "CONSUL_AVAILABLE",
     "KAFKA_AVAILABLE",
     "POSTGRES_AVAILABLE",
+    "SERVICE_REGISTRY_AVAILABLE",
     # Database fixtures
     "postgres_pool",
     # Container fixtures
