@@ -155,8 +155,73 @@ from omnibase_infra.runtime.chain_aware_dispatch import (
 
 # isort: on
 
+# =============================================================================
+# DEPRECATION ALIASES (OMN-529)
+# These symbols were moved to omnibase_infra.services.service_health
+# Re-exported here for backward compatibility - will be removed in v0.5.0
+# =============================================================================
+_DEPRECATED_SYMBOLS: dict[str, str] = {
+    "ServiceHealth": "omnibase_infra.services.service_health",
+    "DEFAULT_HTTP_HOST": "omnibase_infra.services.service_health",
+    "DEFAULT_HTTP_PORT": "omnibase_infra.services.service_health",
+}
+
+
+def __getattr__(name: str) -> object:
+    """Lazy-load deprecated symbols with deprecation warnings.
+
+    This function is called when an attribute is not found in the module.
+    It handles deprecated re-exports by:
+    1. Checking if the name is a deprecated symbol
+    2. Issuing a DeprecationWarning
+    3. Returning the actual symbol from its new location
+
+    Args:
+        name: The attribute name being accessed.
+
+    Returns:
+        The requested symbol from its new location.
+
+    Raises:
+        AttributeError: If the name is not a deprecated symbol.
+    """
+    import warnings
+
+    if name in _DEPRECATED_SYMBOLS:
+        new_module = _DEPRECATED_SYMBOLS[name]
+        warnings.warn(
+            f"'{name}' is deprecated in omnibase_infra.runtime and will be removed "
+            f"in v0.5.0. Import from '{new_module}' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        # Import from the new location
+        from omnibase_infra.services.service_health import (
+            DEFAULT_HTTP_HOST as _DEFAULT_HTTP_HOST,
+        )
+        from omnibase_infra.services.service_health import (
+            DEFAULT_HTTP_PORT as _DEFAULT_HTTP_PORT,
+        )
+        from omnibase_infra.services.service_health import (
+            ServiceHealth as _ServiceHealth,
+        )
+
+        _symbol_map: dict[str, object] = {
+            "ServiceHealth": _ServiceHealth,
+            "DEFAULT_HTTP_HOST": _DEFAULT_HTTP_HOST,
+            "DEFAULT_HTTP_PORT": _DEFAULT_HTTP_PORT,
+        }
+        return _symbol_map[name]
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__: list[str] = [
-    # DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT moved to omnibase_infra.services (OMN-529)
+    # Deprecated re-exports (OMN-529) - will be removed in v0.5.0
+    # Import from omnibase_infra.services.service_health instead
+    "DEFAULT_HTTP_HOST",
+    "DEFAULT_HTTP_PORT",
+    "ServiceHealth",
     # Event bus kind constants
     "EVENT_BUS_INMEMORY",
     "EVENT_BUS_KAFKA",
@@ -176,7 +241,6 @@ __all__: list[str] = [
     "DispatchContextEnforcer",
     "DispatcherRegistry",
     "EventBusBindingRegistry",
-    # ServiceHealth moved to omnibase_infra.services (OMN-529)
     # Message dispatch engine
     "MessageDispatchEngine",
     # Message type registry (OMN-937)

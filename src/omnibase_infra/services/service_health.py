@@ -14,7 +14,7 @@ Configuration:
     ONEX_HTTP_PORT: Port to listen on (default: 8085)
 
 Example:
-    >>> from omnibase_infra.runtime.service_health import ServiceHealth
+    >>> from omnibase_infra.services.service_health import ServiceHealth
     >>> from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
     >>>
     >>> async def main():
@@ -37,7 +37,11 @@ from typing import TYPE_CHECKING, Literal
 from aiohttp import web
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.errors import (
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+    RuntimeHostError,
+)
 from omnibase_infra.runtime.models.model_health_check_response import (
     ModelHealthCheckResponse,
 )
@@ -141,14 +145,14 @@ class ServiceHealth:
             version: Runtime version string for health response.
 
         Raises:
-            ValueError: If neither container nor runtime is provided.
+            ProtocolConfigurationError: If neither container nor runtime is provided.
         """
         # Store container for ONEX compliance (OMN-529)
         self._container: ModelONEXContainer | None = container
 
         # Validate that at least one dependency source is provided
         if container is None and runtime is None:
-            raise ValueError(
+            raise ProtocolConfigurationError(
                 "ServiceHealth requires either 'container' or 'runtime' to be provided. "
                 "Use ServiceHealth(runtime=runtime) or ServiceHealth(container=container)."
             )
@@ -211,11 +215,11 @@ class ServiceHealth:
             The RuntimeHostProcess used for health checks.
 
         Raises:
-            RuntimeError: If runtime was not provided during initialization
+            ProtocolConfigurationError: If runtime was not provided during initialization
                 and has not been resolved from the container.
         """
         if self._runtime is None:
-            raise RuntimeError(
+            raise ProtocolConfigurationError(
                 "RuntimeHostProcess not available. "
                 "Either provide runtime during __init__ or use create_from_container()."
             )

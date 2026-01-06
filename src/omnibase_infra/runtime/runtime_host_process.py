@@ -911,7 +911,14 @@ class RuntimeHostProcess:
         # Backwards compatibility: fall back to singleton pattern
         from omnibase_infra.runtime.handler_registry import get_handler_registry
 
-        return get_handler_registry()
+        singleton_registry = get_handler_registry()
+        # Cache for consistency with container resolution path
+        self._handler_registry = singleton_registry
+        logger.debug(
+            "Handler registry resolved from singleton",
+            extra={"registry_type": type(singleton_registry).__name__},
+        )
+        return singleton_registry
 
     async def _on_message(self, message: ModelEventMessage) -> None:
         """Handle incoming message from event bus subscription.
