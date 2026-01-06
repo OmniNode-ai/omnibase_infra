@@ -179,15 +179,15 @@ class MixinConsulKV:
                     value.decode("utf-8") if isinstance(value, bytes) else value
                 )
                 item_key = item.get("Key")
+                item_flags = item.get("Flags")
+                item_modify_index = item.get("ModifyIndex")
                 items.append(
                     ModelConsulKVItem(
                         key=item_key if isinstance(item_key, str) else "",
                         value=decoded_value if isinstance(decoded_value, str) else None,
-                        flags=item.get("Flags")
-                        if isinstance(item.get("Flags"), int)
-                        else None,
-                        modify_index=item.get("ModifyIndex")
-                        if isinstance(item.get("ModifyIndex"), int)
+                        flags=item_flags if isinstance(item_flags, int) else None,
+                        modify_index=item_modify_index
+                        if isinstance(item_modify_index, int)
                         else None,
                     )
                 )
@@ -205,12 +205,14 @@ class MixinConsulKV:
             value = data.get("Value")
             decoded_value = value.decode("utf-8") if isinstance(value, bytes) else value
             data_key = data.get("Key")
+            data_flags = data.get("Flags")
+            data_modify_index = data.get("ModifyIndex")
             typed_payload_found = ModelConsulKVGetFoundPayload(
                 key=data_key if isinstance(data_key, str) else key,
                 value=decoded_value if isinstance(decoded_value, str) else None,
-                flags=data.get("Flags") if isinstance(data.get("Flags"), int) else None,
-                modify_index=data.get("ModifyIndex")
-                if isinstance(data.get("ModifyIndex"), int)
+                flags=data_flags if isinstance(data_flags, int) else None,
+                modify_index=data_modify_index
+                if isinstance(data_modify_index, int)
                 else None,
                 index=index,
             )

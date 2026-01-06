@@ -122,6 +122,7 @@ from omnibase_infra.handlers.handler_consul import ConsulHandler
 from omnibase_infra.handlers.handler_db import DbHandler
 from omnibase_infra.handlers.handler_http import HttpRestHandler
 from omnibase_infra.handlers.handler_vault import VaultHandler
+from omnibase_infra.models.types import JsonDict
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     HANDLER_TYPE_CONSUL,
