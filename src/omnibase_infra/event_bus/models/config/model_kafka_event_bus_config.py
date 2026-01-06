@@ -189,7 +189,7 @@ class ModelKafkaEventBusConfig(BaseModel):
     retry_backoff_base: float = Field(
         default=1.0,
         description="Base delay in seconds for exponential backoff",
-        ge=0.1,
+        ge=0.001,  # Allow very short backoffs for testing (minimum 1ms)
         le=60.0,
     )
 
@@ -203,7 +203,7 @@ class ModelKafkaEventBusConfig(BaseModel):
     circuit_breaker_reset_timeout: float = Field(
         default=30.0,
         description="Seconds before circuit breaker resets to half-open state",
-        ge=1.0,
+        ge=0.01,  # Allow short timeouts for testing (minimum 10ms)
         le=3600.0,
     )
 

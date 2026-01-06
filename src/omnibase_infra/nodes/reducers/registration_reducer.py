@@ -498,10 +498,6 @@ class ModelValidationResult(BaseModel):
         )
 
 
-# Backwards compatibility alias
-ValidationResult = ModelValidationResult
-
-
 # TODO(OMN-889): Complete pure reducer implementation - add reduce_confirmation() method
 class RegistrationReducer:
     """Pure reducer for node registration workflow.
@@ -721,7 +717,9 @@ class RegistrationReducer:
         """
         return self._validate_event(event).is_valid
 
-    def _validate_event(self, event: ModelNodeIntrospectionEvent) -> ValidationResult:
+    def _validate_event(
+        self, event: ModelNodeIntrospectionEvent
+    ) -> ModelValidationResult:
         """Validate introspection event with detailed error information.
 
         Validates that required fields are present for registration workflow.
@@ -751,7 +749,7 @@ class RegistrationReducer:
         """
         # Validate node_id: required for registration identity
         if event.node_id is None:
-            return ValidationResult.failure(
+            return ModelValidationResult.failure(
                 error_code="missing_node_id",
                 field_name="node_id",
                 error_message="node_id is required for registration identity",
@@ -759,7 +757,7 @@ class RegistrationReducer:
 
         # Validate node_type: must be present
         if not hasattr(event, "node_type") or event.node_type is None:
-            return ValidationResult.failure(
+            return ModelValidationResult.failure(
                 error_code="missing_node_type",
                 field_name="node_type",
                 error_message="node_type is required for service categorization",
@@ -774,7 +772,7 @@ class RegistrationReducer:
             EnumNodeKind.ORCHESTRATOR.value,
         }
         if event.node_type not in valid_node_types:
-            return ValidationResult.failure(
+            return ModelValidationResult.failure(
                 error_code="invalid_node_type",
                 field_name="node_type",
                 error_message=(
@@ -782,7 +780,7 @@ class RegistrationReducer:
                 ),
             )
 
-        return ValidationResult.success()
+        return ModelValidationResult.success()
 
     def _derive_deterministic_event_id(
         self, event: ModelNodeIntrospectionEvent
@@ -1181,8 +1179,7 @@ __all__ = [
     # Performance threshold constants (for tests and monitoring)
     "PERF_THRESHOLD_REDUCE_MS",
     # Validation types (for tests and custom validators)
-    "ModelValidationResult",  # Canonical ONEX name (Model* convention)
+    "ModelValidationResult",
     "RegistrationReducer",
     "ValidationErrorCode",
-    "ValidationResult",  # Backwards compatibility alias
 ]

@@ -12,7 +12,6 @@ import pytest
 
 from omnibase_infra.utils.util_semver import (
     SEMVER_PATTERN,
-    clear_normalize_version_cache,
     normalize_version,
     normalize_version_cached,
     validate_semver,
@@ -60,10 +59,6 @@ class TestNormalizeVersionRaisesTypeError:
 class TestNormalizeVersionCachedRaisesTypeError:
     """Tests that normalize_version_cached() raises TypeError for string input."""
 
-    def setup_method(self) -> None:
-        """Clear the cache before each test."""
-        clear_normalize_version_cache()
-
     def test_normalize_version_cached_raises_type_error(self) -> None:
         """Test that normalize_version_cached raises TypeError for any string input."""
         with pytest.raises(TypeError, match="String version input is not allowed"):
@@ -77,15 +72,6 @@ class TestNormalizeVersionCachedRaisesTypeError:
         error_message = str(exc_info.value)
         assert "ModelSemVer" in error_message
         assert "parse()" in error_message
-
-
-class TestClearNormalizeVersionCache:
-    """Tests for clear_normalize_version_cache function."""
-
-    def test_clear_cache_is_noop(self) -> None:
-        """Test that clear_normalize_version_cache is a no-op (cache no longer exists)."""
-        # Should not raise any errors
-        clear_normalize_version_cache()
 
 
 class TestValidateSemver:

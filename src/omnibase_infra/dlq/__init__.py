@@ -23,7 +23,6 @@ Models:
 Tracker:
     - DLQReplayTracker: PostgreSQL tracker for replay history
     - ServiceDlqTracking: ONEX naming convention alias
-    - DLQTrackingService: Backwards compatibility alias
 
 Example - Recording Replay Attempts:
     >>> from omnibase_infra.dlq import (
@@ -82,19 +81,15 @@ from omnibase_infra.dlq.service_dlq_tracking import (
     ServiceDlqTracking,
 )
 
-# Backwards compatibility alias
-DLQTrackingService = DLQReplayTracker
-
 __all__: list[str] = [
     # Constants
     "PATTERN_TABLE_NAME",  # Regex pattern string for table name validation
     "REGEX_TABLE_NAME",  # Pre-compiled regex for runtime validation
-    # Tracker (multiple names for flexibility)
+    # Tracker
     "DLQReplayTracker",  # Primary class name
-    "DLQTrackingService",  # Backwards compatibility alias
+    "ServiceDlqTracking",  # ONEX naming convention (service_<name>.py → Service<Name>)
     # Models
     "EnumReplayStatus",
     "ModelDlqReplayRecord",
     "ModelDlqTrackingConfig",
-    "ServiceDlqTracking",  # ONEX naming convention (service_<name>.py → Service<Name>)
 ]

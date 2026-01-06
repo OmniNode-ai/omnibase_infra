@@ -12,9 +12,9 @@ from omnibase_core.types import JsonValue
 
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (
-    PluginContext,
-    PluginInputData,
-    PluginOutputData,
+    ModelPluginContext,
+    ModelPluginInputData,
+    ModelPluginOutputData,
 )
 
 
@@ -51,8 +51,8 @@ class PluginJsonNormalizer(PluginComputeBase):
     MAX_RECURSION_DEPTH: int = 100
 
     def execute(
-        self, input_data: PluginInputData, context: PluginContext
-    ) -> PluginOutputData:
+        self, input_data: ModelPluginInputData, context: ModelPluginContext
+    ) -> ModelPluginOutputData:
         """Execute JSON normalization with type-safe inputs and outputs.
 
         Args:
@@ -82,7 +82,7 @@ class PluginJsonNormalizer(PluginComputeBase):
                 json_data, _max_depth=effective_max_depth
             )
             output: JsonNormalizerOutput = {"normalized": normalized}
-            return cast(PluginOutputData, output)
+            return cast(ModelPluginOutputData, output)
 
         except RecursionError as e:
             raise OnexError(
@@ -177,7 +177,7 @@ class PluginJsonNormalizer(PluginComputeBase):
             for item in obj
         ]
 
-    def validate_input(self, input_data: PluginInputData) -> None:
+    def validate_input(self, input_data: ModelPluginInputData) -> None:
         """Validate input with runtime type checking and type guards.
 
         This method validates input structure before execution. By protocol design,
