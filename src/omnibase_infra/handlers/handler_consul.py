@@ -15,6 +15,26 @@ Supported Operations:
     - consul.kv_put: Store value in KV store
     - consul.register: Register service with Consul agent
     - consul.deregister: Deregister service from Consul agent
+
+Intent Format Compatibility (OMN-1258):
+    This handler works with envelope-based operation routing, NOT raw ModelIntent
+    objects. Routing is based on envelope["operation"] field values (e.g.,
+    "consul.register", "consul.kv_get"), not intent_type.
+
+    When the RegistrationReducer emits intents with:
+        - intent_type="extension"
+        - payload.extension_type="infra.consul_register"
+
+    The Orchestrator/Runtime layer translates these to envelope format:
+        {
+            "operation": "consul.register",
+            "payload": {...},  # Consul-specific data from intent.payload.data
+            "correlation_id": "...",
+        }
+
+    This design keeps infrastructure handlers decoupled from the intent format,
+    allowing them to be reused for direct envelope-based invocation scenarios
+    (e.g., CLI tools, direct API calls) as well as intent-driven workflows.
 """
 
 from __future__ import annotations

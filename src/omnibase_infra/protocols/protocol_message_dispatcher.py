@@ -214,9 +214,30 @@ class ProtocolMessageDispatcher(Protocol):
         envelope, processes it according to its category and node kind,
         and returns a dispatch result indicating success or failure.
 
-        Typing Note:
+        Typing Note (ModelEventEnvelope[object]):
             The envelope parameter uses ``ModelEventEnvelope[object]`` instead of
-            ``Any`` to satisfy ONEX "no Any types" guideline.
+            ``Any`` per CLAUDE.md guidance: "Use ``object`` for generic payloads".
+
+            This is intentional:
+            - CLAUDE.md mandates "NEVER use ``Any``" and specifies ``object`` for
+              generic payloads that can accept multiple event types
+            - Generic dispatchers must handle multiple event types at runtime;
+              the dispatch engine routes based on topic/category/message_type,
+              not payload shape
+            - Payload extraction uses ``isinstance()`` type guards for runtime
+              safety (see dispatcher implementations)
+            - ``object`` provides better type safety than ``Any`` while allowing
+              the flexibility required for polymorphic dispatch
+
+            For type-specific processing, dispatcher implementations should use
+            type guards to narrow the payload type:
+
+            .. code-block:: python
+
+                payload = envelope.payload
+                if isinstance(payload, SpecificEventType):
+                    # Type-safe processing here
+                    process_specific_event(payload)
 
         Args:
             envelope: The input envelope containing the message to process.

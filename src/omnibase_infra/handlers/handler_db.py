@@ -7,6 +7,29 @@ Transaction support deferred to Beta. Configurable pool size deferred to Beta.
 
 All queries MUST use parameterized statements for SQL injection protection.
 
+Intent Format Compatibility (OMN-1258):
+    This handler works with envelope-based operation routing, NOT raw ModelIntent
+    objects. Routing is based on envelope["operation"] field values (e.g.,
+    "db.query", "db.execute"), not intent_type.
+
+    When the RegistrationReducer emits intents with:
+        - intent_type="extension"
+        - payload.extension_type="infra.postgres_upsert"
+
+    The Orchestrator/Runtime layer translates these to envelope format:
+        {
+            "operation": "db.execute",
+            "payload": {
+                "sql": "...",
+                "parameters": [...],
+            },
+            "correlation_id": "...",
+        }
+
+    This design keeps infrastructure handlers decoupled from the intent format,
+    allowing them to be reused for direct envelope-based invocation scenarios
+    (e.g., CLI tools, direct API calls) as well as intent-driven workflows.
+
 Single-Statement SQL Limitation
 ===============================
 

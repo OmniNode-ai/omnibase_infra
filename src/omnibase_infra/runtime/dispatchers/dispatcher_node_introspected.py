@@ -27,6 +27,24 @@ Circuit Breaker Pattern:
     - Transitions to HALF_OPEN after timeout to test recovery
     - Raises InfraUnavailableError when circuit is OPEN
 
+Typing Note (ModelEventEnvelope[object]):
+    The ``handle()`` method uses ``ModelEventEnvelope[object]`` instead of ``Any``
+    per CLAUDE.md guidance: "Use ``object`` for generic payloads".
+
+    This is intentional:
+    - CLAUDE.md mandates "NEVER use ``Any``" for type annotations
+    - Generic dispatchers must accept envelopes with any payload type at the
+      protocol level (routing is based on topic/category/message_type)
+    - Payload extraction uses ``isinstance()`` type guards for runtime safety::
+
+        payload = envelope.payload
+        if not isinstance(payload, ModelNodeIntrospectionEvent):
+            # Attempt deserialization from dict
+            ...
+
+    - ``object`` provides better type safety than ``Any`` while allowing the
+      flexibility required for polymorphic dispatch
+
 Related:
     - OMN-888: Registration Orchestrator
     - OMN-892: 2-way Registration E2E Integration Test

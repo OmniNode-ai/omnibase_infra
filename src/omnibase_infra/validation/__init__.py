@@ -146,13 +146,6 @@ from omnibase_infra.validation.infra_validators import (
     validate_infra_union_usage,
 )
 
-# ProtocolContractValidator compatibility shim for omnibase_core 0.6.x
-# This class was removed in omnibase_core 0.6.x. We provide a minimal shim
-# that uses the new validation API.
-from omnibase_infra.validation.protocol_contract_validator_shim import (
-    ProtocolContractValidator,
-)
-
 # Routing coverage validation for startup fail-fast (OMN-958)
 from omnibase_infra.validation.routing_coverage_validator import (
     RoutingCoverageError,
@@ -226,7 +219,6 @@ __all__: list[str] = [
     "ModelContractLintResult",
     "ModelContractViolation",
     "ModelExecutionShapeValidationResult",
-    "ProtocolContractValidator",
     # Routing coverage validation (OMN-958)
     "RoutingCoverageError",
     "RoutingCoverageValidator",

@@ -24,6 +24,16 @@ Thread Safety:
     DispatchContextEnforcer is stateless and thread-safe. All methods can be
     called concurrently without synchronization.
 
+Typing Note (ModelEventEnvelope[object]):
+    Methods in this class use ``ModelEventEnvelope[object]`` instead of ``Any``
+    per CLAUDE.md guidance: "Use ``object`` for generic payloads".
+
+    This is intentional:
+    - CLAUDE.md mandates "NEVER use ``Any``" for type annotations
+    - Context creation extracts correlation metadata from envelopes regardless
+      of payload type; the enforcer operates on envelope metadata, not content
+    - ``object`` signals "any object payload" while maintaining type safety
+
 Related:
     - OMN-973: Time injection enforcement at dispatch
     - ModelDispatchContext: The context model with factory methods

@@ -78,6 +78,19 @@ Thread Safety:
     The ChainPropagationValidator is stateless and thread-safe. All validation
     methods are pure functions that produce fresh result objects.
 
+Typing Note (ModelEventEnvelope[object]):
+    Functions in this module use ``ModelEventEnvelope[object]`` instead of ``Any``
+    per CLAUDE.md guidance: "Use ``object`` for generic payloads".
+
+    This is intentional:
+    - CLAUDE.md mandates "NEVER use ``Any``" for type annotations
+    - Chain validation operates on envelope metadata (correlation_id, causation_id,
+      envelope_id), not payload content - the payload type is irrelevant
+    - Using ``object`` signals "any object payload" while maintaining type safety
+      (unlike ``Any`` which completely disables type checking)
+    - Validators that need to inspect payload content should use ``isinstance()``
+      type guards for runtime safety
+
 Performance Considerations:
     The validator does not cache results. This is an intentional design decision:
 

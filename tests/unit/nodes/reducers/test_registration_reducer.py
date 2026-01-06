@@ -193,7 +193,7 @@ class TestBasicReduce:
         output = reducer.reduce(initial_state, event)
 
         for intent in output.intents:
-            assert intent.payload["correlation_id"] == str(correlation_id)
+            assert intent.payload.data["correlation_id"] == str(correlation_id)
 
     def test_reduce_with_all_node_types(
         self,
@@ -1044,7 +1044,7 @@ class TestConsulIntentBuilding:
         )
         assert consul_intent is not None
 
-        assert "health_check" in consul_intent.payload
+        assert "health_check" in consul_intent.payload.data
         health_check = consul_intent.payload.data["health_check"]
         assert health_check["HTTP"] == "http://localhost:8080/health"
         assert health_check["Interval"] == "10s"
@@ -1186,7 +1186,7 @@ class TestPostgresIntentBuilding:
             None,
         )
         assert postgres_intent is not None
-        assert postgres_intent.payload["correlation_id"] == str(correlation_id)
+        assert postgres_intent.payload.data["correlation_id"] == str(correlation_id)
 
     def test_postgres_intent_has_correct_target(
         self,
@@ -2810,17 +2810,17 @@ class TestDeterminismProperty:
                 intent1.intent_type == "extension"
                 and intent1.payload.extension_type == "infra.postgres_upsert"
             ):
-                payload1 = dict(intent1.payload)
-                payload2 = dict(intent2.payload)
-                record1 = dict(payload1.get("record", {}))
-                record2 = dict(payload2.get("record", {}))
+                data1 = dict(intent1.payload.data)
+                data2 = dict(intent2.payload.data)
+                record1 = dict(data1.get("record", {}))
+                record2 = dict(data2.get("record", {}))
                 # Remove timestamps before comparison
                 for key in ["registered_at", "updated_at"]:
                     record1.pop(key, None)
                     record2.pop(key, None)
-                payload1["record"] = record1
-                payload2["record"] = record2
-                assert payload1 == payload2
+                data1["record"] = record1
+                data2["record"] = record2
+                assert data1 == data2
             else:
                 assert intent1.payload == intent2.payload
 
@@ -2969,17 +2969,17 @@ class TestDeterminismProperty:
                 intent1.intent_type == "extension"
                 and intent1.payload.extension_type == "infra.postgres_upsert"
             ):
-                payload1 = dict(intent1.payload)
-                payload2 = dict(intent2.payload)
-                record1 = dict(payload1.get("record", {}))
-                record2 = dict(payload2.get("record", {}))
+                data1 = dict(intent1.payload.data)
+                data2 = dict(intent2.payload.data)
+                record1 = dict(data1.get("record", {}))
+                record2 = dict(data2.get("record", {}))
                 # Remove timestamps before comparison
                 for key in ["registered_at", "updated_at"]:
                     record1.pop(key, None)
                     record2.pop(key, None)
-                payload1["record"] = record1
-                payload2["record"] = record2
-                assert payload1 == payload2, (
+                data1["record"] = record1
+                data2["record"] = record2
+                assert data1 == data2, (
                     f"Payload mismatch for intent_type={intent1.intent_type}"
                 )
             else:
@@ -3037,17 +3037,17 @@ class TestDeterminismProperty:
                     intent1.intent_type == "extension"
                     and intent1.payload.extension_type == "infra.postgres_upsert"
                 ):
-                    payload1 = dict(intent1.payload)
-                    payload2 = dict(intent2.payload)
-                    record1 = dict(payload1.get("record", {}))
-                    record2 = dict(payload2.get("record", {}))
+                    data1 = dict(intent1.payload.data)
+                    data2 = dict(intent2.payload.data)
+                    record1 = dict(data1.get("record", {}))
+                    record2 = dict(data2.get("record", {}))
                     # Remove timestamps before comparison
                     for key in ["registered_at", "updated_at"]:
                         record1.pop(key, None)
                         record2.pop(key, None)
-                    payload1["record"] = record1
-                    payload2["record"] = record2
-                    assert payload1 == payload2, (
+                    data1["record"] = record1
+                    data2["record"] = record2
+                    assert data1 == data2, (
                         f"Intent {j} payload mismatch between reducer 1 and {i}"
                     )
                 else:
@@ -3965,12 +3965,17 @@ class TestCommandFoldingPrevention:
         assert len(output.intents) > 0, "Reducer should emit intents for Effect layer"
 
         for intent in output.intents:
-            # Verify intent_type uses declarative naming (noun.verb pattern)
-            # Declarative: "consul.register" (describes what should be registered)
+            # Verify intent uses extension type pattern with declarative naming
+            # Extension format: intent_type="extension", extension_type="infra.consul_register"
+            # The extension_type uses namespace.action pattern (e.g., "infra.consul_register")
             # Imperative would be: "RegisterInConsul" (commands action)
-            assert "." in intent.intent_type, (
-                f"Intent type should use namespace.action pattern, "
+            assert intent.intent_type == "extension", (
+                f"Intent type should be 'extension' for extension-based intents, "
                 f"found '{intent.intent_type}'"
+            )
+            assert "." in intent.payload.extension_type, (
+                f"Extension type should use namespace.action pattern, "
+                f"found '{intent.payload.extension_type}'"
             )
 
             # Verify intent targets external system (Effect layer responsibility)
@@ -3989,7 +3994,7 @@ class TestCommandFoldingPrevention:
                 f"found {type(intent.payload)}"
             )
 
-            # Verify payload doesn't contain execution indicators
+            # Verify payload.data doesn't contain execution indicators
             # (no "result", "status", "executed", "completed" keys)
             execution_indicators = [
                 "result",
@@ -3998,7 +4003,7 @@ class TestCommandFoldingPrevention:
                 "success",
                 "error",
             ]
-            for key in intent.payload:
+            for key in intent.payload.data:
                 assert key not in execution_indicators, (
                     f"Intent payload contains execution indicator '{key}'. "
                     f"Intents should contain input data, not execution results."
@@ -4298,20 +4303,20 @@ class TestEventReplayDeterminism:
                     "target": intent.target,
                 }
 
-                # For postgres intents, exclude timestamp fields
+                # For postgres intents, exclude timestamp fields from data
                 if (
                     intent.intent_type == "extension"
                     and intent.payload.extension_type == "infra.postgres_upsert"
                 ):
-                    payload_copy = dict(intent.payload)
-                    if "record" in payload_copy:
-                        record_copy = dict(payload_copy["record"])
+                    data_copy = dict(intent.payload.data)
+                    if "record" in data_copy:
+                        record_copy = dict(data_copy["record"])
                         record_copy.pop("registered_at", None)
                         record_copy.pop("updated_at", None)
-                        payload_copy["record"] = record_copy
-                    fingerprint["payload"] = payload_copy
+                        data_copy["record"] = record_copy
+                    fingerprint["data"] = data_copy
                 else:
-                    fingerprint["payload"] = dict(intent.payload)
+                    fingerprint["data"] = dict(intent.payload.data)
 
                 fingerprints.append(fingerprint)
             return fingerprints

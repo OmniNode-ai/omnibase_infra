@@ -929,9 +929,27 @@ class RegistrationReducer:
         )
 
         # Use ModelPayloadExtension for omnibase_core 0.6.x compatibility
-        # Use serialize_as_any=True because ModelPostgresUpsertRegistrationIntent.record
-        # is typed as BaseModel (for flexibility), but we need to serialize the actual
-        # subclass (ModelNodeRegistrationRecord) with all its fields
+        #
+        # TODO(omnibase_core): Remove serialize_as_any=True workaround once
+        # omnibase_core fixes the typing of ModelPostgresUpsertRegistrationIntent.record
+        #
+        # Root Cause: ModelPostgresUpsertRegistrationIntent.record is typed as BaseModel
+        # (for generic flexibility) but actually contains ModelNodeRegistrationRecord.
+        # Without serialize_as_any=True, Pydantic only serializes BaseModel fields,
+        # losing all subclass-specific data (node_id, node_type, etc.).
+        #
+        # Security/Validation Risk: serialize_as_any=True bypasses Pydantic's type
+        # validation during serialization, meaning any object could be serialized
+        # without type checking. This is acceptable here because:
+        #   1. We control the input (record is built from validated event data above)
+        #   2. The record is immediately serialized, not stored
+        #
+        # Upstream Fix: omnibase_core should either:
+        #   - Use a TypeVar bound or generic for the record field, OR
+        #   - Make record typed as ModelNodeRegistrationRecord directly, OR
+        #   - Provide a protocol-based serialization pattern
+        #
+        # Tracking: Create upstream ticket in omnibase_core to fix intent model typing
         payload = ModelPayloadExtension(
             extension_type="infra.postgres_upsert",
             plugin_name="postgres",
@@ -962,6 +980,12 @@ class RegistrationReducer:
     # =========================================================================
 
     # TODO(OMN-996): Implement reduce_confirmation() using ModelRegistrationConfirmation
+    # Ticket: https://linear.app/omninode/issue/OMN-996
+    # Status: Backlog - Phase 2 of dual registration event flow
+    #
+    # Scope: Process confirmation events from Effect layer (Consul/PostgreSQL)
+    # to complete state transitions: pending -> partial -> complete
+    #
     # The model is now available at:
     #   from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
     #
