@@ -28,7 +28,7 @@ python = "^3.12"
 # NOTE: Tags are acceptable for development; consider commit SHAs for production deployments.
 #
 # omnibase-core v0.6.2: Latest release with updated models and enums.
-omnibase-core = "^0.6.2"
+omnibase-core = {path = "../omnibase_core"}
 omnibase-spi = "^0.4.1"
 
 # Core dependencies

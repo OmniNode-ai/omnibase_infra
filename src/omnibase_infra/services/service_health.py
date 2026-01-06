@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""HTTP Health Server for ONEX Runtime.
+"""HTTP Health Service for ONEX Runtime.
 
-This module provides a minimal HTTP server for exposing health check endpoints.
+This module provides a minimal HTTP service for exposing health check endpoints.
 It is designed to run alongside the ONEX runtime kernel to satisfy Docker/K8s
 health check requirements.
 
-The server exposes:
+The service exposes:
     - GET /health: Returns runtime health status as JSON
     - GET /ready: Returns readiness status as JSON (alias for /health)
 
@@ -14,18 +14,18 @@ Configuration:
     ONEX_HTTP_PORT: Port to listen on (default: 8085)
 
 Example:
-    >>> from omnibase_infra.runtime.health_server import HealthServer
+    >>> from omnibase_infra.runtime.service_health import ServiceHealth
     >>> from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
     >>>
     >>> async def main():
     ...     runtime = RuntimeHostProcess()
-    ...     server = HealthServer(runtime=runtime, port=8085)
+    ...     server = ServiceHealth(runtime=runtime, port=8085)
     ...     await server.start()
     ...     # Server is now running
     ...     await server.stop()
 
 Note:
-    This server uses aiohttp for async HTTP handling, which is already a
+    This service uses aiohttp for async HTTP handling, which is already a
     dependency of omnibase_infra for other infrastructure operations.
 """
 
@@ -38,16 +38,20 @@ from aiohttp import web
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
-from omnibase_infra.runtime.models import ModelHealthCheckResponse
+from omnibase_infra.runtime.models.model_health_check_response import (
+    ModelHealthCheckResponse,
+)
 from omnibase_infra.utils.correlation import generate_correlation_id
 
 if TYPE_CHECKING:
+    from omnibase_core.container import ModelONEXContainer
+
     from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 logger = logging.getLogger(__name__)
 
 # Default configuration - hardcoded to avoid import-time crashes from invalid env vars
-# Environment variable override is handled safely in HealthServer.__init__
+# Environment variable override is handled safely in ServiceHealth.__init__
 DEFAULT_HTTP_PORT: int = 8085
 DEFAULT_HTTP_HOST = "0.0.0.0"  # noqa: S104 - Required for container networking
 
@@ -87,7 +91,7 @@ def _get_port_from_env(default: int) -> int:
         return default
 
 
-class HealthServer:
+class ServiceHealth:
     """Minimal HTTP server for health check endpoints.
 
     This server provides health check endpoints for Docker and Kubernetes
@@ -98,9 +102,21 @@ class HealthServer:
         port: Port to listen on
         host: Host to bind to
         version: Runtime version string to include in health response
+        container: Optional ONEX dependency injection container
+
+    Container Integration (OMN-529):
+        ServiceHealth supports two initialization modes:
+
+        1. Direct runtime injection (original pattern):
+            >>> server = ServiceHealth(runtime=runtime, port=8085)
+
+        2. Container-based injection (ONEX-compliant):
+            >>> server = ServiceHealth(container=container, runtime=runtime)
+            >>> # Or use the async factory method:
+            >>> server = await ServiceHealth.create_from_container(container)
 
     Example:
-        >>> server = HealthServer(runtime=runtime, port=8085)
+        >>> server = ServiceHealth(runtime=runtime, port=8085)
         >>> await server.start()
         >>> # curl http://localhost:8085/health
         >>> await server.stop()
@@ -108,7 +124,8 @@ class HealthServer:
 
     def __init__(
         self,
-        runtime: RuntimeHostProcess,
+        container: ModelONEXContainer | None = None,
+        runtime: RuntimeHostProcess | None = None,
         port: int | None = None,
         host: str = DEFAULT_HTTP_HOST,
         version: str = "unknown",
@@ -116,12 +133,27 @@ class HealthServer:
         """Initialize the health server.
 
         Args:
+            container: Optional ONEX dependency injection container.
             runtime: RuntimeHostProcess instance to delegate health checks to.
+                     Required if container is not provided.
             port: Port to listen on. If None, uses ONEX_HTTP_PORT env var or 8085.
             host: Host to bind to (default: 0.0.0.0 for container networking).
             version: Runtime version string for health response.
+
+        Raises:
+            ValueError: If neither container nor runtime is provided.
         """
-        self._runtime: RuntimeHostProcess = runtime
+        # Store container for ONEX compliance (OMN-529)
+        self._container: ModelONEXContainer | None = container
+
+        # Validate that at least one dependency source is provided
+        if container is None and runtime is None:
+            raise ValueError(
+                "ServiceHealth requires either 'container' or 'runtime' to be provided. "
+                "Use ServiceHealth(runtime=runtime) or ServiceHealth(container=container)."
+            )
+
+        self._runtime: RuntimeHostProcess | None = runtime
         # If port is explicitly provided, use it; otherwise parse from env var safely
         self._port: int = (
             port if port is not None else _get_port_from_env(DEFAULT_HTTP_PORT)
@@ -136,7 +168,7 @@ class HealthServer:
         self._is_running: bool = False
 
         logger.debug(
-            "HealthServer initialized",
+            "ServiceHealth initialized",
             extra={
                 "port": self._port,
                 "host": self._host,
@@ -161,6 +193,72 @@ class HealthServer:
             The port number the server listens on.
         """
         return self._port
+
+    @property
+    def container(self) -> ModelONEXContainer | None:
+        """Return the optional ONEX dependency injection container.
+
+        Returns:
+            The stored ModelONEXContainer instance, or None if not provided.
+        """
+        return self._container
+
+    @property
+    def runtime(self) -> RuntimeHostProcess:
+        """Return the RuntimeHostProcess instance.
+
+        Returns:
+            The RuntimeHostProcess used for health checks.
+
+        Raises:
+            RuntimeError: If runtime was not provided during initialization
+                and has not been resolved from the container.
+        """
+        if self._runtime is None:
+            raise RuntimeError(
+                "RuntimeHostProcess not available. "
+                "Either provide runtime during __init__ or use create_from_container()."
+            )
+        return self._runtime
+
+    @classmethod
+    async def create_from_container(
+        cls,
+        container: ModelONEXContainer,
+        port: int | None = None,
+        host: str = DEFAULT_HTTP_HOST,
+        version: str = "unknown",
+    ) -> ServiceHealth:
+        """Create a ServiceHealth by resolving RuntimeHostProcess from container.
+
+        This is the preferred ONEX-compliant way to create a ServiceHealth when
+        using container-based dependency injection.
+
+        Args:
+            container: ONEX dependency injection container.
+            port: Port to listen on. If None, uses ONEX_HTTP_PORT env var or 8085.
+            host: Host to bind to (default: 0.0.0.0 for container networking).
+            version: Runtime version string for health response.
+
+        Returns:
+            Initialized ServiceHealth with runtime resolved from container.
+
+        Example:
+            >>> container = ModelONEXContainer()
+            >>> await wire_infrastructure_services(container)
+            >>> server = await ServiceHealth.create_from_container(container)
+            >>> await server.start()
+        """
+        from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+
+        runtime = await container.service_registry.resolve_service(RuntimeHostProcess)
+        return cls(
+            container=container,
+            runtime=runtime,
+            port=port,
+            host=host,
+            version=version,
+        )
 
     async def start(self) -> None:
         """Start the HTTP health server for Docker/Kubernetes probes.
@@ -208,7 +306,7 @@ class HealthServer:
                 - Original exception chaining: via "from e" for root cause analysis
 
         Example:
-            >>> server = HealthServer(runtime=runtime, port=8085)
+            >>> server = ServiceHealth(runtime=runtime, port=8085)
             >>> await server.start()
             >>> # Server now listening at http://0.0.0.0:8085/health
             >>> # Docker can probe: curl http://localhost:8085/health
@@ -222,7 +320,7 @@ class HealthServer:
                 CMD curl -f http://localhost:8085/health || exit 1
         """
         if self._is_running:
-            logger.debug("HealthServer already started, skipping")
+            logger.debug("ServiceHealth already started, skipping")
             return
 
         correlation_id = generate_correlation_id()
@@ -256,7 +354,7 @@ class HealthServer:
             self._is_running = True
 
             logger.info(
-                "HealthServer started (correlation_id=%s)",
+                "ServiceHealth started (correlation_id=%s)",
                 correlation_id,
                 extra={
                     "host": self._host,
@@ -334,7 +432,7 @@ class HealthServer:
             - Server state is reset for potential restart
 
         Example:
-            >>> server = HealthServer(runtime=runtime, port=8085)
+            >>> server = ServiceHealth(runtime=runtime, port=8085)
             >>> await server.start()
             >>> # ... runtime operation ...
             >>> await server.stop()
@@ -347,12 +445,12 @@ class HealthServer:
             consistently marked as stopped.
         """
         if not self._is_running:
-            logger.debug("HealthServer already stopped, skipping")
+            logger.debug("ServiceHealth already stopped, skipping")
             return
 
         correlation_id = generate_correlation_id()
         logger.info(
-            "Stopping HealthServer (correlation_id=%s)",
+            "Stopping ServiceHealth (correlation_id=%s)",
             correlation_id,
         )
 
@@ -392,7 +490,7 @@ class HealthServer:
         self._is_running = False
 
         logger.info(
-            "HealthServer stopped successfully (correlation_id=%s)",
+            "ServiceHealth stopped successfully (correlation_id=%s)",
             correlation_id,
         )
 
@@ -435,7 +533,7 @@ class HealthServer:
 
             Customization:
                 If your deployment requires removing degraded containers from rotation,
-                you can override this behavior by subclassing HealthServer and modifying
+                you can override this behavior by subclassing ServiceHealth and modifying
                 the _handle_health method, or configure your load balancer to inspect
                 the response body "status" field instead of relying solely on HTTP codes.
 
@@ -498,7 +596,7 @@ class HealthServer:
 
         try:
             # Get health status from runtime
-            health_details = await self._runtime.health_check()
+            health_details = await self.runtime.health_check()
 
             # Runtime type validation: health_check() returns dict per contract
             # This helps static analysis and provides runtime validation
@@ -536,7 +634,7 @@ class HealthServer:
                 # containers may still serve valuable traffic.
                 #
                 # Customization: To remove degraded containers from rotation, either:
-                #   - Subclass HealthServer and override _handle_health()
+                #   - Subclass ServiceHealth and override _handle_health()
                 #   - Configure load balancer to inspect response body "status" field
                 #   - Change http_status below to 503 if restart-on-degrade is preferred
                 status = "degraded"
@@ -583,4 +681,4 @@ class HealthServer:
             )
 
 
-__all__: list[str] = ["DEFAULT_HTTP_HOST", "DEFAULT_HTTP_PORT", "HealthServer"]
+__all__: list[str] = ["DEFAULT_HTTP_HOST", "DEFAULT_HTTP_PORT", "ServiceHealth"]

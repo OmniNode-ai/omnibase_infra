@@ -281,7 +281,7 @@ class TestBootstrap:
 
     @pytest.fixture
     def mock_health_server(self) -> Generator[MagicMock, None, None]:
-        """Create a mock HealthServer.
+        """Create a mock ServiceHealth.
 
         Uses side_effect with async no-op functions to ensure coroutines
         are properly awaited and cleaned up.
@@ -293,7 +293,7 @@ class TestBootstrap:
         async def noop_stop() -> None:
             """Async no-op for stop that completes immediately."""
 
-        with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_cls:
+        with patch("omnibase_infra.services.service_health.ServiceHealth") as mock_cls:
             mock_instance = MagicMock()
             mock_instance.start = AsyncMock(side_effect=noop_start)
             mock_instance.stop = AsyncMock(side_effect=noop_stop)
@@ -665,7 +665,9 @@ class TestIntegration:
         """
         monkeypatch.setenv("CONTRACTS_DIR", str(tmp_path))
 
-        with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_health:
+        with patch(
+            "omnibase_infra.services.service_health.ServiceHealth"
+        ) as mock_health:
             mock_health_instance = MagicMock()
             mock_health_instance.start = AsyncMock()
             mock_health_instance.stop = AsyncMock()
@@ -721,7 +723,7 @@ class TestHttpPortValidation:
 
     @pytest.fixture
     def mock_health_server(self) -> Generator[MagicMock, None, None]:
-        """Create a mock HealthServer.
+        """Create a mock ServiceHealth.
 
         Uses side_effect with async no-op functions to ensure coroutines
         are properly awaited and cleaned up.
@@ -733,7 +735,7 @@ class TestHttpPortValidation:
         async def noop_stop() -> None:
             """Async no-op for stop that completes immediately."""
 
-        with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_cls:
+        with patch("omnibase_infra.services.service_health.ServiceHealth") as mock_cls:
             mock_instance = MagicMock()
             mock_instance.start = AsyncMock(side_effect=noop_start)
             mock_instance.stop = AsyncMock(side_effect=noop_stop)
@@ -754,7 +756,7 @@ class TestHttpPortValidation:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that port 0 is rejected and falls back to default."""
-        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "0")
 
@@ -767,7 +769,7 @@ class TestHttpPortValidation:
                 exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with default port
+        # Verify ServiceHealth was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
@@ -788,7 +790,7 @@ class TestHttpPortValidation:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that port 65536 is rejected and falls back to default."""
-        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "65536")
 
@@ -801,7 +803,7 @@ class TestHttpPortValidation:
                 exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with default port
+        # Verify ServiceHealth was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
@@ -832,7 +834,7 @@ class TestHttpPortValidation:
             exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with port 1
+        # Verify ServiceHealth was created with port 1
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == 1
@@ -855,7 +857,7 @@ class TestHttpPortValidation:
             exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with port 65535
+        # Verify ServiceHealth was created with port 65535
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == 65535
@@ -868,7 +870,7 @@ class TestHttpPortValidation:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that negative port is rejected and falls back to default."""
-        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "-1")
 
@@ -881,7 +883,7 @@ class TestHttpPortValidation:
                 exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with default port
+        # Verify ServiceHealth was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
@@ -902,7 +904,7 @@ class TestHttpPortValidation:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that very large port number is rejected."""
-        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "100000")
 
@@ -914,7 +916,7 @@ class TestHttpPortValidation:
             exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with default port
+        # Verify ServiceHealth was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
@@ -927,7 +929,7 @@ class TestHttpPortValidation:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that non-numeric port string is rejected and falls back to default."""
-        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "not_a_number")
 
@@ -940,7 +942,7 @@ class TestHttpPortValidation:
                 exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with default port
+        # Verify ServiceHealth was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
@@ -982,7 +984,7 @@ class TestHttpPortValidation:
         - Mixed numeric/alphabetic ("12abc")
         - Decimal strings ("8080.5")
         """
-        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", invalid_port_value)
 
@@ -995,7 +997,7 @@ class TestHttpPortValidation:
                 exit_code = await bootstrap()
 
         assert exit_code == 0, f"Expected success for {description}"
-        # Verify HealthServer was created with default port
+        # Verify ServiceHealth was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT, (

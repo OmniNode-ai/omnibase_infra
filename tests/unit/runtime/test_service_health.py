@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for the ONEX runtime health server.
+"""Unit tests for the ONEX runtime health service.
 
-Tests the HTTP health server including:
-- Server lifecycle (start/stop)
+Tests the HTTP health service including:
+- Service lifecycle (start/stop)
 - Health endpoint responses
 - Error handling
 - Port configuration
+- Container-based dependency injection (OMN-529)
 """
 
 from __future__ import annotations
@@ -15,22 +16,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import web
+from omnibase_core.container import ModelONEXContainer
 
 from omnibase_infra.errors import RuntimeHostError
-from omnibase_infra.runtime.health_server import (
+from omnibase_infra.services.service_health import (
     DEFAULT_HTTP_HOST,
     DEFAULT_HTTP_PORT,
-    HealthServer,
+    ServiceHealth,
 )
 
 
-class TestHealthServerInit:
-    """Tests for HealthServer initialization."""
+class TestServiceHealthInit:
+    """Tests for ServiceHealth initialization."""
 
     def test_init_with_defaults(self) -> None:
         """Test initialization with default values."""
         mock_runtime = MagicMock()
-        server = HealthServer(runtime=mock_runtime)
+        server = ServiceHealth(runtime=mock_runtime)
 
         assert server._runtime is mock_runtime
         assert server._port == DEFAULT_HTTP_PORT
@@ -41,7 +43,7 @@ class TestHealthServerInit:
     def test_init_with_custom_values(self) -> None:
         """Test initialization with custom values."""
         mock_runtime = MagicMock()
-        server = HealthServer(
+        server = ServiceHealth(
             runtime=mock_runtime,
             port=9000,
             host="127.0.0.1",
@@ -55,26 +57,28 @@ class TestHealthServerInit:
     def test_port_property(self) -> None:
         """Test port property returns configured port."""
         mock_runtime = MagicMock()
-        server = HealthServer(runtime=mock_runtime, port=9999)
+        server = ServiceHealth(runtime=mock_runtime, port=9999)
 
         assert server.port == 9999
 
 
-class TestHealthServerLifecycle:
-    """Tests for HealthServer start/stop lifecycle."""
+class TestServiceHealthLifecycle:
+    """Tests for ServiceHealth start/stop lifecycle."""
 
     async def test_start_creates_app_and_runner(self) -> None:
         """Test that start() creates aiohttp app and runner."""
         mock_runtime = MagicMock()
-        server = HealthServer(runtime=mock_runtime, port=0)  # Port 0 for auto-assign
+        server = ServiceHealth(runtime=mock_runtime, port=0)  # Port 0 for auto-assign
 
         # Patch aiohttp components
-        with patch("omnibase_infra.runtime.health_server.web.Application") as mock_app:
+        with patch(
+            "omnibase_infra.services.service_health.web.Application"
+        ) as mock_app:
             with patch(
-                "omnibase_infra.runtime.health_server.web.AppRunner"
+                "omnibase_infra.services.service_health.web.AppRunner"
             ) as mock_runner:
                 with patch(
-                    "omnibase_infra.runtime.health_server.web.TCPSite"
+                    "omnibase_infra.services.service_health.web.TCPSite"
                 ) as mock_site:
                     mock_app_instance = MagicMock()
                     mock_app_instance.router = MagicMock()
@@ -103,14 +107,16 @@ class TestHealthServerLifecycle:
     async def test_start_idempotent(self) -> None:
         """Test that calling start() twice is safe."""
         mock_runtime = MagicMock()
-        server = HealthServer(runtime=mock_runtime)
+        server = ServiceHealth(runtime=mock_runtime)
 
-        with patch("omnibase_infra.runtime.health_server.web.Application") as mock_app:
+        with patch(
+            "omnibase_infra.services.service_health.web.Application"
+        ) as mock_app:
             with patch(
-                "omnibase_infra.runtime.health_server.web.AppRunner"
+                "omnibase_infra.services.service_health.web.AppRunner"
             ) as mock_runner:
                 with patch(
-                    "omnibase_infra.runtime.health_server.web.TCPSite"
+                    "omnibase_infra.services.service_health.web.TCPSite"
                 ) as mock_site:
                     mock_app_instance = MagicMock()
                     mock_app_instance.router = MagicMock()
@@ -138,7 +144,7 @@ class TestHealthServerLifecycle:
     async def test_stop_idempotent(self) -> None:
         """Test that calling stop() twice is safe."""
         mock_runtime = MagicMock()
-        server = HealthServer(runtime=mock_runtime)
+        server = ServiceHealth(runtime=mock_runtime)
 
         # Server not started - stop should be no-op
         await server.stop()
@@ -149,14 +155,16 @@ class TestHealthServerLifecycle:
     async def test_start_raises_on_port_binding_error(self) -> None:
         """Test that port binding errors raise RuntimeHostError."""
         mock_runtime = MagicMock()
-        server = HealthServer(runtime=mock_runtime, port=8085)
+        server = ServiceHealth(runtime=mock_runtime, port=8085)
 
-        with patch("omnibase_infra.runtime.health_server.web.Application") as mock_app:
+        with patch(
+            "omnibase_infra.services.service_health.web.Application"
+        ) as mock_app:
             with patch(
-                "omnibase_infra.runtime.health_server.web.AppRunner"
+                "omnibase_infra.services.service_health.web.AppRunner"
             ) as mock_runner:
                 with patch(
-                    "omnibase_infra.runtime.health_server.web.TCPSite"
+                    "omnibase_infra.services.service_health.web.TCPSite"
                 ) as mock_site:
                     mock_app_instance = MagicMock()
                     mock_app_instance.router = MagicMock()
@@ -178,7 +186,7 @@ class TestHealthServerLifecycle:
                     assert "Address already in use" in str(exc_info.value)
 
 
-class TestHealthServerEndpoints:
+class TestServiceHealthEndpoints:
     """Tests for health endpoint responses."""
 
     async def test_health_endpoint_healthy(self) -> None:
@@ -192,7 +200,7 @@ class TestHealthServerEndpoints:
             }
         )
 
-        server = HealthServer(runtime=mock_runtime, version="1.0.0")
+        server = ServiceHealth(runtime=mock_runtime, version="1.0.0")
 
         # Create a mock request
         mock_request = MagicMock(spec=web.Request)
@@ -222,7 +230,7 @@ class TestHealthServerEndpoints:
             }
         )
 
-        server = HealthServer(runtime=mock_runtime, version="1.0.0")
+        server = ServiceHealth(runtime=mock_runtime, version="1.0.0")
         mock_request = MagicMock(spec=web.Request)
 
         response = await server._handle_health(mock_request)
@@ -244,7 +252,7 @@ class TestHealthServerEndpoints:
             }
         )
 
-        server = HealthServer(runtime=mock_runtime, version="1.0.0")
+        server = ServiceHealth(runtime=mock_runtime, version="1.0.0")
         mock_request = MagicMock(spec=web.Request)
 
         response = await server._handle_health(mock_request)
@@ -262,7 +270,7 @@ class TestHealthServerEndpoints:
             side_effect=Exception("Health check failed")
         )
 
-        server = HealthServer(runtime=mock_runtime, version="1.0.0")
+        server = ServiceHealth(runtime=mock_runtime, version="1.0.0")
         mock_request = MagicMock(spec=web.Request)
 
         response = await server._handle_health(mock_request)
@@ -275,8 +283,8 @@ class TestHealthServerEndpoints:
         assert "Health check failed" in response_text
 
 
-class TestHealthServerIntegration:
-    """Integration tests for HealthServer with real HTTP requests."""
+class TestServiceHealthIntegration:
+    """Integration tests for ServiceHealth with real HTTP requests."""
 
     async def test_real_health_endpoint(self) -> None:
         """Test health endpoint with real HTTP server."""
@@ -292,7 +300,7 @@ class TestHealthServerIntegration:
         )
 
         # Use port 0 for automatic port assignment to avoid conflicts
-        server = HealthServer(
+        server = ServiceHealth(
             runtime=mock_runtime,
             port=0,
             version="test-1.0.0",
@@ -335,7 +343,7 @@ class TestHealthServerIntegration:
             assert not server.is_running
 
 
-class TestHealthServerConstants:
+class TestServiceHealthConstants:
     """Tests for health server constants."""
 
     def test_default_port(self) -> None:
@@ -346,3 +354,152 @@ class TestHealthServerConstants:
         """Test default HTTP host value (0.0.0.0 required for container networking)."""
         # S104: Binding to all interfaces is intentional for Docker/K8s health checks
         assert DEFAULT_HTTP_HOST == "0.0.0.0"  # noqa: S104
+
+
+class TestServiceHealthContainerInjection:
+    """Tests for container-based dependency injection per OMN-529.
+
+    These tests verify the ServiceHealth's support for ModelONEXContainer
+    as the primary dependency injection mechanism, following the ONEX
+    container injection pattern.
+    """
+
+    def test_container_property_returns_stored_container(self) -> None:
+        """Container property should return the stored container."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_runtime = MagicMock()
+
+        server = ServiceHealth(container=mock_container, runtime=mock_runtime)
+
+        assert server.container is mock_container
+
+    def test_container_property_returns_none_when_not_provided(self) -> None:
+        """Container property should return None when only runtime provided."""
+        mock_runtime = MagicMock()
+
+        server = ServiceHealth(runtime=mock_runtime)
+
+        assert server.container is None
+
+    def test_raises_value_error_when_no_container_or_runtime(self) -> None:
+        """Should raise ValueError when neither container nor runtime provided."""
+        with pytest.raises(ValueError) as exc_info:
+            ServiceHealth()
+
+        assert "requires either 'container' or 'runtime'" in str(exc_info.value)
+
+    def test_instantiation_with_container_only(self) -> None:
+        """Test that ServiceHealth can be instantiated with container parameter only.
+
+        When container is provided without runtime, the server should still initialize.
+        Runtime can be resolved from container or created lazily.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+
+        server = ServiceHealth(container=mock_container)
+
+        assert server.container is mock_container
+        assert server._port == DEFAULT_HTTP_PORT
+        assert server._host == DEFAULT_HTTP_HOST
+
+    def test_instantiation_with_container_and_custom_values(self) -> None:
+        """Test container injection with custom port/host/version."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
+
+        server = ServiceHealth(
+            container=mock_container,
+            port=9000,
+            host="127.0.0.1",
+            version="2.0.0",
+        )
+
+        assert server.container is mock_container
+        assert server._port == 9000
+        assert server._host == "127.0.0.1"
+        assert server._version == "2.0.0"
+
+    def test_instantiation_with_both_container_and_runtime(self) -> None:
+        """Test that both container and runtime can be provided together.
+
+        When both are provided, both should be stored for flexibility.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_runtime = MagicMock()
+
+        server = ServiceHealth(container=mock_container, runtime=mock_runtime)
+
+        assert server.container is mock_container
+        assert server._runtime is mock_runtime
+
+    @pytest.mark.asyncio
+    async def test_create_from_container_factory(self) -> None:
+        """Test the async factory method for container-based creation.
+
+        The create_from_container() factory should create a fully configured
+        ServiceHealth instance from a container.
+        """
+        mock_runtime = MagicMock()
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_container.service_registry = MagicMock()
+        mock_container.service_registry.resolve_service = AsyncMock(
+            return_value=mock_runtime
+        )
+
+        server = await ServiceHealth.create_from_container(
+            container=mock_container,
+            port=8090,
+            version="factory-1.0.0",
+        )
+
+        assert server.container is mock_container
+        assert server._port == 8090
+        assert server._version == "factory-1.0.0"
+        assert server._runtime is mock_runtime
+        assert not server.is_running
+
+    @pytest.mark.asyncio
+    async def test_create_from_container_factory_with_defaults(self) -> None:
+        """Test factory method with default values."""
+        mock_runtime = MagicMock()
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_container.service_registry = MagicMock()
+        mock_container.service_registry.resolve_service = AsyncMock(
+            return_value=mock_runtime
+        )
+
+        server = await ServiceHealth.create_from_container(container=mock_container)
+
+        assert server.container is mock_container
+        assert server._port == DEFAULT_HTTP_PORT
+        assert server._host == DEFAULT_HTTP_HOST
+        assert server._version == "unknown"
+        assert server._runtime is mock_runtime
+
+    @pytest.mark.asyncio
+    async def test_container_based_server_health_endpoint(self) -> None:
+        """Test health endpoint works with container-based initialization."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_runtime = MagicMock()
+        mock_runtime.health_check = AsyncMock(
+            return_value={
+                "healthy": True,
+                "degraded": False,
+                "is_running": True,
+            }
+        )
+
+        server = ServiceHealth(
+            container=mock_container,
+            runtime=mock_runtime,
+            version="container-1.0.0",
+        )
+
+        mock_request = MagicMock(spec=web.Request)
+        response = await server._handle_health(mock_request)
+
+        assert response.status == 200
+        assert response.content_type == "application/json"
+        response_text = response.text
+        assert response_text is not None
+        assert '"status":"healthy"' in response_text
+        assert '"version":"container-1.0.0"' in response_text

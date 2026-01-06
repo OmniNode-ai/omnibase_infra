@@ -87,12 +87,14 @@ from omnibase_infra.runtime.container_wiring import (
     wire_registration_handlers,
 )
 from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
-from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT, HealthServer
 from omnibase_infra.runtime.introspection_event_router import (
     IntrospectionEventRouter,
 )
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+
+# ServiceHealth import moved to bootstrap() to avoid circular import
+# from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT, ServiceHealth
 from omnibase_infra.runtime.validation import validate_runtime_config
 from omnibase_infra.utils.correlation import generate_correlation_id
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
@@ -385,9 +387,15 @@ async def bootstrap() -> int:
         Health endpoint: http://0.0.0.0:8085/health
         ============================================================
     """
+    # Lazy import to avoid circular import with services.service_health
+    from omnibase_infra.services.service_health import (
+        DEFAULT_HTTP_PORT,
+        ServiceHealth,
+    )
+
     # Initialize resources to None for cleanup guard in finally block
     runtime: RuntimeHostProcess | None = None
-    health_server: HealthServer | None = None
+    health_server: ServiceHealth | None = None
     postgres_pool: asyncpg.Pool | None = None
     introspection_unsubscribe: Callable[[], Awaitable[None]] | None = None
     correlation_id = generate_correlation_id()
@@ -690,6 +698,7 @@ async def bootstrap() -> int:
         # returns dict[str, Any] but all our model fields are strongly typed)
         runtime_create_start_time = time.time()
         runtime = RuntimeHostProcess(
+            container=container,
             event_bus=event_bus,
             input_topic=config.input_topic,
             output_topic=config.output_topic,
@@ -793,7 +802,8 @@ async def bootstrap() -> int:
             )
             http_port = DEFAULT_HTTP_PORT
 
-        health_server = HealthServer(
+        health_server = ServiceHealth(
+            container=container,
             runtime=runtime,
             port=http_port,
             version=KERNEL_VERSION,

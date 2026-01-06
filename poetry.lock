@@ -3359,12 +3359,10 @@ name = "omnibase-core"
 version = "0.6.2"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
-python-versions = ">=3.12"
+python-versions = "^3.12"
 groups = ["main"]
-files = [
-    {file = "omnibase_core-0.6.2-py3-none-any.whl", hash = "sha256:1a39c0e4e152cdc789825160e56939a10a67581e5d2fc14318d846dcfd9839a8"},
-    {file = "omnibase_core-0.6.2.tar.gz", hash = "sha256:349e06900677ecfe688f626430b906cf4c05140c9d428d1b7948a6c201d29614"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 click = ">=8.1.0,<9.0.0"
@@ -3386,6 +3384,10 @@ cache = ["redis (>=5.0.0,<6.0.0)"]
 cli = ["psutil"]
 full = ["prometheus-client (>=0.21.0,<1.0.0)", "psutil", "redis (>=5.0.0,<6.0.0)"]
 metrics = ["prometheus-client (>=0.21.0,<1.0.0)"]
+
+[package.source]
+type = "directory"
+url = "../omnibase_core"
 
 [[package]]
 name = "omnibase-spi"
@@ -6296,4 +6298,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "3ce4be0a48d57f65a8b7ce723adfb927becf32a19c4c16f0b07afb65c8b82087"
+content-hash = "965283c13d7ef1c2418e2421d40433fdd7bf01f145de60fc946d695e7bf79585"

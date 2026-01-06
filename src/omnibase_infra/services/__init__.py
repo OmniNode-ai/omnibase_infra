@@ -13,7 +13,12 @@ Exports:
     ServiceTimeoutEmitter: Emitter for timeout events with markers
     ServiceTimeoutScanner: Scanner for querying overdue registration entities
 
+Note:
+    ServiceHealth is NOT exported here to avoid circular imports with runtime.
+    Import directly: from omnibase_infra.services.service_health import ServiceHealth
+
 Related Tickets:
+    - OMN-529: ONEX Compliance container injection
     - OMN-932 (C2): Durable Timeout Handling
 """
 
