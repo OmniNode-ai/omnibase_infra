@@ -685,7 +685,8 @@ class TestVersionValidation:
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             RegistryCompute._parse_semver("not-a-semver")
 
-        assert "Invalid semantic version format" in str(exc_info.value)
+        # Case-insensitive check for robustness against minor error message changes
+        assert "invalid semantic version format" in str(exc_info.value).lower()
 
     def test_parse_semver_empty_prerelease_raises_error(self) -> None:
         """Test that empty prerelease suffix raises ProtocolConfigurationError."""
@@ -694,7 +695,8 @@ class TestVersionValidation:
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             RegistryCompute._parse_semver("1.2.3-")
 
-        assert "Prerelease suffix cannot be empty" in str(exc_info.value)
+        # Case-insensitive check for robustness against minor error message changes
+        assert "prerelease suffix cannot be empty" in str(exc_info.value).lower()
 
     def test_valid_prerelease_versions_accepted(
         self, registry: RegistryCompute
@@ -1011,7 +1013,8 @@ class TestSemverEdgeCases:
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             RegistryCompute._parse_semver("1.0.0+build.123")
 
-        assert "Invalid semantic version format" in str(exc_info.value)
+        # Case-insensitive check for robustness against minor error message changes
+        assert "invalid semantic version format" in str(exc_info.value).lower()
 
     def test_semver_multiple_prerelease_segments(self) -> None:
         """Test parsing '1.0.0-alpha.1.2.3' (multiple prerelease segments).
@@ -1076,7 +1079,8 @@ class TestSemverEdgeCases:
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             RegistryCompute._parse_semver("1.0.0++")
 
-        assert "Invalid semantic version format" in str(exc_info.value)
+        # Case-insensitive check for robustness against minor error message changes
+        assert "invalid semantic version format" in str(exc_info.value).lower()
 
     def test_semver_sorting_prerelease_vs_release(
         self, registry: RegistryCompute

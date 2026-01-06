@@ -31,16 +31,18 @@ Running Tests:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-import yaml
+from omnibase_core.enums import EnumNodeKind
 
 # Fixed timestamp for deterministic tests
 TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
@@ -58,47 +60,11 @@ from tests.conftest import (
     assert_reducer_protocol_interface,
 )
 
-# Module-level markers - all tests in this file are integration tests
-pytestmark = [
-    pytest.mark.integration,
-]
-
-
 # =============================================================================
 # Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def mock_container() -> MagicMock:
-    """Create a mock ONEX container."""
-    container = MagicMock()
-    container.config = MagicMock()
-    return container
-
-
-@pytest.fixture
-def contract_path() -> Path:
-    """Return path to contract.yaml."""
-    return Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
-
-
-@pytest.fixture
-def contract_data(contract_path: Path) -> dict:
-    """Load and return contract.yaml as dict.
-
-    Raises:
-        pytest.skip: If contract file doesn't exist (allows tests to be skipped gracefully).
-        yaml.YAMLError: If contract file contains invalid YAML.
-    """
-    if not contract_path.exists():
-        pytest.skip(f"Contract file not found: {contract_path}")
-
-    with open(contract_path, encoding="utf-8") as f:
-        try:
-            return yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            pytest.fail(f"Invalid YAML in contract file: {e}")
+# Note: simple_mock_container, contract_path, and contract_data fixtures are
+# provided by tests/integration/nodes/conftest.py - no local definition needed.
 
 
 # =============================================================================
@@ -154,7 +120,7 @@ class TestContractIntegration:
 
     def test_node_type_is_orchestrator(self, contract_data: dict) -> None:
         """Test that node_type is ORCHESTRATOR."""
-        assert contract_data["node_type"] == "ORCHESTRATOR"
+        assert contract_data["node_type"] == EnumNodeKind.ORCHESTRATOR.name
 
     def test_input_model_importable(self, contract_data: dict) -> None:
         """Test that input model specified in contract is importable and valid.
@@ -867,7 +833,9 @@ class TestModelContractAlignment:
 class TestNodeIntegration:
     """Integration tests for node instantiation and base class behavior."""
 
-    def test_node_instantiation_succeeds(self, mock_container: MagicMock) -> None:
+    def test_node_instantiation_succeeds(
+        self, simple_mock_container: MagicMock
+    ) -> None:
         """Test that node can be instantiated successfully with proper state.
 
         Verifies:
@@ -875,7 +843,7 @@ class TestNodeIntegration:
         - Container is stored as expected
         - Node has required orchestrator attributes
         """
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # Verify type via duck typing (check for class name match)
         assert orchestrator.__class__.__name__ == "NodeRegistrationOrchestrator", (
@@ -886,17 +854,17 @@ class TestNodeIntegration:
         assert hasattr(orchestrator, "container"), (
             "Orchestrator must have 'container' attribute"
         )
-        assert orchestrator.container is mock_container, (
+        assert orchestrator.container is simple_mock_container, (
             "Container reference must match provided container"
         )
 
-    def test_node_inherits_base_class(self, mock_container: MagicMock) -> None:
+    def test_node_inherits_base_class(self, simple_mock_container: MagicMock) -> None:
         """Test that node inherits from NodeOrchestrator base class.
 
         Per ONEX conventions, we verify inheritance via duck typing by checking
         for required methods and attributes rather than isinstance checks.
         """
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # Verify NodeOrchestrator behavior via duck typing
         # NodeOrchestrator provides workflow execution and state management methods
@@ -927,9 +895,9 @@ class TestNodeIntegration:
             f"NodeOrchestrator must be in MRO, found: {mro_names}"
         )
 
-    def test_node_is_declarative(self, mock_container: MagicMock) -> None:
+    def test_node_is_declarative(self, simple_mock_container: MagicMock) -> None:
         """Test that node has no custom imperative methods."""
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # Old imperative methods should not exist
         imperative_methods = [
@@ -1192,7 +1160,7 @@ class TestWorkflowExecutionWithMocks:
                         node_id=self._node_id,
                         correlation_id=self._correlation_id,
                         payload=ModelConsulIntentPayload(
-                            service_name=f"node-{event.node_type}",
+                            service_name=f"onex-{event.node_type}",
                         ),
                     ),
                     ModelPostgresUpsertIntent(
@@ -1319,7 +1287,7 @@ class TestWorkflowExecutionWithMocks:
     @pytest.fixture
     def orchestrator_with_mocks(
         self,
-        mock_container: MagicMock,
+        simple_mock_container: MagicMock,
         mock_reducer: object,
         mock_effect: object,
         mock_event_emitter: object,
@@ -1345,15 +1313,15 @@ class TestWorkflowExecutionWithMocks:
             else:
                 return mock_event_emitter
 
-        mock_container.service_registry = MagicMock()
-        mock_container.service_registry.resolve.side_effect = resolve_mock
+        simple_mock_container.service_registry = MagicMock()
+        simple_mock_container.service_registry.resolve.side_effect = resolve_mock
 
         # Store references for test access
-        mock_container._test_reducer = mock_reducer
-        mock_container._test_effect = mock_effect
-        mock_container._test_emitter = mock_event_emitter
+        simple_mock_container._test_reducer = mock_reducer
+        simple_mock_container._test_effect = mock_effect
+        simple_mock_container._test_emitter = mock_event_emitter
 
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
         return orchestrator
 
     def test_mock_reducer_implements_protocol(self, mock_reducer: object) -> None:
@@ -1775,7 +1743,7 @@ class TestWorkflowExecutionWithMocks:
     def test_mock_container_provides_dependencies(
         self,
         orchestrator_with_mocks: NodeRegistrationOrchestrator,
-        mock_container: MagicMock,
+        simple_mock_container: MagicMock,
     ) -> None:
         """Test that mock container provides reducer and effect dependencies.
 
@@ -1784,19 +1752,19 @@ class TestWorkflowExecutionWithMocks:
         and correct method signatures, rather than using isinstance checks.
         """
         # Verify mocks are accessible via container
-        assert hasattr(mock_container, "_test_reducer"), (
+        assert hasattr(simple_mock_container, "_test_reducer"), (
             "Container must have '_test_reducer' attribute"
         )
-        assert hasattr(mock_container, "_test_effect"), (
+        assert hasattr(simple_mock_container, "_test_effect"), (
             "Container must have '_test_effect' attribute"
         )
-        assert hasattr(mock_container, "_test_emitter"), (
+        assert hasattr(simple_mock_container, "_test_emitter"), (
             "Container must have '_test_emitter' attribute"
         )
 
         # Use shared conformance helpers for protocol verification
-        assert_reducer_protocol_interface(mock_container._test_reducer)
-        assert_effect_protocol_interface(mock_container._test_effect)
+        assert_reducer_protocol_interface(simple_mock_container._test_reducer)
+        assert_effect_protocol_interface(simple_mock_container._test_effect)
 
 
 # =============================================================================

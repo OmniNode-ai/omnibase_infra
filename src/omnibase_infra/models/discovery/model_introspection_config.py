@@ -300,11 +300,11 @@ class ModelIntrospectionConfig(BaseModel):
 
 
 __all__ = [
-    "ModelIntrospectionConfig",
-    "DEFAULT_INTROSPECTION_TOPIC",
     "DEFAULT_HEARTBEAT_TOPIC",
+    "DEFAULT_INTROSPECTION_TOPIC",
     "DEFAULT_REQUEST_INTROSPECTION_TOPIC",
+    "INVALID_TOPIC_CHARS",
     "TOPIC_PATTERN",
     "VERSION_SUFFIX_PATTERN",
-    "INVALID_TOPIC_CHARS",
+    "ModelIntrospectionConfig",
 ]

@@ -17,8 +17,37 @@ Features:
     - Graceful degradation when event bus is unavailable
 
 Note:
-    - active_operations_count in heartbeats is currently hardcoded to 0.
-      Full implementation deferred - see TODO in _publish_heartbeat().
+    - active_operations_count in heartbeats is tracked via ``track_operation()``
+      context manager. Nodes should wrap their operations with this context
+      manager to accurately report concurrent operation counts.
+
+    - **track_operation() Usage Guidelines**:
+
+      Within MixinNodeIntrospection itself, only ``publish_introspection()`` uses
+      ``track_operation()``. This is intentional for the following reasons:
+
+      1. **_publish_heartbeat()**: Explicitly excluded because it's an internal
+         background task. Tracking it would cause self-referential counting
+         (heartbeat counting itself as active) and would report infrastructure
+         overhead rather than business load.
+
+      2. **get_introspection_data()**: Called by ``publish_introspection()``, which
+         already wraps the entire operation. Adding tracking here would cause
+         double-counting. Additionally, this is metadata gathering, not a business
+         operation that represents node load.
+
+      3. **start/stop_introspection_tasks()**: One-time lifecycle operations that
+         complete quickly. They spawn/cancel background tasks but don't represent
+         ongoing load. The counter would increment and immediately decrement.
+
+      4. **get_capabilities(), get_endpoints(), get_current_state()**: Internal
+         metadata operations that are part of introspection data gathering, not
+         independent business operations.
+
+      **For consuming nodes**: Use ``track_operation()`` in your business methods
+      (e.g., ``execute_query()``, ``process_request()``, ``handle_event()``) to
+      accurately report concurrent operation counts in heartbeats. See the
+      ``track_operation()`` docstring for usage examples.
 
 Security Considerations:
     This mixin uses Python reflection (via the ``inspect`` module) to automatically
@@ -169,7 +198,8 @@ import inspect
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
@@ -423,6 +453,12 @@ class MixinNodeIntrospection:
     # Stores the most recent performance metrics from introspection operations
     _introspection_last_metrics: IntrospectionPerformanceMetrics | None
 
+    # Active operations tracking (instance-level)
+    # Thread-safe counter for tracking concurrent operations
+    # Used by heartbeat to report active_operations_count
+    _active_operations: int
+    _operations_lock: asyncio.Lock
+
     # Default operation keywords for capability discovery
     DEFAULT_OPERATION_KEYWORDS: ClassVar[frozenset[str]] = frozenset(
         {
@@ -606,6 +642,11 @@ class MixinNodeIntrospection:
         # Performance metrics tracking
         self._introspection_last_metrics = None
 
+        # Active operations tracking
+        # Thread-safe counter for tracking concurrent operations
+        self._active_operations = 0
+        self._operations_lock = asyncio.Lock()
+
         if config.event_bus is None:
             logger.warning(
                 f"Introspection initialized without event bus for {config.node_id}",
@@ -774,6 +815,20 @@ class MixinNodeIntrospection:
 
         Uses the configured exclude_prefixes set for efficient prefix matching.
 
+        Order-Dependent Matching:
+            This method uses ``any()`` with a generator expression, which
+            short-circuits on the first matching prefix. This means:
+
+            - **Performance**: Prefixes earlier in the set that match common
+              patterns will provide faster filtering. However, since frozenset
+              has no guaranteed iteration order, this is not controllable.
+            - **Correctness**: The result is deterministic regardless of order.
+              A method is skipped if ANY prefix matches, so iteration order
+              does not affect the outcome.
+
+            The default exclude prefixes are: ``_``, ``get_``, ``set_``,
+            ``initialize``, ``start_``, ``stop_``.
+
         Args:
             method_name: Name of the method to check
 
@@ -790,6 +845,25 @@ class MixinNodeIntrospection:
 
         Uses the configured operation_keywords set to identify methods
         that represent node operations.
+
+        Order-Dependent Matching:
+            This method uses ``any()`` with a generator expression, which
+            short-circuits on the first matching keyword. This means:
+
+            - **Performance**: Keywords earlier in the set that appear more
+              frequently in method names will provide faster matching. However,
+              since frozenset has no guaranteed iteration order, this is not
+              directly controllable.
+            - **Correctness**: The result is deterministic regardless of order.
+              A method is classified as an operation if ANY keyword is found
+              in its lowercase name, so iteration order does not affect the
+              classification outcome.
+
+            The default operation keywords are: ``execute``, ``handle``,
+            ``process``, ``run``, ``invoke``, ``call``.
+
+            Node-type-specific keywords are available via
+            ``NODE_TYPE_OPERATION_KEYWORDS`` for specialized filtering.
 
         Args:
             method_name: Name of the method to check
@@ -833,6 +907,66 @@ class MixinNodeIntrospection:
         """
         fsm_indicators = {"_state", "current_state", "_current_state", "state"}
         return any(hasattr(self, indicator) for indicator in fsm_indicators)
+
+    def _extract_state_value(self, state: object) -> str:
+        """Extract string value from a state object.
+
+        Handles both enum states (with .value attribute) and plain values.
+
+        Args:
+            state: The state object to extract value from
+
+        Returns:
+            String representation of the state value
+        """
+        if hasattr(state, "value"):
+            return str(state.value)
+        return str(state)
+
+    def _get_state_from_attribute(self, attr_name: str) -> str | None:
+        """Try to get state value from a named attribute.
+
+        Args:
+            attr_name: Name of the attribute to check
+
+        Returns:
+            State value as string if found and not None, None otherwise
+        """
+        if not hasattr(self, attr_name):
+            return None
+        state = getattr(self, attr_name)
+        if state is None:
+            return None
+        return self._extract_state_value(state)
+
+    async def _get_state_from_method(self) -> str | None:
+        """Try to get state value from get_state method.
+
+        Handles both sync and async get_state methods.
+
+        Returns:
+            State value as string if method exists and returns non-None, None otherwise
+        """
+        if not hasattr(self, "get_state"):
+            return None
+
+        method = self.get_state
+        if not callable(method):
+            return None
+
+        try:
+            result = method()
+            if asyncio.iscoroutine(result):
+                result = await result
+            if result is None:
+                return None
+            return self._extract_state_value(result)
+        except Exception as e:
+            logger.debug(
+                f"Failed to get state from get_state method: {e}",
+                extra={"error": str(e)},
+            )
+            return None
 
     async def get_capabilities(self) -> CapabilitiesDict:
         """Extract node capabilities via reflection.
@@ -1041,37 +1175,16 @@ class MixinNodeIntrospection:
             ```
         """
         self._ensure_initialized()
+
         # Check for state attributes in order of preference
         state_attrs = ["_state", "current_state", "_current_state", "state"]
-
         for attr_name in state_attrs:
-            if hasattr(self, attr_name):
-                state = getattr(self, attr_name)
-                if state is not None:
-                    # Handle enum states
-                    if hasattr(state, "value"):
-                        return str(state.value)
-                    return str(state)
+            state_value = self._get_state_from_attribute(attr_name)
+            if state_value is not None:
+                return state_value
 
-        # Check for get_state method
-        if hasattr(self, "get_state"):
-            method = self.get_state
-            if callable(method):
-                try:
-                    result = method()
-                    if asyncio.iscoroutine(result):
-                        result = await result
-                    if result is not None:
-                        if hasattr(result, "value"):
-                            return str(result.value)
-                        return str(result)
-                except Exception as e:
-                    logger.debug(
-                        f"Failed to get state from get_state method: {e}",
-                        extra={"error": str(e)},
-                    )
-
-        return None
+        # Fall back to get_state method
+        return await self._get_state_from_method()
 
     async def get_introspection_data(self) -> ModelNodeIntrospectionEvent:
         """Get introspection data with caching support.
@@ -1279,6 +1392,10 @@ class MixinNodeIntrospection:
         Gracefully degrades if event bus is unavailable - logs warning
         and returns False instead of raising an exception.
 
+        This method uses ``track_operation()`` to track active operations
+        for heartbeat reporting, demonstrating the recommended pattern
+        for integrating operation tracking into node operations.
+
         Args:
             reason: Reason for the introspection event
                 (startup, shutdown, request, heartbeat)
@@ -1310,72 +1427,86 @@ class MixinNodeIntrospection:
             )
             return False
 
-        try:
-            # Get introspection data
-            event = await self.get_introspection_data()
+        # Track this operation for heartbeat reporting
+        async with self.track_operation("publish_introspection"):
+            try:
+                # Get introspection data
+                event = await self.get_introspection_data()
 
-            # Create publish event with updated reason and correlation_id
-            # Use model_copy for clean field updates (Pydantic v2)
-            final_correlation_id = correlation_id or uuid4()
-            publish_event = event.model_copy(
-                update={
-                    "reason": reason,
-                    "correlation_id": final_correlation_id,
-                }
-            )
-
-            # Publish to event bus using configured topic
-            # Type narrowing: we've already checked _introspection_event_bus is not None above
-            event_bus = self._introspection_event_bus
-            assert event_bus is not None  # Redundant but helps mypy
-            topic = self._introspection_topic
-            if hasattr(event_bus, "publish_envelope"):
-                await event_bus.publish_envelope(
-                    envelope=publish_event,
-                    topic=topic,
-                )
-            else:
-                # Fallback to publish method with raw bytes
-                event_data = publish_event.model_dump(mode="json")
-                value = json.dumps(event_data).encode("utf-8")
-                await event_bus.publish(
-                    topic=topic,
-                    key=str(self._introspection_node_id).encode("utf-8")
-                    if self._introspection_node_id is not None
-                    else None,
-                    value=value,
+                # Create publish event with updated reason and correlation_id
+                # Use model_copy for clean field updates (Pydantic v2)
+                final_correlation_id = correlation_id or uuid4()
+                publish_event = event.model_copy(
+                    update={
+                        "reason": reason,
+                        "correlation_id": final_correlation_id,
+                    }
                 )
 
-            logger.info(
-                f"Published introspection event for {self._introspection_node_id}",
-                extra={
-                    "node_id": self._introspection_node_id,
-                    "reason": reason,
-                    "correlation_id": str(final_correlation_id),
-                },
-            )
-            return True
+                # Publish to event bus using configured topic
+                # Type narrowing: we've already checked _introspection_event_bus is not None above
+                event_bus = self._introspection_event_bus
+                assert event_bus is not None  # Redundant but helps mypy
+                topic = self._introspection_topic
+                if hasattr(event_bus, "publish_envelope"):
+                    await event_bus.publish_envelope(
+                        envelope=publish_event,
+                        topic=topic,
+                    )
+                else:
+                    # Fallback to publish method with raw bytes
+                    event_data = publish_event.model_dump(mode="json")
+                    value = json.dumps(event_data).encode("utf-8")
+                    await event_bus.publish(
+                        topic=topic,
+                        key=str(self._introspection_node_id).encode("utf-8")
+                        if self._introspection_node_id is not None
+                        else None,
+                        value=value,
+                    )
 
-        except Exception as e:
-            # Use error() with exc_info=True instead of exception() to include
-            # structured error_type and error_message fields for log aggregation
-            logger.error(  # noqa: G201
-                f"Failed to publish introspection for {self._introspection_node_id}",
-                extra={
-                    "node_id": self._introspection_node_id,
-                    "reason": reason,
-                    "error_type": type(e).__name__,
-                    "error_message": str(e),
-                },
-                exc_info=True,
-            )
-            return False
+                logger.info(
+                    f"Published introspection event for {self._introspection_node_id}",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "reason": reason,
+                        "correlation_id": str(final_correlation_id),
+                    },
+                )
+                return True
+
+            except Exception as e:
+                # Use error() with exc_info=True instead of exception() to include
+                # structured error_type and error_message fields for log aggregation
+                logger.error(  # noqa: G201
+                    f"Failed to publish introspection for {self._introspection_node_id}",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "reason": reason,
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                    },
+                    exc_info=True,
+                )
+                return False
 
     async def _publish_heartbeat(self) -> bool:
         """Publish heartbeat event to the event bus.
 
         Internal method for heartbeat broadcasting. Calculates uptime
         and publishes heartbeat event.
+
+        Note:
+            This method intentionally does NOT use ``track_operation()``
+            because:
+            1. It's an internal background task, not a business operation
+            2. Tracking it would cause self-referential counting (the
+               heartbeat would count itself as an active operation)
+            3. The purpose of operation tracking is to report business
+               load, not infrastructure overhead
+
+            For business operations, use ``track_operation()`` as
+            demonstrated in ``publish_introspection()``.
 
         Returns:
             True if published successfully, False otherwise
@@ -1412,21 +1543,17 @@ class MixinNodeIntrospection:
                 )
                 node_type = EnumNodeKind.EFFECT
 
+            # Get current active operations count (coroutine-safe)
+            async with self._operations_lock:
+                active_ops_count = self._active_operations
+
             # Create heartbeat event
             now = datetime.now(UTC)
             heartbeat = ModelNodeHeartbeatEvent(
                 node_id=node_id,
                 node_type=node_type,
                 uptime_seconds=uptime_seconds,
-                # TODO(ACTIVE-OP-TRACKING): Implement active operation tracking
-                # Ticket: Create Linear ticket for active operation tracking implementation
-                # Currently hardcoded to 0. Full implementation requires:
-                # - Operation counter increment/decrement around async operations
-                # - Thread-safe counter for concurrent operations
-                # - Integration with node's actual execution context
-                # This is intentionally left as 0 until the tracking infrastructure
-                # is implemented. See MixinNodeIntrospection docstring note.
-                active_operations_count=0,
+                active_operations_count=active_ops_count,
                 correlation_id=uuid4(),
                 timestamp=now,  # Required: time injection pattern
             )
@@ -1456,6 +1583,7 @@ class MixinNodeIntrospection:
                 extra={
                     "node_id": self._introspection_node_id,
                     "uptime_seconds": uptime_seconds,
+                    "active_operations": active_ops_count,
                     "topic": topic,
                 },
             )
@@ -1535,6 +1663,234 @@ class MixinNodeIntrospection:
             extra={"node_id": self._introspection_node_id},
         )
 
+    def _parse_correlation_id(self, raw_value: str | None) -> UUID | None:
+        """Parse correlation ID from request data with graceful fallback.
+
+        Args:
+            raw_value: Raw correlation_id value from request JSON
+
+        Returns:
+            Parsed UUID or None if parsing fails or value is empty
+        """
+        if not raw_value:
+            return None
+
+        try:
+            # UUID() raises ValueError for malformed strings,
+            # TypeError for non-string inputs (e.g., int, list).
+            # Convert to string first for safer handling of unexpected types.
+            return UUID(str(raw_value))
+        except (ValueError, TypeError) as e:
+            # Log warning with structured fields for monitoring.
+            # Truncate received value preview to avoid log bloat
+            # from potentially malicious oversized input.
+            logger.warning(
+                "Invalid correlation_id format in introspection "
+                "request, generating new correlation_id",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                    "received_value_type": type(raw_value).__name__,
+                    "received_value_preview": str(raw_value)[:50],
+                },
+            )
+            return None
+
+    @staticmethod
+    def _should_log_failure(consecutive_failures: int, threshold: int) -> bool:
+        """Determine if failure should be logged based on rate limiting.
+
+        Logs first failure and every Nth consecutive failure to prevent log spam.
+
+        Args:
+            consecutive_failures: Current consecutive failure count
+            threshold: Log every Nth failure
+
+        Returns:
+            True if this failure should be logged at error level
+        """
+        return consecutive_failures == 1 or consecutive_failures % threshold == 0
+
+    async def _cleanup_registry_subscription(self) -> None:
+        """Clean up the current registry subscription."""
+        if self._registry_unsubscribe is not None:
+            try:
+                result = self._registry_unsubscribe()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as cleanup_error:
+                logger.debug(
+                    "Error unsubscribing registry listener for "
+                    f"{self._introspection_node_id}",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "error_type": type(cleanup_error).__name__,
+                        "error_message": str(cleanup_error),
+                    },
+                )
+            self._registry_unsubscribe = None
+
+    async def _handle_introspection_request(self, message: ModelEventMessage) -> None:
+        """Handle incoming introspection request.
+
+        Includes error recovery with rate-limited logging to prevent
+        log spam during sustained failures. Continues processing on
+        non-fatal errors to maintain graceful degradation.
+
+        Args:
+            message: The incoming event message
+        """
+        try:
+            await self._process_introspection_request(message)
+            # Reset failure counter on success
+            self._registry_callback_consecutive_failures = 0
+        except Exception as e:
+            self._handle_request_error(e)
+
+    async def _process_introspection_request(self, message: ModelEventMessage) -> None:
+        """Process the introspection request message.
+
+        Args:
+            message: The incoming event message
+
+        Raises:
+            Exception: If processing fails (will be caught by caller)
+        """
+        # Early exit if message has no parseable value
+        if not hasattr(message, "value") or not message.value:
+            await self.publish_introspection(
+                reason="request",
+                correlation_id=uuid4(),
+            )
+            return
+
+        # Parse request data
+        request_data = json.loads(message.value.decode("utf-8"))
+
+        # Check if request targets a specific node (early exit if not us)
+        # Note: Compare as strings since target_node_id from JSON is a string
+        # while _introspection_node_id is a UUID object
+        target_node_id = request_data.get("target_node_id")
+        if target_node_id and str(target_node_id) != str(self._introspection_node_id):
+            return
+
+        # Parse correlation ID with graceful fallback
+        correlation_id = self._parse_correlation_id(request_data.get("correlation_id"))
+
+        # Respond with introspection data
+        await self.publish_introspection(
+            reason="request",
+            correlation_id=correlation_id,
+        )
+
+    def _handle_request_error(self, error: Exception) -> None:
+        """Handle error during introspection request processing.
+
+        Tracks consecutive failures and rate-limits error logging.
+
+        Args:
+            error: The exception that occurred
+        """
+        # Track consecutive failures for rate-limited logging
+        self._registry_callback_consecutive_failures += 1
+        self._registry_callback_last_failure_time = time.time()
+
+        # Rate-limit error logging to prevent log spam during sustained failures
+        if self._should_log_failure(
+            self._registry_callback_consecutive_failures,
+            self._registry_callback_failure_log_threshold,
+        ):
+            logger.error(
+                f"Error handling introspection request for {self._introspection_node_id}",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                    "consecutive_failures": self._registry_callback_consecutive_failures,
+                    "log_rate_limited": self._registry_callback_consecutive_failures
+                    > 1,
+                },
+                exc_info=True,
+            )
+        else:
+            # Log at debug level for rate-limited failures
+            logger.debug(
+                f"Suppressed error log for introspection request "
+                f"(failure {self._registry_callback_consecutive_failures})",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "error_type": type(error).__name__,
+                    "consecutive_failures": self._registry_callback_consecutive_failures,
+                },
+            )
+
+    async def _attempt_subscription(self) -> bool:
+        """Attempt to subscribe to the request introspection topic.
+
+        Returns:
+            True if subscribed successfully and should wait for stop signal,
+            False if subscription not supported or failed
+
+        Note:
+            This method should only be called when event bus is verified to exist.
+            The caller (_registry_listener_loop) checks for None before calling.
+        """
+        event_bus = self._introspection_event_bus
+        if event_bus is None or not hasattr(event_bus, "subscribe"):
+            logger.warning(
+                "Event bus does not support subscribe for "
+                f"{self._introspection_node_id}",
+                extra={"node_id": self._introspection_node_id},
+            )
+            return False
+
+        request_topic = self._request_introspection_topic
+        unsubscribe = await event_bus.subscribe(
+            topic=request_topic,
+            group_id=f"introspection-{self._introspection_node_id}",
+            on_message=self._handle_introspection_request,
+        )
+        self._registry_unsubscribe = unsubscribe
+
+        logger.info(
+            f"Registry listener subscribed for {self._introspection_node_id}",
+            extra={
+                "node_id": self._introspection_node_id,
+                "topic": request_topic,
+            },
+        )
+        return True
+
+    async def _wait_for_backoff_or_stop(self, backoff_seconds: float) -> bool:
+        """Wait for backoff period or stop signal.
+
+        Args:
+            backoff_seconds: Time to wait in seconds
+
+        Returns:
+            True if stop signal received, False if timeout (should retry)
+
+        Note:
+            This method should only be called when stop_event is verified to exist.
+            The caller (_registry_listener_loop) initializes the event before calling.
+        """
+        stop_event = self._introspection_stop_event
+        if stop_event is None:
+            # Should not happen if called correctly, but handle gracefully
+            return False
+
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=backoff_seconds,
+            )
+            # Stop signal received during backoff
+            return True
+        except TimeoutError:
+            # Normal timeout, continue to retry
+            return False
+
     async def _registry_listener_loop(
         self,
         max_retries: int = 3,
@@ -1594,190 +1950,14 @@ class MixinNodeIntrospection:
             extra={"node_id": self._introspection_node_id},
         )
 
-        def _parse_correlation_id(raw_value: str | None) -> UUID | None:
-            """Parse correlation ID from request data with graceful fallback.
-
-            Args:
-                raw_value: Raw correlation_id value from request JSON
-
-            Returns:
-                Parsed UUID or None if parsing fails or value is empty
-            """
-            if not raw_value:
-                return None
-
-            try:
-                # UUID() raises ValueError for malformed strings,
-                # TypeError for non-string inputs (e.g., int, list).
-                # Convert to string first for safer handling of unexpected types.
-                return UUID(str(raw_value))
-            except (ValueError, TypeError) as e:
-                # Log warning with structured fields for monitoring.
-                # Truncate received value preview to avoid log bloat
-                # from potentially malicious oversized input.
-                logger.warning(
-                    "Invalid correlation_id format in introspection "
-                    "request, generating new correlation_id",
-                    extra={
-                        "node_id": self._introspection_node_id,
-                        "error_type": type(e).__name__,
-                        "error_message": str(e),
-                        "received_value_type": type(raw_value).__name__,
-                        "received_value_preview": str(raw_value)[:50],
-                    },
-                )
-                return None
-
-        def _should_log_failure(consecutive_failures: int, threshold: int) -> bool:
-            """Determine if failure should be logged based on rate limiting.
-
-            Logs first failure and every Nth consecutive failure to prevent log spam.
-
-            Args:
-                consecutive_failures: Current consecutive failure count
-                threshold: Log every Nth failure
-
-            Returns:
-                True if this failure should be logged at error level
-            """
-            return consecutive_failures == 1 or consecutive_failures % threshold == 0
-
-        async def on_request(message: ModelEventMessage) -> None:
-            """Handle incoming introspection request.
-
-            Includes error recovery with rate-limited logging to prevent
-            log spam during sustained failures. Continues processing on
-            non-fatal errors to maintain graceful degradation.
-            """
-            try:
-                # Early exit if message has no parseable value
-                if not hasattr(message, "value") or not message.value:
-                    await self.publish_introspection(
-                        reason="request",
-                        correlation_id=uuid4(),
-                    )
-                    self._registry_callback_consecutive_failures = 0
-                    return
-
-                # Parse request data
-                request_data = json.loads(message.value.decode("utf-8"))
-
-                # Check if request targets a specific node (early exit if not us)
-                target_node_id = request_data.get("target_node_id")
-                if target_node_id and target_node_id != self._introspection_node_id:
-                    return
-
-                # Parse correlation ID with graceful fallback
-                correlation_id = _parse_correlation_id(
-                    request_data.get("correlation_id")
-                )
-
-                # Respond with introspection data
-                await self.publish_introspection(
-                    reason="request",
-                    correlation_id=correlation_id,
-                )
-
-                # Reset failure counter on success
-                self._registry_callback_consecutive_failures = 0
-
-            except Exception as e:
-                # Track consecutive failures for rate-limited logging
-                self._registry_callback_consecutive_failures += 1
-                self._registry_callback_last_failure_time = time.time()
-
-                # Rate-limit error logging to prevent log spam during sustained failures
-                if _should_log_failure(
-                    self._registry_callback_consecutive_failures,
-                    self._registry_callback_failure_log_threshold,
-                ):
-                    logger.error(  # noqa: G201
-                        f"Error handling introspection request for {self._introspection_node_id}",
-                        extra={
-                            "node_id": self._introspection_node_id,
-                            "error_type": type(e).__name__,
-                            "error_message": str(e),
-                            "consecutive_failures": (
-                                self._registry_callback_consecutive_failures
-                            ),
-                            "log_rate_limited": (
-                                self._registry_callback_consecutive_failures > 1
-                            ),
-                        },
-                        exc_info=True,
-                    )
-                else:
-                    # Log at debug level for rate-limited failures
-                    logger.debug(
-                        f"Suppressed error log for introspection request "
-                        f"(failure {self._registry_callback_consecutive_failures})",
-                        extra={
-                            "node_id": self._introspection_node_id,
-                            "error_type": type(e).__name__,
-                            "consecutive_failures": (
-                                self._registry_callback_consecutive_failures
-                            ),
-                        },
-                    )
-
-                # Continue processing - graceful degradation
-                # The callback should not raise exceptions that would disrupt the listener
-
-        # Helper function to clean up subscription
-        async def cleanup_subscription() -> None:
-            """Clean up the current subscription."""
-            if self._registry_unsubscribe is not None:
-                try:
-                    result = self._registry_unsubscribe()
-                    if asyncio.iscoroutine(result):
-                        await result
-                except Exception as cleanup_error:
-                    logger.debug(
-                        "Error unsubscribing registry listener for "
-                        f"{self._introspection_node_id}",
-                        extra={
-                            "node_id": self._introspection_node_id,
-                            "error_type": type(cleanup_error).__name__,
-                            "error_message": str(cleanup_error),
-                        },
-                    )
-                self._registry_unsubscribe = None
-
         # Retry loop with exponential backoff for subscription failures
         retry_count = 0
         while not self._introspection_stop_event.is_set():
             try:
-                # Subscribe to request topic using configured topic
-                request_topic = self._request_introspection_topic
-                if hasattr(self._introspection_event_bus, "subscribe"):
-                    unsubscribe = await self._introspection_event_bus.subscribe(
-                        topic=request_topic,
-                        group_id=f"introspection-{self._introspection_node_id}",
-                        on_message=on_request,
-                    )
-                    self._registry_unsubscribe = unsubscribe
-
-                    # Reset retry count on successful subscription
-                    retry_count = 0
-
-                    logger.info(
-                        f"Registry listener subscribed for {self._introspection_node_id}",
-                        extra={
-                            "node_id": self._introspection_node_id,
-                            "topic": request_topic,
-                        },
-                    )
-
+                if await self._attempt_subscription():
                     # Wait for stop signal
                     await self._introspection_stop_event.wait()
-                    # Stop signal received, exit loop
-                    break
-
-                logger.warning(
-                    "Event bus does not support subscribe for "
-                    f"{self._introspection_node_id}",
-                    extra={"node_id": self._introspection_node_id},
-                )
+                # Exit loop after subscription ends or not supported
                 break
 
             except asyncio.CancelledError:
@@ -1788,70 +1968,84 @@ class MixinNodeIntrospection:
                 break
             except Exception as e:
                 retry_count += 1
-                logger.error(  # noqa: G201
-                    f"Error in registry listener for {self._introspection_node_id}",
-                    extra={
-                        "node_id": self._introspection_node_id,
-                        "error_type": type(e).__name__,
-                        "error_message": str(e),
-                        "retry_count": retry_count,
-                        "max_retries": max_retries,
-                    },
-                    exc_info=True,
-                )
-
-                # Clean up any partial subscription before retry
-                await cleanup_subscription()
-
-                # Check if we should retry
-                if retry_count >= max_retries:
-                    # Use error() with exc_info=True instead of exception()
-                    # to include structured error_type and error_message fields
-                    # for log aggregation
-                    logger.error(  # noqa: G201
-                        "Registry listener exhausted retries",
-                        extra={
-                            "node_id": self._introspection_node_id,
-                            "retry_count": retry_count,
-                            "max_retries": max_retries,
-                            "error_type": type(e).__name__,
-                            "error_message": str(e),
-                        },
-                        exc_info=True,
-                    )
+                if not await self._handle_subscription_error(
+                    e, retry_count, max_retries, base_backoff_seconds
+                ):
                     break
-
-                # Exponential backoff before retry
-                backoff = base_backoff_seconds * (2 ** (retry_count - 1))
-                logger.info(
-                    f"Registry listener retrying in {backoff}s for "
-                    f"{self._introspection_node_id}",
-                    extra={
-                        "node_id": self._introspection_node_id,
-                        "backoff_seconds": backoff,
-                        "retry_count": retry_count,
-                    },
-                )
-
-                # Wait for backoff period or stop signal
-                try:
-                    await asyncio.wait_for(
-                        self._introspection_stop_event.wait(),
-                        timeout=backoff,
-                    )
-                    # Stop signal received during backoff
-                    break
-                except TimeoutError:
-                    # Normal timeout, continue to retry
-                    pass
 
         # Final cleanup
-        await cleanup_subscription()
+        await self._cleanup_registry_subscription()
 
         logger.info(
             f"Registry listener stopped for {self._introspection_node_id}",
             extra={"node_id": self._introspection_node_id},
         )
+
+    async def _handle_subscription_error(
+        self,
+        error: Exception,
+        retry_count: int,
+        max_retries: int,
+        base_backoff_seconds: float,
+    ) -> bool:
+        """Handle subscription error with retry logic.
+
+        Args:
+            error: The exception that occurred
+            retry_count: Current retry attempt number
+            max_retries: Maximum retry attempts
+            base_backoff_seconds: Base backoff time for exponential retry
+
+        Returns:
+            True if should continue retrying, False if should stop
+        """
+        logger.error(
+            f"Error in registry listener for {self._introspection_node_id}",
+            extra={
+                "node_id": self._introspection_node_id,
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+                "retry_count": retry_count,
+                "max_retries": max_retries,
+            },
+            exc_info=True,
+        )
+
+        # Clean up any partial subscription before retry
+        await self._cleanup_registry_subscription()
+
+        # Check if we should retry
+        if retry_count >= max_retries:
+            logger.error(
+                "Registry listener exhausted retries",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "retry_count": retry_count,
+                    "max_retries": max_retries,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                },
+                exc_info=True,
+            )
+            return False
+
+        # Exponential backoff before retry
+        backoff = base_backoff_seconds * (2 ** (retry_count - 1))
+        logger.info(
+            f"Registry listener retrying in {backoff}s for "
+            f"{self._introspection_node_id}",
+            extra={
+                "node_id": self._introspection_node_id,
+                "backoff_seconds": backoff,
+                "retry_count": retry_count,
+            },
+        )
+
+        # Wait for backoff period or stop signal
+        if await self._wait_for_backoff_or_stop(backoff):
+            return False  # Stop signal received
+
+        return True  # Continue retrying
 
     async def start_introspection_tasks(
         self,
@@ -2058,19 +2252,175 @@ class MixinNodeIntrospection:
         """
         return self._introspection_last_metrics
 
+    @asynccontextmanager
+    async def track_operation(
+        self,
+        operation_name: str | None = None,
+    ) -> AsyncIterator[None]:
+        """Context manager for tracking active operations.
+
+        Provides coroutine-safe tracking of concurrent operations for
+        heartbeat reporting. Increments the active operations counter
+        on entry and decrements it on exit (whether successful or not).
+
+        Concurrency Safety:
+            Uses asyncio.Lock for coroutine-safe counter updates.
+            The lock is held only during counter updates, not during
+            the operation itself. Logging occurs AFTER lock release
+            to prevent blocking during I/O.
+
+        Error Handling:
+            Counter updates are protected with try/except to ensure
+            operation tracking failures don't affect the main operation.
+            The counter will never go negative due to atomic operations.
+
+        Args:
+            operation_name: Optional name for logging/debugging.
+                Not used for counter logic but useful for diagnostics.
+
+        Yields:
+            None. The context manager is used purely for side effects.
+
+        Example:
+            ```python
+            class MyNode(MixinNodeIntrospection):
+                async def execute_query(self, query: str) -> Result:
+                    async with self.track_operation("execute_query"):
+                        # This operation is now tracked in heartbeats
+                        return await self._database.execute(query)
+
+                async def process_batch(self, items: list[Item]) -> None:
+                    # Track multiple concurrent operations
+                    async with asyncio.TaskGroup() as tg:
+                        for item in items:
+                            tg.create_task(self._process_with_tracking(item))
+
+                async def _process_with_tracking(self, item: Item) -> None:
+                    async with self.track_operation("process_item"):
+                        await self._process_single(item)
+            ```
+
+        Note:
+            The counter is read by ``_publish_heartbeat()`` to report
+            the current number of active operations. This provides
+            visibility into node load for monitoring and scaling.
+        """
+        # Increment counter on entry - capture count inside lock, log outside
+        count_after_increment = 0
+        increment_succeeded = False
+        try:
+            async with self._operations_lock:
+                self._active_operations += 1
+                count_after_increment = self._active_operations
+            increment_succeeded = True
+        except Exception as e:
+            # Log but don't fail the operation
+            logger.warning(
+                f"Failed to increment operation counter: {e}",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "operation": operation_name,
+                    "error_type": type(e).__name__,
+                },
+            )
+
+        # Log AFTER releasing lock to prevent blocking during I/O
+        if increment_succeeded and operation_name:
+            logger.debug(
+                f"Operation started: {operation_name}",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "operation": operation_name,
+                    "active_operations": count_after_increment,
+                },
+            )
+
+        try:
+            yield
+        finally:
+            # Decrement counter on exit - capture state inside lock, log outside
+            count_after_decrement = 0
+            decrement_succeeded = False
+            counter_was_zero = False
+            try:
+                async with self._operations_lock:
+                    # Prevent negative counter (defensive check)
+                    if self._active_operations > 0:
+                        self._active_operations -= 1
+                    else:
+                        counter_was_zero = True
+                    count_after_decrement = self._active_operations
+                decrement_succeeded = True
+            except Exception as e:
+                # Log but don't fail the operation
+                logger.warning(
+                    f"Failed to decrement operation counter: {e}",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "operation": operation_name,
+                        "error_type": type(e).__name__,
+                    },
+                )
+
+            # Log AFTER releasing lock to prevent blocking during I/O
+            if decrement_succeeded:
+                if counter_was_zero:
+                    # This should never happen, but log if it does
+                    logger.warning(
+                        "Active operations counter already at zero during decrement",
+                        extra={
+                            "node_id": self._introspection_node_id,
+                            "operation": operation_name,
+                        },
+                    )
+                elif operation_name:
+                    logger.debug(
+                        f"Operation completed: {operation_name}",
+                        extra={
+                            "node_id": self._introspection_node_id,
+                            "operation": operation_name,
+                            "active_operations": count_after_decrement,
+                        },
+                    )
+
+    async def get_active_operations_count(self) -> int:
+        """Get the current count of active operations.
+
+        Returns the number of operations currently being tracked via
+        ``track_operation()``. This is the same value reported in
+        heartbeat events.
+
+        Concurrency Safety:
+            Uses asyncio.Lock for coroutine-safe counter access.
+            The returned value is a snapshot; concurrent operations
+            may change the count immediately after reading.
+
+        Returns:
+            Current number of active operations (>= 0).
+
+        Example:
+            ```python
+            count = await node.get_active_operations_count()
+            if count > threshold:
+                logger.warning(f"High operation load: {count} active")
+            ```
+        """
+        async with self._operations_lock:
+            return self._active_operations
+
 
 __all__ = [
-    "MixinNodeIntrospection",
-    "INTROSPECTION_TOPIC",
     "HEARTBEAT_TOPIC",
+    "INTROSPECTION_TOPIC",
+    "PERF_THRESHOLD_CACHE_HIT_MS",
+    "PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS",
+    "PERF_THRESHOLD_GET_CAPABILITIES_MS",
+    "PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS",
     "REQUEST_INTROSPECTION_TOPIC",
     "CapabilitiesDict",  # Backward-compatible alias for CapabilitiesTypedDict
     "CapabilitiesTypedDict",  # Re-export from model for convenience
     "IntrospectionCacheDict",
     "IntrospectionPerformanceMetrics",
+    "MixinNodeIntrospection",
     "PerformanceMetricsCacheDict",  # TypedDict for cached performance metrics
-    "PERF_THRESHOLD_GET_CAPABILITIES_MS",
-    "PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS",
-    "PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS",
-    "PERF_THRESHOLD_CACHE_HIT_MS",
 ]

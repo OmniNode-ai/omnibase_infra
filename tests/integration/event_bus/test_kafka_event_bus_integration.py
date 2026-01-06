@@ -42,7 +42,6 @@ KAFKA_AVAILABLE = KAFKA_BOOTSTRAP_SERVERS is not None
 
 # Module-level markers - skip all tests if Kafka is not available
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.skipif(
         not KAFKA_AVAILABLE,
         reason="Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)",

@@ -66,6 +66,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -151,12 +152,11 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
 
         # Initialize circuit breaker for PostgreSQL fault tolerance
         # Uses MixinAsyncCircuitBreaker for consistent implementation across infra services
-        self._init_circuit_breaker(
-            threshold=5,
-            reset_timeout=60.0,
+        cb_config = ModelCircuitBreakerConfig.from_env(
             service_name="dlq_tracking_service",
             transport_type=EnumInfraTransportType.DATABASE,
         )
+        self._init_circuit_breaker_from_config(cb_config)
 
         # Defense-in-depth: Validate table name at runtime even though
         # Pydantic config already validates it. This protects against:

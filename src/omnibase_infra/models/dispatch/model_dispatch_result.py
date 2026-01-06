@@ -180,6 +180,14 @@ class ModelDispatchResult(BaseModel):
         description="Number of outputs produced by the dispatcher.",
         ge=0,
     )
+    output_events: list[BaseModel] = Field(
+        default_factory=list,
+        description=(
+            "List of output events produced by the dispatcher that need to be "
+            "published to output_topic. These are raw Pydantic models that will "
+            "be wrapped in ModelEventEnvelope by the kernel before publishing."
+        ),
+    )
 
     # ---- Error Information ----
     error_message: str | None = Field(

@@ -175,7 +175,7 @@ def validate_envelope(
 
 
 __all__: list[str] = [
-    "normalize_correlation_id",
     "PAYLOAD_REQUIRED_OPERATIONS",
+    "normalize_correlation_id",
     "validate_envelope",
 ]

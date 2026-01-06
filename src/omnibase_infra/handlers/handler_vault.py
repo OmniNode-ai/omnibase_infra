@@ -21,46 +21,41 @@ Return Type:
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, TypeVar
-from uuid import UUID, uuid4
+from typing import TYPE_CHECKING
+from uuid import uuid4
 
+import hvac
 from omnibase_core.models.dispatch import ModelHandlerOutput
+
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import (
+    InfraAuthenticationError,
+    ModelInfraErrorContext,
+    RuntimeHostError,
+)
+from omnibase_infra.handlers.mixins import (
+    MixinVaultInitialization,
+    MixinVaultRetry,
+    MixinVaultSecrets,
+    MixinVaultToken,
+)
+from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonType
-
-T = TypeVar("T")
-
-import hvac
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
-from pydantic import SecretStr, ValidationError
-
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import (
-    InfraAuthenticationError,
-    InfraConnectionError,
-    InfraTimeoutError,
-    InfraUnavailableError,
-    ModelInfraErrorContext,
-    ProtocolConfigurationError,
-    RuntimeHostError,
-    SecretResolutionError,
-)
-from omnibase_infra.handlers.model_vault_handler_config import ModelVaultHandlerConfig
-from omnibase_infra.handlers.models import ModelOperationContext, ModelRetryState
-from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 logger = logging.getLogger(__name__)
 
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_VAULT: str = "vault-handler"
 
-DEFAULT_MOUNT_POINT: str = "secret"
 SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
     {
         "vault.read_secret",
@@ -72,7 +67,14 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
-class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
+class VaultHandler(
+    MixinAsyncCircuitBreaker,
+    MixinEnvelopeExtraction,
+    MixinVaultInitialization,
+    MixinVaultRetry,
+    MixinVaultSecrets,
+    MixinVaultToken,
+):
     """HashiCorp Vault handler using hvac client (MVP: KV v2 secrets engine).
 
     Security Policy - Token Handling:
@@ -114,6 +116,14 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         - Backoff calculation: initial_backoff * (exponential_base ** attempt)
         - Max backoff capped at max_backoff_seconds
         - Circuit breaker checked before retry execution
+
+    Mixin Composition:
+        - MixinAsyncCircuitBreaker: Circuit breaker pattern
+        - MixinEnvelopeExtraction: Envelope parsing utilities
+        - MixinVaultInitialization: Configuration and client setup
+        - MixinVaultRetry: Retry logic with exponential backoff
+        - MixinVaultSecrets: CRUD operations for secrets
+        - MixinVaultToken: Token management and renewal
     """
 
     def __init__(self) -> None:
@@ -135,8 +145,48 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     @property
     def handler_type(self) -> EnumHandlerType:
-        """Return EnumHandlerType.VAULT."""
-        return EnumHandlerType.VAULT
+        """Return the architectural role of this handler.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - This handler is an infrastructure
+            protocol/transport handler (as opposed to NODE_HANDLER for event
+            processing, PROJECTION_HANDLER for read models, or COMPUTE_HANDLER
+            for pure computation).
+
+        Note:
+            handler_type determines lifecycle, protocol selection, and runtime
+            invocation patterns. It answers "what is this handler in the architecture?"
+
+        See Also:
+            - handler_category: Behavioral classification (EFFECT/COMPUTE)
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification of this handler.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - This handler performs side-effecting
+            I/O operations (Vault secret management). EFFECT handlers are not
+            deterministic and interact with external systems.
+
+        Note:
+            handler_category determines security rules, determinism guarantees,
+            replay safety, and permissions. It answers "how does this handler
+            behave at runtime?"
+
+            Categories:
+            - COMPUTE: Pure, deterministic transformations (no side effects)
+            - EFFECT: Side-effecting I/O (database, HTTP, service calls)
+            - NONDETERMINISTIC_COMPUTE: Pure but not deterministic (UUID, random)
+
+        See Also:
+            - handler_type: Architectural role (INFRA_HANDLER/NODE_HANDLER/etc.)
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     @property
     def max_workers(self) -> int:
@@ -163,56 +213,10 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 - retry: Optional retry configuration dict
 
         Raises:
-            ProtocolConfigurationError: If configuration validation fails. This includes:
-                - Missing URL: URL is a required field (Pydantic validation)
-                - Empty URL: URL cannot be empty string (field_validator)
-                - Invalid URL format: Must start with http:// or https:// (field_validator)
-                - Missing token: Token is a required field (post-Pydantic defensive check)
-                - Other Pydantic validation failures (e.g., timeout out of range)
-
-                All URL-related configuration errors raise ProtocolConfigurationError because
-                they represent invalid configuration, not runtime connectivity issues.
-                Error message will contain Pydantic validation details.
-
-            RuntimeHostError: If client initialization fails for non-auth/non-connection
-                reasons (e.g., unexpected exception during hvac.Client creation).
-
-            InfraAuthenticationError: If token authentication fails (token rejected by Vault).
-                This occurs when the Vault server is reachable but rejects the provided token.
-
-            InfraConnectionError: If connection to Vault server fails (network/DNS issues).
-                This occurs when the Vault server is unreachable at the specified URL.
-                Use this error type when the URL format is valid but the server cannot be reached.
-
-        Error Type Decision Guide:
-            - URL missing/empty/malformed -> ProtocolConfigurationError (config validation)
-            - URL valid but server unreachable -> InfraConnectionError (runtime connectivity)
-            - URL valid, server reachable, auth fails -> InfraAuthenticationError (auth issue)
-
-        Security:
-            Token must be provided via environment variable, not hardcoded in config.
-            Use SecretStr for token to prevent accidental logging.
-
-        Example Error Scenarios:
-            >>> # Missing URL - raises ProtocolConfigurationError
-            >>> await handler.initialize({"token": "s.xxx"})
-            ProtocolConfigurationError: Invalid Vault configuration: ... url ... required
-
-            >>> # Empty URL - raises ProtocolConfigurationError
-            >>> await handler.initialize({"url": "", "token": "s.xxx"})
-            ProtocolConfigurationError: Invalid Vault configuration: ... URL cannot be empty
-
-            >>> # Invalid URL format - raises ProtocolConfigurationError
-            >>> await handler.initialize({"url": "not-a-valid-url", "token": "s.xxx"})
-            ProtocolConfigurationError: Invalid Vault configuration: ... must start with http://
-
-            >>> # Valid URL but server unreachable - raises InfraConnectionError
-            >>> await handler.initialize({"url": "http://unreachable:8200", "token": "s.xxx"})
-            InfraConnectionError: Failed to connect to Vault: VaultError
-
-            >>> # Valid URL, server reachable, invalid token - raises InfraAuthenticationError
-            >>> await handler.initialize({"url": "http://localhost:8200", "token": "bad"})
-            InfraAuthenticationError: Vault authentication failed - check token validity
+            ProtocolConfigurationError: If configuration validation fails.
+            RuntimeHostError: If client initialization fails for non-auth/non-connection reasons.
+            InfraAuthenticationError: If token authentication fails.
+            InfraConnectionError: If connection to Vault server fails.
         """
         init_correlation_id = uuid4()
 
@@ -225,219 +229,34 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             },
         )
 
-        # Parse configuration using Pydantic model
+        # Phase 1: Parse and validate configuration (includes defensive validation)
+        self._config = self._parse_vault_config(config, init_correlation_id)
+
+        # Phase 2: Create client and verify connection
         try:
-            # Handle SecretStr token conversion
-            token_raw = config.get("token")
-            if isinstance(token_raw, str):
-                config = dict(config)  # Make mutable copy
-                config["token"] = SecretStr(token_raw)
-
-            # Use model_validate for type-safe dict parsing (Pydantic v2 pattern)
-            self._config = ModelVaultHandlerConfig.model_validate(config)
-        except ValidationError as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="initialize",
-                target_name="vault_handler",
-                correlation_id=init_correlation_id,
-                namespace=None,  # Config not initialized yet
-            )
-            raise ProtocolConfigurationError(
-                f"Invalid Vault configuration: {e}",
-                context=ctx,
-            ) from e
-        except Exception as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="initialize",
-                target_name="vault_handler",
-                correlation_id=init_correlation_id,
-                namespace=None,  # Config not initialized yet
-            )
-            raise RuntimeHostError(
-                f"Configuration parsing failed: {type(e).__name__}",
-                context=ctx,
-            ) from e
-
-        # Defensive validation for required fields
-        # Note: These checks are defensive programming since Pydantic validation
-        # should catch missing/empty URL and missing token. However, we keep them
-        # to ensure consistent error handling if the Pydantic model changes.
-        # All configuration validation errors use ProtocolConfigurationError per
-        # ONEX error handling patterns (config issues != runtime connectivity issues).
-        if not self._config.url:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="initialize",
-                target_name="vault_handler",
-                correlation_id=init_correlation_id,
-                namespace=self._config.namespace if self._config else None,
-            )
-            raise ProtocolConfigurationError(
-                "Missing 'url' in config - Vault server URL required",
-                context=ctx,
+            self._client = self._create_hvac_client(self._config)
+            self._verify_vault_auth(
+                self._client, init_correlation_id, self._config.namespace
             )
 
-        if self._config.token is None:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="initialize",
-                target_name="vault_handler",
-                correlation_id=init_correlation_id,
-                namespace=self._config.namespace if self._config else None,
-            )
-            raise ProtocolConfigurationError(
-                "Missing 'token' in config - Vault authentication token required",
-                context=ctx,
-            )
+            # Phase 3: Initialize token TTL tracking
+            self._initialize_token_ttl(self._client, self._config, init_correlation_id)
 
-        try:
-            # Initialize hvac client (synchronous)
-            self._client = hvac.Client(
-                url=self._config.url,
-                token=self._config.token.get_secret_value(),
-                namespace=self._config.namespace,
-                verify=self._config.verify_ssl,
-                timeout=self._config.timeout_seconds,
-            )
+            # Phase 4: Setup thread pool and circuit breaker
+            self._setup_thread_pool(self._config)
+            self._setup_circuit_breaker(self._config)
 
-            # Verify authentication
-            if not self._client.is_authenticated():
-                ctx = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.VAULT,
-                    operation="initialize",
-                    target_name="vault_handler",
-                    correlation_id=init_correlation_id,
-                    namespace=self._config.namespace if self._config else None,
-                )
-                raise InfraAuthenticationError(
-                    "Vault authentication failed - check token validity",
-                    context=ctx,
-                )
-
-            # Initialize token expiration tracking by querying actual TTL from Vault
-            try:
-                token_info = self._client.auth.token.lookup_self()
-                token_data = token_info.get("data", {})
-                token_ttl = None
-
-                if isinstance(token_data, dict):
-                    # TTL is in seconds, use it if available
-                    ttl_seconds = token_data.get("ttl")
-                    if isinstance(ttl_seconds, int) and ttl_seconds > 0:
-                        token_ttl = ttl_seconds
-
-                if token_ttl is None:
-                    # Fallback to config or safe default
-                    token_ttl = self._config.default_token_ttl
-                    logger.warning(
-                        "Token TTL not in Vault response, using fallback",
-                        extra={
-                            "ttl": token_ttl,
-                            "correlation_id": str(init_correlation_id),
-                        },
-                    )
-
-                self._token_expires_at = time.time() + token_ttl
-
-                logger.info(
-                    "Token TTL initialized",
-                    extra={
-                        "ttl_seconds": token_ttl,
-                        "correlation_id": str(init_correlation_id),
-                    },
-                )
-            except Exception as e:
-                # Fallback to config default TTL if lookup fails
-                token_ttl = self._config.default_token_ttl
-                logger.warning(
-                    "Failed to query token TTL, using fallback",
-                    extra={
-                        "error_type": type(e).__name__,
-                        "default_ttl_seconds": token_ttl,
-                        "correlation_id": str(init_correlation_id),
-                    },
-                )
-                self._token_expires_at = time.time() + token_ttl
-
-            # Create bounded thread pool executor for production safety
-            self._max_workers = self._config.max_concurrent_operations
-            self._executor = ThreadPoolExecutor(
-                max_workers=self._max_workers,
-                thread_name_prefix="vault_handler_",
-            )
-            # Calculate max queue size
-            self._max_queue_size = (
-                self._max_workers * self._config.max_queue_size_multiplier
-            )
-
-            # Initialize circuit breaker using mixin (if enabled)
-            if self._config.circuit_breaker_enabled:
-                self._init_circuit_breaker(
-                    threshold=self._config.circuit_breaker_failure_threshold,
-                    reset_timeout=self._config.circuit_breaker_reset_timeout_seconds,
-                    service_name=f"vault.{self._config.namespace or 'default'}",
-                    transport_type=EnumInfraTransportType.VAULT,
-                )
-                self._circuit_breaker_initialized = True
-
+            # Phase 5: Mark as initialized and log success
             self._initialized = True
-            logger.info(
-                "%s initialized successfully",
-                self.__class__.__name__,
-                extra={
-                    "handler": self.__class__.__name__,
-                    "url": self._config.url,
-                    "namespace": self._config.namespace,
-                    "timeout_seconds": self._config.timeout_seconds,
-                    "verify_ssl": self._config.verify_ssl,
-                    "thread_pool_max_workers": self._max_workers,
-                    "thread_pool_max_queue_size": self._max_queue_size,
-                    "circuit_breaker_enabled": self._config.circuit_breaker_enabled,
-                    "correlation_id": str(init_correlation_id),
-                },
-            )
+            self._log_init_success(self._config, init_correlation_id)
 
         except InfraAuthenticationError:
             # Re-raise our own authentication errors without wrapping
             raise
-        except hvac.exceptions.InvalidRequest as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="initialize",
-                target_name="vault_handler",
-                correlation_id=init_correlation_id,
-                namespace=self._config.namespace if self._config else None,
-            )
-            raise InfraAuthenticationError(
-                "Vault authentication failed - invalid token or permissions",
-                context=ctx,
-            ) from e
-        except hvac.exceptions.VaultError as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="initialize",
-                target_name="vault_handler",
-                correlation_id=init_correlation_id,
-                namespace=self._config.namespace if self._config else None,
-            )
-            raise InfraConnectionError(
-                f"Failed to connect to Vault: {type(e).__name__}",
-                context=ctx,
-            ) from e
         except Exception as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="initialize",
-                target_name="vault_handler",
-                correlation_id=init_correlation_id,
-                namespace=self._config.namespace if self._config else None,
+            self._handle_init_hvac_error(
+                e, init_correlation_id, self._config.namespace if self._config else None
             )
-            raise RuntimeHostError(
-                f"Failed to initialize Vault client: {type(e).__name__}",
-                context=ctx,
-            ) from e
 
     async def shutdown(self) -> None:
         """Close Vault client and release resources.
@@ -560,760 +379,43 @@ class VaultHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         else:  # vault.renew_token
             return await self._renew_token_operation(correlation_id, input_envelope_id)
 
-    async def _check_token_renewal(self, correlation_id: UUID) -> None:
-        """Check if token needs renewal and renew if necessary.
-
-        Args:
-            correlation_id: Correlation ID for tracing
-
-        Raises:
-            InfraAuthenticationError: If token renewal fails
-        """
-        if self._config is None or self._client is None:
-            logger.debug(
-                "Token renewal check skipped - handler not initialized",
-                extra={
-                    "config_initialized": self._config is not None,
-                    "client_initialized": self._client is not None,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return
-
-        current_time = time.time()
-        time_until_expiry = self._token_expires_at - current_time
-        threshold = self._config.token_renewal_threshold_seconds
-        needs_renewal = time_until_expiry < threshold
-
-        # Log edge case when expiry time exactly equals threshold
-        # This helps troubleshoot boundary condition behavior
-        is_edge_case = abs(time_until_expiry - threshold) < 0.001  # Within 1ms
-
-        logger.debug(
-            "Token renewal check",
-            extra={
-                "current_time": current_time,
-                "token_expires_at": self._token_expires_at,
-                "time_until_expiry_seconds": time_until_expiry,
-                "threshold_seconds": threshold,
-                "needs_renewal": needs_renewal,
-                "is_threshold_edge_case": is_edge_case,
-                "correlation_id": str(correlation_id),
-            },
-        )
-
-        if is_edge_case:
-            logger.debug(
-                "Token renewal edge case detected - expiry equals threshold",
-                extra={
-                    "time_until_expiry_seconds": time_until_expiry,
-                    "threshold_seconds": threshold,
-                    "difference_ms": abs(time_until_expiry - threshold) * 1000,
-                    "will_renew": needs_renewal,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-
-        if needs_renewal:
-            logger.info(
-                "Token approaching expiration, renewing",
-                extra={
-                    "time_until_expiry_seconds": time_until_expiry,
-                    "threshold_seconds": threshold,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            await self.renew_token(correlation_id=correlation_id)
-            logger.debug(
-                "Token renewal completed successfully",
-                extra={
-                    "new_expires_at": self._token_expires_at,
-                    "new_time_until_expiry_seconds": self._token_expires_at
-                    - time.time(),
-                    "correlation_id": str(correlation_id),
-                },
-            )
-        else:
-            logger.debug(
-                "Token renewal skipped - token still valid",
-                extra={
-                    "time_until_expiry_seconds": time_until_expiry,
-                    "threshold_seconds": threshold,
-                    "margin_seconds": time_until_expiry - threshold,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-
-    async def _execute_with_retry(
-        self,
-        operation: str,
-        func: Callable[[], T],
-        correlation_id: UUID,
-    ) -> T:
-        """Execute operation with exponential backoff retry logic and circuit breaker.
-
-        Thread Pool Integration:
-            All hvac operations (which are synchronous) are executed in a dedicated
-            thread pool via loop.run_in_executor(). This prevents blocking the async
-            event loop and allows concurrent Vault operations up to max_workers limit.
-
-        Circuit breaker integration (via MixinAsyncCircuitBreaker):
-            - Checks circuit state before execution (raises if OPEN)
-            - Records success/failure for circuit state management
-            - Allows test request in HALF_OPEN state
-
-        Args:
-            operation: Operation name for logging
-            func: Callable to execute (synchronous hvac method)
-            correlation_id: Correlation ID for tracing
-
-        Returns:
-            Result from func()
-
-        Raises:
-            InfraTimeoutError: If all retries exhausted or operation times out
-            InfraConnectionError: If connection fails
-            InfraAuthenticationError: If authentication fails
-            InfraUnavailableError: If circuit breaker is OPEN
-        """
-        if self._config is None:
-            raise RuntimeError("Config not initialized")
-
-        # Check circuit breaker before execution (async mixin pattern)
-        if self._circuit_breaker_initialized:
-            async with self._circuit_breaker_lock:
-                await self._check_circuit_breaker(operation, correlation_id)
-
-        # Initialize retry state with config values
-        retry_config = self._config.retry
-        retry_state = ModelRetryState(
-            attempt=0,
-            max_attempts=retry_config.max_attempts,
-            delay_seconds=retry_config.initial_backoff_seconds,
-            backoff_multiplier=retry_config.exponential_base,
-        )
-
-        # Create operation context for tracking
-        op_context = ModelOperationContext.create(
-            operation_name=operation,
-            correlation_id=correlation_id,
-            timeout_seconds=self._config.timeout_seconds,
-            metadata={"namespace": self._config.namespace or "default"},
-        )
-
-        while retry_state.is_retriable():
-            try:
-                # hvac is synchronous, wrap in custom thread executor
-                loop = asyncio.get_running_loop()
-
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(self._executor, func),
-                    timeout=op_context.timeout_seconds,
-                )
-
-                # Record success for circuit breaker (async mixin pattern)
-                if self._circuit_breaker_initialized:
-                    async with self._circuit_breaker_lock:
-                        await self._reset_circuit_breaker()
-
-                return result
-
-            except TimeoutError as e:
-                error_msg = f"Timeout after {op_context.timeout_seconds}s"
-                retry_state = retry_state.next_attempt(
-                    error_message=error_msg,
-                    max_delay_seconds=retry_config.max_backoff_seconds,
-                )
-                # Only record circuit failure on final retry attempt
-                if not retry_state.is_retriable():
-                    if self._circuit_breaker_initialized:
-                        async with self._circuit_breaker_lock:
-                            await self._record_circuit_failure(
-                                operation, correlation_id
-                            )
-                    ctx = ModelInfraErrorContext(
-                        transport_type=EnumInfraTransportType.VAULT,
-                        operation=operation,
-                        target_name="vault_handler",
-                        correlation_id=correlation_id,
-                        namespace=self._config.namespace if self._config else None,
-                    )
-                    raise InfraTimeoutError(
-                        f"Vault operation timed out after {op_context.timeout_seconds}s",
-                        context=ctx,
-                        timeout_seconds=op_context.timeout_seconds,
-                    ) from e
-
-            except hvac.exceptions.Forbidden as e:
-                # Don't retry authentication failures, record for circuit breaker
-                if self._circuit_breaker_initialized:
-                    async with self._circuit_breaker_lock:
-                        await self._record_circuit_failure(operation, correlation_id)
-                ctx = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.VAULT,
-                    operation=operation,
-                    target_name="vault_handler",
-                    correlation_id=correlation_id,
-                    namespace=self._config.namespace if self._config else None,
-                )
-                raise InfraAuthenticationError(
-                    "Vault operation forbidden - check token permissions",
-                    context=ctx,
-                ) from e
-
-            except hvac.exceptions.InvalidPath as e:
-                # Don't retry invalid path errors (not a circuit breaker failure)
-                ctx = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.VAULT,
-                    operation=operation,
-                    target_name="vault_handler",
-                    correlation_id=correlation_id,
-                    namespace=self._config.namespace if self._config else None,
-                )
-                raise SecretResolutionError(
-                    "Secret path not found or invalid",
-                    context=ctx,
-                ) from e
-
-            except hvac.exceptions.VaultDown as e:
-                error_msg = f"Vault down: {type(e).__name__}"
-                retry_state = retry_state.next_attempt(
-                    error_message=error_msg,
-                    max_delay_seconds=retry_config.max_backoff_seconds,
-                )
-                # Only record circuit failure on final retry attempt
-                if not retry_state.is_retriable():
-                    if self._circuit_breaker_initialized:
-                        async with self._circuit_breaker_lock:
-                            await self._record_circuit_failure(
-                                operation, correlation_id
-                            )
-                    ctx = ModelInfraErrorContext(
-                        transport_type=EnumInfraTransportType.VAULT,
-                        operation=operation,
-                        target_name="vault_handler",
-                        correlation_id=correlation_id,
-                        namespace=self._config.namespace if self._config else None,
-                    )
-                    raise InfraUnavailableError(
-                        "Vault server is unavailable",
-                        context=ctx,
-                    ) from e
-
-            except Exception as e:
-                error_msg = f"Unexpected error: {type(e).__name__}"
-                retry_state = retry_state.next_attempt(
-                    error_message=error_msg,
-                    max_delay_seconds=retry_config.max_backoff_seconds,
-                )
-                # Only record circuit failure on final retry attempt
-                if not retry_state.is_retriable():
-                    if self._circuit_breaker_initialized:
-                        async with self._circuit_breaker_lock:
-                            await self._record_circuit_failure(
-                                operation, correlation_id
-                            )
-                    ctx = ModelInfraErrorContext(
-                        transport_type=EnumInfraTransportType.VAULT,
-                        operation=operation,
-                        target_name="vault_handler",
-                        correlation_id=correlation_id,
-                        namespace=self._config.namespace if self._config else None,
-                    )
-                    raise InfraConnectionError(
-                        f"Vault operation failed: {type(e).__name__}",
-                        context=ctx,
-                    ) from e
-
-            # Use delay from retry state (already calculated with backoff)
-            logger.debug(
-                "Retrying Vault operation",
-                extra={
-                    "operation": operation,
-                    "attempt": retry_state.attempt,
-                    "max_attempts": retry_state.max_attempts,
-                    "backoff_seconds": retry_state.delay_seconds,
-                    "last_error": retry_state.last_error,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-
-            await asyncio.sleep(retry_state.delay_seconds)
-
-        # Should never reach here, but satisfy type checker
-        if retry_state.last_error is not None:
-            raise RuntimeError(f"Retry exhausted: {retry_state.last_error}")
-        raise RuntimeError("Retry loop completed without result")
-
-    async def _read_secret(
-        self,
-        payload: dict[str, JsonType],
-        correlation_id: UUID,
-        input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
-        """Read secret from Vault KV v2 secrets engine.
-
-        Args:
-            payload: dict containing:
-                - path: Secret path (required)
-                - mount_point: KV mount point (default: "secret")
-            correlation_id: Correlation ID for tracing
-            input_envelope_id: Input envelope ID for causality tracking
-
-        Returns:
-            ModelHandlerOutput with secret data
-        """
-        path = payload.get("path")
-        if not isinstance(path, str) or not path:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="vault.read_secret",
-                target_name="vault_handler",
-                correlation_id=correlation_id,
-                namespace=self._config.namespace if self._config else None,
-            )
-            raise RuntimeHostError(
-                "Missing or invalid 'path' in payload",
-                context=ctx,
-            )
-
-        mount_point = payload.get("mount_point", DEFAULT_MOUNT_POINT)
-        if not isinstance(mount_point, str):
-            mount_point = DEFAULT_MOUNT_POINT
-
-        if self._client is None:
-            raise RuntimeError("Client not initialized")
-
-        def read_func() -> dict[str, JsonType]:
-            if self._client is None:
-                raise RuntimeError("Client not initialized")
-            result: dict[str, JsonType] = (
-                self._client.secrets.kv.v2.read_secret_version(
-                    path=path,
-                    mount_point=mount_point,
-                )
-            )
-            return result
-
-        result = await self._execute_with_retry(
-            "vault.read_secret",
-            read_func,
-            correlation_id,
-        )
-
-        # Extract nested data with type checking
-        data_obj = result.get("data", {})
-        data_dict = data_obj if isinstance(data_obj, dict) else {}
-        secret_data = data_dict.get("data", {})
-        metadata = data_dict.get("metadata", {})
-
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_VAULT,
-            result={
-                "status": "success",
-                "payload": {
-                    "data": secret_data if isinstance(secret_data, dict) else {},
-                    "metadata": metadata if isinstance(metadata, dict) else {},
-                },
-                "correlation_id": str(correlation_id),
-            },
-        )
-
-    async def _write_secret(
-        self,
-        payload: dict[str, JsonType],
-        correlation_id: UUID,
-        input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
-        """Write secret to Vault KV v2 secrets engine.
-
-        Args:
-            payload: dict containing:
-                - path: Secret path (required)
-                - data: Secret data dict (required)
-                - mount_point: KV mount point (default: "secret")
-            correlation_id: Correlation ID for tracing
-            input_envelope_id: Input envelope ID for causality tracking
-
-        Returns:
-            ModelHandlerOutput with write confirmation
-        """
-        path = payload.get("path")
-        if not isinstance(path, str) or not path:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="vault.write_secret",
-                target_name="vault_handler",
-                correlation_id=correlation_id,
-                namespace=self._config.namespace if self._config else None,
-            )
-            raise RuntimeHostError(
-                "Missing or invalid 'path' in payload",
-                context=ctx,
-            )
-
-        data = payload.get("data")
-        if not isinstance(data, dict):
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="vault.write_secret",
-                target_name="vault_handler",
-                correlation_id=correlation_id,
-                namespace=self._config.namespace if self._config else None,
-            )
-            raise RuntimeHostError(
-                "Missing or invalid 'data' in payload - must be a dict",
-                context=ctx,
-            )
-
-        mount_point = payload.get("mount_point", DEFAULT_MOUNT_POINT)
-        if not isinstance(mount_point, str):
-            mount_point = DEFAULT_MOUNT_POINT
-
-        if self._client is None:
-            raise RuntimeError("Client not initialized")
-
-        def write_func() -> dict[str, JsonType]:
-            if self._client is None:
-                raise RuntimeError("Client not initialized")
-            result: dict[str, JsonType] = (
-                self._client.secrets.kv.v2.create_or_update_secret(
-                    path=path,
-                    secret=data,
-                    mount_point=mount_point,
-                )
-            )
-            return result
-
-        result = await self._execute_with_retry(
-            "vault.write_secret",
-            write_func,
-            correlation_id,
-        )
-
-        # Extract nested data with type checking
-        data_obj = result.get("data", {})
-        data_dict = data_obj if isinstance(data_obj, dict) else {}
-
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_VAULT,
-            result={
-                "status": "success",
-                "payload": {
-                    "version": data_dict.get("version"),
-                    "created_time": data_dict.get("created_time"),
-                },
-                "correlation_id": str(correlation_id),
-            },
-        )
-
-    async def _delete_secret(
-        self,
-        payload: dict[str, JsonType],
-        correlation_id: UUID,
-        input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
-        """Delete secret from Vault KV v2 secrets engine.
-
-        Args:
-            payload: dict containing:
-                - path: Secret path (required)
-                - mount_point: KV mount point (default: "secret")
-            correlation_id: Correlation ID for tracing
-            input_envelope_id: Input envelope ID for causality tracking
-
-        Returns:
-            ModelHandlerOutput with deletion confirmation
-        """
-        path = payload.get("path")
-        if not isinstance(path, str) or not path:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="vault.delete_secret",
-                target_name="vault_handler",
-                correlation_id=correlation_id,
-                namespace=self._config.namespace if self._config else None,
-            )
-            raise RuntimeHostError(
-                "Missing or invalid 'path' in payload",
-                context=ctx,
-            )
-
-        mount_point = payload.get("mount_point", DEFAULT_MOUNT_POINT)
-        if not isinstance(mount_point, str):
-            mount_point = DEFAULT_MOUNT_POINT
-
-        if self._client is None:
-            raise RuntimeError("Client not initialized")
-
-        def delete_func() -> None:
-            if self._client is None:
-                raise RuntimeError("Client not initialized")
-            # Delete latest version
-            self._client.secrets.kv.v2.delete_latest_version_of_secret(
-                path=path,
-                mount_point=mount_point,
-            )
-
-        await self._execute_with_retry(
-            "vault.delete_secret",
-            delete_func,
-            correlation_id,
-        )
-
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_VAULT,
-            result={
-                "status": "success",
-                "payload": {"deleted": True},
-                "correlation_id": str(correlation_id),
-            },
-        )
-
-    async def _list_secrets(
-        self,
-        payload: dict[str, JsonType],
-        correlation_id: UUID,
-        input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
-        """List secrets at path in Vault KV v2 secrets engine.
-
-        Args:
-            payload: dict containing:
-                - path: Secret path (required)
-                - mount_point: KV mount point (default: "secret")
-            correlation_id: Correlation ID for tracing
-            input_envelope_id: Input envelope ID for causality tracking
-
-        Returns:
-            ModelHandlerOutput with list of secret keys
-        """
-        path = payload.get("path")
-        if not isinstance(path, str) or not path:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="vault.list_secrets",
-                target_name="vault_handler",
-                correlation_id=correlation_id,
-                namespace=self._config.namespace if self._config else None,
-            )
-            raise RuntimeHostError(
-                "Missing or invalid 'path' in payload",
-                context=ctx,
-            )
-
-        mount_point = payload.get("mount_point", DEFAULT_MOUNT_POINT)
-        if not isinstance(mount_point, str):
-            mount_point = DEFAULT_MOUNT_POINT
-
-        if self._client is None:
-            raise RuntimeError("Client not initialized")
-
-        def list_func() -> dict[str, JsonType]:
-            if self._client is None:
-                raise RuntimeError("Client not initialized")
-            result: dict[str, JsonType] = self._client.secrets.kv.v2.list_secrets(
-                path=path,
-                mount_point=mount_point,
-            )
-            return result
-
-        result = await self._execute_with_retry(
-            "vault.list_secrets",
-            list_func,
-            correlation_id,
-        )
-
-        # Extract nested data with type checking
-        data_obj = result.get("data", {})
-        data_dict = data_obj if isinstance(data_obj, dict) else {}
-        keys = data_dict.get("keys", [])
-
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_VAULT,
-            result={
-                "status": "success",
-                "payload": {"keys": keys if isinstance(keys, list) else []},
-                "correlation_id": str(correlation_id),
-            },
-        )
-
-    async def renew_token(
-        self, correlation_id: UUID | None = None
-    ) -> dict[str, JsonType]:
-        """Renew Vault authentication token.
-
-        Token TTL Extraction Logic:
-            1. Extract 'auth.lease_duration' from Vault renewal response
-            2. If lease_duration is invalid or missing, use default_token_ttl
-            3. Update _token_expires_at = current_time + extracted_ttl
-            4. Log warning when falling back to default TTL
-
-        Args:
-            correlation_id: Optional correlation ID for tracing. When called via
-                envelope dispatch, this preserves the request's correlation_id.
-                When called directly (e.g., by monitoring), a new ID is generated.
-
-        Returns:
-            Token renewal information including new TTL
-
-        Raises:
-            InfraAuthenticationError: If token renewal fails
-        """
-        if correlation_id is None:
-            correlation_id = uuid4()
-
-        if self._client is None or self._config is None:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="vault.renew_token",
-                target_name="vault_handler",
-                correlation_id=correlation_id,
-                namespace=self._config.namespace if self._config else None,
-            )
-            raise RuntimeHostError(
-                "VaultHandler not initialized",
-                context=ctx,
-            )
-
-        def renew_func() -> dict[str, JsonType]:
-            if self._client is None:
-                raise RuntimeError("Client not initialized")
-            result: dict[str, JsonType] = self._client.auth.token.renew_self()
-            return result
-
-        try:
-            result = await self._execute_with_retry(
-                "vault.renew_token",
-                renew_func,
-                correlation_id,
-            )
-
-            # Update token expiration tracking
-            auth_data = result.get("auth", {})
-            token_ttl = None
-
-            if isinstance(auth_data, dict):
-                lease_duration = auth_data.get("lease_duration")
-                if isinstance(lease_duration, int) and lease_duration > 0:
-                    token_ttl = lease_duration
-
-            if token_ttl is None:
-                # Fallback to config or safe default
-                token_ttl = self._config.default_token_ttl
-                logger.warning(
-                    "Token TTL not in renewal response, using fallback",
-                    extra={
-                        "ttl": token_ttl,
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-
-            # After successful renewal, query actual TTL from Vault to handle
-            # server-side TTL updates or policies that modify actual TTL
-            loop = asyncio.get_running_loop()
-            try:
-                token_info = await loop.run_in_executor(
-                    self._executor,
-                    self._client.auth.token.lookup_self,
-                )
-                token_data = token_info.get("data", {})
-                if isinstance(token_data, dict):
-                    ttl_seconds = token_data.get("ttl")
-                    if isinstance(ttl_seconds, int) and ttl_seconds > 0:
-                        token_ttl = ttl_seconds
-                        logger.info(
-                            "Token TTL refreshed from Vault lookup",
-                            extra={
-                                "ttl_seconds": token_ttl,
-                                "correlation_id": str(correlation_id),
-                            },
-                        )
-            except Exception as e:
-                # Fallback to lease_duration from renewal response (already set above)
-                logger.debug(
-                    "Token lookup after renewal failed, using lease_duration",
-                    extra={
-                        "error_type": type(e).__name__,
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-
-            self._token_expires_at = time.time() + token_ttl
-
-            logger.info(
-                "Token renewed successfully",
-                extra={
-                    "new_ttl_seconds": token_ttl,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-
-            return result
-
-        except Exception as e:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="vault.renew_token",
-                target_name="vault_handler",
-                correlation_id=correlation_id,
-                namespace=self._config.namespace if self._config else None,
-            )
-            raise InfraAuthenticationError(
-                "Failed to renew Vault token",
-                context=ctx,
-            ) from e
-
-    async def _renew_token_operation(
-        self,
-        correlation_id: UUID,
-        input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
-        """Execute token renewal operation from envelope.
-
-        Args:
-            correlation_id: Correlation ID for tracing
-            input_envelope_id: Input envelope ID for causality tracking
-
-        Returns:
-            ModelHandlerOutput with renewal information
-        """
-        result = await self.renew_token(correlation_id=correlation_id)
-
-        # Extract nested auth data with type checking
-        auth_obj = result.get("auth", {})
-        auth_data = auth_obj if isinstance(auth_obj, dict) else {}
-
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_VAULT,
-            result={
-                "status": "success",
-                "payload": {
-                    "renewable": auth_data.get("renewable", False),
-                    "lease_duration": auth_data.get("lease_duration", 0),
-                },
-                "correlation_id": str(correlation_id),
-            },
-        )
-
     def describe(self) -> dict[str, JsonType]:
-        """Return handler metadata and capabilities.
+        """Return handler metadata and capabilities for introspection.
+
+        This method exposes the handler's type classification along with its
+        operational configuration and capabilities.
 
         Returns:
-            Handler description with supported operations and configuration
+            dict containing:
+                - handler_type: Architectural role from handler_type property
+                  (e.g., "infra_handler"). See EnumHandlerType for valid values.
+                - handler_category: Behavioral classification from handler_category
+                  property (e.g., "effect"). See EnumHandlerTypeCategory for valid values.
+                - supported_operations: List of supported operations
+                - timeout_seconds: Request timeout in seconds
+                - initialized: Whether the handler is initialized
+                - version: Handler version string
+
+        Note:
+            The handler_type and handler_category fields form the handler
+            classification system:
+
+            1. handler_type (architectural role): Determines lifecycle and invocation
+               patterns. This handler is INFRA_HANDLER (protocol/transport handler).
+
+            2. handler_category (behavioral classification): Determines security rules
+               and replay safety. This handler is EFFECT (side-effecting I/O).
+
+            The transport type for this handler is VAULT (secret management).
+
+        See Also:
+            - handler_type property: Full documentation of architectural role
+            - handler_category property: Full documentation of behavioral classification
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
         """
         return {
             "handler_type": self.handler_type.value,
+            "handler_category": self.handler_category.value,
             "supported_operations": sorted(SUPPORTED_OPERATIONS),
             "timeout_seconds": self._config.timeout_seconds if self._config else 30.0,
             "initialized": self._initialized,

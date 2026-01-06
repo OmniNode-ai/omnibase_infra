@@ -16,16 +16,22 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
 
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_http import HttpRestHandler
+from omnibase_infra.handlers.models.http import ModelHttpBodyContent
 from tests.helpers import (
     DeterministicClock,
     DeterministicIdGenerator,
@@ -98,9 +104,9 @@ class TestHttpRestHandlerInitialization:
         assert handler._client is None
         assert handler._timeout == 30.0
 
-    def test_handler_type_returns_http(self, handler: HttpRestHandler) -> None:
-        """Test handler_type property returns EnumHandlerType.HTTP."""
-        assert handler.handler_type == EnumHandlerType.HTTP
+    def test_handler_type_returns_infra_handler(self, handler: HttpRestHandler) -> None:
+        """Test handler_type property returns EnumHandlerType.INFRA_HANDLER."""
+        assert handler.handler_type == EnumHandlerType.INFRA_HANDLER
 
     @pytest.mark.asyncio
     async def test_initialize_with_empty_config(self, handler: HttpRestHandler) -> None:
@@ -815,18 +821,74 @@ class TestHttpRestHandlerErrorHandling:
 
 
 class TestHttpRestHandlerDescribe:
-    """Test suite for describe operations."""
+    """Test suite for describe operations and three-dimensional handler type system.
+
+    The ONEX handler architecture uses a three-dimensional type system where each
+    handler is classified along three orthogonal axes:
+
+    1. **handler_type** (Architectural Role): Determines interface, lifecycle, and
+       runtime invocation pattern. Values include INFRA_HANDLER (protocol/transport),
+       NODE_HANDLER (event processing), PROJECTION_HANDLER (read models).
+
+    2. **handler_category** (Behavioral Classification): Determines runtime policies,
+       determinism guarantees, and replay safety. Values include COMPUTE (pure),
+       EFFECT (side-effecting I/O), NONDETERMINISTIC_COMPUTE (pure but non-deterministic).
+
+    3. **transport_type** (Protocol Identifier): Identifies the specific transport
+       protocol. Values include HTTP, DATABASE, KAFKA, CONSUL, VAULT, etc.
+
+    For HttpRestHandler:
+    - handler_type = INFRA_HANDLER (manages HTTP protocol and connections)
+    - handler_category = EFFECT (performs side-effecting network I/O)
+    - transport_type = HTTP (uses HTTP/REST protocol)
+
+    These three dimensions enable fine-grained policy decisions: security rules are
+    driven by handler_category, lifecycle management by handler_type, and
+    transport-specific configuration by transport_type.
+    """
 
     @pytest.fixture
     def handler(self) -> HttpRestHandler:
-        """Create HttpRestHandler fixture."""
+        """Create HttpRestHandler fixture for describe() tests.
+
+        Returns:
+            HttpRestHandler: A new, uninitialized handler instance.
+        """
         return HttpRestHandler()
 
     def test_describe_returns_handler_metadata(self, handler: HttpRestHandler) -> None:
-        """Test describe returns correct handler metadata."""
+        """Test describe() returns all three dimensions of the handler type system.
+
+        Verifies that describe() includes all three type identifiers that form the
+        three-dimensional handler classification:
+
+        1. handler_type: "infra_handler" (EnumHandlerType.INFRA_HANDLER)
+           - Architectural role: Protocol/transport handler managing HTTP connections
+
+        2. handler_category: "effect" (EnumHandlerTypeCategory.EFFECT)
+           - Behavioral classification: Side-effecting I/O requiring idempotency handling
+
+        3. transport_type: "http" (EnumInfraTransportType.HTTP)
+           - Protocol identifier: HTTP/REST protocol transport
+
+        These values are tested both as raw strings and against their enum constants
+        to ensure consistency between the describe() output and property accessors.
+        """
         description = handler.describe()
 
-        assert description["handler_type"] == "http"
+        # Architectural role - INFRA_HANDLER for protocol/transport handlers
+        assert description["handler_type"] == "infra_handler"
+        assert description["handler_type"] == EnumHandlerType.INFRA_HANDLER.value
+
+        # Behavioral classification - EFFECT for side-effecting I/O operations
+        assert description["handler_category"] == "effect"
+        assert description["handler_category"] == EnumHandlerTypeCategory.EFFECT.value
+
+        # Protocol/transport identifier - HTTP for HTTP handlers
+        assert description["transport_type"] == "http"
+        assert description["transport_type"] == EnumInfraTransportType.HTTP.value
+
+        # Standard metadata
         assert description["timeout_seconds"] == 30.0
         assert description["version"] == "0.1.0-mvp"
         assert description["initialized"] is False
@@ -834,7 +896,18 @@ class TestHttpRestHandlerDescribe:
     def test_describe_lists_supported_operations(
         self, handler: HttpRestHandler
     ) -> None:
-        """Test describe lists supported operations."""
+        """Test describe() lists handler-specific supported operations.
+
+        Beyond the three-dimensional type classification, describe() also exposes
+        handler-specific capabilities. For HttpRestHandler, this includes the
+        list of supported HTTP operations.
+
+        MVP supports:
+        - http.get: HTTP GET requests
+        - http.post: HTTP POST requests
+
+        PUT, DELETE, PATCH are deferred to Beta release.
+        """
         description = handler.describe()
 
         assert "supported_operations" in description
@@ -848,7 +921,17 @@ class TestHttpRestHandlerDescribe:
     async def test_describe_reflects_initialized_state(
         self, handler: HttpRestHandler
     ) -> None:
-        """Test describe shows correct initialized state."""
+        """Test describe() reflects handler lifecycle state accurately.
+
+        INFRA_HANDLER types manage connection lifecycle. The describe() output
+        includes an 'initialized' flag that indicates whether the handler has
+        an active connection and is ready to process requests.
+
+        Lifecycle states tested:
+        - Before initialize(): initialized = False
+        - After initialize(): initialized = True
+        - After shutdown(): initialized = False
+        """
         assert handler.describe()["initialized"] is False
 
         await handler.initialize({})
@@ -856,6 +939,117 @@ class TestHttpRestHandlerDescribe:
 
         await handler.shutdown()
         assert handler.describe()["initialized"] is False
+
+    def test_handler_type_property_returns_infra_handler(
+        self, handler: HttpRestHandler
+    ) -> None:
+        """Test handler_type property returns INFRA_HANDLER (Dimension 1: Architectural Role).
+
+        The handler_type property identifies the architectural role of this handler,
+        determining which interface it implements, its lifecycle management pattern,
+        and runtime invocation behavior.
+
+        INFRA_HANDLER indicates this handler:
+        - Manages external connections and protocol-specific operations
+        - Uses connection pooling and health check lifecycle patterns
+        - May implement circuit breakers for resilience
+        - Is responsible for transport layer concerns (not business logic)
+
+        Other handler_type values include NODE_HANDLER (event processing) and
+        PROJECTION_HANDLER (read models), each with different interfaces and lifecycles.
+        """
+        assert handler.handler_type == EnumHandlerType.INFRA_HANDLER
+        assert handler.handler_type.value == "infra_handler"
+
+    def test_handler_category_property_returns_effect(
+        self, handler: HttpRestHandler
+    ) -> None:
+        """Test handler_category property returns EFFECT (Dimension 2: Behavioral Classification).
+
+        The handler_category property identifies the behavioral classification of this
+        handler, determining which runtime policies apply, whether the handler is
+        deterministic, and how it should be handled during replay scenarios.
+
+        EFFECT indicates this handler:
+        - Performs side-effecting I/O operations (network calls)
+        - May produce non-deterministic results (server state may change)
+        - Requires idempotency handling for safe replay
+        - Cannot be safely cached without explicit invalidation
+        - Needs circuit breakers and retry policies for resilience
+
+        Other categories include COMPUTE (pure, deterministic) and
+        NONDETERMINISTIC_COMPUTE (pure but non-deterministic like UUID generation).
+        """
+        assert handler.handler_category == EnumHandlerTypeCategory.EFFECT
+        assert handler.handler_category.value == "effect"
+
+    def test_transport_type_property_returns_http(
+        self, handler: HttpRestHandler
+    ) -> None:
+        """Test transport_type property returns HTTP (Dimension 3: Protocol Identifier).
+
+        The transport_type property identifies the specific transport protocol this
+        handler uses, enabling transport-specific configuration, error handling,
+        and observability.
+
+        HTTP indicates this handler:
+        - Uses HTTP/REST protocol for communication
+        - Applies HTTP-specific timeout and size limit configurations
+        - Reports HTTP-specific error codes and status
+        - May include HTTP-specific headers in error context
+        - Uses HTTP-specific connection pooling (httpx.AsyncClient)
+
+        Other transport_type values include DATABASE, KAFKA, CONSUL, VAULT, VALKEY,
+        GRPC, and RUNTIME, each with their own protocol-specific behaviors.
+        """
+        assert handler.transport_type == EnumInfraTransportType.HTTP
+        assert handler.transport_type.value == "http"
+
+    def test_handler_type_semantics_are_distinct(
+        self, handler: HttpRestHandler
+    ) -> None:
+        """Test that all three type dimensions are present and semantically distinct.
+
+        The three-dimensional type system requires that each dimension represents
+        an orthogonal classification axis. This test verifies:
+
+        1. All three keys are present in describe() output
+        2. Each dimension has a distinct value (no accidental overlap)
+
+        For HttpRestHandler:
+        - handler_type = "infra_handler" (architectural role)
+        - handler_category = "effect" (behavioral classification)
+        - transport_type = "http" (protocol identifier)
+
+        The orthogonality of these dimensions enables independent policy decisions:
+        - A NODE_HANDLER (handler_type) could be COMPUTE or EFFECT (handler_category)
+        - An EFFECT handler could use HTTP or KAFKA (transport_type)
+        - Different transport_types have different timeout/retry defaults
+
+        Note: While theoretically handler_category and transport_type could share
+        the same string value, in practice they come from different enum types
+        and serve different semantic purposes.
+        """
+        description = handler.describe()
+
+        # All three dimensions must be present in describe() output
+        assert "handler_type" in description, "Missing handler_type (Dimension 1)"
+        assert "handler_category" in description, (
+            "Missing handler_category (Dimension 2)"
+        )
+        assert "transport_type" in description, "Missing transport_type (Dimension 3)"
+
+        # Values should be different (they represent orthogonal dimensions)
+        assert description["handler_type"] != description["handler_category"], (
+            "handler_type and handler_category should have distinct values"
+        )
+        assert description["handler_type"] != description["transport_type"], (
+            "handler_type and transport_type should have distinct values"
+        )
+        # For HTTP handlers specifically: "effect" != "http"
+        assert description["handler_category"] != description["transport_type"], (
+            "handler_category and transport_type should have distinct values"
+        )
 
 
 class TestHttpRestHandlerLifecycle:
@@ -1916,6 +2110,223 @@ class TestHttpRestHandlerLogWarnings:
         assert "Invalid Content-Length" in handler_warnings[0].message
 
 
+class TestHttpRestHandlerPrepareRequestContent:
+    """Test suite for _prepare_request_content helper method."""
+
+    @pytest.fixture
+    def handler(self) -> HttpRestHandler:
+        """Create HttpRestHandler fixture."""
+        return HttpRestHandler()
+
+    @pytest.fixture
+    def error_context(self) -> ModelInfraErrorContext:
+        """Create error context fixture."""
+        from omnibase_infra.enums import EnumInfraTransportType
+
+        return ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="http.post",
+            target_name="https://example.com",
+            correlation_id=uuid4(),
+        )
+
+    def test_get_method_returns_empty_content(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test GET method returns empty content regardless of body."""
+        body_content = ModelHttpBodyContent(
+            body={"data": "ignored"}, pre_serialized=None
+        )
+        content, json_body, headers = handler._prepare_request_content(
+            method="GET",
+            headers={"X-Custom": "value"},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content is None
+        assert json_body is None
+        assert headers == {"X-Custom": "value"}
+
+    def test_post_with_none_body_returns_empty_content(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with None body returns empty content."""
+        body_content = ModelHttpBodyContent(body=None, pre_serialized=None)
+        content, json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content is None
+        assert json_body is None
+        assert headers == {}
+
+    def test_post_with_pre_serialized_bytes(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with pre-serialized bytes uses them directly."""
+        pre_serialized = b'{"key": "value"}'
+        body_content = ModelHttpBodyContent(
+            body={"key": "value"},  # Body is ignored when pre_serialized is provided
+            pre_serialized=pre_serialized,
+        )
+
+        content, json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content == pre_serialized
+        assert json_body is None
+        assert headers == {"Content-Type": "application/json"}
+
+    def test_post_with_pre_serialized_preserves_existing_content_type(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with pre-serialized preserves existing Content-Type header."""
+        pre_serialized = b'{"key": "value"}'
+        body_content = ModelHttpBodyContent(
+            body={"key": "value"},
+            pre_serialized=pre_serialized,
+        )
+
+        content, json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content == pre_serialized
+        assert json_body is None
+        # Original Content-Type preserved (case-insensitive check)
+        assert headers == {"Content-Type": "application/json; charset=utf-8"}
+
+    def test_post_with_dict_body_fallback(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with dict body uses json parameter when no pre-serialized."""
+        body = {"key": "value", "number": 42}
+        body_content = ModelHttpBodyContent(body=body, pre_serialized=None)
+
+        content, json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content is None
+        assert json_body == body
+        assert headers == {}
+
+    def test_post_with_string_body(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with string body uses content parameter."""
+        body = "raw string content"
+        body_content = ModelHttpBodyContent(body=body, pre_serialized=None)
+
+        content, json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content == "raw string content"
+        assert json_body is None
+        assert headers == {}
+
+    def test_post_with_list_body_serializes_to_json(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with list body serializes to JSON string."""
+        body = [1, 2, 3, "four"]
+        body_content = ModelHttpBodyContent(body=body, pre_serialized=None)
+
+        content, json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        assert content == '[1, 2, 3, "four"]'
+        assert json_body is None
+        assert headers == {}
+
+    def test_post_with_non_serializable_body_raises_error(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test POST with non-JSON-serializable body raises ProtocolConfigurationError."""
+
+        class NonSerializable:
+            pass
+
+        body_content = ModelHttpBodyContent(body=NonSerializable(), pre_serialized=None)
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            handler._prepare_request_content(
+                method="POST",
+                headers={},
+                body_content=body_content,
+                ctx=error_context,
+            )
+
+        assert "not JSON-serializable" in str(exc_info.value)
+        assert "NonSerializable" in str(exc_info.value)
+
+    def test_headers_not_mutated(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test original headers dict is not mutated."""
+        original_headers = {"X-Custom": "value"}
+        pre_serialized = b'{"key": "value"}'
+        body_content = ModelHttpBodyContent(
+            body={"key": "value"},
+            pre_serialized=pre_serialized,
+        )
+
+        _content, _json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers=original_headers,
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        # Original headers should be unchanged
+        assert original_headers == {"X-Custom": "value"}
+        # Returned headers should have Content-Type added
+        assert headers == {"X-Custom": "value", "Content-Type": "application/json"}
+
+    def test_content_type_check_case_insensitive(
+        self, handler: HttpRestHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test Content-Type header check is case-insensitive."""
+        pre_serialized = b'{"key": "value"}'
+        body_content = ModelHttpBodyContent(
+            body={"key": "value"},
+            pre_serialized=pre_serialized,
+        )
+
+        # Lowercase content-type
+        _content, _json_body, headers = handler._prepare_request_content(
+            method="POST",
+            headers={"content-type": "text/plain"},
+            body_content=body_content,
+            ctx=error_context,
+        )
+
+        # Should not add another Content-Type since one exists (case-insensitive)
+        assert headers == {"content-type": "text/plain"}
+        assert "Content-Type" not in headers
+
+
 class TestHttpRestHandlerDeterministicIntegration:
     """Integration tests demonstrating deterministic test utilities (OMN-252).
 
@@ -2089,6 +2500,560 @@ class TestHttpRestHandlerDeterministicIntegration:
         await handler.shutdown()
 
 
+class TestHttpRestHandlerEnvVarParsing:
+    """Test suite for environment variable parsing error handling.
+
+    These tests verify that invalid environment variable values produce
+    ProtocolConfigurationError with proper context instead of raw ValueError.
+
+    Note: These tests use the centralized parse_env_* utilities from
+    omnibase_infra.utils.util_env_parsing.
+    """
+
+    def test_parse_env_float_with_default(self) -> None:
+        """Test parse_env_float returns default when env var is not set."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        # Ensure env var is not set
+        os.environ.pop("TEST_FLOAT_VAR", None)
+
+        result = parse_env_float(
+            "TEST_FLOAT_VAR",
+            42.5,
+            transport_type=EnumInfraTransportType.HTTP,
+            service_name="test_handler",
+        )
+        assert result == 42.5
+
+    def test_parse_env_float_with_valid_value(self) -> None:
+        """Test parse_env_float parses valid float string."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_FLOAT_VAR"] = "123.456"
+        try:
+            result = parse_env_float(
+                "TEST_FLOAT_VAR",
+                0.0,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 123.456
+        finally:
+            os.environ.pop("TEST_FLOAT_VAR", None)
+
+    def test_parse_env_float_with_invalid_value_raises_protocol_error(self) -> None:
+        """Test parse_env_float raises ProtocolConfigurationError for invalid value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_FLOAT_VAR"] = "not_a_number"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                parse_env_float(
+                    "TEST_FLOAT_VAR",
+                    0.0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+
+            error_msg = str(exc_info.value)
+            assert "TEST_FLOAT_VAR" in error_msg
+            assert "expected numeric value" in error_msg
+        finally:
+            os.environ.pop("TEST_FLOAT_VAR", None)
+
+    def test_parse_env_int_with_default(self) -> None:
+        """Test parse_env_int returns default when env var is not set."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        # Ensure env var is not set
+        os.environ.pop("TEST_INT_VAR", None)
+
+        result = parse_env_int(
+            "TEST_INT_VAR",
+            100,
+            transport_type=EnumInfraTransportType.HTTP,
+            service_name="test_handler",
+        )
+        assert result == 100
+
+    def test_parse_env_int_with_valid_value(self) -> None:
+        """Test parse_env_int parses valid integer string."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_INT_VAR"] = "12345"
+        try:
+            result = parse_env_int(
+                "TEST_INT_VAR",
+                0,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 12345
+        finally:
+            os.environ.pop("TEST_INT_VAR", None)
+
+    def test_parse_env_int_with_invalid_value_raises_protocol_error(self) -> None:
+        """Test parse_env_int raises ProtocolConfigurationError for invalid value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_INT_VAR"] = "abc123"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                parse_env_int(
+                    "TEST_INT_VAR",
+                    0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+
+            error_msg = str(exc_info.value)
+            assert "TEST_INT_VAR" in error_msg
+            assert "expected integer" in error_msg
+        finally:
+            os.environ.pop("TEST_INT_VAR", None)
+
+    def test_parse_env_int_with_float_string_raises_protocol_error(self) -> None:
+        """Test parse_env_int raises ProtocolConfigurationError for float string."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        # "123.456" is a valid float but not a valid integer
+        os.environ["TEST_INT_VAR"] = "123.456"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                parse_env_int(
+                    "TEST_INT_VAR",
+                    0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+
+            error_msg = str(exc_info.value)
+            assert "TEST_INT_VAR" in error_msg
+            assert "expected integer" in error_msg
+        finally:
+            os.environ.pop("TEST_INT_VAR", None)
+
+    def test_parse_env_float_error_includes_context(self) -> None:
+        """Test parse_env_float error includes proper ModelInfraErrorContext."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_FLOAT_VAR"] = "invalid"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                parse_env_float(
+                    "TEST_FLOAT_VAR",
+                    0.0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+
+            # Verify context is properly set
+            # Note: RuntimeHostError extracts context fields into additional_context dict
+            error = exc_info.value
+            assert error.context is not None
+            additional = error.context.get("additional_context", {})
+            assert additional.get("operation") == "parse_env_config"
+            assert additional.get("target_name") == "test_handler"
+        finally:
+            os.environ.pop("TEST_FLOAT_VAR", None)
+
+    def test_parse_env_int_error_includes_context(self) -> None:
+        """Test parse_env_int error includes proper ModelInfraErrorContext."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_INT_VAR"] = "invalid"
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                parse_env_int(
+                    "TEST_INT_VAR",
+                    0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+
+            # Verify context is properly set
+            # Note: RuntimeHostError extracts context fields into additional_context dict
+            error = exc_info.value
+            assert error.context is not None
+            additional = error.context.get("additional_context", {})
+            assert additional.get("operation") == "parse_env_config"
+            assert additional.get("target_name") == "test_handler"
+        finally:
+            os.environ.pop("TEST_INT_VAR", None)
+
+
+@pytest.mark.unit
+class TestHttpRestHandlerEnvVarRangeValidation:
+    """Test suite for environment variable range validation.
+
+    These tests verify that parse_env_float and parse_env_int correctly
+    handle min_value and max_value constraints, returning defaults and
+    logging warnings when values are outside the valid range.
+
+    Note: These tests use the centralized parse_env_* utilities from
+    omnibase_infra.utils.util_env_parsing.
+    """
+
+    def test_parse_env_float_below_min_uses_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test parse_env_float returns default when value is below minimum."""
+        import logging
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "0.05"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_float(
+                    "TEST_RANGE_FLOAT",
+                    1.0,
+                    min_value=0.1,
+                    max_value=100.0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+            assert result == 1.0  # Default
+            assert "below minimum" in caplog.text
+            assert "TEST_RANGE_FLOAT" in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_float_above_max_uses_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test parse_env_float returns default when value is above maximum."""
+        import logging
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "150.0"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_float(
+                    "TEST_RANGE_FLOAT",
+                    1.0,
+                    min_value=0.1,
+                    max_value=100.0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+            assert result == 1.0  # Default
+            assert "above maximum" in caplog.text
+            assert "TEST_RANGE_FLOAT" in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_float_within_range_returns_value(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test parse_env_float returns parsed value when within range."""
+        import logging
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "50.5"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_float(
+                    "TEST_RANGE_FLOAT",
+                    1.0,
+                    min_value=0.1,
+                    max_value=100.0,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+            assert result == 50.5  # Parsed value
+            # No warnings should be logged
+            assert "below minimum" not in caplog.text
+            assert "above maximum" not in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_int_below_min_uses_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test parse_env_int returns default when value is below minimum."""
+        import logging
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "-5"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_int(
+                    "TEST_RANGE_INT",
+                    100,
+                    min_value=1,
+                    max_value=1000,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+            assert result == 100  # Default
+            assert "below minimum" in caplog.text
+            assert "TEST_RANGE_INT" in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_int_above_max_uses_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test parse_env_int returns default when value is above maximum."""
+        import logging
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "5000"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_int(
+                    "TEST_RANGE_INT",
+                    100,
+                    min_value=1,
+                    max_value=1000,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+            assert result == 100  # Default
+            assert "above maximum" in caplog.text
+            assert "TEST_RANGE_INT" in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_int_within_range_returns_value(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test parse_env_int returns parsed value when within range."""
+        import logging
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "500"
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = parse_env_int(
+                    "TEST_RANGE_INT",
+                    100,
+                    min_value=1,
+                    max_value=1000,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    service_name="test_handler",
+                )
+            assert result == 500  # Parsed value
+            # No warnings should be logged
+            assert "below minimum" not in caplog.text
+            assert "above maximum" not in caplog.text
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_float_with_none_min_allows_any_low_value(self) -> None:
+        """Test parse_env_float with None min_value allows any low value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "-1000000.0"
+        try:
+            result = parse_env_float(
+                "TEST_RANGE_FLOAT",
+                1.0,
+                min_value=None,
+                max_value=100.0,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == -1000000.0  # Very low value allowed
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_float_with_none_max_allows_any_high_value(self) -> None:
+        """Test parse_env_float with None max_value allows any high value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "1000000.0"
+        try:
+            result = parse_env_float(
+                "TEST_RANGE_FLOAT",
+                1.0,
+                min_value=0.1,
+                max_value=None,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 1000000.0  # Very high value allowed
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_int_with_none_min_allows_any_low_value(self) -> None:
+        """Test parse_env_int with None min_value allows any low value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "-999999"
+        try:
+            result = parse_env_int(
+                "TEST_RANGE_INT",
+                100,
+                min_value=None,
+                max_value=1000,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == -999999  # Very low value allowed
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_int_with_none_max_allows_any_high_value(self) -> None:
+        """Test parse_env_int with None max_value allows any high value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "999999999"
+        try:
+            result = parse_env_int(
+                "TEST_RANGE_INT",
+                100,
+                min_value=1,
+                max_value=None,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 999999999  # Very high value allowed
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_float_at_exact_min_boundary(self) -> None:
+        """Test parse_env_float at exact minimum boundary returns value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "0.1"
+        try:
+            result = parse_env_float(
+                "TEST_RANGE_FLOAT",
+                1.0,
+                min_value=0.1,
+                max_value=100.0,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 0.1  # Exact boundary is valid
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_float_at_exact_max_boundary(self) -> None:
+        """Test parse_env_float at exact maximum boundary returns value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_float
+
+        os.environ["TEST_RANGE_FLOAT"] = "100.0"
+        try:
+            result = parse_env_float(
+                "TEST_RANGE_FLOAT",
+                1.0,
+                min_value=0.1,
+                max_value=100.0,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 100.0  # Exact boundary is valid
+        finally:
+            os.environ.pop("TEST_RANGE_FLOAT", None)
+
+    def test_parse_env_int_at_exact_min_boundary(self) -> None:
+        """Test parse_env_int at exact minimum boundary returns value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "1"
+        try:
+            result = parse_env_int(
+                "TEST_RANGE_INT",
+                100,
+                min_value=1,
+                max_value=1000,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 1  # Exact boundary is valid
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+    def test_parse_env_int_at_exact_max_boundary(self) -> None:
+        """Test parse_env_int at exact maximum boundary returns value."""
+        import os
+
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.utils.util_env_parsing import parse_env_int
+
+        os.environ["TEST_RANGE_INT"] = "1000"
+        try:
+            result = parse_env_int(
+                "TEST_RANGE_INT",
+                100,
+                min_value=1,
+                max_value=1000,
+                transport_type=EnumInfraTransportType.HTTP,
+                service_name="test_handler",
+            )
+            assert result == 1000  # Exact boundary is valid
+        finally:
+            os.environ.pop("TEST_RANGE_INT", None)
+
+
 __all__: list[str] = [
     "TestHttpRestHandlerInitialization",
     "TestHttpRestHandlerGetOperations",
@@ -2100,5 +3065,8 @@ __all__: list[str] = [
     "TestHttpRestHandlerResponseParsing",
     "TestHttpRestHandlerSizeLimits",
     "TestHttpRestHandlerLogWarnings",
+    "TestHttpRestHandlerPrepareRequestContent",
     "TestHttpRestHandlerDeterministicIntegration",
+    "TestHttpRestHandlerEnvVarParsing",
+    "TestHttpRestHandlerEnvVarRangeValidation",
 ]

@@ -72,12 +72,6 @@ from tests.conftest import (
     assert_reducer_protocol_interface,
 )
 
-# Module-level markers - all tests in this file are integration tests
-pytestmark = [
-    pytest.mark.integration,
-]
-
-
 # =============================================================================
 # Mock Implementations
 # =============================================================================
@@ -136,7 +130,7 @@ class MockReducerImpl:
                     node_id=event.node_id,
                     correlation_id=event.correlation_id,
                     payload=ModelConsulIntentPayload(
-                        service_name=f"node-{event.node_type}",
+                        service_name=f"onex-{event.node_type}",
                     ),
                 ),
                 ModelPostgresUpsertIntent(
@@ -240,14 +234,8 @@ class MockEffectImpl:
 # =============================================================================
 # Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def mock_container() -> MagicMock:
-    """Create a mock ONEX container."""
-    container = MagicMock()
-    container.config = MagicMock()
-    return container
+# Note: simple_mock_container fixture is provided by
+# tests/integration/nodes/conftest.py - no local definition needed.
 
 
 @pytest.fixture
@@ -322,7 +310,7 @@ def mock_event_emitter() -> MagicMock:
 
 @pytest.fixture
 def configured_container(
-    mock_container: MagicMock,
+    simple_mock_container: MagicMock,
     mock_reducer: MockReducerImpl,
     mock_effect: MockEffectImpl,
     mock_event_emitter: MagicMock,
@@ -337,15 +325,15 @@ def configured_container(
             return mock_effect
         return mock_event_emitter
 
-    mock_container.service_registry = MagicMock()
-    mock_container.service_registry.resolve = MagicMock(side_effect=resolve_mock)
+    simple_mock_container.service_registry = MagicMock()
+    simple_mock_container.service_registry.resolve = MagicMock(side_effect=resolve_mock)
 
     # Store references for test access
-    mock_container._test_reducer = mock_reducer
-    mock_container._test_effect = mock_effect
-    mock_container._test_emitter = mock_event_emitter
+    simple_mock_container._test_reducer = mock_reducer
+    simple_mock_container._test_effect = mock_effect
+    simple_mock_container._test_emitter = mock_event_emitter
 
-    return mock_container
+    return simple_mock_container
 
 
 @pytest.fixture

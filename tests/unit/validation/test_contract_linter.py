@@ -18,9 +18,11 @@ import pytest
 
 from omnibase_infra.validation.contract_linter import (
     ContractLinter,
+    ContractRuleId,
     EnumContractViolationSeverity,
     ModelContractLintResult,
     ModelContractViolation,
+    convert_violation_to_handler_error,
     lint_contract_file,
     lint_contracts_in_directory,
 )
@@ -716,4 +718,212 @@ class TestRealContract:
         # All contracts should be valid
         assert result.is_valid, (
             f"Contracts have errors: {[str(v) for v in result.violations if v.severity == EnumContractViolationSeverity.ERROR]}"
+        )
+
+
+class TestStructuredErrorConversion:
+    """Tests for structured error conversion (OMN-1091)."""
+
+    def test_convert_yaml_parse_error(self) -> None:
+        """Test converting YAML parse error to handler validation error."""
+        violation = ModelContractViolation(
+            file_path="nodes/registration/contract.yaml",
+            field_path="",
+            message="YAML parse error: invalid syntax",
+            severity=EnumContractViolationSeverity.ERROR,
+            suggestion="Check YAML indentation and syntax",
+        )
+
+        error = convert_violation_to_handler_error(violation)
+
+        assert error.rule_id == ContractRuleId.YAML_PARSE_ERROR
+        assert error.handler_identity.handler_id == "registration"
+        assert error.file_path == "nodes/registration/contract.yaml"
+        assert error.remediation_hint == "Check YAML indentation and syntax"
+        assert error.severity == "error"
+        assert error.is_blocking()
+
+    def test_convert_missing_required_field(self) -> None:
+        """Test converting missing required field error."""
+        violation = ModelContractViolation(
+            file_path="nodes/compute/contract.yaml",
+            field_path="node_type",
+            message="Required field 'node_type' is missing",
+            severity=EnumContractViolationSeverity.ERROR,
+            suggestion="Add 'node_type:' to your contract.yaml",
+        )
+
+        error = convert_violation_to_handler_error(violation)
+
+        assert error.rule_id == ContractRuleId.MISSING_REQUIRED_FIELD
+        assert error.handler_identity.handler_id == "compute"
+        assert "node_type" in error.message
+
+    def test_convert_invalid_node_type(self) -> None:
+        """Test converting invalid node_type error."""
+        violation = ModelContractViolation(
+            file_path="nodes/test/contract.yaml",
+            field_path="node_type",
+            message="Invalid node_type 'INVALID'. Must be one of: EFFECT, COMPUTE",
+            severity=EnumContractViolationSeverity.ERROR,
+        )
+
+        error = convert_violation_to_handler_error(violation)
+
+        assert error.rule_id == ContractRuleId.INVALID_NODE_TYPE
+        assert "INVALID" in error.message
+
+    def test_convert_import_error(self) -> None:
+        """Test converting import error."""
+        violation = ModelContractViolation(
+            file_path="nodes/effect/contract.yaml",
+            field_path="input_model.module",
+            message="Cannot import module 'nonexistent.module': No module named 'nonexistent'",
+            severity=EnumContractViolationSeverity.ERROR,
+            suggestion="Verify module path and ensure it's installed",
+        )
+
+        error = convert_violation_to_handler_error(violation)
+
+        assert error.rule_id == ContractRuleId.IMPORT_ERROR
+        assert "Cannot import" in error.message
+
+    def test_convert_model_not_found(self) -> None:
+        """Test converting model not found error."""
+        violation = ModelContractViolation(
+            file_path="nodes/reducer/contract.yaml",
+            field_path="output_model.name",
+            message="Class 'ModelMissing' not found in module 'some.module'",
+            severity=EnumContractViolationSeverity.ERROR,
+        )
+
+        error = convert_violation_to_handler_error(violation)
+
+        assert error.rule_id == ContractRuleId.MODEL_NOT_FOUND
+        assert "not found" in error.message
+
+    def test_convert_warning_to_warning_severity(self) -> None:
+        """Test converting warning severity violation."""
+        violation = ModelContractViolation(
+            file_path="nodes/test/contract.yaml",
+            field_path="name",
+            message="Node name 'TestNode' should be snake_case",
+            severity=EnumContractViolationSeverity.WARNING,
+            suggestion="Use snake_case: e.g., 'test_node'",
+        )
+
+        error = convert_violation_to_handler_error(violation)
+
+        assert error.severity == "warning"
+        assert not error.is_blocking()
+
+    def test_convert_file_not_found(self) -> None:
+        """Test converting file not found error."""
+        violation = ModelContractViolation(
+            file_path="/nonexistent/contract.yaml",
+            field_path="",
+            message="Contract file not found: /nonexistent/contract.yaml",
+            severity=EnumContractViolationSeverity.ERROR,
+        )
+
+        error = convert_violation_to_handler_error(violation)
+
+        assert error.rule_id == ContractRuleId.FILE_NOT_FOUND
+        assert "not found" in error.message.lower()
+
+    def test_convert_encoding_error(self) -> None:
+        """Test converting encoding error."""
+        violation = ModelContractViolation(
+            file_path="nodes/test/contract.yaml",
+            field_path="",
+            message="Contract file contains binary or non-UTF-8 content",
+            severity=EnumContractViolationSeverity.ERROR,
+        )
+
+        error = convert_violation_to_handler_error(violation)
+
+        assert error.rule_id == ContractRuleId.ENCODING_ERROR
+        assert "encoding" in error.message.lower() or "binary" in error.message.lower()
+
+    def test_result_to_handler_errors(self, tmp_path: Path) -> None:
+        """Test ModelContractLintResult.to_handler_errors() method."""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(
+            """
+name: test_node
+node_type: INVALID_TYPE
+"""
+        )
+
+        linter = ContractLinter(check_imports=False)
+        result = linter.lint_file(contract_file)
+
+        # Convert to handler errors
+        handler_errors = result.to_handler_errors()
+
+        assert len(handler_errors) > 0
+        assert all(hasattr(error, "rule_id") for error in handler_errors)
+        assert all(hasattr(error, "handler_identity") for error in handler_errors)
+        assert all(hasattr(error, "remediation_hint") for error in handler_errors)
+
+        # Verify at least one error has CONTRACT-003 (invalid node_type)
+        rule_ids = {error.rule_id for error in handler_errors}
+        assert ContractRuleId.INVALID_NODE_TYPE in rule_ids
+
+    def test_handler_error_format_for_ci(self) -> None:
+        """Test handler error CI formatting."""
+        violation = ModelContractViolation(
+            file_path="nodes/test/contract.yaml",
+            field_path="node_type",
+            message="Invalid node_type",
+            severity=EnumContractViolationSeverity.ERROR,
+            suggestion="Use EFFECT, COMPUTE, REDUCER, or ORCHESTRATOR",
+        )
+
+        error = convert_violation_to_handler_error(violation)
+        ci_output = error.format_for_ci()
+
+        # Should be GitHub Actions format
+        assert ci_output.startswith("::error")
+        assert "file=nodes/test/contract.yaml" in ci_output
+        assert ContractRuleId.INVALID_NODE_TYPE in ci_output
+        assert "Remediation:" in ci_output
+
+    def test_handler_error_format_for_logging(self) -> None:
+        """Test handler error logging formatting."""
+        violation = ModelContractViolation(
+            file_path="nodes/test/contract.yaml",
+            field_path="input_model",
+            message="Invalid model reference",
+            severity=EnumContractViolationSeverity.ERROR,
+            suggestion="Add 'name' and 'module' fields",
+        )
+
+        error = convert_violation_to_handler_error(violation)
+        log_output = error.format_for_logging()
+
+        # Should contain structured information
+        assert "Handler Validation Error" in log_output
+        assert ContractRuleId.INVALID_MODEL_REFERENCE in log_output
+        assert "Type:" in log_output
+        assert "Handler:" in log_output
+        assert "Message:" in log_output
+        assert "Remediation:" in log_output
+
+    def test_default_remediation_hint(self) -> None:
+        """Test default remediation hint when violation has no suggestion."""
+        violation = ModelContractViolation(
+            file_path="nodes/test/contract.yaml",
+            field_path="node_type",
+            message="Invalid node_type",
+            severity=EnumContractViolationSeverity.ERROR,
+            # No suggestion provided
+        )
+
+        error = convert_violation_to_handler_error(violation)
+
+        # Should have default remediation hint
+        assert (
+            error.remediation_hint
+            == "Review contract.yaml and fix the validation error"
         )

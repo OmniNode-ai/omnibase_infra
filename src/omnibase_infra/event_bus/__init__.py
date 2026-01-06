@@ -2,9 +2,14 @@
 # Copyright (c) 2025 OmniNode Team
 """Event bus implementations for omnibase_infra.
 
-This module provides event bus implementations for local testing and development.
-The primary implementation is InMemoryEventBus for unit testing and local development
-without requiring external message broker infrastructure.
+This module provides event bus implementations for the ONEX infrastructure.
+Two implementations are supported:
+- InMemoryEventBus: For unit testing and local development without external dependencies
+- KafkaEventBus: For production use with Kafka/Redpanda (see kafka_event_bus.py)
+
+Event bus selection is handled by kernel.py at bootstrap time based on:
+- KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses KafkaEventBus)
+- config.event_bus.type field in runtime_config.yaml
 
 Exports:
     InMemoryEventBus: In-memory event bus for local testing and development
@@ -47,21 +52,21 @@ from omnibase_infra.event_bus.topic_constants import (
 )
 
 __all__: list[str] = [
+    "DLQ_CATEGORY_SUFFIXES",
+    "DLQ_COMMAND_TOPIC_SUFFIX",
+    "DLQ_DOMAIN",
+    "DLQ_EVENT_TOPIC_SUFFIX",
+    "DLQ_INTENT_TOPIC_SUFFIX",
+    "DLQ_TOPIC_PATTERN",
+    # Topic Constants
+    "DLQ_TOPIC_VERSION",
     # Event Bus
     "InMemoryEventBus",
     "ModelEventHeaders",
     "ModelEventMessage",
-    # Topic Constants
-    "DLQ_TOPIC_VERSION",
-    "DLQ_DOMAIN",
-    "DLQ_INTENT_TOPIC_SUFFIX",
-    "DLQ_EVENT_TOPIC_SUFFIX",
-    "DLQ_COMMAND_TOPIC_SUFFIX",
-    "DLQ_CATEGORY_SUFFIXES",
-    "DLQ_TOPIC_PATTERN",
     # Topic Functions
     "build_dlq_topic",
-    "parse_dlq_topic",
-    "is_dlq_topic",
     "get_dlq_topic_for_original",
+    "is_dlq_topic",
+    "parse_dlq_topic",
 ]

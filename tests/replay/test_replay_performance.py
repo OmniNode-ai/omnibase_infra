@@ -64,6 +64,19 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
+# Module-Level Markers
+# =============================================================================
+# These markers enable selective test execution:
+#   pytest -m "replay" - run only replay tests
+#   pytest -m "performance" - run only performance tests
+#   pytest -m "not replay" - skip replay tests
+
+pytestmark = [
+    pytest.mark.replay,
+    pytest.mark.performance,
+]
+
+# =============================================================================
 # Constants
 # =============================================================================
 

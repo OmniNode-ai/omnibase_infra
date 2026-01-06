@@ -68,7 +68,7 @@ from __future__ import annotations
 # DispatchContextEnforcer, we warm the sys.modules cache before chain_aware_dispatch.
 
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
-from omnibase_infra.runtime.dispatcher_registry import (
+from omnibase_infra.runtime.registry_dispatcher import (
     DispatcherRegistry,
     ProtocolMessageDispatcher,
 )
@@ -142,7 +142,20 @@ from omnibase_infra.runtime.container_wiring import (
     get_policy_registry_from_container,
     get_projection_reader_from_container,
     wire_infrastructure_services,
+    wire_registration_dispatchers,
     wire_registration_handlers,
+)
+
+# Registration dispatchers (OMN-892)
+from omnibase_infra.runtime.dispatchers import (
+    DispatcherNodeIntrospected,
+    DispatcherNodeRegistrationAcked,
+    DispatcherRuntimeTick,
+)
+
+# Introspection event router (PR #101)
+from omnibase_infra.runtime.introspection_event_router import (
+    IntrospectionEventRouter,
 )
 
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
@@ -155,84 +168,91 @@ from omnibase_infra.runtime.chain_aware_dispatch import (
 # isort: on
 
 __all__: list[str] = [
+    "DEFAULT_HTTP_HOST",
+    "DEFAULT_HTTP_PORT",
+    # Event bus kind constants
+    "EVENT_BUS_INMEMORY",
+    "EVENT_BUS_KAFKA",
+    "HANDLER_TYPE_CONSUL",
+    "HANDLER_TYPE_DATABASE",
+    "HANDLER_TYPE_GRPC",
+    # Handler type constants
+    "HANDLER_TYPE_HTTP",
+    "HANDLER_TYPE_KAFKA",
+    "HANDLER_TYPE_VALKEY",
+    "HANDLER_TYPE_VAULT",
+    # Envelope validation
+    "PAYLOAD_REQUIRED_OPERATIONS",
+    # Chain-aware dispatch (OMN-951)
+    "ChainAwareDispatcher",
+    # Context enforcement
+    "DispatchContextEnforcer",
+    "DispatcherRegistry",
+    "EventBusBindingRegistry",
+    # Health server
+    "HealthServer",
+    # Message dispatch engine
+    "MessageDispatchEngine",
+    # Message type registry (OMN-937)
+    "MessageTypeRegistry",
+    "MessageTypeRegistryError",
+    "ModelDomainConstraint",
+    "ModelMessageTypeEntry",
+    "ModelRuntimeSchedulerConfig",
+    "ModelRuntimeSchedulerMetrics",
+    "ModelRuntimeTick",
+    "PolicyRegistry",
+    # Registry classes
+    "ProtocolBindingRegistry",
+    "ProtocolMessageDispatcher",
+    "ProtocolMessageTypeRegistry",
+    # Policy protocol and registry
+    "ProtocolPolicy",
+    # Runtime scheduler (OMN-953)
+    "ProtocolRuntimeScheduler",
+    # Error class
+    "RegistryError",
+    # Runtime host
+    "RuntimeHostProcess",
+    "RuntimeScheduler",
+    "get_compute_registry_from_container",
+    "get_event_bus_class",
+    "get_event_bus_registry",
+    # Convenience functions
+    "get_handler_class",
+    "get_handler_node_introspected_from_container",
+    "get_handler_node_registration_acked_from_container",
+    # Singleton accessors
+    "get_handler_registry",
+    "get_handler_registry_from_container",
+    "get_handler_runtime_tick_from_container",
+    "get_known_event_bus_kinds",
+    "get_known_handler_types",
+    "get_or_create_compute_registry",
+    "get_or_create_policy_registry",
+    "get_policy_registry_from_container",
+    "get_projection_reader_from_container",
     # Kernel entrypoint
     "kernel_bootstrap",
     "kernel_main",
     "load_runtime_config",
-    # Runtime host
-    "RuntimeHostProcess",
-    # Health server
-    "HealthServer",
-    "DEFAULT_HTTP_PORT",
-    "DEFAULT_HTTP_HOST",
-    # Handler type constants
-    "HANDLER_TYPE_HTTP",
-    "HANDLER_TYPE_DATABASE",
-    "HANDLER_TYPE_KAFKA",
-    "HANDLER_TYPE_VAULT",
-    "HANDLER_TYPE_CONSUL",
-    "HANDLER_TYPE_VALKEY",
-    "HANDLER_TYPE_GRPC",
-    # Event bus kind constants
-    "EVENT_BUS_INMEMORY",
-    "EVENT_BUS_KAFKA",
-    # Error class
-    "RegistryError",
-    # Registry classes
-    "ProtocolBindingRegistry",
-    "EventBusBindingRegistry",
-    # Singleton accessors
-    "get_handler_registry",
-    "get_event_bus_registry",
-    # Convenience functions
-    "get_handler_class",
-    "get_event_bus_class",
+    "propagate_chain_context",
     "register_handlers_from_config",
+    "validate_dispatch_chain",
+    "validate_envelope",
+    "wire_custom_event_bus",
+    "wire_custom_handler",
     # Wiring functions
     "wire_default_handlers",
     "wire_handlers_from_contract",
-    "get_known_handler_types",
-    "get_known_event_bus_kinds",
-    "wire_custom_handler",
-    "wire_custom_event_bus",
-    # Policy protocol and registry
-    "ProtocolPolicy",
-    "PolicyRegistry",
-    # Runtime scheduler (OMN-953)
-    "ProtocolRuntimeScheduler",
-    "RuntimeScheduler",
-    "ModelRuntimeSchedulerConfig",
-    "ModelRuntimeSchedulerMetrics",
-    "ModelRuntimeTick",
-    # Envelope validation
-    "PAYLOAD_REQUIRED_OPERATIONS",
-    "validate_envelope",
-    # Message dispatch engine
-    "MessageDispatchEngine",
-    "DispatcherRegistry",
-    "ProtocolMessageDispatcher",
-    # Context enforcement
-    "DispatchContextEnforcer",
-    # Message type registry (OMN-937)
-    "MessageTypeRegistry",
-    "MessageTypeRegistryError",
-    "ModelMessageTypeEntry",
-    "ModelDomainConstraint",
-    "ProtocolMessageTypeRegistry",
-    # Chain-aware dispatch (OMN-951)
-    "ChainAwareDispatcher",
-    "propagate_chain_context",
-    "validate_dispatch_chain",
     # Container wiring (OMN-888)
     "wire_infrastructure_services",
     "wire_registration_handlers",
-    "get_policy_registry_from_container",
-    "get_handler_registry_from_container",
-    "get_or_create_policy_registry",
-    "get_compute_registry_from_container",
-    "get_or_create_compute_registry",
-    "get_projection_reader_from_container",
-    "get_handler_node_introspected_from_container",
-    "get_handler_runtime_tick_from_container",
-    "get_handler_node_registration_acked_from_container",
+    "wire_registration_dispatchers",
+    # Registration dispatchers (OMN-892)
+    "DispatcherNodeIntrospected",
+    "DispatcherRuntimeTick",
+    "DispatcherNodeRegistrationAcked",
+    # Introspection event router (PR #101)
+    "IntrospectionEventRouter",
 ]

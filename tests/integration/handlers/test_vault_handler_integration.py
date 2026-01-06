@@ -76,7 +76,6 @@ from tests.integration.handlers.conftest import VAULT_AVAILABLE, VAULT_REACHABLE
 
 # Module-level markers - skip all tests if Vault is not available
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.skipif(
         not VAULT_AVAILABLE,
         reason="Vault not available (VAULT_TOKEN not set)",

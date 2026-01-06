@@ -31,7 +31,7 @@ from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchC
 from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
-from omnibase_infra.runtime.dispatcher_registry import ProtocolMessageDispatcher
+from omnibase_infra.runtime.registry_dispatcher import ProtocolMessageDispatcher
 
 
 class MockMessageDispatcher:

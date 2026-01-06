@@ -83,8 +83,8 @@ from pydantic import BaseModel, ConfigDict
 from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
 )
-from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.validation.model_execution_shape_rule import (
     ModelExecutionShapeRule,
@@ -98,17 +98,17 @@ from omnibase_infra.models.validation.model_execution_shape_violation import (
 
 logger = logging.getLogger(__name__)
 
-# Handler type detection patterns
-_HANDLER_SUFFIX_MAP: dict[str, EnumHandlerType] = {
-    "EffectHandler": EnumHandlerType.EFFECT,
-    "ReducerHandler": EnumHandlerType.REDUCER,
-    "OrchestratorHandler": EnumHandlerType.ORCHESTRATOR,
-    "ComputeHandler": EnumHandlerType.COMPUTE,
+# Node archetype detection patterns
+_NODE_ARCHETYPE_SUFFIX_MAP: dict[str, EnumNodeArchetype] = {
+    "EffectHandler": EnumNodeArchetype.EFFECT,
+    "ReducerHandler": EnumNodeArchetype.REDUCER,
+    "OrchestratorHandler": EnumNodeArchetype.ORCHESTRATOR,
+    "ComputeHandler": EnumNodeArchetype.COMPUTE,
     # Base class patterns
-    "Effect": EnumHandlerType.EFFECT,
-    "Reducer": EnumHandlerType.REDUCER,
-    "Orchestrator": EnumHandlerType.ORCHESTRATOR,
-    "Compute": EnumHandlerType.COMPUTE,
+    "Effect": EnumNodeArchetype.EFFECT,
+    "Reducer": EnumNodeArchetype.REDUCER,
+    "Orchestrator": EnumNodeArchetype.ORCHESTRATOR,
+    "Compute": EnumNodeArchetype.COMPUTE,
 }
 
 # Patterns for detecting message category types in return annotations.
@@ -210,20 +210,20 @@ _MESSAGE_CATEGORY_TO_OUTPUT_TYPE: dict[EnumMessageCategory, EnumNodeOutputType] 
     EnumMessageCategory.INTENT: EnumNodeOutputType.INTENT,
 }
 
-# Canonical execution shape rules for each handler type.
+# Canonical execution shape rules for each node archetype.
 # All output types use EnumNodeOutputType consistently (EVENT, COMMAND, INTENT, PROJECTION).
 # EnumMessageCategory (EVENT, COMMAND, INTENT) is used for message routing topics,
 # while EnumNodeOutputType is used for execution shape validation.
-EXECUTION_SHAPE_RULES: dict[EnumHandlerType, ModelExecutionShapeRule] = {
-    EnumHandlerType.EFFECT: ModelExecutionShapeRule(
-        handler_type=EnumHandlerType.EFFECT,
+EXECUTION_SHAPE_RULES: dict[EnumNodeArchetype, ModelExecutionShapeRule] = {
+    EnumNodeArchetype.EFFECT: ModelExecutionShapeRule(
+        node_archetype=EnumNodeArchetype.EFFECT,
         allowed_return_types=[EnumNodeOutputType.EVENT, EnumNodeOutputType.COMMAND],
         forbidden_return_types=[EnumNodeOutputType.PROJECTION],
         can_publish_directly=False,
         can_access_system_time=True,
     ),
-    EnumHandlerType.COMPUTE: ModelExecutionShapeRule(
-        handler_type=EnumHandlerType.COMPUTE,
+    EnumNodeArchetype.COMPUTE: ModelExecutionShapeRule(
+        node_archetype=EnumNodeArchetype.COMPUTE,
         allowed_return_types=[
             EnumNodeOutputType.EVENT,
             EnumNodeOutputType.COMMAND,
@@ -234,15 +234,15 @@ EXECUTION_SHAPE_RULES: dict[EnumHandlerType, ModelExecutionShapeRule] = {
         can_publish_directly=False,
         can_access_system_time=True,
     ),
-    EnumHandlerType.REDUCER: ModelExecutionShapeRule(
-        handler_type=EnumHandlerType.REDUCER,
+    EnumNodeArchetype.REDUCER: ModelExecutionShapeRule(
+        node_archetype=EnumNodeArchetype.REDUCER,
         allowed_return_types=[EnumNodeOutputType.PROJECTION],
         forbidden_return_types=[EnumNodeOutputType.EVENT],
         can_publish_directly=False,
         can_access_system_time=False,
     ),
-    EnumHandlerType.ORCHESTRATOR: ModelExecutionShapeRule(
-        handler_type=EnumHandlerType.ORCHESTRATOR,
+    EnumNodeArchetype.ORCHESTRATOR: ModelExecutionShapeRule(
+        node_archetype=EnumNodeArchetype.ORCHESTRATOR,
         allowed_return_types=[EnumNodeOutputType.COMMAND, EnumNodeOutputType.EVENT],
         forbidden_return_types=[
             EnumNodeOutputType.INTENT,
@@ -262,7 +262,7 @@ class ModelDetectedNodeInfo(BaseModel):
 
     Attributes:
         name: The class or function name.
-        node_type: The detected node type (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
+        node_archetype: The detected node archetype (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
         node: The AST node representing the detected element.
         line_number: The line number where the element is defined.
         file_path: The absolute path to the source file.
@@ -271,15 +271,10 @@ class ModelDetectedNodeInfo(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str
-    node_type: EnumHandlerType  # Renamed from handler_type for clarity
+    node_archetype: EnumNodeArchetype
     node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
     line_number: int
     file_path: str
-
-    @property
-    def handler_type(self) -> EnumHandlerType:
-        """Backwards compatibility alias for node_type."""
-        return self.node_type
 
 
 # Backwards compatibility alias
@@ -358,7 +353,7 @@ class ExecutionShapeValidator:
         except SyntaxError as e:
             # Syntax error is a file-level issue, not a handler-specific violation.
             # Use SYNTAX_ERROR violation type for AST parse failures.
-            # handler_type is None because we can't analyze the code structure.
+            # node_archetype is None because we can't analyze the code structure.
             logger.warning(
                 "Syntax error in file",
                 extra={"file": str(file_path), "error": str(e)},
@@ -366,10 +361,15 @@ class ExecutionShapeValidator:
             return [
                 ModelExecutionShapeViolationResult(
                     violation_type=EnumExecutionShapeViolation.SYNTAX_ERROR,
-                    handler_type=None,  # Cannot determine handler type from unparseable file
+                    node_archetype=None,  # Cannot determine archetype from unparseable file
                     file_path=str(file_path.resolve()),
                     line_number=e.lineno or 1,
-                    message=f"Syntax error in file: {e.msg}",
+                    message=(
+                        f"Validation error: Cannot parse Python source file. "
+                        f"Syntax error at line {e.lineno or 1}: {e.msg}. "
+                        f"File: {file_path.name}. Fix the syntax error to enable "
+                        f"execution shape validation."
+                    ),
                     severity="error",
                 )
             ]
@@ -435,37 +435,37 @@ class ExecutionShapeValidator:
         Detection methods:
             1. Class name suffix: *EffectHandler, *ReducerHandler, etc.
             2. Base class: class MyHandler(EffectHandler)
-            3. Decorator: @handler_type(EnumHandlerType.EFFECT)
+            3. Decorator: @node_archetype(EnumNodeArchetype.EFFECT)
 
         Args:
             tree: The parsed AST.
             file_path: Path to the source file.
 
         Returns:
-            List of detected handlers with their type information.
+            List of detected handlers with their archetype information.
         """
         handlers: list[HandlerInfo] = []
 
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
-                handler_type = self._detect_handler_type_from_class(node)
-                if handler_type is not None:
+                archetype = self._detect_node_archetype_from_class(node)
+                if archetype is not None:
                     handlers.append(
                         HandlerInfo(
                             name=node.name,
-                            node_type=handler_type,
+                            node_archetype=archetype,
                             node=node,
                             line_number=node.lineno,
                             file_path=file_path,
                         )
                     )
             elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                handler_type = self._detect_handler_type_from_decorator(node)
-                if handler_type is not None:
+                archetype = self._detect_node_archetype_from_decorator(node)
+                if archetype is not None:
                     handlers.append(
                         HandlerInfo(
                             name=node.name,
-                            node_type=handler_type,
+                            node_archetype=archetype,
                             node=node,
                             line_number=node.lineno,
                             file_path=file_path,
@@ -474,11 +474,11 @@ class ExecutionShapeValidator:
 
         return handlers
 
-    def _detect_handler_type_from_class(
+    def _detect_node_archetype_from_class(
         self,
         node: ast.ClassDef,
-    ) -> EnumHandlerType | None:
-        """Detect handler type from class definition.
+    ) -> EnumNodeArchetype | None:
+        """Detect node archetype from class definition.
 
         Checks:
             1. Class name suffix (e.g., OrderEffectHandler)
@@ -489,58 +489,74 @@ class ExecutionShapeValidator:
             node: The class definition AST node.
 
         Returns:
-            The detected handler type, or None if not a handler.
+            The detected node archetype, or None if not a handler.
         """
         # Check class name suffix
-        for suffix, handler_type in _HANDLER_SUFFIX_MAP.items():
+        for suffix, archetype in _NODE_ARCHETYPE_SUFFIX_MAP.items():
             if node.name.endswith(suffix):
-                return handler_type
+                return archetype
 
         # Check base classes
         for base in node.bases:
             base_name = self._get_name_from_expr(base)
             if base_name is not None:
-                for pattern, handler_type in _HANDLER_SUFFIX_MAP.items():
+                for pattern, archetype in _NODE_ARCHETYPE_SUFFIX_MAP.items():
                     if base_name.endswith(pattern):
-                        return handler_type
+                        return archetype
 
         # Check decorators
-        return self._detect_handler_type_from_decorator(node)
+        return self._detect_node_archetype_from_decorator(node)
 
-    def _detect_handler_type_from_decorator(
+    def _detect_node_archetype_from_decorator(
         self,
         node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef,
-    ) -> EnumHandlerType | None:
-        """Detect handler type from decorators.
+    ) -> EnumNodeArchetype | None:
+        """Detect node archetype from decorators.
 
         Looks for patterns like:
-            @handler_type(EnumHandlerType.EFFECT)
+            @node_archetype(EnumNodeArchetype.EFFECT)
+            @handler_type(EnumNodeArchetype.EFFECT)  # Backward compatible alias
             @effect_handler
             @reducer_handler
+
+        Note:
+            Both ``@node_archetype`` and ``@handler_type`` decorator names are
+            supported for backward compatibility during the migration from
+            handler-type to node-archetype terminology.
 
         Args:
             node: The AST node with decorators.
 
         Returns:
-            The detected handler type, or None if not found.
+            The detected node archetype, or None if not found.
         """
         for decorator in node.decorator_list:
-            # Check @handler_type(EnumHandlerType.X) pattern
+            # Check @node_archetype(EnumNodeArchetype.X) pattern
             if isinstance(decorator, ast.Call):
                 func = decorator.func
                 func_name = self._get_name_from_expr(func)
-                if func_name == "handler_type" and decorator.args:
+                if func_name in ("node_archetype", "handler_type") and decorator.args:
                     arg = decorator.args[0]
                     arg_str = self._get_name_from_expr(arg)
                     if arg_str is not None:
-                        # Handle EnumHandlerType.EFFECT or just EFFECT
-                        for handler_type in EnumHandlerType:
-                            if handler_type.value in arg_str.lower():
-                                return handler_type
+                        # Handle EnumNodeArchetype.EFFECT or just EFFECT
+                        # Use exact matching to avoid false positives from substring matches
+                        # (e.g., "side_effect" should not match "effect")
+                        arg_upper = arg_str.upper()
+                        for archetype in EnumNodeArchetype:
+                            # Match exact enum member name: "EFFECT", "COMPUTE", etc.
+                            if arg_upper == archetype.name:
+                                return archetype
+                            # Match qualified name: "EnumNodeArchetype.EFFECT"
+                            if arg_upper.endswith(f".{archetype.name}"):
+                                return archetype
+                            # Match quoted string value: "effect", "compute", etc.
+                            if arg_upper == archetype.value.upper():
+                                return archetype
 
             # Check @effect_handler, @reducer_handler patterns
             # Use suffix/prefix matching to reduce false positives from decorators
-            # that happen to contain handler type keywords (e.g., @side_effect)
+            # that happen to contain archetype keywords (e.g., @side_effect)
             decorator_name = self._get_name_from_expr(decorator)
             if decorator_name is not None:
                 decorator_lower = decorator_name.lower()
@@ -561,7 +577,7 @@ class ExecutionShapeValidator:
                     or decorator_lower == "effect"
                     or decorator_lower == "effect_handler"
                 ):
-                    return EnumHandlerType.EFFECT
+                    return EnumNodeArchetype.EFFECT
 
                 # Reducer handler patterns
                 if (
@@ -570,7 +586,7 @@ class ExecutionShapeValidator:
                     or decorator_lower == "reducer"
                     or decorator_lower == "reducer_handler"
                 ):
-                    return EnumHandlerType.REDUCER
+                    return EnumNodeArchetype.REDUCER
 
                 # Orchestrator handler patterns
                 if (
@@ -579,7 +595,7 @@ class ExecutionShapeValidator:
                     or decorator_lower == "orchestrator"
                     or decorator_lower == "orchestrator_handler"
                 ):
-                    return EnumHandlerType.ORCHESTRATOR
+                    return EnumNodeArchetype.ORCHESTRATOR
 
                 # Compute handler patterns
                 if (
@@ -588,7 +604,7 @@ class ExecutionShapeValidator:
                     or decorator_lower == "compute"
                     or decorator_lower == "compute_handler"
                 ):
-                    return EnumHandlerType.COMPUTE
+                    return EnumNodeArchetype.COMPUTE
 
         return None
 
@@ -627,7 +643,7 @@ class ExecutionShapeValidator:
             List of violations found in this handler.
         """
         violations: list[ModelExecutionShapeViolationResult] = []
-        rule = self._rules.get(handler.handler_type)
+        rule = self._rules.get(handler.node_archetype)
 
         if rule is None:
             return violations
@@ -688,7 +704,7 @@ class ExecutionShapeValidator:
             if annotation_str is not None:
                 category = self._detect_message_category(annotation_str)
                 if category is not None and not self._is_return_type_allowed(
-                    category, handler.handler_type, rule
+                    category, handler.node_archetype, rule
                 ):
                     violation = self._create_return_type_violation(
                         handler, method.lineno, category, annotation_str
@@ -707,7 +723,7 @@ class ExecutionShapeValidator:
     def _is_return_type_allowed(
         self,
         category: EnumMessageCategory | EnumNodeOutputType,
-        handler_type: EnumHandlerType,
+        node_archetype: EnumNodeArchetype,
         rule: ModelExecutionShapeRule,
     ) -> bool:
         """Check if a return type is allowed for a handler.
@@ -722,7 +738,7 @@ class ExecutionShapeValidator:
 
         Args:
             category: The detected message category or node output type.
-            handler_type: The handler type to check against.
+            node_archetype: The node archetype to check against.
             rule: The execution shape rule (uses EnumNodeOutputType).
 
         Returns:
@@ -774,7 +790,7 @@ class ExecutionShapeValidator:
             if func_name is not None:
                 category = self._detect_message_category(func_name)
                 if category is not None and not self._is_return_type_allowed(
-                    category, handler.handler_type, rule
+                    category, handler.node_archetype, rule
                 ):
                     violation = self._create_return_type_violation(
                         handler, return_node.lineno, category, func_name
@@ -787,7 +803,7 @@ class ExecutionShapeValidator:
             var_name = return_node.value.id
             category = self._detect_message_category(var_name)
             if category is not None and not self._is_return_type_allowed(
-                category, handler.handler_type, rule
+                category, handler.node_archetype, rule
             ):
                 violation = self._create_return_type_violation(
                     handler, return_node.lineno, category, var_name
@@ -920,6 +936,12 @@ class ExecutionShapeValidator:
         violation_type: EnumExecutionShapeViolation | None = None
         message = ""
 
+        # Get the execution shape rule for context
+        rule = self._rules.get(handler.node_archetype)
+        allowed_types_str = (
+            ", ".join(t.name for t in rule.allowed_return_types) if rule else "unknown"
+        )
+
         # Helper to check if category matches EVENT (from either enum)
         def is_event(cat: EnumMessageCategory | EnumNodeOutputType) -> bool:
             return cat == EnumMessageCategory.EVENT or cat == EnumNodeOutputType.EVENT
@@ -932,42 +954,52 @@ class ExecutionShapeValidator:
         def is_projection(cat: EnumMessageCategory | EnumNodeOutputType) -> bool:
             return cat == EnumNodeOutputType.PROJECTION
 
-        if handler.handler_type == EnumHandlerType.REDUCER:
+        # Get the category name for consistent error messages
+        category_name = category.name if hasattr(category, "name") else str(category)
+
+        if handler.node_archetype == EnumNodeArchetype.REDUCER:
             if is_event(category):
                 violation_type = EnumExecutionShapeViolation.REDUCER_RETURNS_EVENTS
                 message = (
-                    f"Reducer '{handler.name}' returns EVENT type '{type_name}'. "
-                    "Reducers cannot emit events; event emission is an effect operation."
+                    f"Execution shape violation: Node archetype 'REDUCER' cannot produce "
+                    f"output type 'EVENT'. Handler '{handler.name}' returns type '{type_name}'. "
+                    f"Expected output types: [{allowed_types_str}]. Found: {category_name}. "
+                    f"Reducers must be pure state projectors; event emission is an EFFECT operation."
                 )
-        elif handler.handler_type == EnumHandlerType.ORCHESTRATOR:
+        elif handler.node_archetype == EnumNodeArchetype.ORCHESTRATOR:
             if is_intent(category):
                 violation_type = (
                     EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_INTENTS
                 )
                 message = (
-                    f"Orchestrator '{handler.name}' returns INTENT type '{type_name}'. "
-                    "Intents originate from external systems, not orchestration."
+                    f"Execution shape violation: Node archetype 'ORCHESTRATOR' cannot produce "
+                    f"output type 'INTENT'. Handler '{handler.name}' returns type '{type_name}'. "
+                    f"Expected output types: [{allowed_types_str}]. Found: {category_name}. "
+                    f"Intents represent external user/system requests and should not be "
+                    f"generated by orchestration logic."
                 )
             elif is_projection(category):
                 violation_type = (
                     EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_PROJECTIONS
                 )
                 message = (
-                    f"Orchestrator '{handler.name}' returns PROJECTION type '{type_name}'. "
-                    "PROJECTION is a node output type (EnumNodeOutputType), not a message "
-                    "routing category (EnumMessageCategory). Projections represent aggregated "
-                    "state and are only valid for REDUCER node output types. Orchestrators "
-                    "coordinate workflows and should return COMMANDs or EVENTs instead."
+                    f"Execution shape violation: Node archetype 'ORCHESTRATOR' cannot produce "
+                    f"output type 'PROJECTION'. Handler '{handler.name}' returns type '{type_name}'. "
+                    f"Expected output types: [{allowed_types_str}]. Found: {category_name}. "
+                    f"PROJECTION (EnumNodeOutputType.PROJECTION) represents aggregated state "
+                    f"and is only valid for REDUCER nodes. Orchestrators coordinate workflows "
+                    f"and should emit COMMAND or EVENT types."
                 )
-        elif handler.handler_type == EnumHandlerType.EFFECT:
+        elif handler.node_archetype == EnumNodeArchetype.EFFECT:
             if is_projection(category):
                 violation_type = EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
                 message = (
-                    f"Effect handler '{handler.name}' returns PROJECTION type '{type_name}'. "
-                    "PROJECTION is a node output type (EnumNodeOutputType), not a message "
-                    "routing category (EnumMessageCategory). Projections represent aggregated "
-                    "state and are only valid for REDUCER node output types. Effect handlers "
-                    "interact with external systems and should return EVENTs or COMMANDs instead."
+                    f"Execution shape violation: Node archetype 'EFFECT' cannot produce "
+                    f"output type 'PROJECTION'. Handler '{handler.name}' returns type '{type_name}'. "
+                    f"Expected output types: [{allowed_types_str}]. Found: {category_name}. "
+                    f"PROJECTION (EnumNodeOutputType.PROJECTION) represents aggregated state "
+                    f"and is only valid for REDUCER nodes. Effect handlers interact with "
+                    f"external systems and should emit EVENT or COMMAND types."
                 )
 
         if violation_type is None:
@@ -975,7 +1007,7 @@ class ExecutionShapeValidator:
 
         return ModelExecutionShapeViolationResult(
             violation_type=violation_type,
-            handler_type=handler.handler_type,
+            node_archetype=handler.node_archetype,
             file_path=handler.file_path,
             line_number=line_number,
             message=message,
@@ -1010,15 +1042,20 @@ class ExecutionShapeValidator:
                 if isinstance(node.func, ast.Attribute):
                     method_name = node.func.attr
                     if method_name in _FORBIDDEN_PUBLISH_METHODS:
+                        archetype_name = handler.node_archetype.name
                         violations.append(
                             ModelExecutionShapeViolationResult(
                                 violation_type=EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH,
-                                handler_type=handler.handler_type,
+                                node_archetype=handler.node_archetype,
                                 file_path=handler.file_path,
                                 line_number=node.lineno,
                                 message=(
-                                    f"Handler '{handler.name}' calls '.{method_name}()' directly. "
-                                    "All message routing must go through the event bus abstraction."
+                                    f"Execution shape violation: Node archetype '{archetype_name}' "
+                                    f"handler '{handler.name}' calls forbidden method '.{method_name}()' "
+                                    f"directly at line {node.lineno}. Direct publish methods are "
+                                    f"forbidden for all node archetypes. Allowed: Return message objects "
+                                    f"and let the dispatcher handle routing. Forbidden methods: "
+                                    f"{', '.join(sorted(_FORBIDDEN_PUBLISH_METHODS))}."
                                 ),
                                 severity="error",
                             )
@@ -1058,12 +1095,16 @@ class ExecutionShapeValidator:
                         violations.append(
                             ModelExecutionShapeViolationResult(
                                 violation_type=EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME,
-                                handler_type=handler.handler_type,
+                                node_archetype=handler.node_archetype,
                                 file_path=handler.file_path,
                                 line_number=node.lineno,
                                 message=(
-                                    f"Reducer '{handler.name}' calls '{func_name}()'. "
-                                    "Reducers must be deterministic for replay consistency."
+                                    f"Execution shape violation: Node archetype 'REDUCER' "
+                                    f"cannot access system time. Handler '{handler.name}' calls "
+                                    f"'{func_name}()' at line {node.lineno}. REDUCER nodes must "
+                                    f"be deterministic for event replay consistency. Use timestamps "
+                                    f"from the event payload instead of system time. "
+                                    f"Forbidden patterns: {', '.join(sorted(_SYSTEM_TIME_PATTERNS))}."
                                 ),
                                 severity="error",
                             )
@@ -1080,12 +1121,15 @@ class ExecutionShapeValidator:
                                 violations.append(
                                     ModelExecutionShapeViolationResult(
                                         violation_type=EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME,
-                                        handler_type=handler.handler_type,
+                                        node_archetype=handler.node_archetype,
                                         file_path=handler.file_path,
                                         line_number=node.lineno,
                                         message=(
-                                            f"Reducer '{handler.name}' calls '{full_name}()'. "
-                                            "Reducers must be deterministic for replay consistency."
+                                            f"Execution shape violation: Node archetype 'REDUCER' "
+                                            f"cannot access system time. Handler '{handler.name}' calls "
+                                            f"'{full_name}()' at line {node.lineno}. REDUCER nodes must "
+                                            f"be deterministic for event replay consistency. Use timestamps "
+                                            f"from the event payload instead of system time."
                                         ),
                                         severity="error",
                                     )
@@ -1152,7 +1196,7 @@ def validate_execution_shapes_ci(
     return ModelExecutionShapeValidationResult.from_violations(violations)
 
 
-def get_execution_shape_rules() -> dict[EnumHandlerType, ModelExecutionShapeRule]:
+def get_execution_shape_rules() -> dict[EnumNodeArchetype, ModelExecutionShapeRule]:
     """Get the canonical execution shape rules.
 
     Returns a shallow copy of the rules dictionary to prevent modification
@@ -1162,17 +1206,17 @@ def get_execution_shape_rules() -> dict[EnumHandlerType, ModelExecutionShapeRule
     dictionary structure or the rule objects.
 
     Returns:
-        Dictionary mapping handler types to their execution shape rules.
+        Dictionary mapping node archetypes to their execution shape rules.
         Callers may safely modify the returned dictionary without affecting
         the canonical rules.
 
     Example:
         >>> rules = get_execution_shape_rules()
         >>> # Safe to modify the returned dict (won't affect original)
-        >>> del rules[EnumHandlerType.COMPUTE]
+        >>> del rules[EnumNodeArchetype.COMPUTE]
         >>>
         >>> # But rule objects are immutable (will raise TypeError)
-        >>> rules[EnumHandlerType.EFFECT].can_publish_directly = True  # Raises!
+        >>> rules[EnumNodeArchetype.EFFECT].can_publish_directly = True  # Raises!
     """
     return EXECUTION_SHAPE_RULES.copy()
 
@@ -1221,11 +1265,11 @@ _validator = ExecutionShapeValidator()
 
 
 __all__ = [
+    "EXECUTION_SHAPE_RULES",
     "ExecutionShapeValidator",
     "HandlerInfo",
     "ModelExecutionShapeValidationResult",
+    "get_execution_shape_rules",
     "validate_execution_shapes",
     "validate_execution_shapes_ci",
-    "get_execution_shape_rules",
-    "EXECUTION_SHAPE_RULES",
 ]

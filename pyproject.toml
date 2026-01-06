@@ -240,8 +240,11 @@ markers = [
     "infrastructure: Infrastructure-specific tests",
     "validation: Validation framework tests",
     "consul: Tests requiring real Consul instance (CONSUL_HTTP_ADDR)",
+    "database: marks tests that require database connection",
     "postgres: Tests requiring real PostgreSQL instance (POSTGRES_DSN)",
     "kafka: Tests requiring real Kafka instance (KAFKA_BOOTSTRAP_SERVERS)",
+    "e2e: End-to-end tests requiring full infrastructure (Kafka + Consul + PostgreSQL)",
+    "runtime: Tests requiring the ONEX runtime container to be running",
 ]
 addopts = [
     "--strict-markers",

@@ -14,12 +14,13 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
     InfraTimeoutError,
+    ModelInfraErrorContext,
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_db import DbHandler
@@ -41,9 +42,13 @@ class TestDbHandlerInitialization:
         assert handler._pool_size == 5
         assert handler._timeout == 30.0
 
-    def test_handler_type_returns_database(self, handler: DbHandler) -> None:
-        """Test handler_type property returns EnumHandlerType.DATABASE."""
-        assert handler.handler_type == EnumHandlerType.DATABASE
+    def test_handler_type_returns_infra_handler(self, handler: DbHandler) -> None:
+        """Test handler_type property returns EnumHandlerType.INFRA_HANDLER."""
+        assert handler.handler_type == EnumHandlerType.INFRA_HANDLER
+
+    def test_handler_category_returns_effect(self, handler: DbHandler) -> None:
+        """Test handler_category property returns EnumHandlerTypeCategory.EFFECT."""
+        assert handler.handler_category == EnumHandlerTypeCategory.EFFECT
 
     @pytest.mark.asyncio
     async def test_initialize_missing_dsn_raises_error(
@@ -830,7 +835,8 @@ class TestDbHandlerDescribe:
         """Test describe returns correct handler metadata."""
         description = handler.describe()
 
-        assert description.handler_type == "database"
+        assert description.handler_type == "infra_handler"
+        assert description.handler_category == "effect"
         assert description.pool_size == 5
         assert description.timeout_seconds == 30.0
         assert description.version == "0.1.0-mvp"
@@ -1294,6 +1300,171 @@ class TestDbHandlerLogWarnings:
         )
 
 
+class TestDbHandlerMapPostgresError:
+    """Test suite for _map_postgres_error helper function.
+
+    Tests the extracted error mapping helper that centralizes exception-to-error
+    mapping logic, reducing complexity in _execute_statement and _execute_query.
+    """
+
+    @pytest.fixture
+    def handler(self) -> DbHandler:
+        """Create DbHandler fixture."""
+        return DbHandler()
+
+    @pytest.fixture
+    def error_context(self) -> ModelInfraErrorContext:
+        """Create error context fixture."""
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.errors import ModelInfraErrorContext
+
+        return ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="db.execute",
+            target_name="db_handler",
+            correlation_id=uuid4(),
+        )
+
+    def test_query_canceled_returns_timeout_error(
+        self, handler: DbHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test QueryCanceledError maps to InfraTimeoutError."""
+        exc = asyncpg.QueryCanceledError("query timeout")
+
+        result = handler._map_postgres_error(exc, error_context)
+
+        assert isinstance(result, InfraTimeoutError)
+        assert "timed out" in str(result).lower()
+        # timeout_seconds is passed as extra context to the error
+        assert str(handler._timeout) in str(result)
+
+    def test_connection_error_returns_infra_connection_error(
+        self, handler: DbHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test PostgresConnectionError maps to InfraConnectionError."""
+        exc = asyncpg.PostgresConnectionError("connection lost")
+
+        result = handler._map_postgres_error(exc, error_context)
+
+        assert isinstance(result, InfraConnectionError)
+        assert "connection" in str(result).lower()
+
+    def test_syntax_error_returns_runtime_error(
+        self, handler: DbHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test PostgresSyntaxError maps to RuntimeHostError with syntax prefix."""
+        exc = asyncpg.PostgresSyntaxError("syntax error near 'SELEKT'")
+        exc.message = "syntax error at or near 'SELEKT'"
+
+        result = handler._map_postgres_error(exc, error_context)
+
+        assert isinstance(result, RuntimeHostError)
+        assert "SQL syntax error" in str(result)
+        assert "SELEKT" in str(result)
+
+    def test_undefined_table_returns_runtime_error(
+        self, handler: DbHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test UndefinedTableError maps to RuntimeHostError with table prefix."""
+        exc = asyncpg.UndefinedTableError("table not found")
+        exc.message = 'relation "nonexistent" does not exist'
+
+        result = handler._map_postgres_error(exc, error_context)
+
+        assert isinstance(result, RuntimeHostError)
+        assert "Table not found" in str(result)
+        assert "nonexistent" in str(result)
+
+    def test_undefined_column_returns_runtime_error(
+        self, handler: DbHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test UndefinedColumnError maps to RuntimeHostError with column prefix."""
+        exc = asyncpg.UndefinedColumnError("column not found")
+        exc.message = 'column "unknown_col" does not exist'
+
+        result = handler._map_postgres_error(exc, error_context)
+
+        assert isinstance(result, RuntimeHostError)
+        assert "Column not found" in str(result)
+        assert "unknown_col" in str(result)
+
+    def test_unique_violation_returns_runtime_error(
+        self, handler: DbHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test UniqueViolationError maps to RuntimeHostError with unique prefix."""
+        exc = asyncpg.UniqueViolationError("unique violation")
+        exc.message = "duplicate key value violates unique constraint"
+
+        result = handler._map_postgres_error(exc, error_context)
+
+        assert isinstance(result, RuntimeHostError)
+        assert "Unique constraint violation" in str(result)
+
+    def test_foreign_key_violation_returns_runtime_error(
+        self, handler: DbHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test ForeignKeyViolationError maps to RuntimeHostError with FK prefix."""
+        exc = asyncpg.ForeignKeyViolationError("foreign key violation")
+        exc.message = "insert violates foreign key constraint"
+
+        result = handler._map_postgres_error(exc, error_context)
+
+        assert isinstance(result, RuntimeHostError)
+        assert "Foreign key constraint violation" in str(result)
+
+    def test_not_null_violation_returns_runtime_error(
+        self, handler: DbHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test NotNullViolationError maps to RuntimeHostError with NOT NULL prefix."""
+        exc = asyncpg.NotNullViolationError("not null violation")
+        exc.message = "null value in column violates not-null constraint"
+
+        result = handler._map_postgres_error(exc, error_context)
+
+        assert isinstance(result, RuntimeHostError)
+        assert "Not null constraint violation" in str(result)
+
+    def test_check_violation_returns_runtime_error(
+        self, handler: DbHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test CheckViolationError maps to RuntimeHostError with check prefix."""
+        exc = asyncpg.CheckViolationError("check violation")
+        exc.message = "new row violates check constraint"
+
+        result = handler._map_postgres_error(exc, error_context)
+
+        assert isinstance(result, RuntimeHostError)
+        assert "Check constraint violation" in str(result)
+
+    def test_unknown_postgres_error_returns_runtime_error_with_default_prefix(
+        self, handler: DbHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test unknown PostgresError maps to RuntimeHostError with default prefix."""
+        # Use a generic PostgresError that's not specifically mapped
+        exc = asyncpg.PostgresError("some error")
+
+        result = handler._map_postgres_error(exc, error_context)
+
+        assert isinstance(result, RuntimeHostError)
+        assert "Database error" in str(result)
+
+    def test_error_without_message_attribute_uses_type_name(
+        self, handler: DbHandler, error_context: ModelInfraErrorContext
+    ) -> None:
+        """Test error without message attribute uses exception type name."""
+        # PostgresError by default doesn't have a message attribute
+        exc = asyncpg.PostgresError("generic error")
+        # Verify no message attribute exists (or it has no value)
+        # getattr with default will return the type name fallback
+        assert not hasattr(exc, "message") or exc.message is None
+
+        result = handler._map_postgres_error(exc, error_context)
+
+        assert isinstance(result, RuntimeHostError)
+        # Should contain the type name as fallback
+        assert "PostgresError" in str(result)
+
+
 __all__: list[str] = [
     "TestDbHandlerInitialization",
     "TestDbHandlerQueryOperations",
@@ -1305,4 +1476,5 @@ __all__: list[str] = [
     "TestDbHandlerDsnSecurity",
     "TestDbHandlerRowCountParsing",
     "TestDbHandlerLogWarnings",
+    "TestDbHandlerMapPostgresError",
 ]

@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from pytest_httpserver import HTTPServer
 
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.asyncio]
 
 
 class TestHttpGetSuccess:

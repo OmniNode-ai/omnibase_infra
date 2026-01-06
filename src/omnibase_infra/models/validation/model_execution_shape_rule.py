@@ -2,8 +2,8 @@
 # Copyright (c) 2025 OmniNode Team
 """Execution Shape Rule Model.
 
-Defines the validation rules for ONEX handler execution shapes.
-Each rule specifies what node output types a handler type is allowed
+Defines the validation rules for ONEX node archetype execution shapes.
+Each rule specifies what node output types a node archetype is allowed
 to return, whether it can publish directly, and other constraints.
 """
 
@@ -11,31 +11,31 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-from omnibase_infra.enums.enum_handler_type import EnumHandlerType
+from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 
 
 class ModelExecutionShapeRule(BaseModel):
-    """Execution shape rule for ONEX handler validation.
+    """Execution shape rule for ONEX node archetype validation.
 
-    Defines the constraints for a specific handler type in the ONEX
+    Defines the constraints for a specific node archetype in the ONEX
     4-node architecture. These rules are used by the execution shape
     validator to detect violations during static analysis.
 
     Attributes:
-        handler_type: The handler type this rule applies to.
-        allowed_return_types: Node output types the handler CAN return.
-        forbidden_return_types: Node output types the handler CANNOT return.
-        can_publish_directly: Whether handler can bypass event bus routing.
-        can_access_system_time: Whether handler can access non-deterministic time.
+        node_archetype: The node archetype this rule applies to.
+        allowed_return_types: Node output types the node CAN return.
+        forbidden_return_types: Node output types the node CANNOT return.
+        can_publish_directly: Whether node can bypass event bus routing.
+        can_access_system_time: Whether node can access non-deterministic time.
 
     Example:
-        >>> from omnibase_infra.enums import EnumHandlerType, EnumNodeOutputType
+        >>> from omnibase_infra.enums import EnumNodeArchetype, EnumNodeOutputType
         >>> from omnibase_infra.models.validation import ModelExecutionShapeRule
         >>>
         >>> # Reducer rule: can return projections, cannot return events
         >>> rule = ModelExecutionShapeRule(
-        ...     handler_type=EnumHandlerType.REDUCER,
+        ...     node_archetype=EnumNodeArchetype.REDUCER,
         ...     allowed_return_types=[EnumNodeOutputType.PROJECTION],
         ...     forbidden_return_types=[EnumNodeOutputType.EVENT],
         ...     can_publish_directly=False,
@@ -62,11 +62,11 @@ class ModelExecutionShapeRule(BaseModel):
 
         3. **Permissive fallback**: If `allowed_return_types` is empty,
            all non-forbidden output types are implicitly allowed. This mode
-           is not typically used in ONEX handlers.
+           is not typically used in ONEX nodes.
 
         **Practical usage in ONEX:**
 
-        Most handler rules explicitly list their allowed output types for
+        Most node archetype rules explicitly list their allowed output types for
         clarity and type safety:
 
         - EFFECT: allowed=[EVENT, COMMAND], forbidden=[PROJECTION]
@@ -75,14 +75,14 @@ class ModelExecutionShapeRule(BaseModel):
         - ORCHESTRATOR: allowed=[COMMAND, EVENT], forbidden=[INTENT, PROJECTION]
     """
 
-    handler_type: EnumHandlerType = Field(
+    node_archetype: EnumNodeArchetype = Field(
         ...,
-        description="The handler type this rule applies to",
+        description="The node archetype this rule applies to",
     )
     allowed_return_types: list[EnumNodeOutputType] = Field(
         default_factory=list,
         description=(
-            "Node output types this handler type is explicitly allowed to return. "
+            "Node output types this node archetype is explicitly allowed to return. "
             "If non-empty, acts as an allow-list: only listed types pass validation. "
             "If empty, all non-forbidden types are implicitly allowed (permissive mode). "
             "Used by is_return_type_allowed() method for validation. "
@@ -92,15 +92,15 @@ class ModelExecutionShapeRule(BaseModel):
     )
     forbidden_return_types: list[EnumNodeOutputType] = Field(
         default_factory=list,
-        description="Node output types this handler type is forbidden from returning",
+        description="Node output types this node archetype is forbidden from returning",
     )
     can_publish_directly: bool = Field(
         default=False,
-        description="Whether this handler can publish messages directly (bypassing event bus)",
+        description="Whether this node can publish messages directly (bypassing event bus)",
     )
     can_access_system_time: bool = Field(
         default=True,
-        description="Whether this handler can access system time (non-deterministic)",
+        description="Whether this node can access system time (non-deterministic)",
     )
 
     model_config = ConfigDict(
@@ -128,7 +128,7 @@ class ModelExecutionShapeRule(BaseModel):
         2. If `allowed_return_types` is non-empty, the output type must be in that list
            to be allowed (explicit allow-list mode).
         3. If `allowed_return_types` is empty, all non-forbidden output types are
-           implicitly allowed (permissive mode for COMPUTE handlers).
+           implicitly allowed (permissive mode for COMPUTE nodes).
 
         Args:
             output_type: The node output type to check.

@@ -12,6 +12,15 @@ The wiring module is responsible for:
 - Validating that requested handler types are known and supported
 - Providing a summary of registered handlers for debugging
 
+Event Bus Support:
+    This module registers InMemoryEventBus as the default event bus. For production
+    deployments requiring KafkaEventBus, the event bus is selected at kernel bootstrap
+    time based on:
+    - KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses KafkaEventBus)
+    - config.event_bus.type field in runtime_config.yaml
+
+    See kernel.py for event bus selection logic during runtime bootstrap.
+
 Design Principles:
 - Explicit wiring: All handler registrations are explicit, not auto-discovered
 - Contract-driven: Supports wiring from contract configuration dicts
@@ -162,8 +171,13 @@ _KNOWN_HANDLERS: dict[str, tuple[type[ProtocolHandler], str]] = {
     HANDLER_TYPE_VAULT: (VaultHandler, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]
 }
 
-# Known event bus kinds that can be wired
+# Known event bus kinds that can be wired via this module.
 # Maps bus kind constant to (bus_class, description)
+#
+# Note: KafkaEventBus is NOT in this registry. It is selected at kernel bootstrap
+# time via environment variable (KAFKA_BOOTSTRAP_SERVERS) or runtime config
+# (event_bus.type = "kafka"). This registry handles only contract-based wiring
+# while production event bus selection is handled by kernel.py.
 _KNOWN_EVENT_BUSES: dict[str, tuple[type[ProtocolEventBus], str]] = {
     EVENT_BUS_INMEMORY: (InMemoryEventBus, "In-memory event bus for local/testing"),
 }
@@ -184,6 +198,15 @@ def wire_default_handlers() -> dict[str, list[str]]:
 
     Registered Event Buses:
         - INMEMORY: InMemoryEventBus for local/testing deployments
+
+    Event Bus Selection Note:
+        This function only registers InMemoryEventBus in the event bus registry.
+        For production deployments with KafkaEventBus:
+        - Set KAFKA_BOOTSTRAP_SERVERS environment variable, OR
+        - Configure event_bus.type = "kafka" in runtime_config.yaml
+
+        KafkaEventBus selection happens at kernel bootstrap time (see kernel.py),
+        not through this registry-based wiring mechanism.
 
     Returns:
         Summary dict with keys:
@@ -511,13 +534,13 @@ def wire_custom_event_bus(
 
 
 __all__: list[str] = [
+    "get_known_event_bus_kinds",
+    # Introspection functions
+    "get_known_handler_types",
+    "wire_custom_event_bus",
+    # Custom registration functions
+    "wire_custom_handler",
     # Primary wiring functions
     "wire_default_handlers",
     "wire_handlers_from_contract",
-    # Introspection functions
-    "get_known_handler_types",
-    "get_known_event_bus_kinds",
-    # Custom registration functions
-    "wire_custom_handler",
-    "wire_custom_event_bus",
 ]

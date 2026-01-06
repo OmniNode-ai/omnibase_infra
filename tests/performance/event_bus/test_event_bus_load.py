@@ -44,8 +44,6 @@ from tests.performance.event_bus.conftest import generate_unique_topic
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestSustainedLoad:
     """Test sustained high-volume operation."""
 
@@ -174,8 +172,6 @@ class TestSustainedLoad:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestMemoryStability:
     """Test memory stability under sustained load."""
 
@@ -317,8 +313,6 @@ class TestMemoryStability:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestMultipleSubscriberLoad:
     """Test load with multiple subscribers."""
 
@@ -462,8 +456,6 @@ class TestMultipleSubscriberLoad:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestRecoveryResilience:
     """Test recovery and resilience under load."""
 

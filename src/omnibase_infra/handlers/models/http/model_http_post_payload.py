@@ -3,6 +3,11 @@
 """HTTP POST Payload Model.
 
 This module provides the Pydantic model for http.post operation results.
+Uses the registry pattern for dynamic type resolution.
+
+Related:
+    - RegistryPayloadHttp: Payload type registration and lookup
+    - OMN-1007: Union reduction refactoring
 """
 
 from __future__ import annotations
@@ -10,15 +15,23 @@ from __future__ import annotations
 from typing import Literal
 
 from omnibase_core.types import JsonType
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.http.enum_http_operation_type import (
     EnumHttpOperationType,
 )
+from omnibase_infra.handlers.models.http.model_payload_http import (
+    ModelPayloadHttp,
+    RegistryPayloadHttp,
+)
 
 
-class ModelHttpPostPayload(BaseModel):
+@RegistryPayloadHttp.register("post")
+class ModelHttpPostPayload(ModelPayloadHttp):
     """Payload for http.post operation result.
+
+    This model is registered with RegistryPayloadHttp for dynamic type resolution.
+    Use @RegistryPayloadHttp.register("post") decorator pattern.
 
     Contains the HTTP response from a POST request including status code,
     headers, and response body.
@@ -37,6 +50,12 @@ class ModelHttpPostPayload(BaseModel):
         ... )
         >>> print(payload.status_code)
         201
+
+        # Dynamic type lookup:
+        >>> from omnibase_infra.handlers.models.http import RegistryPayloadHttp
+        >>> payload_cls = RegistryPayloadHttp.get_type("post")
+        >>> payload_cls.__name__
+        'ModelHttpPostPayload'
     """
 
     model_config = ConfigDict(

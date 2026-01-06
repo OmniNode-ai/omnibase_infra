@@ -142,8 +142,6 @@ class SimulatedEffectExecutor:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestHighVolumeSequential:
     """Test high volume sequential request processing."""
 
@@ -235,8 +233,6 @@ class TestHighVolumeSequential:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestConcurrentLoad:
     """Test concurrent request processing."""
 
@@ -362,8 +358,6 @@ class TestConcurrentLoad:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestIdempotencyCacheStress:
     """Test idempotency store under stress conditions."""
 
@@ -474,8 +468,6 @@ class TestIdempotencyCacheStress:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestMemoryBounds:
     """Test that memory usage stays bounded."""
 
@@ -537,8 +529,6 @@ class TestMemoryBounds:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestLatencyDistribution:
     """Test operation latency characteristics."""
 
@@ -644,8 +634,6 @@ class TestLatencyDistribution:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestThroughput:
     """Test operation throughput characteristics."""
 

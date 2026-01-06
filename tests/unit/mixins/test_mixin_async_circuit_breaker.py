@@ -5,7 +5,6 @@ Comprehensive unit tests for MixinAsyncCircuitBreaker.
 
 This test suite validates:
 - Basic circuit breaker functionality (state management, failure counting)
-- State transitions (CLOSED → OPEN → HALF_OPEN → CLOSED)
 - Thread safety with concurrent operations (100+ parallel tasks)
 - Correlation ID propagation and generation
 - Error context validation
@@ -13,21 +12,26 @@ This test suite validates:
 
 Test Organization:
     - TestMixinAsyncCircuitBreakerBasics: Basic functionality
-    - TestMixinAsyncCircuitBreakerStateTransitions: State machine transitions
     - TestMixinAsyncCircuitBreakerThreadSafety: Concurrency and race conditions
     - TestMixinAsyncCircuitBreakerCorrelationId: Correlation ID handling
     - TestMixinAsyncCircuitBreakerErrorContext: Error context validation
     - TestMixinAsyncCircuitBreakerEdgeCases: Edge cases and boundary conditions
 
+Related Test Files:
+    - test_circuit_breaker_transitions.py: Dedicated state transition tests
+    - test_mixin_async_circuit_breaker_race_conditions.py: Race condition tests
+    - test_effect_circuit_breaker.py: Effect-level integration tests
+    - test_recovery_circuit_breaker.py: Chaos/recovery tests
+
 Coverage Goals:
     - >90% code coverage for mixin
-    - All state transitions tested
     - Thread safety validated with parallel execution
     - All error paths tested
 """
 
 import asyncio
 import time
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
@@ -39,8 +43,11 @@ from omnibase_infra.mixins.mixin_async_circuit_breaker import (
     MixinAsyncCircuitBreaker,
 )
 
+if TYPE_CHECKING:
+    from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 
-class TestCircuitBreakerService(MixinAsyncCircuitBreaker):
+
+class CircuitBreakerServiceStub(MixinAsyncCircuitBreaker):
     """Test service that uses circuit breaker mixin for testing."""
 
     def __init__(
@@ -151,14 +158,14 @@ class TestMixinAsyncCircuitBreakerBasics:
 
     async def test_circuit_starts_closed(self) -> None:
         """Test that circuit breaker starts in CLOSED state."""
-        service = TestCircuitBreakerService()
+        service = CircuitBreakerServiceStub()
         assert service.get_state() == CircuitState.CLOSED
         assert service.get_failure_count() == 0
         assert not service._circuit_breaker_open
 
     async def test_check_allows_operation_when_closed(self) -> None:
         """Test that check_circuit allows operations when circuit is CLOSED."""
-        service = TestCircuitBreakerService()
+        service = CircuitBreakerServiceStub()
 
         # Should not raise when circuit is closed
         await service.check_circuit("test_operation")
@@ -168,7 +175,7 @@ class TestMixinAsyncCircuitBreakerBasics:
 
     async def test_record_failure_increments_counter(self) -> None:
         """Test that record_failure increments the failure counter."""
-        service = TestCircuitBreakerService(threshold=5)
+        service = CircuitBreakerServiceStub(threshold=5)
 
         # Record multiple failures (below threshold)
         await service.record_failure("test_operation")
@@ -185,7 +192,7 @@ class TestMixinAsyncCircuitBreakerBasics:
 
     async def test_record_failure_opens_circuit_at_threshold(self) -> None:
         """Test that circuit opens when failure threshold is reached."""
-        service = TestCircuitBreakerService(threshold=3)
+        service = CircuitBreakerServiceStub(threshold=3)
 
         # Record failures up to threshold
         await service.record_failure("test_operation")
@@ -198,7 +205,7 @@ class TestMixinAsyncCircuitBreakerBasics:
 
     async def test_check_raises_when_open(self) -> None:
         """Test that check_circuit raises InfraUnavailableError when circuit is OPEN."""
-        service = TestCircuitBreakerService(threshold=2)
+        service = CircuitBreakerServiceStub(threshold=2)
 
         # Open the circuit
         await service.record_failure("test_operation")
@@ -215,7 +222,7 @@ class TestMixinAsyncCircuitBreakerBasics:
 
     async def test_reset_closes_circuit(self) -> None:
         """Test that reset_circuit closes the circuit and resets failure count."""
-        service = TestCircuitBreakerService(threshold=2)
+        service = CircuitBreakerServiceStub(threshold=2)
 
         # Open the circuit
         await service.record_failure("test_operation")
@@ -233,141 +240,12 @@ class TestMixinAsyncCircuitBreakerBasics:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestMixinAsyncCircuitBreakerStateTransitions:
-    """Test circuit breaker state machine transitions."""
-
-    async def test_state_transition_closed_to_open(self) -> None:
-        """Test CLOSED → OPEN transition when threshold is reached."""
-        service = TestCircuitBreakerService(threshold=3)
-
-        # Start in CLOSED state
-        assert service.get_state() == CircuitState.CLOSED
-
-        # Record failures to reach threshold
-        await service.record_failure("test_operation")
-        await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.CLOSED  # Still closed
-
-        await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN  # Now open
-
-    async def test_state_transition_open_to_half_open(self) -> None:
-        """Test OPEN → HALF_OPEN transition after reset timeout."""
-        service = TestCircuitBreakerService(threshold=2, reset_timeout=0.1)
-
-        # Open the circuit
-        await service.record_failure("test_operation")
-        await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
-
-        # Wait for reset timeout
-        await asyncio.sleep(0.15)
-
-        # Next check should transition to HALF_OPEN (no error)
-        await service.check_circuit("test_operation")
-
-        # Circuit should be half-open (failures reset)
-        assert service.get_failure_count() == 0
-        assert service._circuit_breaker_open is False
-
-    async def test_state_transition_half_open_to_closed(self) -> None:
-        """Test HALF_OPEN → CLOSED transition on successful operation.
-
-        This test verifies that:
-        1. Circuit opens after failures reach threshold
-        2. Circuit transitions to HALF_OPEN after reset timeout
-        3. A successful operation in HALF_OPEN state returns correct result
-        4. Successful operation transitions circuit to CLOSED state
-        """
-        service = TestCircuitBreakerService(threshold=2, reset_timeout=0.1)
-
-        # Open the circuit
-        await service.record_failure("test_operation")
-        await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
-
-        # Wait for reset timeout (circuit will transition to HALF_OPEN on next check)
-        await asyncio.sleep(0.15)
-
-        # Execute a SUCCESSFUL operation - this should:
-        # 1. Transition from OPEN to HALF_OPEN (during check_circuit)
-        # 2. Execute the operation successfully
-        # 3. Call reset_circuit (which transitions HALF_OPEN to CLOSED)
-        # 4. Return the successful result
-        result = await service.execute_operation("test_after_recovery")
-
-        # Verify the operation succeeded and returned correct result
-        assert result == "success:test_after_recovery"
-
-        # Circuit should now be fully closed
-        assert service.get_state() == CircuitState.CLOSED
-        assert service.get_failure_count() == 0
-
-    async def test_state_transition_half_open_to_open(self) -> None:
-        """Test HALF_OPEN → OPEN transition on failure after timeout.
-
-        This test verifies that:
-        1. Circuit opens after failures reach threshold
-        2. Circuit transitions to HALF_OPEN after reset timeout
-        3. A failed operation in HALF_OPEN state raises the expected error
-        4. Failed operation transitions circuit back to OPEN state
-        """
-        service = TestCircuitBreakerService(threshold=2, reset_timeout=0.1)
-
-        # Open the circuit
-        await service.record_failure("test_operation")
-        await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
-
-        # Wait for reset timeout (circuit will transition to HALF_OPEN on next check)
-        await asyncio.sleep(0.15)
-
-        # Execute a FAILING operation - this should:
-        # 1. Transition from OPEN to HALF_OPEN (during check_circuit)
-        # 2. Execute the operation which fails
-        # 3. Call record_circuit_failure
-        # 4. Raise RuntimeError
-        with pytest.raises(RuntimeError, match="Simulated operation failure"):
-            await service.execute_operation("test_after_recovery", should_fail=True)
-
-        # One failure recorded - still below threshold of 2, but in HALF_OPEN
-        # the circuit immediately opens on first failure (standard circuit breaker behavior)
-        # Actually, looking at the code, it needs threshold failures to open
-        # So we need another failure to open the circuit
-        await service.record_failure("test_operation")
-
-        # Circuit should be open again after reaching threshold
-        assert service.get_state() == CircuitState.OPEN
-
-    async def test_auto_reset_after_timeout(self) -> None:
-        """Test automatic reset after timeout elapsed."""
-        service = TestCircuitBreakerService(threshold=2, reset_timeout=0.1)
-
-        # Open the circuit
-        await service.record_failure("test_operation")
-        await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
-
-        # Before timeout - should raise
-        with pytest.raises(InfraUnavailableError):
-            await service.check_circuit("test_operation")
-
-        # Wait for timeout
-        await asyncio.sleep(0.15)
-
-        # After timeout - should not raise (auto-reset to HALF_OPEN)
-        await service.check_circuit("test_operation")
-        assert service.get_failure_count() == 0
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
 class TestMixinAsyncCircuitBreakerThreadSafety:
     """Test circuit breaker thread safety with concurrent operations."""
 
     async def test_concurrent_check_operations(self) -> None:
         """Test multiple check operations in parallel (100 tasks)."""
-        service = TestCircuitBreakerService(threshold=10)
+        service = CircuitBreakerServiceStub(threshold=10)
 
         # Run 100 concurrent check operations
         tasks = [service.check_circuit("test_operation") for _ in range(100)]
@@ -378,7 +256,7 @@ class TestMixinAsyncCircuitBreakerThreadSafety:
 
     async def test_concurrent_failure_recording(self) -> None:
         """Test multiple failure recordings in parallel (100 tasks)."""
-        service = TestCircuitBreakerService(threshold=200)
+        service = CircuitBreakerServiceStub(threshold=200)
 
         # Run 100 concurrent failure recordings
         tasks = [service.record_failure("test_operation") for _ in range(100)]
@@ -389,7 +267,7 @@ class TestMixinAsyncCircuitBreakerThreadSafety:
 
     async def test_concurrent_check_and_failure(self) -> None:
         """Test mixed check and failure operations in parallel."""
-        service = TestCircuitBreakerService(threshold=50)
+        service = CircuitBreakerServiceStub(threshold=50)
 
         # Create mixed tasks (50 checks, 50 failures)
         check_tasks = [service.check_circuit("check") for _ in range(50)]
@@ -409,7 +287,7 @@ class TestMixinAsyncCircuitBreakerThreadSafety:
     async def test_no_race_condition_at_threshold(self) -> None:
         """Test that exactly threshold failures opens circuit (no race)."""
         threshold = 10
-        service = TestCircuitBreakerService(threshold=threshold)
+        service = CircuitBreakerServiceStub(threshold=threshold)
 
         # Record exactly threshold failures concurrently
         tasks = [service.record_failure("test_operation") for _ in range(threshold)]
@@ -421,7 +299,7 @@ class TestMixinAsyncCircuitBreakerThreadSafety:
 
     async def test_lock_prevents_race_conditions(self) -> None:
         """Test that lock prevents race conditions during state transitions."""
-        service = TestCircuitBreakerService(threshold=5, reset_timeout=0.1)
+        service = CircuitBreakerServiceStub(threshold=5, reset_timeout=0.1)
 
         # Concurrent operations: failures, checks, resets
         async def mixed_operations() -> None:
@@ -453,7 +331,7 @@ class TestMixinAsyncCircuitBreakerCorrelationId:
 
     async def test_correlation_id_propagation(self) -> None:
         """Test that correlation_id flows through errors."""
-        service = TestCircuitBreakerService(threshold=1)
+        service = CircuitBreakerServiceStub(threshold=1)
 
         # Open the circuit
         correlation_id = uuid4()
@@ -468,7 +346,7 @@ class TestMixinAsyncCircuitBreakerCorrelationId:
 
     async def test_correlation_id_generated_if_none(self) -> None:
         """Test that UUID is generated if correlation_id not provided."""
-        service = TestCircuitBreakerService(threshold=1)
+        service = CircuitBreakerServiceStub(threshold=1)
 
         # Open the circuit without correlation_id
         await service.record_failure("test_operation")
@@ -484,7 +362,7 @@ class TestMixinAsyncCircuitBreakerCorrelationId:
 
     async def test_correlation_id_in_error_context(self) -> None:
         """Test that correlation_id is properly included in error context."""
-        service = TestCircuitBreakerService(threshold=1)
+        service = CircuitBreakerServiceStub(threshold=1)
 
         # Open circuit with specific correlation_id
         correlation_id = uuid4()
@@ -508,7 +386,7 @@ class TestMixinAsyncCircuitBreakerErrorContext:
 
     async def test_error_context_contains_required_fields(self) -> None:
         """Test that error context contains all required fields."""
-        service = TestCircuitBreakerService(
+        service = CircuitBreakerServiceStub(
             threshold=1,
             service_name="test-service",
             transport_type=EnumInfraTransportType.KAFKA,
@@ -534,7 +412,7 @@ class TestMixinAsyncCircuitBreakerErrorContext:
     async def test_error_includes_service_name(self) -> None:
         """Test that error includes service_name in context."""
         service_name = "custom-kafka-service"
-        service = TestCircuitBreakerService(threshold=1, service_name=service_name)
+        service = CircuitBreakerServiceStub(threshold=1, service_name=service_name)
 
         # Open circuit
         await service.record_failure("test_operation")
@@ -549,7 +427,7 @@ class TestMixinAsyncCircuitBreakerErrorContext:
 
     async def test_error_includes_circuit_state(self) -> None:
         """Test that error includes circuit_state in context."""
-        service = TestCircuitBreakerService(threshold=1)
+        service = CircuitBreakerServiceStub(threshold=1)
 
         # Open circuit
         await service.record_failure("test_operation")
@@ -564,7 +442,7 @@ class TestMixinAsyncCircuitBreakerErrorContext:
     async def test_error_includes_retry_after(self) -> None:
         """Test that error includes retry_after_seconds calculated correctly."""
         reset_timeout = 10.0
-        service = TestCircuitBreakerService(threshold=1, reset_timeout=reset_timeout)
+        service = CircuitBreakerServiceStub(threshold=1, reset_timeout=reset_timeout)
 
         # Open circuit
         await service.record_failure("test_operation")
@@ -589,7 +467,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
 
     async def test_threshold_of_one(self) -> None:
         """Test circuit breaker with threshold=1 (opens on first failure)."""
-        service = TestCircuitBreakerService(threshold=1)
+        service = CircuitBreakerServiceStub(threshold=1)
 
         # First failure should open circuit
         await service.record_failure("test_operation")
@@ -601,7 +479,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
 
     async def test_zero_reset_timeout(self) -> None:
         """Test circuit breaker with zero reset timeout (immediate reset)."""
-        service = TestCircuitBreakerService(threshold=2, reset_timeout=0.0)
+        service = CircuitBreakerServiceStub(threshold=2, reset_timeout=0.0)
 
         # Open circuit
         await service.record_failure("test_operation")
@@ -614,7 +492,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
 
     async def test_very_long_reset_timeout(self) -> None:
         """Test circuit breaker with very long reset timeout."""
-        service = TestCircuitBreakerService(threshold=1, reset_timeout=3600.0)
+        service = CircuitBreakerServiceStub(threshold=1, reset_timeout=3600.0)
 
         # Open circuit
         await service.record_failure("test_operation")
@@ -630,7 +508,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
 
     async def test_multiple_resets(self) -> None:
         """Test multiple manual resets work correctly."""
-        service = TestCircuitBreakerService(threshold=2)
+        service = CircuitBreakerServiceStub(threshold=2)
 
         # Open and reset circuit multiple times
         for _ in range(5):
@@ -646,7 +524,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
 
     async def test_failure_after_manual_reset(self) -> None:
         """Test that failures after manual reset work correctly."""
-        service = TestCircuitBreakerService(threshold=3)
+        service = CircuitBreakerServiceStub(threshold=3)
 
         # Record some failures
         await service.record_failure("test_operation")
@@ -668,7 +546,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
     async def test_concurrent_operations_at_threshold_boundary(self) -> None:
         """Test concurrent operations near threshold boundary."""
         threshold = 5
-        service = TestCircuitBreakerService(threshold=threshold)
+        service = CircuitBreakerServiceStub(threshold=threshold)
 
         # Record threshold - 1 failures
         for _ in range(threshold - 1):
@@ -682,7 +560,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
 
     async def test_reset_idempotency(self) -> None:
         """Test that reset is idempotent (multiple resets don't break state)."""
-        service = TestCircuitBreakerService(threshold=2)
+        service = CircuitBreakerServiceStub(threshold=2)
 
         # Open circuit
         await service.record_failure("test_operation")
@@ -700,7 +578,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
     async def test_check_circuit_timing_precision(self) -> None:
         """Test that timeout timing is precise (no off-by-one errors)."""
         reset_timeout = 0.2
-        service = TestCircuitBreakerService(threshold=1, reset_timeout=reset_timeout)
+        service = CircuitBreakerServiceStub(threshold=1, reset_timeout=reset_timeout)
 
         # Open circuit
         start_time = time.perf_counter()
@@ -719,3 +597,161 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
         # Check after timeout - should succeed (auto-reset)
         await service.check_circuit("test_operation")
         assert service.get_failure_count() == 0
+
+
+class CircuitBreakerConfigServiceStub(MixinAsyncCircuitBreaker):
+    """Test service that uses _init_circuit_breaker_from_config for testing."""
+
+    def __init__(
+        self,
+        config: "ModelCircuitBreakerConfig",
+    ) -> None:
+        """Initialize test service with circuit breaker from config.
+
+        Args:
+            config: Circuit breaker configuration model
+        """
+        self._init_circuit_breaker_from_config(config)
+
+    async def check_circuit(
+        self, operation: str = "test_operation", correlation_id: UUID | None = None
+    ) -> None:
+        """Check circuit breaker state (thread-safe wrapper for testing)."""
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(operation, correlation_id)
+
+    async def record_failure(
+        self, operation: str = "test_operation", correlation_id: UUID | None = None
+    ) -> None:
+        """Record circuit failure (thread-safe wrapper for testing)."""
+        async with self._circuit_breaker_lock:
+            await self._record_circuit_failure(operation, correlation_id)
+
+    def get_state(self) -> CircuitState:
+        """Get current circuit state (for testing assertions)."""
+        if self._circuit_breaker_open:
+            return CircuitState.OPEN
+        return CircuitState.CLOSED
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestMixinAsyncCircuitBreakerFromConfig:
+    """Test _init_circuit_breaker_from_config method.
+
+    This test class validates that the config-based initialization correctly
+    delegates to _init_circuit_breaker with the config values.
+    """
+
+    async def test_init_from_config_with_defaults(self) -> None:
+        """Test initialization from config with default values."""
+        from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+
+        config = ModelCircuitBreakerConfig()
+        service = CircuitBreakerConfigServiceStub(config)
+
+        # Verify default values were applied
+        assert service.circuit_breaker_threshold == 5
+        assert service.circuit_breaker_reset_timeout == 60.0
+        assert service.service_name == "unknown"
+        assert service.transport_type == EnumInfraTransportType.HTTP
+
+    async def test_init_from_config_with_custom_values(self) -> None:
+        """Test initialization from config with custom values."""
+        from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+
+        config = ModelCircuitBreakerConfig(
+            threshold=10,
+            reset_timeout_seconds=120.0,
+            service_name="kafka.production",
+            transport_type=EnumInfraTransportType.KAFKA,
+        )
+        service = CircuitBreakerConfigServiceStub(config)
+
+        # Verify custom values were applied
+        assert service.circuit_breaker_threshold == 10
+        assert service.circuit_breaker_reset_timeout == 120.0
+        assert service.service_name == "kafka.production"
+        assert service.transport_type == EnumInfraTransportType.KAFKA
+
+    async def test_init_from_config_circuit_functions_correctly(self) -> None:
+        """Test that circuit breaker initialized from config functions correctly."""
+        from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+
+        config = ModelCircuitBreakerConfig(
+            threshold=2,
+            reset_timeout_seconds=60.0,
+            service_name="test-service",
+            transport_type=EnumInfraTransportType.DATABASE,
+        )
+        service = CircuitBreakerConfigServiceStub(config)
+
+        # Circuit should start closed
+        assert service.get_state() == CircuitState.CLOSED
+
+        # Record failures to open circuit
+        await service.record_failure("test_operation")
+        await service.record_failure("test_operation")
+
+        # Circuit should now be open
+        assert service.get_state() == CircuitState.OPEN
+
+        # Check should raise with correct transport type in error context
+        with pytest.raises(InfraUnavailableError) as exc_info:
+            await service.check_circuit("test_operation")
+
+        error = exc_info.value
+        assert error.model.context["transport_type"] == EnumInfraTransportType.DATABASE
+        assert error.model.context["target_name"] == "test-service"
+
+    async def test_init_from_config_from_env(self) -> None:
+        """Test initialization from config created via from_env()."""
+        import os
+        from unittest.mock import patch
+
+        from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+
+        env_vars = {
+            "TEST_CB_THRESHOLD": "3",
+            "TEST_CB_RESET_TIMEOUT": "30.0",
+        }
+        with patch.dict(os.environ, env_vars, clear=True):
+            config = ModelCircuitBreakerConfig.from_env(
+                service_name="consul.dev",
+                transport_type=EnumInfraTransportType.CONSUL,
+                prefix="TEST_CB",
+            )
+            service = CircuitBreakerConfigServiceStub(config)
+
+            # Verify values from environment were applied
+            assert service.circuit_breaker_threshold == 3
+            assert service.circuit_breaker_reset_timeout == 30.0
+            assert service.service_name == "consul.dev"
+            assert service.transport_type == EnumInfraTransportType.CONSUL
+
+    async def test_init_from_config_all_transport_types(self) -> None:
+        """Test initialization from config with all transport types."""
+        from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+
+        transport_types = [
+            EnumInfraTransportType.HTTP,
+            EnumInfraTransportType.DATABASE,
+            EnumInfraTransportType.KAFKA,
+            EnumInfraTransportType.CONSUL,
+            EnumInfraTransportType.VAULT,
+            EnumInfraTransportType.VALKEY,
+            EnumInfraTransportType.GRPC,
+            EnumInfraTransportType.RUNTIME,
+        ]
+
+        for transport_type in transport_types:
+            config = ModelCircuitBreakerConfig(
+                threshold=5,
+                reset_timeout_seconds=60.0,
+                service_name=f"service.{transport_type.value}",
+                transport_type=transport_type,
+            )
+            service = CircuitBreakerConfigServiceStub(config)
+
+            assert service.transport_type == transport_type
+            assert service.service_name == f"service.{transport_type.value}"

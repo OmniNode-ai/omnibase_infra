@@ -65,7 +65,6 @@ from .conftest import POSTGRES_AVAILABLE
 
 # Module-level markers - skip all tests if PostgreSQL is not available
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.skipif(
         not POSTGRES_AVAILABLE,
         reason="PostgreSQL not available (POSTGRES_PASSWORD not set)",

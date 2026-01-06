@@ -330,7 +330,7 @@ from typing import Protocol
 class ServiceFactory(Protocol):
     """Factory for creating service instances."""
 
-    def create(self, container: ModelONEXContainer) -> Any:
+    def create(self, container: ModelONEXContainer) -> object:
         """Create service instance."""
         ...
 

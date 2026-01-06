@@ -8,6 +8,11 @@ DLQ replay tracking service, including connection pooling and table settings.
 Security Note:
     The dsn field may contain credentials. Use environment variables for
     sensitive values and ensure connection strings are not logged.
+
+Environment Variables:
+    ONEX_DLQ_POOL_MIN_SIZE: Minimum pool connections (default: 1, range: 1-100)
+    ONEX_DLQ_POOL_MAX_SIZE: Maximum pool connections (default: 5, range: 1-100)
+    ONEX_DLQ_COMMAND_TIMEOUT: Command timeout in seconds (default: 30.0, range: 1.0-300.0)
 """
 
 from __future__ import annotations
@@ -19,6 +24,37 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 from omnibase_infra.dlq.constants_dlq import PATTERN_TABLE_NAME
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
+
+# Module-level defaults from environment variables
+# These allow runtime configuration without code changes
+# Invalid type values raise ProtocolConfigurationError
+# Out-of-range values log a warning and use default (soft validation pattern)
+
+_DEFAULT_POOL_MIN_SIZE = parse_env_int(
+    "ONEX_DLQ_POOL_MIN_SIZE",
+    1,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="dlq_tracking_service",
+    min_value=1,  # Minimum 1 connection
+    max_value=100,  # Maximum pool size
+)
+_DEFAULT_POOL_MAX_SIZE = parse_env_int(
+    "ONEX_DLQ_POOL_MAX_SIZE",
+    5,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="dlq_tracking_service",
+    min_value=1,  # Minimum 1 connection
+    max_value=100,  # Maximum pool size
+)
+_DEFAULT_COMMAND_TIMEOUT = parse_env_float(
+    "ONEX_DLQ_COMMAND_TIMEOUT",
+    30.0,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="dlq_tracking_service",
+    min_value=1.0,  # Minimum 1 second
+    max_value=300.0,  # Maximum 5 minutes
+)
 
 
 class ModelDlqTrackingConfig(BaseModel):
@@ -68,7 +104,17 @@ class ModelDlqTrackingConfig(BaseModel):
     @field_validator("dsn", mode="before")
     @classmethod
     def validate_dsn(cls, v: object) -> str:
-        """Validate PostgreSQL DSN format.
+        """Validate PostgreSQL DSN format using robust parser.
+
+        This validator uses urllib.parse for comprehensive DSN validation,
+        handling edge cases like IPv6 addresses, URL-encoded passwords,
+        and query parameters.
+
+        Edge cases validated:
+            - IPv6 addresses: postgresql://user:pass@[::1]:5432/db
+            - URL-encoded passwords: user:p%40ssword@host (p@ssword)
+            - Query parameters: postgresql://host/db?sslmode=require
+            - Missing components: postgresql://localhost/db (no user/pass/port)
 
         Args:
             v: DSN value (any type before Pydantic conversion)
@@ -79,51 +125,14 @@ class ModelDlqTrackingConfig(BaseModel):
         Raises:
             ProtocolConfigurationError: If DSN format is invalid
         """
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="validate_config",
-            target_name="dlq_tracking_service",
-            correlation_id=uuid4(),
-        )
+        from omnibase_infra.utils.util_dsn_validation import parse_and_validate_dsn
 
-        if v is None:
-            raise ProtocolConfigurationError(
-                "dsn cannot be None",
-                context=context,
-                parameter="dsn",
-                value=None,
-            )
-        if not isinstance(v, str):
-            raise ProtocolConfigurationError(
-                f"dsn must be a string, got {type(v).__name__}",
-                context=context,
-                parameter="dsn",
-                value=type(v).__name__,
-            )
-        if not v.strip():
-            raise ProtocolConfigurationError(
-                "dsn cannot be empty",
-                context=context,
-                parameter="dsn",
-                value="",
-            )
+        # parse_and_validate_dsn handles all validation and error context
+        # It will raise ProtocolConfigurationError with proper context if invalid
+        parse_and_validate_dsn(v)
 
-        dsn = v.strip()
-
-        # Basic PostgreSQL DSN validation
-        # Note: Only standard PostgreSQL prefixes are allowed. The "postgresql+asyncpg://"
-        # prefix is a SQLAlchemy convention, not an asyncpg convention. asyncpg uses
-        # standard "postgresql://" or "postgres://" prefixes directly.
-        valid_prefixes = ("postgresql://", "postgres://")
-        if not dsn.startswith(valid_prefixes):
-            raise ProtocolConfigurationError(
-                f"dsn must start with one of {valid_prefixes}",
-                context=context,
-                parameter="dsn",
-                value="[REDACTED]",  # Never log DSN contents
-            )
-
-        return dsn
+        # If validation passes, return the stripped string
+        return v.strip() if isinstance(v, str) else str(v)
 
     # Defense-in-depth: Table name validation is applied at both config and runtime level.
     # See constants_dlq.py for details on why both validations are intentional.
@@ -135,20 +144,26 @@ class ModelDlqTrackingConfig(BaseModel):
         pattern=PATTERN_TABLE_NAME,
     )
     pool_min_size: int = Field(
-        default=1,
-        description="Minimum number of connections in the pool",
+        default=_DEFAULT_POOL_MIN_SIZE,
+        description=(
+            "Minimum number of connections in the pool (env: ONEX_DLQ_POOL_MIN_SIZE)"
+        ),
         ge=1,
         le=100,
     )
     pool_max_size: int = Field(
-        default=5,
-        description="Maximum number of connections in the pool",
+        default=_DEFAULT_POOL_MAX_SIZE,
+        description=(
+            "Maximum number of connections in the pool (env: ONEX_DLQ_POOL_MAX_SIZE)"
+        ),
         ge=1,
         le=100,
     )
     command_timeout: float = Field(
-        default=30.0,
-        description="Timeout for database commands in seconds",
+        default=_DEFAULT_COMMAND_TIMEOUT,
+        description=(
+            "Timeout for database commands in seconds (env: ONEX_DLQ_COMMAND_TIMEOUT)"
+        ),
         ge=1.0,
         le=300.0,
     )

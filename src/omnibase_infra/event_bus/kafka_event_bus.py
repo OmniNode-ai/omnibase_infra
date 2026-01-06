@@ -178,10 +178,6 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import KafkaError
 
 from omnibase_infra.enums import EnumInfraTransportType
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
-
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -198,6 +194,9 @@ from omnibase_infra.event_bus.models import (
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.utils import sanitize_error_message
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonType
 
 # Type alias for DLQ callback functions
 DlqCallbackType = Callable[[ModelDlqEvent], Awaitable[None]]
@@ -651,8 +650,12 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     if self._producer is not None:
                         try:
                             await self._producer.stop()
-                        except Exception:
-                            pass  # Best effort cleanup
+                        except Exception as cleanup_err:
+                            logger.warning(
+                                "Cleanup failed for Kafka producer stop: %s",
+                                cleanup_err,
+                                exc_info=True,
+                            )
                     self._producer = None
                 # Record failure (circuit breaker lock required)
                 async with self._circuit_breaker_lock:
@@ -689,8 +692,12 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     if self._producer is not None:
                         try:
                             await self._producer.stop()
-                        except Exception:
-                            pass  # Best effort cleanup
+                        except Exception as cleanup_err:
+                            logger.warning(
+                                "Cleanup failed for Kafka producer stop: %s",
+                                cleanup_err,
+                                exc_info=True,
+                            )
                     self._producer = None
                 # Record failure (circuit breaker lock required)
                 async with self._circuit_breaker_lock:
@@ -948,8 +955,12 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     if self._producer is not None:
                         try:
                             await self._producer.stop()
-                        except Exception:
-                            pass  # Best effort cleanup
+                        except Exception as cleanup_err:
+                            logger.warning(
+                                "Cleanup failed for Kafka producer stop during publish: %s",
+                                cleanup_err,
+                                exc_info=True,
+                            )
                     self._producer = None
                 last_exception = e
                 async with self._circuit_breaker_lock:
@@ -1163,11 +1174,15 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         correlation_id = uuid4()
         sanitized_servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
 
+        # Normalize empty string to default group (treats "" same as None)
+        # This ensures consistent behavior when group_id is unset or empty
+        effective_group_id = group_id.strip() if group_id else self._group
+
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(
             topic,
             bootstrap_servers=self._bootstrap_servers,
-            group_id=f"{self._environment}.{group_id}",
+            group_id=f"{self._environment}.{effective_group_id}",
             auto_offset_reset=self._config.auto_offset_reset,
             enable_auto_commit=self._config.enable_auto_commit,
         )
@@ -1188,7 +1203,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 f"Started consumer for topic {topic}",
                 extra={
                     "topic": topic,
-                    "group_id": group_id,
+                    "group_id": effective_group_id,
                     "correlation_id": str(correlation_id),
                     "servers": sanitized_servers,
                 },
@@ -1198,8 +1213,13 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             # Clean up consumer on failure to prevent resource leak
             try:
                 await consumer.stop()
-            except Exception:
-                pass  # Best effort cleanup
+            except Exception as cleanup_err:
+                logger.warning(
+                    "Cleanup failed for Kafka consumer stop (topic=%s): %s",
+                    topic,
+                    cleanup_err,
+                    exc_info=True,
+                )
 
             # Propagate timeout error to surface startup failures (differentiate from connection errors)
             context = ModelInfraErrorContext(
@@ -1231,8 +1251,13 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             # Clean up consumer on failure to prevent resource leak
             try:
                 await consumer.stop()
-            except Exception:
-                pass  # Best effort cleanup
+            except Exception as cleanup_err:
+                logger.warning(
+                    "Cleanup failed for Kafka consumer stop (topic=%s): %s",
+                    topic,
+                    cleanup_err,
+                    exc_info=True,
+                )
 
             # Propagate connection error to surface startup failures (differentiate from timeout)
             context = ModelInfraErrorContext(

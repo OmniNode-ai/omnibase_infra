@@ -52,23 +52,31 @@ This is a deliberate design choice for security and clarity:
 
 For multi-statement operations requiring atomicity, use the ``db.transaction``
 operation (planned for Beta release).
+
+Note:
+    Environment variable configuration (ONEX_DB_POOL_SIZE, ONEX_DB_TIMEOUT) is parsed
+    at module import time, not at handler instantiation. This means:
+
+    - Changes to environment variables require application restart to take effect
+    - Tests should use ``unittest.mock.patch.dict(os.environ, ...)`` before importing,
+      or use ``importlib.reload()`` to re-import the module after patching
+    - This is an intentional design choice for startup-time validation
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import asyncpg
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
 from omnibase_core.models.dispatch import ModelHandlerOutput
 
-from omnibase_infra.enums import EnumInfraTransportType
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -82,18 +90,48 @@ from omnibase_infra.handlers.models import (
     ModelDbQueryResponse,
 )
 from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonType
 
 logger = logging.getLogger(__name__)
 
 # MVP pool size fixed at 5 connections.
 # Note: Recommended range is 10-20 for production workloads.
 # Configurable pool size deferred to Beta release.
-_DEFAULT_POOL_SIZE: int = 5
+_DEFAULT_POOL_SIZE: int = parse_env_int(
+    "ONEX_DB_POOL_SIZE",
+    5,
+    min_value=1,
+    max_value=100,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="db_handler",
+)
 
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_DB: str = "db-handler"
-_DEFAULT_TIMEOUT_SECONDS: float = 30.0
+_DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
+    "ONEX_DB_TIMEOUT",
+    30.0,
+    min_value=0.1,
+    max_value=3600.0,
+    transport_type=EnumInfraTransportType.DATABASE,
+    service_name="db_handler",
+)
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
+
+# Error message prefixes for PostgreSQL errors
+# Used by _map_postgres_error to build descriptive error messages
+_POSTGRES_ERROR_PREFIXES: dict[type[asyncpg.PostgresError], str] = {
+    asyncpg.PostgresSyntaxError: "SQL syntax error",
+    asyncpg.UndefinedTableError: "Table not found",
+    asyncpg.UndefinedColumnError: "Column not found",
+    asyncpg.UniqueViolationError: "Unique constraint violation",
+    asyncpg.ForeignKeyViolationError: "Foreign key constraint violation",
+    asyncpg.NotNullViolationError: "Not null constraint violation",
+    asyncpg.CheckViolationError: "Check constraint violation",
+}
 
 
 class DbHandler(MixinEnvelopeExtraction):
@@ -114,6 +152,23 @@ class DbHandler(MixinEnvelopeExtraction):
         See CLAUDE.md "Error Sanitization Guidelines" for the full security policy
         on what information is safe vs unsafe to include in errors and logs.
 
+    Production Database Safety:
+        When connecting to production databases, ensure the following safeguards:
+
+        1. **Use read-only credentials** when possible to prevent accidental mutations
+        2. **Connection isolation**: Use separate DSNs for read and write operations
+        3. **Query timeouts**: Configure appropriate timeouts to prevent long-running
+           queries from exhausting connection pools (default: 30 seconds)
+        4. **Pool limits**: Production workloads should use 10-20 connections
+           (currently fixed at 5 for MVP - see Beta roadmap)
+        5. **SSL/TLS**: Always use encrypted connections (sslmode=require/verify-full)
+        6. **Audit logging**: Enable PostgreSQL statement logging for compliance
+        7. **Connection pooling**: Consider PgBouncer for high-traffic scenarios
+
+        WARNING: This handler executes arbitrary SQL. Ensure all queries use
+        parameterized statements to prevent SQL injection. Multi-statement SQL
+        is intentionally blocked for security.
+
     TODO(OMN-42): Consider implementing circuit breaker pattern for connection
     resilience. See CLAUDE.md "Error Recovery Patterns" for implementation guidance.
     """
@@ -128,8 +183,48 @@ class DbHandler(MixinEnvelopeExtraction):
 
     @property
     def handler_type(self) -> EnumHandlerType:
-        """Return EnumHandlerType.DATABASE."""
-        return EnumHandlerType.DATABASE
+        """Return the architectural role of this handler.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - This handler is an infrastructure
+            protocol/transport handler (as opposed to NODE_HANDLER for event
+            processing, PROJECTION_HANDLER for read models, or COMPUTE_HANDLER
+            for pure computation).
+
+        Note:
+            handler_type determines lifecycle, protocol selection, and runtime
+            invocation patterns. It answers "what is this handler in the architecture?"
+
+        See Also:
+            - handler_category: Behavioral classification (EFFECT/COMPUTE)
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification of this handler.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - This handler performs side-effecting
+            I/O operations (database queries and mutations). EFFECT handlers are
+            not deterministic and interact with external systems.
+
+        Note:
+            handler_category determines security rules, determinism guarantees,
+            replay safety, and permissions. It answers "how does this handler
+            behave at runtime?"
+
+            Categories:
+            - COMPUTE: Pure, deterministic transformations (no side effects)
+            - EFFECT: Side-effecting I/O (database, HTTP, service calls)
+            - NONDETERMINISTIC_COMPUTE: Pure but not deterministic (UUID, random)
+
+        See Also:
+            - handler_type: Architectural role (INFRA_HANDLER/NODE_HANDLER/etc.)
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     async def initialize(self, config: dict[str, JsonType]) -> None:
         """Initialize database connection pool with fixed size (5).
@@ -344,8 +439,8 @@ class DbHandler(MixinEnvelopeExtraction):
         connection information may be helpful, while ensuring credentials
         are never exposed. The raw DSN should NEVER be logged directly.
 
-        Replaces the password portion of the DSN with asterisks. Handles
-        standard PostgreSQL DSN formats.
+        Uses urllib.parse for robust parsing instead of regex, handling
+        edge cases like IPv6 addresses and URL-encoded passwords.
 
         Args:
             dsn: Raw PostgreSQL connection string containing credentials.
@@ -357,13 +452,17 @@ class DbHandler(MixinEnvelopeExtraction):
             >>> handler._sanitize_dsn("postgresql://user:secret@host:5432/db")
             'postgresql://user:***@host:5432/db'
 
+            >>> handler._sanitize_dsn("postgresql://user:p%40ss@[::1]:5432/db")
+            'postgresql://user:***@[::1]:5432/db'
+
         Note:
             This method is intentionally NOT used in production error paths.
             It exists as a utility for development/debugging only. See class
             docstring "Security Policy - DSN Handling" for full policy.
         """
-        # Match password in DSN formats: user:password@ or :password@
-        return re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", dsn)
+        from omnibase_infra.utils.util_dsn_validation import sanitize_dsn
+
+        return sanitize_dsn(dsn)
 
     def _extract_parameters(
         self, payload: dict[str, JsonType], operation: str, correlation_id: UUID
@@ -474,42 +573,8 @@ class DbHandler(MixinEnvelopeExtraction):
                 return self._build_response(
                     [], row_count, correlation_id, input_envelope_id
                 )
-        except asyncpg.QueryCanceledError as e:
-            raise InfraTimeoutError(
-                f"Statement timed out after {self._timeout}s",
-                context=ctx,
-                timeout_seconds=self._timeout,
-            ) from e
-        except asyncpg.PostgresConnectionError as e:
-            raise InfraConnectionError(
-                "Database connection lost during statement execution", context=ctx
-            ) from e
-        except asyncpg.PostgresSyntaxError as e:
-            raise RuntimeHostError(f"SQL syntax error: {e.message}", context=ctx) from e
-        except asyncpg.UndefinedTableError as e:
-            raise RuntimeHostError(f"Table not found: {e.message}", context=ctx) from e
-        except asyncpg.UndefinedColumnError as e:
-            raise RuntimeHostError(f"Column not found: {e.message}", context=ctx) from e
-        except asyncpg.UniqueViolationError as e:
-            raise RuntimeHostError(
-                f"Unique constraint violation: {e.message}", context=ctx
-            ) from e
-        except asyncpg.ForeignKeyViolationError as e:
-            raise RuntimeHostError(
-                f"Foreign key constraint violation: {e.message}", context=ctx
-            ) from e
-        except asyncpg.NotNullViolationError as e:
-            raise RuntimeHostError(
-                f"Not null constraint violation: {e.message}", context=ctx
-            ) from e
-        except asyncpg.CheckViolationError as e:
-            raise RuntimeHostError(
-                f"Check constraint violation: {e.message}", context=ctx
-            ) from e
         except asyncpg.PostgresError as e:
-            raise RuntimeHostError(
-                f"Database error: {type(e).__name__}", context=ctx
-            ) from e
+            raise self._map_postgres_error(e, ctx) from e
 
     def _parse_row_count(self, result: str) -> int:
         """Parse row count from asyncpg execute result string.
@@ -526,6 +591,45 @@ class DbHandler(MixinEnvelopeExtraction):
         except (ValueError, IndexError):
             pass
         return 0
+
+    def _map_postgres_error(
+        self,
+        exc: asyncpg.PostgresError,
+        ctx: ModelInfraErrorContext,
+    ) -> RuntimeHostError | InfraTimeoutError | InfraConnectionError:
+        """Map asyncpg exception to ONEX infrastructure error.
+
+        This helper reduces complexity of _execute_statement and _execute_query
+        by centralizing exception-to-error mapping logic.
+
+        Args:
+            exc: The asyncpg exception that was raised.
+            ctx: Error context with transport type, operation, and correlation ID.
+
+        Returns:
+            Appropriate ONEX infrastructure error based on exception type.
+        """
+        exc_type = type(exc)
+
+        # Special cases requiring specific error types or additional arguments
+        if exc_type is asyncpg.QueryCanceledError:
+            return InfraTimeoutError(
+                f"Statement timed out after {self._timeout}s",
+                context=ctx,
+                timeout_seconds=self._timeout,
+            )
+
+        if exc_type is asyncpg.PostgresConnectionError:
+            return InfraConnectionError(
+                "Database connection lost during statement execution",
+                context=ctx,
+            )
+
+        # All other errors map to RuntimeHostError with descriptive message
+        prefix = _POSTGRES_ERROR_PREFIXES.get(exc_type, "Database error")
+        # Use message attribute if available and non-empty, else use type name
+        message = getattr(exc, "message", None) or type(exc).__name__
+        return RuntimeHostError(f"{prefix}: {message}", context=ctx)
 
     def _build_response(
         self,
@@ -548,9 +652,43 @@ class DbHandler(MixinEnvelopeExtraction):
         )
 
     def describe(self) -> ModelDbDescribeResponse:
-        """Return handler metadata and capabilities."""
+        """Return handler metadata and capabilities for introspection.
+
+        This method exposes the handler's type classification along with its
+        operational configuration and capabilities.
+
+        Returns:
+            ModelDbDescribeResponse containing:
+                - handler_type: Architectural role from handler_type property
+                  (e.g., "infra_handler"). See EnumHandlerType for valid values.
+                - handler_category: Behavioral classification from handler_category
+                  property (e.g., "effect"). See EnumHandlerTypeCategory for valid values.
+                - supported_operations: List of supported operations
+                - pool_size: Connection pool size
+                - timeout_seconds: Query timeout in seconds
+                - initialized: Whether the handler is initialized
+                - version: Handler version string
+
+        Note:
+            The handler_type and handler_category fields form the handler
+            classification system:
+
+            1. handler_type (architectural role): Determines lifecycle and invocation
+               patterns. This handler is INFRA_HANDLER (protocol/transport handler).
+
+            2. handler_category (behavioral classification): Determines security rules
+               and replay safety. This handler is EFFECT (side-effecting I/O).
+
+            The transport type for this handler is DATABASE (PostgreSQL).
+
+        See Also:
+            - handler_type property: Full documentation of architectural role
+            - handler_category property: Full documentation of behavioral classification
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
         return ModelDbDescribeResponse(
             handler_type=self.handler_type.value,
+            handler_category=self.handler_category.value,
             supported_operations=sorted(_SUPPORTED_OPERATIONS),
             pool_size=self._pool_size,
             timeout_seconds=self._timeout,

@@ -44,9 +44,13 @@ async def reduce(
     self,
     state: ModelReducerState,
     event: ModelNodeIntrospectionEvent,
-) -> tuple[ModelReducerState, list[ModelRegistrationIntent]]:
+) -> ModelReducerExecutionResult:
     ...
 ```
+
+**Note**: The return type was changed from `tuple[ModelReducerState, list[ModelRegistrationIntent]]`
+to `ModelReducerExecutionResult` as part of OMN-1007 tuple-to-model conversion. The new model
+provides factory methods (`no_change()`, `with_intents()`, `empty()`) for common patterns.
 
 ### ProtocolEffect
 

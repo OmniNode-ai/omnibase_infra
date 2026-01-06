@@ -6,6 +6,20 @@ This module provides a reusable mixin for extracting correlation_id and envelope
 from request envelopes. These IDs are essential for distributed tracing and
 causality tracking across infrastructure components.
 
+Envelope Structure:
+    Request envelopes in ONEX infrastructure follow a standard structure::
+
+        {
+            "envelope_id": UUID,         # Unique ID for this specific envelope
+            "correlation_id": UUID,      # Groups related operations across services
+            "operation": str,            # Operation identifier (e.g., "http.get")
+            "payload": dict,             # Operation-specific payload data
+            "metadata": dict,            # Optional metadata (timestamps, sources)
+        }
+
+    The envelope_id and correlation_id fields can be either UUID objects or
+    string representations. This mixin handles both formats transparently.
+
 Features:
     - Extracts correlation_id for request grouping and distributed tracing
     - Extracts envelope_id for request/response causality tracking

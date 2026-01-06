@@ -128,6 +128,24 @@ class ModelPolicyTypeFilter(BaseModel):
     def __bool__(self) -> bool:
         """Boolean representation based on value presence.
 
+        Warning:
+            **Non-standard __bool__ behavior**: This model overrides ``__bool__`` to
+            return ``True`` only when a filter value is set. This differs from typical
+            Pydantic model behavior where ``bool(model)`` always returns ``True`` for
+            any valid model instance.
+
+            This design enables idiomatic filter checks::
+
+                if policy_filter:
+                    # Filter is active - apply it
+                    filtered = [p for p in policies if policy_filter.matches(p.type)]
+                else:
+                    # No filter - return all
+                    filtered = policies
+
+            Use ``policy_filter.has_value()`` for explicit, self-documenting code.
+            Use ``policy_filter is not None`` if you need to check model existence.
+
         Returns:
             True if a filter value is set, False otherwise.
         """

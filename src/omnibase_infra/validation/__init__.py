@@ -91,17 +91,33 @@ Security Design (Intentional Fail-Open Architecture):
     - routing_coverage_validator.py: Routing gap detection (module docstring)
 """
 
-from omnibase_core.validation import (
-    CircularImportValidator,
-    validate_all,
-    validate_architecture,
-    validate_contracts,
-    validate_patterns,
-    validate_union_usage,
-)
+# Try to import from omnibase_core.validation if available (requires omnibase_core 0.7.0+)
+try:
+    from omnibase_core.validation import (
+        validate_all,
+        validate_architecture,
+        validate_contracts,
+        validate_patterns,
+        validate_union_usage,
+    )
+    from omnibase_core.validation.circular_import_validator import (
+        CircularImportValidator,
+    )
+    from omnibase_core.validation.contract_validator import ProtocolContractValidator
 
-# NOTE: ProtocolContractValidator was removed in omnibase_core 0.6.2
-# See infra_validators.py for the stub implementation
+    _CORE_VALIDATION_AVAILABLE = True
+except ImportError:
+    # omnibase_core < 0.7.0 doesn't have validation module
+    # Provide stub implementations for backward compatibility
+    validate_all = None  # type: ignore[assignment]
+    validate_architecture = None  # type: ignore[assignment]
+    validate_contracts = None  # type: ignore[assignment]
+    validate_patterns = None  # type: ignore[assignment]
+    validate_union_usage = None  # type: ignore[assignment]
+    CircularImportValidator = None  # type: ignore[assignment, misc]
+    ProtocolContractValidator = None  # type: ignore[assignment, misc]
+    _CORE_VALIDATION_AVAILABLE = False
+
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
     ChainPropagationError,
@@ -168,9 +184,21 @@ from omnibase_infra.validation.runtime_shape_validator import (
     enforce_execution_shape,
 )
 
+# Security validation for handler introspection and security constraints
+from omnibase_infra.validation.security_validator import (
+    SENSITIVE_METHOD_PATTERNS,
+    SENSITIVE_PARAMETER_NAMES,
+    SecurityRuleId,
+    convert_to_validation_error,
+    has_sensitive_parameters,
+    is_sensitive_method_name,
+    validate_handler_security,
+    validate_method_exposure,
+)
+
 # Topic category validation for execution shape enforcement
 from omnibase_infra.validation.topic_category_validator import (
-    HANDLER_EXPECTED_CATEGORIES,
+    NODE_ARCHETYPE_EXPECTED_CATEGORIES,
     TOPIC_CATEGORY_PATTERNS,
     TOPIC_SUFFIXES,
     TopicCategoryASTVisitor,
@@ -180,64 +208,81 @@ from omnibase_infra.validation.topic_category_validator import (
     validate_topic_categories_in_file,
 )
 
-__all__ = [
-    # Direct re-exports from omnibase_core
-    "validate_architecture",
-    "validate_contracts",
-    "validate_patterns",
-    "validate_union_usage",
-    "validate_all",
-    "CircularImportValidator",
-    # Infrastructure-specific wrappers
-    "INFRA_MAX_UNIONS",
-    "validate_infra_architecture",
-    "validate_infra_contracts",
-    "validate_infra_patterns",
-    "validate_infra_contract_deep",
-    "validate_infra_union_usage",
-    "validate_infra_circular_imports",
-    "validate_infra_all",
-    "get_validation_summary",
+# Validation error aggregation and reporting for startup (OMN-1091)
+from omnibase_infra.validation.validation_aggregator import ValidationAggregator
+
+__all__: list[str] = [
     # Runtime shape validation
     "EXECUTION_SHAPE_RULES",
-    "ExecutionShapeViolationError",
-    "RuntimeShapeValidator",
-    "detect_message_category",
-    "enforce_execution_shape",
+    "NODE_ARCHETYPE_EXPECTED_CATEGORIES",
+    # Infrastructure-specific wrappers
+    "INFRA_MAX_UNIONS",
+    # Security validation constants
+    "SENSITIVE_METHOD_PATTERNS",
+    "SENSITIVE_PARAMETER_NAMES",
     # Topic category validation
-    "TopicCategoryValidator",
-    "TopicCategoryASTVisitor",
     "TOPIC_CATEGORY_PATTERNS",
     "TOPIC_SUFFIXES",
-    "HANDLER_EXPECTED_CATEGORIES",
-    "validate_topic_categories_in_file",
-    "validate_topic_categories_in_directory",
-    "validate_message_on_topic",
-    # Routing coverage validation (OMN-958)
-    "RoutingCoverageError",
-    "RoutingCoverageValidator",
-    "discover_message_types",
-    "discover_registered_routes",
-    "validate_routing_coverage_on_startup",
-    "check_routing_coverage_ci",
-    # AST-based execution shape validation (OMN-958)
-    "ExecutionShapeValidator",
-    "HandlerInfo",
-    "ModelExecutionShapeValidationResult",
-    "validate_execution_shapes",
-    "validate_execution_shapes_ci",
-    "get_execution_shape_rules",
     # Chain propagation validation (OMN-951)
     "ChainPropagationError",
     "ChainPropagationValidator",
-    "enforce_chain_propagation",
-    "validate_message_chain",
+    "CircularImportValidator",
     # Contract linting (PR #57)
     "ContractLinter",
     "EnumContractViolationSeverity",
+    # AST-based execution shape validation (OMN-958)
+    "ExecutionShapeValidator",
+    "ExecutionShapeViolationError",
+    "HandlerInfo",
     "ModelContractLintResult",
     "ModelContractViolation",
+    "ModelExecutionShapeValidationResult",
+    "ProtocolContractValidator",
+    # Routing coverage validation (OMN-958)
+    "RoutingCoverageError",
+    "RoutingCoverageValidator",
+    "RuntimeShapeValidator",
+    # Security validation
+    "SecurityRuleId",
+    "TopicCategoryASTVisitor",
+    # Topic category validation
+    "TopicCategoryValidator",
+    # Validation error aggregation (OMN-1091)
+    "ValidationAggregator",
+    "check_routing_coverage_ci",
+    "convert_to_validation_error",
+    "detect_message_category",
+    "discover_message_types",
+    "discover_registered_routes",
+    "enforce_chain_propagation",
+    "enforce_execution_shape",
+    "get_execution_shape_rules",
+    "get_validation_summary",
+    "has_sensitive_parameters",
+    "is_sensitive_method_name",
     "lint_contract_file",
     "lint_contracts_ci",
     "lint_contracts_in_directory",
+    "validate_all",
+    # Direct re-exports from omnibase_core
+    "validate_architecture",
+    "validate_contracts",
+    "validate_execution_shapes",
+    "validate_execution_shapes_ci",
+    "validate_handler_security",
+    "validate_infra_all",
+    "validate_infra_architecture",
+    "validate_infra_circular_imports",
+    "validate_infra_contract_deep",
+    "validate_infra_contracts",
+    "validate_infra_patterns",
+    "validate_infra_union_usage",
+    "validate_message_chain",
+    "validate_message_on_topic",
+    "validate_method_exposure",
+    "validate_patterns",
+    "validate_routing_coverage_on_startup",
+    "validate_topic_categories_in_directory",
+    "validate_topic_categories_in_file",
+    "validate_union_usage",
 ]

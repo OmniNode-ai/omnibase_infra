@@ -16,14 +16,27 @@ All handlers follow the pattern:
 
 Handler Architecture:
     - Handlers are stateless classes (no mutable state between calls)
-    - Handlers use projection reader for state queries (read-only)
+    - Handlers use projection reader for state queries
+    - Handlers may use projector for state persistence (e.g., HandlerNodeIntrospected)
     - Handlers use `now` parameter for time-based decisions
     - Handlers return EVENTS only (never intents or projections)
+
+Projection Persistence:
+    Handlers that modify registration state can optionally accept a projector for
+    persisting projections to PostgreSQL. When configured with a projector, the
+    handler persists the state transition BEFORE returning events, ensuring that
+    read models are consistent before downstream processing.
+
+    Example:
+        handler = HandlerNodeIntrospected(reader, projector=projector)
+        events = await handler.handle(event, now, correlation_id)
+        # Projection was persisted before events were returned
 
 Related Tickets:
     - OMN-888 (C1): Registration Orchestrator
     - OMN-932 (C2): Durable Timeout Handling
     - OMN-1006: Node Heartbeat for Liveness Tracking
+    - OMN-892: 2-Way Registration E2E Integration Test
 """
 
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_heartbeat import (

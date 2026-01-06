@@ -45,7 +45,6 @@ from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 # Module-level markers
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.asyncio,
 ]
 
@@ -185,7 +184,7 @@ class ContractDrivenEffectNode(MixinNodeIntrospection):
         # Build config kwargs, only including topics that are explicitly defined
         config_kwargs: dict[str, object] = {
             "node_id": uuid4(),  # Generate unique UUID for each node instance
-            "node_type": metadata.get("node_type", "EFFECT"),
+            "node_type": metadata.get("node_type", EnumNodeKind.EFFECT),
             "event_bus": event_bus,
             "version": metadata.get("version", "1.0.0"),
         }
@@ -242,7 +241,7 @@ class ComputeNodeWithCustomTopics(MixinNodeIntrospection):
         # Create domain-specific topics
         config = ModelIntrospectionConfig(
             node_id=uuid4(),  # Generate unique UUID for each node instance
-            node_type="COMPUTE",
+            node_type=EnumNodeKind.COMPUTE,
             event_bus=event_bus,
             version="2.0.0",
             introspection_topic=f"onex.{domain}.introspection.published.v1",
@@ -314,6 +313,7 @@ class TestContractToIntrospectionIntegration:
 
         # Verify node metadata from contract
         # node_id is now a UUID (generated at initialization)
+
         assert isinstance(node._introspection_node_id, UUID)
         assert node._contract_node_name == "test-effect-node"
         assert node._introspection_node_type == EnumNodeKind.EFFECT
@@ -433,9 +433,12 @@ class TestEndToEndIntrospectionWorkflow:
         assert topic == "onex.workflow.introspection.published.v1"
 
         # Verify envelope content
+
         assert isinstance(envelope, ModelNodeIntrospectionEvent)
         # node_id is a UUID, verify it matches the node's internal ID
         assert envelope.node_id == node._introspection_node_id
+        # node_type is stored as EnumNodeKind (a StrEnum that inherits from str).
+        # Compare directly to the enum for type consistency with _introspection_node_type.
         assert envelope.node_type == EnumNodeKind.EFFECT
         assert envelope.version == "1.5.0"
         assert envelope.reason == "startup"
@@ -466,6 +469,7 @@ class TestEndToEndIntrospectionWorkflow:
 
         # Verify node identification
         # node_id is a UUID, verify it matches the node's internal ID
+
         assert data.node_id == node._introspection_node_id
         assert data.node_type == EnumNodeKind.EFFECT
         assert data.version == "1.0.0"
@@ -924,7 +928,7 @@ class TestTopicValidation:
             # Should not raise
             config = ModelIntrospectionConfig(
                 node_id=uuid4(),
-                node_type="EFFECT",
+                node_type=EnumNodeKind.EFFECT,
                 introspection_topic=topic,
             )
             assert config.introspection_topic == topic
@@ -935,7 +939,7 @@ class TestTopicValidation:
         with pytest.raises(ValueError, match=r"must start with a lowercase letter"):
             ModelIntrospectionConfig(
                 node_id=uuid4(),
-                node_type="EFFECT",
+                node_type=EnumNodeKind.EFFECT,
                 introspection_topic="Invalid.topic.v1",
             )
 
@@ -945,7 +949,7 @@ class TestTopicValidation:
         with pytest.raises(ValueError, match="invalid characters"):
             ModelIntrospectionConfig(
                 node_id=uuid4(),
-                node_type="EFFECT",
+                node_type=EnumNodeKind.EFFECT,
                 introspection_topic="onex.invalid@topic.v1",
             )
 
@@ -956,7 +960,7 @@ class TestTopicValidation:
         with pytest.raises(ValueError, match="must not end with a dot"):
             ModelIntrospectionConfig(
                 node_id=uuid4(),
-                node_type="EFFECT",
+                node_type=EnumNodeKind.EFFECT,
                 introspection_topic="onex.",
             )
 
@@ -982,7 +986,7 @@ class TestSubclassTopicOverrides:
                 self._state = "ready"
                 config = ModelIntrospectionConfig(
                     node_id=node_id,
-                    node_type="EFFECT",
+                    node_type=EnumNodeKind.EFFECT,
                     introspection_topic="onex.tenant1.introspection.published.v1",
                     heartbeat_topic="onex.tenant1.heartbeat.published.v1",
                     request_introspection_topic="onex.tenant1.introspection.requested.v1",
@@ -1016,7 +1020,7 @@ class TestSubclassTopicOverrides:
                 # Build config with optional topic override
                 config_kwargs: dict[str, object] = {
                     "node_id": node_id,
-                    "node_type": "EFFECT",
+                    "node_type": EnumNodeKind.EFFECT,
                 }
                 if introspection_topic is not None:
                     config_kwargs["introspection_topic"] = introspection_topic

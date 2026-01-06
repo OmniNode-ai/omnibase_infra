@@ -25,6 +25,7 @@ class ModelOrchestratorInput(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        strict=True,
     )
 
     introspection_event: ModelNodeIntrospectionEvent = Field(

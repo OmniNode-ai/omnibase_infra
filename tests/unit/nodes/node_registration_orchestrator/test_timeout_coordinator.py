@@ -138,7 +138,7 @@ def create_mock_emission_result(
 
 @pytest.fixture
 def mock_timeout_query() -> AsyncMock:
-    """Create a mock TimeoutScanner."""
+    """Create a mock ServiceTimeoutScanner."""
     query = AsyncMock()
     query.find_overdue_entities = AsyncMock(
         return_value=create_mock_query_result(),
@@ -148,7 +148,7 @@ def mock_timeout_query() -> AsyncMock:
 
 @pytest.fixture
 def mock_timeout_emission() -> AsyncMock:
-    """Create a mock TimeoutEmitter."""
+    """Create a mock ServiceTimeoutEmitter."""
     emission = AsyncMock()
     emission.process_timeouts = AsyncMock(
         return_value=create_mock_emission_result(),
@@ -380,7 +380,7 @@ class TestTimeoutCoordinatorCoordinate:
 
         # Result should still be success but with errors captured
         assert result.success is True
-        assert result.errors == ["Error 1", "Error 2"]
+        assert result.errors == ("Error 1", "Error 2")
         assert result.has_errors is True
 
     async def test_coordinate_empty_results(
@@ -547,7 +547,7 @@ class TestModelTimeoutCoordinationResult:
         assert result.emission_time_ms == 0.0
         assert result.success is True
         assert result.error is None
-        assert result.errors == []
+        assert result.errors == ()
 
     def test_total_found_property(self) -> None:
         """Test total_found property calculation."""

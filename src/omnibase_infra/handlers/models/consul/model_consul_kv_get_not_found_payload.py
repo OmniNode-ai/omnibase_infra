@@ -9,10 +9,16 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from omnibase_infra.handlers.models.consul.model_payload_consul import (
+    ModelPayloadConsul,
+    RegistryPayloadConsul,
+)
 
 
-class ModelConsulKVGetNotFoundPayload(BaseModel):
+@RegistryPayloadConsul.register("kv_get_not_found")
+class ModelConsulKVGetNotFoundPayload(ModelPayloadConsul):
     """Payload for consul.kv_get when key is not found.
 
     Attributes:

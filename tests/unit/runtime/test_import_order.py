@@ -136,8 +136,8 @@ class TestImportOrderIndependence:
         assert MessageDispatchEngine is not None
 
     def test_import_dispatcher_registry_first(self) -> None:
-        """Test that dispatcher_registry can be imported directly."""
-        from omnibase_infra.runtime.dispatcher_registry import (
+        """Test that registry_dispatcher can be imported directly."""
+        from omnibase_infra.runtime.registry_dispatcher import (
             DispatcherRegistry,
             ProtocolMessageDispatcher,
         )

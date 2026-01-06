@@ -346,7 +346,7 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from omnibase_core.enums import EnumReductionType, EnumStreamingMode
+from omnibase_core.enums import EnumNodeKind, EnumReductionType, EnumStreamingMode
 from omnibase_core.models.intents import (
     ModelConsulRegisterIntent,
     ModelPostgresUpsertRegistrationIntent,
@@ -772,7 +772,13 @@ class RegistrationReducer:
             )
 
         # Validate node_type value is valid ONEX type
-        valid_node_types = {"effect", "compute", "reducer", "orchestrator"}
+        # Use EnumNodeKind values (excluding RUNTIME_HOST which is not a registration type)
+        valid_node_types = {
+            EnumNodeKind.EFFECT.value,
+            EnumNodeKind.COMPUTE.value,
+            EnumNodeKind.REDUCER.value,
+            EnumNodeKind.ORCHESTRATOR.value,
+        }
         if event.node_type not in valid_node_types:
             return ValidationResult.failure(
                 error_code="invalid_node_type",
@@ -847,7 +853,7 @@ class RegistrationReducer:
         Returns:
             ModelIntent with intent_type="consul.register" and Consul payload.
         """
-        service_id = f"node-{event.node_type}-{event.node_id}"
+        service_id = f"onex-{event.node_type}-{event.node_id}"
         service_name = f"onex-{event.node_type}"
         tags = [
             f"node_type:{event.node_type}",
@@ -1184,13 +1190,13 @@ class RegistrationReducer:
 
 
 __all__ = [
-    "RegistrationReducer",
-    # Validation types (for tests and custom validators)
-    "ModelValidationResult",  # Canonical ONEX name (Model* convention)
-    "ValidationResult",  # Backwards compatibility alias
-    "ValidationErrorCode",
+    "PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS",
+    "PERF_THRESHOLD_INTENT_BUILD_MS",
     # Performance threshold constants (for tests and monitoring)
     "PERF_THRESHOLD_REDUCE_MS",
-    "PERF_THRESHOLD_INTENT_BUILD_MS",
-    "PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS",
+    # Validation types (for tests and custom validators)
+    "ModelValidationResult",  # Canonical ONEX name (Model* convention)
+    "RegistrationReducer",
+    "ValidationErrorCode",
+    "ValidationResult",  # Backwards compatibility alias
 ]

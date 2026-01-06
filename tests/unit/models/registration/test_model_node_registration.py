@@ -1098,7 +1098,8 @@ class TestModelNodeRegistrationSemverValidation:
                 registered_at=now,
                 updated_at=now,
             )
-        assert "Invalid semantic version" in str(exc_info.value)
+        # Case-insensitive check for robustness against minor error message changes
+        assert "invalid semantic version" in str(exc_info.value).lower()
 
     def test_invalid_semver_with_v_prefix(self) -> None:
         """Test that version with 'v' prefix is rejected."""
@@ -1112,7 +1113,8 @@ class TestModelNodeRegistrationSemverValidation:
                 registered_at=now,
                 updated_at=now,
             )
-        assert "Invalid semantic version" in str(exc_info.value)
+        # Case-insensitive check for robustness against minor error message changes
+        assert "invalid semantic version" in str(exc_info.value).lower()
 
     def test_invalid_semver_four_parts(self) -> None:
         """Test that version with four parts is rejected."""
@@ -1126,7 +1128,8 @@ class TestModelNodeRegistrationSemverValidation:
                 registered_at=now,
                 updated_at=now,
             )
-        assert "Invalid semantic version" in str(exc_info.value)
+        # Case-insensitive check for robustness against minor error message changes
+        assert "invalid semantic version" in str(exc_info.value).lower()
 
     def test_invalid_semver_arbitrary_string(self) -> None:
         """Test that arbitrary strings are rejected."""
@@ -1142,7 +1145,8 @@ class TestModelNodeRegistrationSemverValidation:
                     registered_at=now,
                     updated_at=now,
                 )
-            assert "Invalid semantic version" in str(exc_info.value)
+            # Case-insensitive check for robustness against minor error message changes
+            assert "invalid semantic version" in str(exc_info.value).lower()
 
     def test_invalid_semver_non_numeric_parts(self) -> None:
         """Test that versions with non-numeric parts are rejected."""
@@ -1158,7 +1162,8 @@ class TestModelNodeRegistrationSemverValidation:
                     registered_at=now,
                     updated_at=now,
                 )
-            assert "Invalid semantic version" in str(exc_info.value)
+            # Case-insensitive check for robustness against minor error message changes
+            assert "invalid semantic version" in str(exc_info.value).lower()
 
     def test_semver_error_message_format(self) -> None:
         """Test that validation error contains helpful message."""
@@ -1173,8 +1178,12 @@ class TestModelNodeRegistrationSemverValidation:
                 updated_at=now,
             )
         error_message = str(exc_info.value)
-        assert "Invalid semantic version 'invalid'" in error_message
-        assert "MAJOR.MINOR.PATCH" in error_message
+        error_message_lower = error_message.lower()
+        # Case-insensitive check for the error type and value
+        assert "invalid semantic version" in error_message_lower
+        assert "'invalid'" in error_message_lower
+        # MAJOR.MINOR.PATCH format guidance - case-insensitive
+        assert "major.minor.patch" in error_message_lower
 
 
 class TestModelNodeRegistrationHealthEndpointValidation:

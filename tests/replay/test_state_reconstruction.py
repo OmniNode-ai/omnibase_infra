@@ -41,6 +41,17 @@ from tests.helpers import (
     create_introspection_event,
 )
 
+# =============================================================================
+# Module-Level Markers
+# =============================================================================
+# These markers enable selective test execution:
+#   pytest -m "replay" - run only replay tests
+#   pytest -m "not replay" - skip replay tests
+
+pytestmark = [
+    pytest.mark.replay,
+]
+
 __all__ = [
     "TestEventLogReconstruction",
     "TestMultipleReconstructionScenarios",
@@ -51,48 +62,8 @@ __all__ = [
 # =============================================================================
 # Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def reducer() -> RegistrationReducer:
-    """Create a fresh RegistrationReducer instance.
-
-    Returns:
-        A new RegistrationReducer instance for testing.
-    """
-    return RegistrationReducer()
-
-
-@pytest.fixture
-def initial_state() -> ModelRegistrationState:
-    """Create the canonical initial idle state.
-
-    This is the starting state for all event log reconstructions.
-
-    Returns:
-        ModelRegistrationState in idle status with no prior events.
-    """
-    return ModelRegistrationState()
-
-
-@pytest.fixture
-def id_generator() -> DeterministicIdGenerator:
-    """Create a deterministic ID generator for reproducible tests.
-
-    Returns:
-        DeterministicIdGenerator with default seed.
-    """
-    return DeterministicIdGenerator(seed=100)
-
-
-@pytest.fixture
-def clock() -> DeterministicClock:
-    """Create a deterministic clock for reproducible timestamps.
-
-    Returns:
-        DeterministicClock starting at 2024-01-01 UTC.
-    """
-    return DeterministicClock()
+# Note: Core fixtures (reducer, initial_state, id_generator, clock) are provided
+# by tests/replay/conftest.py. Do not duplicate them here.
 
 
 # =============================================================================

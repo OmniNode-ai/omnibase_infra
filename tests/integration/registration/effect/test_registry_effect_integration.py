@@ -87,8 +87,9 @@ class TestFullSuccessFlow:
         # Verify Consul registration details
         consul_reg = consul_client.registrations[0]
         assert sample_request.node_id is not None
+        # Service ID follows ONEX convention: onex-{node_type}-{node_id}
         assert (
-            f"node-{sample_request.node_type}-{sample_request.node_id}"
+            f"onex-{sample_request.node_type}-{sample_request.node_id}"
             == consul_reg.service_id
         )
         assert consul_reg.service_name == sample_request.service_name

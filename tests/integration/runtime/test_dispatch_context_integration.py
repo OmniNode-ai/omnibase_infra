@@ -26,23 +26,17 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
-from omnibase_infra.runtime.dispatcher_registry import (
+from omnibase_infra.runtime.registry_dispatcher import (
     DispatcherRegistry,
 )
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
-
-# =============================================================================
-# Module-level markers
-# =============================================================================
-
-pytestmark = [pytest.mark.integration]
 
 # =============================================================================
 # Test Payload Models
@@ -1009,7 +1003,7 @@ class TestEdgeCasesAndErrorHandling:
             envelope=envelope,
         )
 
-        with pytest.raises(Exception):  # ValidationError for frozen models
+        with pytest.raises(ValidationError):
             ctx.now = datetime.now(UTC)  # type: ignore[misc]
 
     @pytest.mark.asyncio

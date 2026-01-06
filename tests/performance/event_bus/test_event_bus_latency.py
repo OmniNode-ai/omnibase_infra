@@ -47,8 +47,6 @@ from tests.performance.event_bus.conftest import generate_unique_topic
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestPublishLatency:
     """Test publish operation latency characteristics."""
 
@@ -210,8 +208,6 @@ class TestPublishLatency:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestEndToEndLatency:
     """Test end-to-end message delivery latency."""
 
@@ -388,8 +384,6 @@ class TestEndToEndLatency:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.performance
-@pytest.mark.unit
 class TestLatencyUnderLoad:
     """Test latency characteristics under varying load conditions."""
 

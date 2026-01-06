@@ -349,6 +349,77 @@ class ModelReplayConfig(BaseModel):
         description="Kafka producer request timeout in milliseconds (default: 30s)",
     )
 
+    @field_validator("bootstrap_servers", mode="before")
+    @classmethod
+    def validate_bootstrap_servers(cls, v: object) -> str:
+        """Validate bootstrap_servers format.
+
+        Validates that bootstrap_servers:
+        - Is not None
+        - Is a string
+        - Is not empty or whitespace-only
+        - Contains valid host:port format(s)
+
+        Args:
+            v: Bootstrap servers value (any type before Pydantic conversion)
+
+        Returns:
+            Validated bootstrap servers string (stripped of whitespace)
+
+        Raises:
+            ValueError: If bootstrap servers format is invalid
+        """
+        if v is None:
+            raise ValueError(
+                "bootstrap_servers cannot be None. "
+                "Set KAFKA_BOOTSTRAP_SERVERS environment variable or use --bootstrap-servers."
+            )
+        if not isinstance(v, str):
+            raise ValueError(
+                f"bootstrap_servers must be a string, got {type(v).__name__}"
+            )
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError(
+                "bootstrap_servers cannot be empty. "
+                "Provide a valid Kafka broker address (e.g., 'localhost:9092')."
+            )
+
+        # Validate host:port format for each server
+        servers = stripped.split(",")
+        for server in servers:
+            server = server.strip()
+            if not server:
+                raise ValueError(
+                    f"bootstrap_servers cannot contain empty entries. Got: '{v}'"
+                )
+            if ":" not in server:
+                raise ValueError(
+                    f"Invalid bootstrap server format '{server}'. "
+                    "Expected 'host:port' (e.g., 'localhost:9092')."
+                )
+            host, port_str = server.rsplit(":", 1)
+            if not host:
+                raise ValueError(
+                    f"Invalid bootstrap server format '{server}'. Host cannot be empty."
+                )
+            try:
+                port = int(port_str)
+                if port < 1 or port > 65535:
+                    raise ValueError(
+                        f"Invalid port {port} in '{server}'. "
+                        "Port must be between 1 and 65535."
+                    )
+            except ValueError as e:
+                if "Invalid port" in str(e):
+                    raise
+                raise ValueError(
+                    f"Invalid port '{port_str}' in '{server}'. "
+                    "Port must be a valid integer."
+                ) from e
+
+        return stripped
+
     @field_validator("rate_limit_per_second")
     @classmethod
     def validate_rate_limit(cls, v: float) -> float:
