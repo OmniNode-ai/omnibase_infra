@@ -919,6 +919,7 @@ class RegistrationReducer:
 
         # Build typed PostgreSQL upsert payload (implements ProtocolIntentPayload)
         postgres_payload = ModelPayloadPostgresUpsertRegistration(
+            correlation_id=correlation_id,
             record=record,
         )
 

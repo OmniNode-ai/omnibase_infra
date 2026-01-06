@@ -15,6 +15,7 @@ Related:
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from omnibase_core.models.reducer.payloads import ModelIntentPayloadBase
 from pydantic import BaseModel, Field
@@ -32,12 +33,18 @@ class ModelPayloadPostgresUpsertRegistration(ModelIntentPayloadBase):
 
     Attributes:
         intent_type: Discriminator literal for intent routing. Always "postgres.upsert_registration".
+        correlation_id: Correlation ID for distributed tracing.
         record: The registration record to upsert (typed as BaseModel for flexibility).
     """
 
     intent_type: Literal["postgres.upsert_registration"] = Field(
         default="postgres.upsert_registration",
         description="Discriminator literal for intent routing.",
+    )
+
+    correlation_id: UUID = Field(
+        ...,
+        description="Correlation ID for distributed tracing.",
     )
 
     record: BaseModel = Field(

@@ -104,12 +104,6 @@ from omnibase_core.validation import (
     validate_union_usage,
 )
 
-# Backwards compatibility aliases for omnibase_core 0.6.2 renames
-# ProtocolContractValidator -> ServiceContractValidator
-# CircularImportValidationResult -> ModelImportValidationResult
-ProtocolContractValidator = ServiceContractValidator
-CircularImportValidationResult = ModelImportValidationResult
-
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
     ChainPropagationError,
@@ -219,7 +213,6 @@ __all__: list[str] = [
     "ChainPropagationError",
     "ChainPropagationValidator",
     "CircularImportValidator",
-    "CircularImportValidationResult",  # Backwards compatibility alias
     # Contract linting (PR #57)
     "ContractLinter",
     "EnumContractViolationSeverity",
@@ -230,8 +223,7 @@ __all__: list[str] = [
     "ModelContractLintResult",
     "ModelContractViolation",
     "ModelExecutionShapeValidationResult",
-    "ModelImportValidationResult",  # New name (omnibase_core 0.6.2)
-    "ProtocolContractValidator",  # Backwards compatibility alias
+    "ModelImportValidationResult",
     "ServiceContractValidator",
     # Routing coverage validation (OMN-958)
     "RoutingCoverageError",
