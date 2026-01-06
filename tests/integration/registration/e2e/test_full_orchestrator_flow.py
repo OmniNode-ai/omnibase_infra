@@ -51,7 +51,6 @@ from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
-from omnibase_infra.models.discovery import DEFAULT_INTROSPECTION_TOPIC
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
@@ -63,26 +62,13 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 
-from .conftest import (
-    ALL_INFRA_AVAILABLE,
-    CONSUL_AVAILABLE,
-    KAFKA_AVAILABLE,
-    POSTGRES_AVAILABLE,
-    SERVICE_REGISTRY_AVAILABLE,
-)
+# Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
 from .verification_helpers import (
-    verify_consul_registration,
-    verify_postgres_registration,
-    wait_for_consul_registration,
     wait_for_postgres_registration,
 )
 
 if TYPE_CHECKING:
-    import asyncpg
-    from omnibase_core.container import ModelONEXContainer
-
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
-    from omnibase_infra.handlers import ConsulHandler
     from omnibase_infra.nodes.effects import NodeRegistryEffect
     from omnibase_infra.projectors import (
         ProjectionReaderRegistration,
@@ -93,18 +79,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Module-level markers
+# Note: conftest.py already applies pytest.mark.e2e and skipif(not ALL_INFRA_AVAILABLE)
+# to all tests in this directory. We only add the e2e marker here for explicit clarity.
 pytestmark = [
     pytest.mark.e2e,
-    pytest.mark.skipif(
-        not ALL_INFRA_AVAILABLE,
-        reason=(
-            "Full infrastructure required for E2E tests. "
-            f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS)'}. "
-            f"Consul: {'available' if CONSUL_AVAILABLE else 'MISSING (set CONSUL_HOST or unreachable)'}. "
-            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
-            f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
-        ),
-    ),
 ]
 
 

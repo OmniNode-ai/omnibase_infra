@@ -57,13 +57,7 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
 )
 
-from .conftest import (
-    ALL_INFRA_AVAILABLE,
-    CONSUL_AVAILABLE,
-    KAFKA_AVAILABLE,
-    POSTGRES_AVAILABLE,
-    SERVICE_REGISTRY_AVAILABLE,
-)
+# Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
 from .performance_utils import (
     PerformanceThresholds,
     assert_heartbeat_interval,
@@ -79,8 +73,6 @@ from .verification_helpers import (
     verify_dual_registration,
     verify_postgres_registration,
     wait_for_consul_registration,
-    wait_for_heartbeat_update,
-    wait_for_kafka_event,
     wait_for_postgres_registration,
 )
 
@@ -92,9 +84,6 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
     )
-    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-        HandlerNodeIntrospected,
-    )
     from omnibase_infra.projectors import (
         ProjectionReaderRegistration,
         ProjectorRegistration,
@@ -104,18 +93,10 @@ if TYPE_CHECKING:
 
 
 # Module-level markers
+# Note: conftest.py already applies pytest.mark.e2e and skipif(not ALL_INFRA_AVAILABLE)
+# to all tests in this directory. We only add the e2e marker here for explicit clarity.
 pytestmark = [
     pytest.mark.e2e,
-    pytest.mark.skipif(
-        not ALL_INFRA_AVAILABLE,
-        reason=(
-            "Full infrastructure required for E2E tests. "
-            f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS)'}. "
-            f"Consul: {'available' if CONSUL_AVAILABLE else 'MISSING (set CONSUL_HOST or unreachable)'}. "
-            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
-            f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
-        ),
-    ),
 ]
 
 
@@ -1607,9 +1588,6 @@ class TestSuite5RegistryRecovery:
         """
         from omnibase_infra.models.projection.model_registration_projection import (
             ModelRegistrationProjection,
-        )
-        from omnibase_infra.nodes.node_registration_orchestrator import (
-            NodeRegistrationOrchestrator,
         )
         from omnibase_infra.projectors import ProjectorRegistration
         from omnibase_infra.runtime.container_wiring import (

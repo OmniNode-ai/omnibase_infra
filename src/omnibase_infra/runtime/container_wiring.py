@@ -235,7 +235,15 @@ async def wire_infrastructure_services(
         >>> hasattr(compute_reg, 'register_plugin') and callable(compute_reg.register_plugin)
         True
     """
-    # Validate service_registry is available before attempting registration
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        logger.warning(
+            "wire_infrastructure_services: service_registry is None, "
+            "skipping service registration"
+        )
+        return {"services": [], "status": "skipped"}
+
+    # Validate service_registry has required methods
     _validate_service_registry(container, "wire_infrastructure_services")
 
     services_registered: list[str] = []
@@ -811,7 +819,17 @@ async def wire_registration_handlers(
         >>> # Resolve handlers from container
         >>> handler = await container.service_registry.resolve_service(HandlerNodeIntrospected)
     """
-    # Validate service_registry is available before attempting registration
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        logger.warning(
+            "wire_registration_handlers: service_registry is None, "
+            "skipping handler registration"
+        )
+        return {"services": [], "status": "skipped"}
+
+    # Validate service_registry has required methods.
+    # NOTE: Validation is done BEFORE imports for fail-fast behavior - no point loading
+    # heavy infrastructure modules if service_registry is unavailable.
     _validate_service_registry(container, "wire_registration_handlers")
 
     # Deferred imports: These imports are placed inside the function to avoid circular
@@ -1211,9 +1229,22 @@ async def wire_registration_dispatchers(
         {'dispatchers': [...], 'routes': [...]}
         >>> engine.freeze()  # Must freeze after wiring
     """
-    # Validate service_registry is available
+    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+    if container.service_registry is None:
+        logger.warning(
+            "wire_registration_dispatchers: service_registry is None, "
+            "skipping dispatcher registration"
+        )
+        return {"dispatchers": [], "routes": [], "status": "skipped"}
+
+    # Validate service_registry has required methods.
+    # NOTE: Validation is done BEFORE imports for fail-fast behavior - no point loading
+    # heavy infrastructure modules if service_registry is unavailable.
     _validate_service_registry(container, "wire_registration_dispatchers")
 
+    # Deferred imports: These imports are placed inside the function to avoid circular
+    # import issues and to delay loading dispatcher infrastructure until this function
+    # is actually called.
     from omnibase_infra.enums.enum_message_category import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (

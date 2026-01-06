@@ -68,17 +68,12 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
-# Import shared envelope helper and availability flags from conftest
+# Import shared envelope helper from conftest
+# Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
 from tests.integration.registration.e2e.conftest import (
-    CONSUL_AVAILABLE,
-    KAFKA_AVAILABLE,
-    POSTGRES_AVAILABLE,
-    SERVICE_REGISTRY_AVAILABLE,
     wrap_event_in_envelope,
 )
 
@@ -114,27 +109,20 @@ def _check_runtime_available() -> bool:
 RUNTIME_AVAILABLE = _check_runtime_available()
 
 
-# Skip all tests in this module if runtime or required infrastructure is not available
-ALL_RUNTIME_REQUIREMENTS_MET = (
-    RUNTIME_AVAILABLE
-    and KAFKA_AVAILABLE
-    and CONSUL_AVAILABLE
-    and POSTGRES_AVAILABLE
-    and SERVICE_REGISTRY_AVAILABLE
-)
-
+# Module-level markers
+# Note: conftest.py already applies pytest.mark.e2e and skipif(not ALL_INFRA_AVAILABLE)
+# to all tests in this directory. We only add runtime-specific markers here:
+# - pytest.mark.runtime for categorization
+# - skipif(not RUNTIME_AVAILABLE) for the unique runtime container check
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.runtime,
     pytest.mark.skipif(
-        not ALL_RUNTIME_REQUIREMENTS_MET,
+        not RUNTIME_AVAILABLE,
         reason=(
-            "Runtime E2E tests require all infrastructure. "
-            f"Runtime: {'available' if RUNTIME_AVAILABLE else f'MISSING at {RUNTIME_HEALTH_URL}'}. "
-            f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING'}. "
-            f"Consul: {'available' if CONSUL_AVAILABLE else 'MISSING'}. "
-            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING'}. "
-            f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
+            "Runtime E2E tests require the runtime container to be running. "
+            f"Runtime: MISSING at {RUNTIME_HEALTH_URL}. "
+            "Start with: docker compose -f docker/docker-compose.e2e.yml --profile runtime up -d"
         ),
     ),
 ]
