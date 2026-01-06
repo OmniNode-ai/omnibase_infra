@@ -28,7 +28,10 @@ from omnibase_infra.errors import (
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
+    from typing import Any
+
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +88,7 @@ class MixinVaultInitialization:
         )
 
     def _parse_vault_config(
-        self, config: dict[str, JsonType], correlation_id: UUID
+        self, config: dict[str, Any], correlation_id: UUID
     ) -> ModelVaultHandlerConfig:
         """Parse and validate vault configuration.
 

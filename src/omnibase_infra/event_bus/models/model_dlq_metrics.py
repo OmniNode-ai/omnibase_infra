@@ -55,7 +55,10 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
+    from typing import Any
+
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 
 class ModelDlqMetrics(BaseModel):
@@ -270,7 +273,7 @@ class ModelDlqMetrics(BaseModel):
         """
         return self.error_type_counts.get(error_type, 0)
 
-    def to_dict(self) -> dict[str, JsonType]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary with computed properties included.
 
         Returns:

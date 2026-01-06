@@ -66,7 +66,10 @@ from omnibase_infra.mixins import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
+    from typing import Any
+
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 T = TypeVar("T")
 
@@ -319,7 +322,7 @@ class ConsulHandler(
             error_message=f"Unexpected error: {type(error).__name__}",
         )
 
-    async def initialize(self, config: dict[str, JsonType]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         """Initialize Consul client with configuration.
 
         Args:
@@ -440,7 +443,7 @@ class ConsulHandler(
         )
 
     async def execute(
-        self, envelope: dict[str, JsonType]
+        self, envelope: dict[str, Any]
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Execute Consul operation from envelope.
 
@@ -690,7 +693,7 @@ class ConsulHandler(
 
             return None, new_state
 
-    def describe(self) -> dict[str, JsonType]:
+    def describe(self) -> dict[str, Any]:
         """Return handler metadata and capabilities for introspection.
 
         This method exposes the handler's type classification along with its

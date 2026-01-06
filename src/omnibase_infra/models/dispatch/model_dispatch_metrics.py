@@ -52,9 +52,12 @@ See Also:
     omnibase_core.runtime.MessageDispatchEngine: Uses these for observability
 """
 
-from omnibase_core.types import JsonType
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
+# NOTE: Using `Any` instead of `JsonType` from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
     ModelDispatcherMetrics,
@@ -453,7 +456,7 @@ class ModelDispatchMetrics(BaseModel):
         category_key = category.value.lower()
         return self.category_metrics.get(category_key, 0)
 
-    def to_dict(self) -> dict[str, JsonType]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert to dictionary with computed properties included.
 

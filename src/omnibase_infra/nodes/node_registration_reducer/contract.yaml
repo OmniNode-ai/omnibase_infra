@@ -1,0 +1,287 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+# ONEX Node Contract - Registration Reducer Node
+#
+# This reducer follows the pure function pattern for node registration workflows:
+#   reduce(state, event) -> ModelReducerOutput[state + intents]
+#
+# The FSM defines state transitions for the registration lifecycle:
+#   idle -> pending -> partial -> complete
+#                  \           \
+#                   -> failed <-
+#
+# All state transition logic is driven by this contract.
+# =============================================================================
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+name: "node_registration_reducer"
+node_type: "REDUCER"
+description: "Pure reducer for node registration workflow - processes introspection events and emits registration intents for Consul and PostgreSQL backends."
+input_model:
+  name: "ModelReducerInput"
+  module: "omnibase_core.models.reducer.model_reducer_input"
+  description: "Reducer input containing introspection event and trigger."
+output_model:
+  name: "ModelReducerOutput"
+  module: "omnibase_core.models.reducer.model_reducer_output"
+  description: "Reducer output containing new state and registration intents."
+# FSM State Machine Definition
+# ============================
+# The registration reducer uses an FSM to manage the registration lifecycle.
+# This is the SINGLE SOURCE OF TRUTH for all state transition logic.
+#
+# State Diagram:
+#   +-------+   introspection   +---------+
+#   | idle  | ----------------> | pending |
+#   +-------+                   +---------+
+#      ^                         |       |
+#      |       consul confirmed  |       | postgres confirmed
+#      |       (first)          v       v (first)
+#      |                  +---------+
+#      |                  | partial |
+#      |                  +---------+
+#      |                    |       |
+#      |   remaining        |       | error received
+#      |   confirmed        v       v
+#      |              +---------+ +---------+
+#      +---reset------| complete| | failed  |---reset---+
+#                     +---------+ +---------+           |
+#                                                       v
+#                                                 +-------+
+#                                                 | idle  |
+#                                                 +-------+
+#
+state_machine:
+  state_machine_name: "registration_fsm"
+  initial_state: "idle"
+  states:
+    - state_name: "idle"
+      description: "Initial state - waiting for introspection event"
+      entry_actions: []
+      exit_actions: []
+      required_data: []
+    - state_name: "pending"
+      description: "Registration initiated - waiting for backend confirmations"
+      entry_actions:
+        - "emit_consul_intent"
+        - "emit_postgres_intent"
+      exit_actions: []
+      required_data:
+        - "node_id"
+        - "correlation_id"
+    - state_name: "partial"
+      description: "One backend confirmed - waiting for remaining confirmation"
+      entry_actions: []
+      exit_actions: []
+      required_data:
+        - "node_id"
+        - "correlation_id"
+    - state_name: "complete"
+      description: "Both backends confirmed - registration successful"
+      is_terminal: false # Can be reset for re-registration
+      entry_actions: []
+      exit_actions: []
+      required_data:
+        - "node_id"
+    - state_name: "failed"
+      description: "Registration failed - recoverable via reset"
+      is_terminal: false # Can be reset for retry
+      entry_actions: []
+      exit_actions: []
+      required_data:
+        - "failure_reason"
+  transitions:
+    # idle -> pending: On introspection event
+    - from_state: "idle"
+      to_state: "pending"
+      trigger: "introspection_received"
+      description: "Start registration on introspection event"
+      conditions:
+        - expression: "node_id is_present"
+          required: true
+        - expression: "node_type is_valid"
+          required: true
+      actions:
+        - action_name: "build_consul_intent"
+          action_type: "intent_emission"
+        - action_name: "build_postgres_intent"
+          action_type: "intent_emission"
+    # pending -> partial: On first confirmation
+    - from_state: "pending"
+      to_state: "partial"
+      trigger: "consul_confirmed"
+      description: "Consul registration confirmed"
+      actions:
+        - action_name: "mark_consul_confirmed"
+          action_type: "state_update"
+    - from_state: "pending"
+      to_state: "partial"
+      trigger: "postgres_confirmed"
+      description: "PostgreSQL registration confirmed"
+      actions:
+        - action_name: "mark_postgres_confirmed"
+          action_type: "state_update"
+    # pending -> failed: On error
+    - from_state: "pending"
+      to_state: "failed"
+      trigger: "error_received"
+      description: "Registration failed from pending state"
+      actions:
+        - action_name: "record_failure"
+          action_type: "state_update"
+    # partial -> complete: On second confirmation
+    - from_state: "partial"
+      to_state: "complete"
+      trigger: "consul_confirmed"
+      description: "Consul confirmed after postgres - registration complete"
+      conditions:
+        - expression: "postgres_confirmed is_true"
+          required: true
+    - from_state: "partial"
+      to_state: "complete"
+      trigger: "postgres_confirmed"
+      description: "PostgreSQL confirmed after consul - registration complete"
+      conditions:
+        - expression: "consul_confirmed is_true"
+          required: true
+    # partial -> failed: On error
+    - from_state: "partial"
+      to_state: "failed"
+      trigger: "error_received"
+      description: "Registration failed from partial state"
+      actions:
+        - action_name: "record_failure"
+          action_type: "state_update"
+    # Reset transitions: failed/complete -> idle
+    - from_state: "failed"
+      to_state: "idle"
+      trigger: "reset"
+      description: "Reset from failed state for retry"
+      actions:
+        - action_name: "clear_state"
+          action_type: "state_update"
+    - from_state: "complete"
+      to_state: "idle"
+      trigger: "reset"
+      description: "Reset from complete state for re-registration"
+      actions:
+        - action_name: "clear_state"
+          action_type: "state_update"
+    # Validation failure: idle -> failed
+    - from_state: "idle"
+      to_state: "failed"
+      trigger: "validation_failed"
+      description: "Event validation failed"
+      actions:
+        - action_name: "record_validation_failure"
+          action_type: "state_update"
+  persistence_enabled: true
+  terminal_states: []
+  # Note: complete and failed are NOT true terminals - they can reset to idle
+  # This list is empty because all states can transition (via reset)
+# Intent Emission Configuration
+# ============================
+# The reducer emits intents for Effect layer execution.
+# These intents are NOT executed by the reducer - they are returned
+# in the ModelReducerOutput for the Runtime to publish.
+intent_emission:
+  enabled: true
+  intents:
+    - intent_type: "consul.register"
+      target_pattern: "consul://service/{service_name}"
+      payload_model: "ModelPayloadConsulRegister"
+      payload_module: "omnibase_infra.nodes.reducers.models.model_payload_consul_register"
+      description: "Register node with Consul service discovery"
+    - intent_type: "postgres.upsert_registration"
+      target_pattern: "postgres://node_registrations/{node_id}"
+      payload_model: "ModelPayloadPostgresUpsertRegistration"
+      payload_module: "omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration"
+      description: "Upsert node registration record in PostgreSQL"
+# State Model Configuration
+# =========================
+# The reducer uses ModelRegistrationState for immutable state management.
+state_model:
+  name: "ModelRegistrationState"
+  module: "omnibase_infra.nodes.reducers.models.model_registration_state"
+  description: "Immutable state model for pure reducer pattern"
+# Validation Configuration
+# ========================
+# Event validation rules applied before state transitions.
+validation:
+  enabled: true
+  rules:
+    - field: "node_id"
+      required: true
+      error_code: "missing_node_id"
+      error_message: "node_id is required for registration identity"
+    - field: "node_type"
+      required: true
+      valid_values:
+        - "effect"
+        - "compute"
+        - "reducer"
+        - "orchestrator"
+      error_code: "missing_node_type"
+      invalid_error_code: "invalid_node_type"
+      error_message: "node_type is required for service categorization"
+# Performance Configuration
+# =========================
+# Performance thresholds for monitoring.
+# Values can be overridden via environment variables.
+performance:
+  thresholds:
+    reduce_ms:
+      default: 300.0
+      env_var: "ONEX_PERF_THRESHOLD_REDUCE_MS"
+      description: "Target processing time for reduce() method"
+    intent_build_ms:
+      default: 50.0
+      env_var: "ONEX_PERF_THRESHOLD_INTENT_BUILD_MS"
+      description: "Target processing time for intent building"
+    idempotency_check_ms:
+      default: 1.0
+      env_var: "ONEX_PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS"
+      description: "Target processing time for idempotency check"
+# Idempotency Configuration
+# =========================
+# The reducer supports idempotent event processing via event_id tracking.
+idempotency:
+  enabled: true
+  strategy: "event_id_tracking"
+  derivation: "deterministic_hash"
+  hash_fields:
+    - "node_id"
+    - "node_type"
+    - "timestamp"
+  description: "Skip duplicate events based on event_id or derived hash"
+# Dependencies
+# ============
+dependencies:
+  - name: "container"
+    type: "ModelONEXContainer"
+    module: "omnibase_core.models.container.model_onex_container"
+    description: "ONEX dependency injection container"
+# Health Check
+# ============
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+# Metadata
+# ========
+metadata:
+  author: "OmniNode Team"
+  created: "2025-12-28"
+  updated: "2026-01-06"
+  tags:
+    - "reducer"
+    - "registration"
+    - "fsm"
+    - "pure-function"
+    - "mvp"
+  related_tickets:
+    - "OMN-889"
+    - "OMN-1104"

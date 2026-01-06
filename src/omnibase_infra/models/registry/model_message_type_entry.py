@@ -21,8 +21,10 @@ Related:
 """
 
 from datetime import datetime
+from typing import Any
 
-from omnibase_core.types import JsonType
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -161,7 +163,7 @@ class ModelMessageTypeEntry(BaseModel):
         description="Timestamp when this entry was registered (UTC, must be explicitly provided).",
     )
 
-    metadata: JsonType = Field(
+    metadata: Any = Field(
         default=None,
         description="Optional additional metadata. Accepts any JSON-serializable value.",
     )

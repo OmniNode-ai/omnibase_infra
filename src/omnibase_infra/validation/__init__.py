@@ -92,9 +92,8 @@ Security Design (Intentional Fail-Open Architecture):
 """
 
 from omnibase_core.models.validation.model_import_validation_result import (
-    ModelImportValidationResult,
+    ModelModuleImportResult as ModelImportValidationResult,
 )
-from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
     CircularImportValidator,
     validate_all,
@@ -180,6 +179,12 @@ from omnibase_infra.validation.security_validator import (
     is_sensitive_method_name,
     validate_handler_security,
     validate_method_exposure,
+)
+
+# NOTE: ServiceContractValidator was removed in omnibase_core 0.6.2
+# Using a stub that implements ProtocolContractValidator
+from omnibase_infra.validation.stub_contract_validator import (
+    ServiceContractValidator,
 )
 
 # Topic category validation for execution shape enforcement

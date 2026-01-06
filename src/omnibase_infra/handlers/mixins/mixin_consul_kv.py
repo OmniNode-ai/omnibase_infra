@@ -13,10 +13,11 @@ Operations:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 from uuid import UUID
 
-from omnibase_core.types import JsonType
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 T = TypeVar("T")
 
@@ -108,7 +109,7 @@ class MixinConsulKV:
 
     async def _kv_get(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, Any],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
@@ -143,16 +144,14 @@ class MixinConsulKV:
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def get_func() -> tuple[
-            int, list[dict[str, JsonType]] | dict[str, JsonType] | None
-        ]:
+        def get_func() -> tuple[int, list[dict[str, Any]] | dict[str, Any] | None]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
             index, data = self._client.kv.get(key, recurse=recurse_bool)
             return index, data
 
         # Type alias for KV get result
-        KVGetResult = tuple[int, list[dict[str, JsonType]] | dict[str, JsonType] | None]
+        KVGetResult = tuple[int, list[dict[str, Any]] | dict[str, Any] | None]
         result = await self._execute_with_retry(
             "consul.kv_get",
             get_func,
@@ -221,7 +220,7 @@ class MixinConsulKV:
 
     async def _kv_put(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, Any],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:

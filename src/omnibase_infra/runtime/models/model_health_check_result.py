@@ -5,7 +5,7 @@
 This module provides the Pydantic model for component health check operation results.
 
 Design Pattern:
-    ModelHealthCheckResult replaces tuple[str, JsonType] returns from
+    ModelHealthCheckResult replaces tuple[str, Any] returns from
     check_health() with a strongly-typed model that provides:
     - Component type identification
     - Typed health status with structured details
@@ -31,7 +31,10 @@ Example:
 
 from __future__ import annotations
 
-from omnibase_core.types import JsonType
+from typing import Any
+
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -63,7 +66,7 @@ class ModelHealthCheckResult(BaseModel):
         ...,
         description="Whether the handler is healthy",
     )
-    details: dict[str, JsonType] = Field(
+    details: dict[str, Any] = Field(
         default_factory=dict,
         description="Detailed health check data from the handler",
     )
@@ -88,7 +91,7 @@ class ModelHealthCheckResult(BaseModel):
             >>> result.healthy
             True
         """
-        details: dict[str, JsonType] = {"healthy": True}
+        details: dict[str, Any] = {"healthy": True}
         if note:
             details["note"] = note
         return cls(handler_type=handler_type, healthy=True, details=details)
@@ -178,7 +181,7 @@ class ModelHealthCheckResult(BaseModel):
     def from_handler_response(
         cls,
         handler_type: str,
-        health_response: JsonType,
+        health_response: Any,
     ) -> ModelHealthCheckResult:
         """Create a result from a raw handler health check response.
 

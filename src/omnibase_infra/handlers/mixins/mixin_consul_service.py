@@ -35,8 +35,12 @@ from omnibase_infra.handlers.models.model_consul_handler_response import (
 )
 
 if TYPE_CHECKING:
+    from typing import Any
+
     import consul as consul_lib
-    from omnibase_core.types import JsonType
+
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 
 class ProtocolConsulServiceDependencies(Protocol):
@@ -104,7 +108,7 @@ class MixinConsulService:
 
     async def _register_service(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, Any],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
@@ -152,9 +156,7 @@ class MixinConsulService:
             tags_list = [str(t) for t in tags]
 
         check = payload.get("check")
-        check_dict: dict[str, JsonType] | None = (
-            check if isinstance(check, dict) else None
-        )
+        check_dict: dict[str, Any] | None = check if isinstance(check, dict) else None
 
         if self._client is None:
             raise RuntimeError("Client not initialized")
@@ -187,7 +189,7 @@ class MixinConsulService:
 
     async def _deregister_service(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, Any],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:

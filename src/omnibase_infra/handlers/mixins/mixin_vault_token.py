@@ -27,7 +27,10 @@ from omnibase_infra.errors import (
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
+    from typing import Any
+
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 T = TypeVar("T")
 
@@ -170,7 +173,7 @@ class MixinVaultToken:
 
     def _extract_ttl_from_renewal_response(
         self,
-        result: dict[str, JsonType],
+        result: dict[str, Any],
         default_ttl: int,
         correlation_id: UUID,
     ) -> int:
@@ -247,9 +250,7 @@ class MixinVaultToken:
 
         return current_ttl
 
-    async def renew_token(
-        self, correlation_id: UUID | None = None
-    ) -> dict[str, JsonType]:
+    async def renew_token(self, correlation_id: UUID | None = None) -> dict[str, Any]:
         """Renew Vault authentication token.
 
         Token TTL Extraction Logic:
@@ -281,10 +282,10 @@ class MixinVaultToken:
         assert self._client is not None
         assert self._config is not None
 
-        def renew_func() -> dict[str, JsonType]:
+        def renew_func() -> dict[str, Any]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, JsonType] = self._client.auth.token.renew_self()
+            result: dict[str, Any] = self._client.auth.token.renew_self()
             return result
 
         # _execute_with_retry already raises properly typed errors:
@@ -324,7 +325,7 @@ class MixinVaultToken:
         self,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
+    ) -> ModelHandlerOutput[dict[str, Any]]:
         """Execute token renewal operation from envelope.
 
         Args:

@@ -44,7 +44,10 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
+    from typing import Any
+
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 
 class ModelDlqEvent(BaseModel):
@@ -150,7 +153,7 @@ class ModelDlqEvent(BaseModel):
         description="Consumer group that processed the message",
     )
 
-    def to_log_context(self) -> dict[str, JsonType]:
+    def to_log_context(self) -> dict[str, Any]:
         """Convert to a dictionary suitable for structured logging.
 
         Returns a dictionary with all fields formatted for logging,

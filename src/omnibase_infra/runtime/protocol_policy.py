@@ -62,7 +62,7 @@ Example Usage:
         def policy_type(self) -> EnumPolicyType:
             return EnumPolicyType.ORCHESTRATOR  # Recommended for type safety
 
-        def evaluate(self, context: JsonType) -> JsonType:
+        def evaluate(self, context: Any) -> Any:
             '''Calculate backoff delay based on retry attempt.'''
             attempt = int(context.get("attempt", 0))
             base_delay = float(context.get("base_delay_seconds", 1.0))
@@ -74,7 +74,7 @@ Example Usage:
                 "should_retry": attempt < 10,
             }
 
-        def decide(self, context: JsonType) -> JsonType:
+        def decide(self, context: Any) -> Any:
             '''Alias for evaluate() - delegates to evaluate().'''
             return self.evaluate(context)
 
@@ -115,7 +115,10 @@ from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 from omnibase_infra.enums import EnumPolicyType
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
+    from typing import Any
+
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 
 @runtime_checkable
@@ -174,7 +177,7 @@ class ProtocolPolicy(Protocol):
             def policy_type(self) -> str:
                 return "orchestrator"
 
-            def evaluate(self, context: JsonType) -> JsonType:
+            def evaluate(self, context: Any) -> Any:
                 failure_count = int(context.get("failure_count", 0))
                 threshold = int(context.get("threshold", 5))
                 return {
@@ -247,7 +250,7 @@ class ProtocolPolicy(Protocol):
         """
         ...
 
-    def evaluate(self, context: JsonType) -> JsonType:
+    def evaluate(self, context: Any) -> Any:
         """Evaluate the policy with the given context and return a decision.
 
         This is the primary method for policy execution. It receives contextual
@@ -277,7 +280,7 @@ class ProtocolPolicy(Protocol):
 
         Example:
             ```python
-            def evaluate(self, context: JsonType) -> JsonType:
+            def evaluate(self, context: Any) -> Any:
                 '''Decide retry behavior based on error type.'''
                 error_type = str(context.get("error_type", "unknown"))
                 attempt = int(context.get("attempt", 0))
@@ -293,7 +296,7 @@ class ProtocolPolicy(Protocol):
         """
         ...
 
-    def decide(self, context: JsonType) -> JsonType:
+    def decide(self, context: Any) -> Any:
         """Alias for evaluate() - provided for semantic clarity.
 
         Some use cases read more naturally with "decide" rather than "evaluate".
@@ -319,7 +322,7 @@ class ProtocolPolicy(Protocol):
         Note:
             Default implementations should delegate to evaluate():
             ```python
-            def decide(self, context: JsonType) -> JsonType:
+            def decide(self, context: Any) -> Any:
                 return self.evaluate(context)
             ```
         """

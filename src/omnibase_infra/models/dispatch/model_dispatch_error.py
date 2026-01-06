@@ -58,9 +58,16 @@ See Also:
 
 from __future__ import annotations
 
+from typing import Any
+
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# NOTE: Using `Any` instead of `JsonType` from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases. JsonType is defined as:
+#   dict[str, 'JsonType'] | list['JsonType'] | str | int | float | bool | None
+# which causes infinite recursion during schema generation.
+# See: https://docs.pydantic.dev/2.12/concepts/types/#named-recursive-types
 
 # Sentinel values for "not set" state
 _SENTINEL_STR: str = ""
@@ -116,7 +123,7 @@ class ModelDispatchError(BaseModel):
         default=None,
         description="Typed error code from EnumCoreErrorCode. None if not set.",
     )
-    error_details: dict[str, JsonType] = Field(
+    error_details: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional JSON-serializable error context.",
     )
@@ -175,7 +182,7 @@ class ModelDispatchError(BaseModel):
         cls,
         exception: Exception,
         code: EnumCoreErrorCode | None = None,
-        details: dict[str, JsonType] | None = None,
+        details: dict[str, Any] | None = None,
     ) -> ModelDispatchError:
         """Create error info from an exception.
 
@@ -211,7 +218,7 @@ class ModelDispatchError(BaseModel):
         cls,
         message: str,
         code: EnumCoreErrorCode | None = None,
-        details: dict[str, JsonType] | None = None,
+        details: dict[str, Any] | None = None,
     ) -> ModelDispatchError:
         """Create error info from a message string.
 
@@ -242,7 +249,7 @@ class ModelDispatchError(BaseModel):
             error_details=details or {},
         )
 
-    def with_details(self, **kwargs: JsonType) -> ModelDispatchError:
+    def with_details(self, **kwargs: Any) -> ModelDispatchError:
         """Create a copy with additional error details.
 
         Merges the provided kwargs with existing error_details.
@@ -264,7 +271,7 @@ class ModelDispatchError(BaseModel):
         merged_details = {**self.error_details, **kwargs}
         return self.model_copy(update={"error_details": merged_details})
 
-    def to_dict(self) -> dict[str, str | int | dict[str, JsonType]]:
+    def to_dict(self) -> dict[str, str | int | dict[str, Any]]:
         """Convert to dictionary with only set fields.
 
         Returns a dictionary containing only fields that are set (non-sentinel),
@@ -287,7 +294,7 @@ class ModelDispatchError(BaseModel):
 
         .. versionadded:: 0.7.0
         """
-        result: dict[str, str | int | dict[str, JsonType]] = {}
+        result: dict[str, str | int | dict[str, Any]] = {}
         if self.has_message:
             result["error_message"] = self.error_message
         if self.has_code:

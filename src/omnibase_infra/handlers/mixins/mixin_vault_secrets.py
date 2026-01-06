@@ -19,7 +19,10 @@ from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
+    from typing import Any
+
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 T = TypeVar("T")
 
@@ -55,10 +58,10 @@ class MixinVaultSecrets:
 
     async def _read_secret(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, Any],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
+    ) -> ModelHandlerOutput[dict[str, Any]]:
         """Read secret from Vault KV v2 secrets engine.
 
         Args:
@@ -92,14 +95,12 @@ class MixinVaultSecrets:
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def read_func() -> dict[str, JsonType]:
+        def read_func() -> dict[str, Any]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, JsonType] = (
-                self._client.secrets.kv.v2.read_secret_version(
-                    path=path,
-                    mount_point=mount_point,
-                )
+            result: dict[str, Any] = self._client.secrets.kv.v2.read_secret_version(
+                path=path,
+                mount_point=mount_point,
             )
             return result
 
@@ -131,10 +132,10 @@ class MixinVaultSecrets:
 
     async def _write_secret(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, Any],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
+    ) -> ModelHandlerOutput[dict[str, Any]]:
         """Write secret to Vault KV v2 secrets engine.
 
         Args:
@@ -183,15 +184,13 @@ class MixinVaultSecrets:
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def write_func() -> dict[str, JsonType]:
+        def write_func() -> dict[str, Any]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, JsonType] = (
-                self._client.secrets.kv.v2.create_or_update_secret(
-                    path=path,
-                    secret=data,
-                    mount_point=mount_point,
-                )
+            result: dict[str, Any] = self._client.secrets.kv.v2.create_or_update_secret(
+                path=path,
+                secret=data,
+                mount_point=mount_point,
             )
             return result
 
@@ -221,10 +220,10 @@ class MixinVaultSecrets:
 
     async def _delete_secret(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, Any],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
+    ) -> ModelHandlerOutput[dict[str, Any]]:
         """Delete secret from Vault KV v2 secrets engine.
 
         Args:
@@ -286,10 +285,10 @@ class MixinVaultSecrets:
 
     async def _list_secrets(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, Any],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
+    ) -> ModelHandlerOutput[dict[str, Any]]:
         """List secrets at path in Vault KV v2 secrets engine.
 
         Args:
@@ -323,10 +322,10 @@ class MixinVaultSecrets:
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def list_func() -> dict[str, JsonType]:
+        def list_func() -> dict[str, Any]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, JsonType] = self._client.secrets.kv.v2.list_secrets(
+            result: dict[str, Any] = self._client.secrets.kv.v2.list_secrets(
                 path=path,
                 mount_point=mount_point,
             )

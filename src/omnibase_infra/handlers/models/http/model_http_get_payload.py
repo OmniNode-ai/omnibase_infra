@@ -12,9 +12,10 @@ Related:
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from omnibase_core.types import JsonType
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.http.enum_http_operation_type import (
@@ -78,7 +79,7 @@ class ModelHttpGetPayload(ModelPayloadHttp):
         default_factory=dict,
         description="Response headers as key-value dictionary",
     )
-    body: JsonType = Field(
+    body: Any = Field(
         description="Response body",
     )
 

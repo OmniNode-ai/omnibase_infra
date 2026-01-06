@@ -38,10 +38,9 @@ from omnibase_core.models.common.model_validation_metadata import (
     ModelValidationMetadata,
 )
 from omnibase_core.models.validation.model_import_validation_result import (
-    ModelImportValidationResult,
+    ModelModuleImportResult as ModelImportValidationResult,
 )
 from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
-from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
     CircularImportValidator,
     ModelContractValidationResult,
@@ -50,6 +49,12 @@ from omnibase_core.validation import (
     validate_contracts,
     validate_patterns,
     validate_union_usage_file,
+)
+
+# NOTE: ServiceContractValidator was removed in omnibase_core 0.6.2
+# Using a stub that implements ProtocolContractValidator
+from omnibase_infra.validation.stub_contract_validator import (
+    ServiceContractValidator,
 )
 
 # Module-level initialization (AFTER all imports)

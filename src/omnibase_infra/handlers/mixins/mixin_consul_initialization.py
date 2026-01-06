@@ -32,8 +32,10 @@ from omnibase_infra.handlers.models.consul import ModelConsulHandlerConfig
 
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
+    from typing import Any
 
-    from omnibase_core.types import JsonType
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +95,7 @@ class MixinConsulInitialization:
 
     def _validate_consul_config(
         self,
-        config: dict[str, JsonType],
+        config: dict[str, Any],
         correlation_id: UUID,
     ) -> ModelConsulHandlerConfig:
         """Validate and parse Consul configuration.

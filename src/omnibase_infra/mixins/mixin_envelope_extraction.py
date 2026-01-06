@@ -32,7 +32,7 @@ Usage:
     from omnibase_infra.mixins import MixinEnvelopeExtraction
 
     class MyHandler(MixinEnvelopeExtraction):
-        async def handle(self, envelope: dict[str, JsonType]):
+        async def handle(self, envelope: dict[str, Any]):
             correlation_id = self._extract_correlation_id(envelope)
             envelope_id = self._extract_envelope_id(envelope)
             # ... use IDs for tracing and causality tracking
@@ -49,7 +49,10 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
+    from typing import Any
+
+# NOTE: Using Any instead of Any from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 
 class MixinEnvelopeExtraction:
@@ -62,7 +65,7 @@ class MixinEnvelopeExtraction:
     extract tracing IDs from incoming request envelopes.
     """
 
-    def _extract_correlation_id(self, envelope: "dict[str, JsonType]") -> UUID:
+    def _extract_correlation_id(self, envelope: "dict[str, Any]") -> UUID:
         """Extract or generate correlation ID from envelope.
 
         Correlation IDs enable distributed tracing by grouping all operations
@@ -88,7 +91,7 @@ class MixinEnvelopeExtraction:
                 pass
         return uuid4()
 
-    def _extract_envelope_id(self, envelope: "dict[str, JsonType]") -> UUID:
+    def _extract_envelope_id(self, envelope: "dict[str, Any]") -> UUID:
         """Extract or generate envelope ID for causality tracking.
 
         Envelope IDs enable end-to-end causality tracking in distributed systems.
