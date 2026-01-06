@@ -390,13 +390,10 @@ async def get_policy_registry_from_container(
         )
         return registry
     except AttributeError as e:
+        # Note: service_registry case is now handled by _validate_service_registry
+        # This block handles other AttributeErrors like missing resolve_service
         error_str = str(e)
-        if "service_registry" in error_str:
-            hint = (
-                "Container missing 'service_registry' attribute. "
-                "Expected ModelONEXContainer from omnibase_core."
-            )
-        elif "resolve_service" in error_str:
+        if "resolve_service" in error_str:
             hint = (
                 "Container.service_registry missing 'resolve_service' method. "
                 "Check omnibase_core version compatibility (requires v0.5.6 or later)."
@@ -553,13 +550,10 @@ async def get_handler_registry_from_container(
         )
         return registry
     except AttributeError as e:
+        # Note: service_registry case is now handled by _validate_service_registry
+        # This block handles other AttributeErrors like missing resolve_service
         error_str = str(e)
-        if "service_registry" in error_str:
-            hint = (
-                "Container missing 'service_registry' attribute. "
-                "Expected ModelONEXContainer from omnibase_core."
-            )
-        elif "resolve_service" in error_str:
+        if "resolve_service" in error_str:
             hint = (
                 "Container.service_registry missing 'resolve_service' method. "
                 "Check omnibase_core version compatibility (requires v0.5.6 or later)."
@@ -641,13 +635,10 @@ async def get_compute_registry_from_container(
         )
         return registry
     except AttributeError as e:
+        # Note: service_registry case is now handled by _validate_service_registry
+        # This block handles other AttributeErrors like missing resolve_service
         error_str = str(e)
-        if "service_registry" in error_str:
-            hint = (
-                "Container missing 'service_registry' attribute. "
-                "Expected ModelONEXContainer from omnibase_core."
-            )
-        elif "resolve_service" in error_str:
+        if "resolve_service" in error_str:
             hint = (
                 "Container.service_registry missing 'resolve_service' method. "
                 "Check omnibase_core version compatibility (requires v0.5.6 or later)."
@@ -934,13 +925,10 @@ async def wire_registration_handlers(
         )
 
     except AttributeError as e:
+        # Note: service_registry case is now handled by _validate_service_registry
+        # This block handles other AttributeErrors like missing register_instance
         error_str = str(e)
-        if "service_registry" in error_str:
-            hint = (
-                "Container missing 'service_registry' attribute. "
-                "Expected ModelONEXContainer from omnibase_core."
-            )
-        elif "register_instance" in error_str:
+        if "register_instance" in error_str:
             hint = (
                 "Container.service_registry missing 'register_instance' method. "
                 "Check omnibase_core version compatibility (requires v0.5.6 or later)."

@@ -138,9 +138,7 @@ class TestWireRegistrationHandlers:
         OMN-1257: Changed from RuntimeError to ServiceRegistryUnavailableError
         for clearer error messages when service_registry is missing or None.
         """
-        from omnibase_infra.runtime.container_wiring import (
-            ServiceRegistryUnavailableError,
-        )
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
 
         mock_container = MagicMock(spec=[])  # No service_registry attribute
         del mock_container.service_registry
@@ -160,9 +158,7 @@ class TestWireRegistrationHandlers:
         OMN-1257: Tests the second validation branch where service_registry
         attribute exists but is set to None (e.g., when enable_service_registry=False).
         """
-        from omnibase_infra.runtime.container_wiring import (
-            ServiceRegistryUnavailableError,
-        )
+        from omnibase_infra.errors import ServiceRegistryUnavailableError
 
         mock_container = MagicMock()
         mock_container.service_registry = None  # Exists but is None
