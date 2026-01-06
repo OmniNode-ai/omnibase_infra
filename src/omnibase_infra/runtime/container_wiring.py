@@ -119,7 +119,11 @@ def _ensure_service_registry(container: ModelONEXContainer) -> None:
         # Initialize the service registry
         service_registry = ServiceRegistry(config)
 
-        # Assign to container's internal attribute (service_registry is a property)
+        # TODO(omnibase_core): Request public API for service_registry initialization [OMN-1258]
+        # Current workaround accesses private _service_registry attribute because
+        # omnibase_core 0.6.2+ does not auto-initialize service_registry by default.
+        # Upstream fix: omnibase_core should provide container.initialize_service_registry(config)
+        # to allow downstream packages to lazily initialize without private attribute access.
         container._service_registry = service_registry
 
         logger.debug(

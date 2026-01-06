@@ -154,6 +154,127 @@ _IntentUnion = ModelCommandIntent | ModelEventIntent  # Pydantic validation
 def process(intent: ProtocolRegistrationIntent): ...  # Function signature
 ```
 
+### Intent Model Architecture
+
+**Overview**: Reducers emit intents that orchestrators route to Effect layer nodes. This follows the extension-type pattern introduced in omnibase_core 0.6.x.
+
+**Three-Layer Intent Structure**:
+
+| Layer | Model | Purpose |
+|-------|-------|---------|
+| 1. Typed Intent | `ModelConsulRegisterIntent` | Domain-specific Pydantic model with typed fields |
+| 2. Extension Wrapper | `ModelPayloadExtension` | Wraps serialized intent with `extension_type` for routing |
+| 3. Outer Container | `ModelIntent` | Standard intent envelope with `intent_type="extension"` |
+
+**Step 1: Define Typed Intent Models** (in `omnibase_core.models.intents/`):
+```python
+from pydantic import BaseModel
+from uuid import UUID
+
+class ModelConsulRegisterIntent(BaseModel):
+    """Typed intent for Consul service registration."""
+    correlation_id: UUID
+    service_id: str
+    service_name: str
+    tags: list[str]
+    health_check: dict[str, str] | None = None
+
+class ModelPostgresUpsertRegistrationIntent(BaseModel):
+    """Typed intent for PostgreSQL upsert operations."""
+    correlation_id: UUID
+    record: BaseModel  # Use typed record model, not raw dict
+```
+
+**Step 2: Wrap in ModelPayloadExtension**:
+```python
+from omnibase_core.models.reducer import ModelIntent
+from omnibase_core.models.reducer.payloads import ModelPayloadExtension
+from omnibase_core.models.intents import ModelConsulRegisterIntent
+
+# 1. Build typed intent with domain data
+consul_intent = ModelConsulRegisterIntent(
+    correlation_id=correlation_id,
+    service_id=f"onex-{node_type}-{node_id}",
+    service_name=f"onex-{node_type}",
+    tags=["node_type:effect"],
+)
+
+# 2. Wrap in ModelPayloadExtension with extension_type for routing
+payload = ModelPayloadExtension(
+    extension_type="infra.consul_register",  # Used for Effect layer routing
+    plugin_name="consul",
+    data=consul_intent.model_dump(mode="json"),
+)
+
+# 3. Return as ModelIntent from reducer
+return ModelIntent(
+    intent_type="extension",
+    target=f"consul://service/{service_name}",
+    payload=payload,
+)
+```
+
+**Extension Type Naming Convention**:
+- Format: `{namespace}.{operation}` (e.g., `infra.postgres_upsert`, `infra.consul_register`)
+- Namespace indicates the domain (infra, core, app)
+- Operation describes the action
+
+**Target URI Convention**:
+- Format: `{protocol}://{resource}/{identifier}`
+- Examples: `postgres://node_registrations/{node_id}`, `consul://service/{service_name}`
+
+**Serialization with Nested Models**:
+
+When intent contains complex nested models (e.g., `ModelNodeRegistrationRecord`), use `serialize_as_any=True`:
+```python
+postgres_intent = ModelPostgresUpsertRegistrationIntent(
+    correlation_id=correlation_id,
+    record=record,  # ModelNodeRegistrationRecord
+)
+payload = ModelPayloadExtension(
+    extension_type="infra.postgres_upsert",
+    plugin_name="postgres",
+    data=postgres_intent.model_dump(mode="json", serialize_as_any=True),
+)
+```
+
+**Why `serialize_as_any=True`**: When a field is typed as `BaseModel` but contains a subclass, Pydantic only serializes base fields without this flag.
+
+**Migration from Legacy Patterns**:
+
+| Legacy Pattern | Current Pattern |
+|---------------|-----------------|
+| Raw dict payloads | Typed Pydantic models in `omnibase_core.models.intents/` |
+| `kind="consul.register"` | `extension_type="infra.consul_register"` |
+| Direct `ModelIntent(payload={...})` | `ModelIntent(payload=ModelPayloadExtension(...))` |
+| String-based routing | Extension type-based routing |
+| Inline intent definitions | Reusable intent models from omnibase_core |
+
+**Effect Layer Routing**:
+
+Effect nodes use `extension_type` to route intents to appropriate handlers:
+```python
+from omnibase_core.models.reducer.payloads import ModelPayloadExtension
+
+routing_table = {
+    "infra.consul_register": ConsulAdapter.handle_register,
+    "infra.postgres_upsert": PostgresAdapter.handle_upsert,
+}
+
+async def route_intent(intent: ModelIntent) -> None:
+    if intent.intent_type == "extension":
+        if isinstance(intent.payload, ModelPayloadExtension):
+            handler = routing_table.get(intent.payload.extension_type)
+            if handler:
+                await handler(intent.payload.data)
+            else:
+                raise ValueError(f"Unknown extension_type: {intent.payload.extension_type}")
+```
+
+**Reference Implementation**: `src/omnibase_infra/nodes/reducers/registration_reducer.py`
+**Integration Tests**: `tests/integration/nodes/test_intent_flow_integration.py`
+**Related Ticket**: OMN-912 (ModelIntent typed payloads)
+
 ### ONEX Architecture
 - **Contract-Driven** - All tools/services follow contract patterns
 - **Container Injection** - `def __init__(self, container: ModelONEXContainer)`
