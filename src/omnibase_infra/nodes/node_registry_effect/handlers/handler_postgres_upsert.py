@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from omnibase_infra.nodes.node_registry_effect.models import ModelBackendResult
-from omnibase_infra.utils import sanitize_backend_error
+from omnibase_infra.utils import sanitize_backend_error, sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_infra.nodes.effects.protocol_postgres_adapter import (
@@ -148,9 +148,8 @@ class HandlerPostgresUpsert:
 
         except Exception as e:
             elapsed_ms = (time.perf_counter() - start_time) * 1000
-            # Sanitize error message to avoid exposing secrets
-            # Use exception type for debugging context
-            sanitized_error = f"{type(e).__name__}: PostgreSQL upsert failed"
+            # Sanitize error message to prevent credential exposure
+            sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,

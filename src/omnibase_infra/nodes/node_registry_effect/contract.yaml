@@ -58,6 +58,23 @@ output_model:
 #   3. Execute handlers in parallel (for dual-backend operations)
 #   4. Aggregate results with partial failure handling
 #   5. Return ModelRegistryResponse with combined status
+#
+# Parallel Execution Behavior:
+#   When execution_mode is "parallel", handlers for the same operation execute
+#   concurrently using asyncio.gather(). For dual-backend operations like
+#   "register_node", both HandlerConsulRegister and HandlerPostgresUpsert run
+#   simultaneously, reducing total latency to max(consul_time, postgres_time)
+#   rather than consul_time + postgres_time.
+#
+#   Partial failure (partial_failure_handling: true) means if Consul succeeds
+#   but PostgreSQL fails (or vice versa), the operation returns success=false
+#   with partial_failure=true, allowing callers to retry the failed backend
+#   via the "retry_partial_failure" operation.
+#
+# Handler Responsibility:
+#   Each handler manages its own retry logic using the retry_policy defined
+#   in error_handling. The orchestration layer dispatches once per handler
+#   and delegates retry behavior to the handlers themselves.
 # =============================================================================
 operation_routing:
   routing_strategy: "operation_match"
@@ -155,6 +172,18 @@ error_handling:
         reset_timeout_ms: 60000
   # Retry policy with exponential backoff
   # Handles transient infrastructure failures.
+  #
+  # IMPORTANT: Orchestration Layer Retry Behavior
+  #   This retry_policy is declarative configuration consumed by handlers.
+  #   At the orchestration layer, the effective retry count is always 0 -
+  #   the orchestrator dispatches to handlers exactly once per operation.
+  #   Individual handlers are responsible for implementing retry loops using
+  #   these settings (max_retries, delays, exponential backoff).
+  #
+  #   This design ensures:
+  #   - Clear separation of concerns (orchestrator routes, handlers retry)
+  #   - Per-backend retry isolation (Consul retries don't affect Postgres)
+  #   - Consistent retry behavior across all handler implementations
   retry_policy:
     max_retries: 3
     initial_delay_ms: 100
@@ -168,7 +197,7 @@ error_handling:
   # Removes sensitive information from error messages before logging.
   error_sanitization:
     enabled: true
-    utility: "omnibase_infra.shared.utils.util_error_sanitization"
+    utility: "omnibase_infra.utils.util_error_sanitization"
     sanitize_patterns:
       - "password"
       - "secret"
@@ -263,43 +292,58 @@ capabilities:
 definitions:
   ModelRegistryRequest:
     type: object
-    description: "Input model for registry effect operations"
+    description: "Request model for dual-backend registration operations"
     properties:
-      operation:
-        type: string
-        description: "Operation to perform (register_node, deregister_node, retry_partial_failure)"
-        enum:
-          - "register_node"
-          - "deregister_node"
-          - "retry_partial_failure"
       node_id:
+        type: uuid
+        description: "Unique identifier for the node being registered"
+      node_type:
+        type: enum
+        enum_class: "EnumNodeKind"
+        module: "omnibase_core.enums.enum_node_kind"
+        description: "Type of ONEX node (effect, compute, reducer, orchestrator)"
+        enum:
+          - "effect"
+          - "compute"
+          - "reducer"
+          - "orchestrator"
+      node_version:
         type: string
-        description: "Unique identifier for the node"
+        description: "Semantic version of the node"
+      correlation_id:
+        type: uuid
+        description: "Correlation ID for distributed tracing"
+        default: "auto-generated"
       service_name:
         type: string
-        description: "Service name for registration"
-      health_endpoint:
-        type: string
-        description: "Health check endpoint URL"
+        nullable: true
+        description: "Name for service discovery registration"
+      endpoints:
+        type: object
+        description: "Dict of endpoint type to URL (e.g., {'health': 'http://...'})"
+        default: {}
+      tags:
+        type: array
+        items:
+          type: string
+        description: "List of tags for service discovery"
+        default: []
       metadata:
         type: object
-        description: "Additional metadata for registration"
-      target_backend:
-        type: string
-        description: "Target backend for retry operations (consul, postgres)"
-        enum:
-          - "consul"
-          - "postgres"
-      idempotency_key:
-        type: string
-        description: "Idempotency key for operation deduplication"
-      correlation_id:
-        type: string
-        description: "Request correlation ID for tracing"
+        description: "Additional metadata for the registration record"
+        default: {}
+      health_check_config:
+        type: object
+        nullable: true
+        description: "Optional health check configuration for Consul"
+      timestamp:
+        type: datetime
+        description: "When this request was created (must be timezone-aware)"
     required:
-      - operation
       - node_id
-      - correlation_id
+      - node_type
+      - node_version
+      - timestamp
   ModelRegistryResponse:
     type: object
     description: "Output model for registry effect operations"
