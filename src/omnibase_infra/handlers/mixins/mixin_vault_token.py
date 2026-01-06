@@ -27,7 +27,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_core.types import JsonType
 
 T = TypeVar("T")
 
@@ -170,7 +170,7 @@ class MixinVaultToken:
 
     def _extract_ttl_from_renewal_response(
         self,
-        result: dict[str, JsonValue],
+        result: dict[str, JsonType],
         default_ttl: int,
         correlation_id: UUID,
     ) -> int:
@@ -249,7 +249,7 @@ class MixinVaultToken:
 
     async def renew_token(
         self, correlation_id: UUID | None = None
-    ) -> dict[str, JsonValue]:
+    ) -> dict[str, JsonType]:
         """Renew Vault authentication token.
 
         Token TTL Extraction Logic:
@@ -281,10 +281,10 @@ class MixinVaultToken:
         assert self._client is not None
         assert self._config is not None
 
-        def renew_func() -> dict[str, JsonValue]:
+        def renew_func() -> dict[str, JsonType]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, JsonValue] = self._client.auth.token.renew_self()
+            result: dict[str, JsonType] = self._client.auth.token.renew_self()
             return result
 
         # _execute_with_retry already raises properly typed errors:
@@ -324,7 +324,7 @@ class MixinVaultToken:
         self,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[dict[str, JsonType]]:
         """Execute token renewal operation from envelope.
 
         Args:

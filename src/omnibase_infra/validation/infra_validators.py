@@ -37,18 +37,23 @@ import yaml
 from omnibase_core.models.common.model_validation_metadata import (
     ModelValidationMetadata,
 )
+from omnibase_core.models.validation.model_import_validation_result import (
+    ModelImportValidationResult,
+)
 from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
+from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
-    CircularImportValidationResult,
     CircularImportValidator,
     ModelContractValidationResult,
     ModelValidationResult,
-    ProtocolContractValidator,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage_file,
 )
+
+type CircularImportValidationResult = ModelImportValidationResult
+type ProtocolContractValidator = ServiceContractValidator
 
 # Module-level initialization (AFTER all imports)
 logger = logging.getLogger(__name__)
@@ -717,7 +722,7 @@ def validate_infra_contract_deep(
 # - All validation state is created fresh for each file
 # - No per-validation state is stored in the validator instance
 
-_contract_validator = ProtocolContractValidator()
+_contract_validator = ServiceContractValidator()
 
 
 # ==============================================================================

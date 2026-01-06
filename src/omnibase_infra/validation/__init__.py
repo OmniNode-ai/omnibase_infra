@@ -91,15 +91,18 @@ Security Design (Intentional Fail-Open Architecture):
     - routing_coverage_validator.py: Routing gap detection (module docstring)
 """
 
+from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
+    CircularImportValidator,
     validate_all,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage,
 )
-from omnibase_core.validation.circular_import_validator import CircularImportValidator
-from omnibase_core.validation.contract_validator import ProtocolContractValidator
+
+# Backwards compatibility type alias (Python 3.12+ type keyword)
+type ProtocolContractValidator = ServiceContractValidator
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
@@ -220,7 +223,8 @@ __all__: list[str] = [
     "ModelContractLintResult",
     "ModelContractViolation",
     "ModelExecutionShapeValidationResult",
-    "ProtocolContractValidator",
+    "ProtocolContractValidator",  # Backwards compatibility alias
+    "ServiceContractValidator",
     # Routing coverage validation (OMN-958)
     "RoutingCoverageError",
     "RoutingCoverageValidator",

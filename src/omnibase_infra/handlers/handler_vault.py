@@ -14,7 +14,7 @@ Security Features:
 All secret operations MUST use proper authentication and authorization.
 
 Return Type:
-    All operations return ModelHandlerOutput[dict[str, JsonValue]] per OMN-975.
+    All operations return ModelHandlerOutput[dict[str, JsonType]] per OMN-975.
     Uses ModelHandlerOutput.for_compute() since handlers return synchronous results
     rather than emitting events to the event bus.
 """
@@ -49,7 +49,7 @@ from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_core.types import JsonType
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ class VaultHandler(
         """Return maximum queue size (public API for tests)."""
         return self._max_queue_size
 
-    async def initialize(self, config: dict[str, JsonValue]) -> None:
+    async def initialize(self, config: dict[str, JsonType]) -> None:
         """Initialize Vault client with configuration.
 
         Args:
@@ -285,8 +285,8 @@ class VaultHandler(
         logger.info("VaultHandler shutdown complete")
 
     async def execute(
-        self, envelope: dict[str, JsonValue]
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+        self, envelope: dict[str, JsonType]
+    ) -> ModelHandlerOutput[dict[str, JsonType]]:
         """Execute Vault operation from envelope.
 
         Args:
@@ -297,7 +297,7 @@ class VaultHandler(
                 - envelope_id: Optional envelope ID for causality tracking
 
         Returns:
-            ModelHandlerOutput[dict[str, JsonValue]] with status, payload, and correlation_id
+            ModelHandlerOutput[dict[str, JsonType]] with status, payload, and correlation_id
             per OMN-975 handler output standardization.
 
         Raises:
@@ -379,7 +379,7 @@ class VaultHandler(
         else:  # vault.renew_token
             return await self._renew_token_operation(correlation_id, input_envelope_id)
 
-    def describe(self) -> dict[str, JsonValue]:
+    def describe(self) -> dict[str, JsonType]:
         """Return handler metadata and capabilities for introspection.
 
         This method exposes the handler's type classification along with its
