@@ -213,7 +213,7 @@ async def wire_infrastructure_services(
     Returns:
         Summary dict with:
             - services: List of registered service class names
-            - status: "skipped" if service_registry was unavailable
+            - status: "success" on success, "skipped" if service_registry was unavailable
 
     Raises:
         RuntimeError: If service registration fails
@@ -223,7 +223,7 @@ async def wire_infrastructure_services(
         >>> container = ModelONEXContainer()
         >>> summary = await wire_infrastructure_services(container)
         >>> print(summary)
-        {'services': ['PolicyRegistry', 'ProtocolBindingRegistry', 'RegistryCompute']}
+        {'services': ['PolicyRegistry', 'ProtocolBindingRegistry', 'RegistryCompute'], 'status': 'success'}
         >>> policy_reg = await container.service_registry.resolve_service(PolicyRegistry)
         >>> handler_reg = await container.service_registry.resolve_service(ProtocolBindingRegistry)
         >>> compute_reg = await container.service_registry.resolve_service(RegistryCompute)
@@ -356,7 +356,7 @@ async def wire_infrastructure_services(
         },
     )
 
-    return {"services": services_registered}
+    return {"services": services_registered, "status": "success"}
 
 
 async def get_policy_registry_from_container(
@@ -801,7 +801,7 @@ async def wire_registration_handlers(
     Returns:
         Summary dict with:
             - services: List of registered service class names
-            - status: "skipped" if service_registry was unavailable
+            - status: "success" on success, "skipped" if service_registry was unavailable
 
     Raises:
         RuntimeError: If service registration fails
@@ -815,7 +815,7 @@ async def wire_registration_handlers(
         >>> await projector.initialize_schema()
         >>> summary = await wire_registration_handlers(container, pool, projector=projector)
         >>> print(summary)
-        {'services': ['ProjectionReaderRegistration', 'HandlerNodeIntrospected', ...]}
+        {'services': ['ProjectionReaderRegistration', 'HandlerNodeIntrospected', ...], 'status': 'success'}
         >>> # Resolve handlers from container
         >>> handler = await container.service_registry.resolve_service(HandlerNodeIntrospected)
     """
@@ -988,7 +988,7 @@ async def wire_registration_handlers(
         },
     )
 
-    return {"services": services_registered}
+    return {"services": services_registered, "status": "success"}
 
 
 async def get_projection_reader_from_container(
@@ -1201,7 +1201,7 @@ async def wire_registration_dispatchers(
             - routes: List of registered route IDs (e.g.,
               ['route.registration.node-introspection', 'route.registration.runtime-tick',
                'route.registration.node-registration-acked'])
-            - status: "skipped" if service_registry was unavailable
+            - status: "success" on success, "skipped" if service_registry was unavailable
 
         This diagnostic output can be logged or used to verify correct wiring.
 
@@ -1372,6 +1372,7 @@ async def wire_registration_dispatchers(
     return {
         "dispatchers": dispatchers_registered,
         "routes": routes_registered,
+        "status": "success",
     }
 
 

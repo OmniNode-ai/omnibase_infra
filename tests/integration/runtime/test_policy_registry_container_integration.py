@@ -57,16 +57,33 @@ from tests.conftest import (
 # Module-level markers - all tests in this file are integration tests
 pytestmark = [pytest.mark.integration]
 
-# Check if ServiceRegistry is available in omnibase_core
-_service_registry_available = False
-try:
-    _test_container = ModelONEXContainer()
-    _service_registry_available = _test_container.service_registry is not None
-except (AttributeError, ImportError, TypeError):
-    # AttributeError: service_registry attribute doesn't exist
-    # ImportError: omnibase_core not available
-    # TypeError: ModelONEXContainer initialization changed
-    pass
+
+def _check_service_registry_available() -> bool:
+    """Check if ServiceRegistry is available in omnibase_core.
+
+    Creates a temporary container to check for service_registry availability,
+    then explicitly cleans up the container to prevent resource leaks.
+
+    Returns:
+        True if service_registry is available and not None, False otherwise.
+    """
+    container = None
+    try:
+        container = ModelONEXContainer()
+        return container.service_registry is not None
+    except AttributeError:
+        # service_registry attribute removed in omnibase_core 0.6.x
+        return False
+    except TypeError:
+        # ModelONEXContainer.__init__ signature changed (new required params)
+        return False
+    finally:
+        # Explicit cleanup of temporary container
+        del container
+
+
+# Module-level flag for pytest.mark.skipif decorators
+_service_registry_available = _check_service_registry_available()
 
 
 @pytest.mark.skipif(

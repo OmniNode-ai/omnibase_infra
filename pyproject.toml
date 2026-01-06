@@ -43,6 +43,7 @@ omnibase-spi = "^0.4.1"
 # - For Git-sourced external deps, prefer commit SHAs over tags because:
 #   - SHAs are immutable; tags can be force-pushed
 #   - SHAs provide audit trail and tamper-evidence
+# - Note: All dependencies below are PyPI-sourced; SHA guidance applies to future git deps
 # - To update: 1) Review changelog for security fixes, 2) Update version, 3) Run tests
 # - See docs/decisions/adr-cryptography-upgrade-46.md for upgrade rationale examples
 
