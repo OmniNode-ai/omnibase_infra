@@ -264,13 +264,16 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         upsert_sql = """
             INSERT INTO registration_projections (
                 entity_id, domain, current_state, node_type, node_version,
-                capabilities, ack_deadline, liveness_deadline, last_heartbeat_at,
+                capabilities, contract_type, intent_types, protocols,
+                capability_tags, contract_version,
+                ack_deadline, liveness_deadline, last_heartbeat_at,
                 ack_timeout_emitted_at, liveness_timeout_emitted_at,
                 last_applied_event_id, last_applied_offset,
                 last_applied_sequence, last_applied_partition,
                 registered_at, updated_at, correlation_id
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                $15, $16, $17, $18, $19, $20, $21, $22, $23
             )
             ON CONFLICT (entity_id, domain) DO UPDATE SET
                 -- EXCLUDED.* refers to values from the INSERT that triggered conflict
@@ -278,6 +281,11 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                 node_type = EXCLUDED.node_type,
                 node_version = EXCLUDED.node_version,
                 capabilities = EXCLUDED.capabilities,
+                contract_type = EXCLUDED.contract_type,
+                intent_types = EXCLUDED.intent_types,
+                protocols = EXCLUDED.protocols,
+                capability_tags = EXCLUDED.capability_tags,
+                contract_version = EXCLUDED.contract_version,
                 ack_deadline = EXCLUDED.ack_deadline,
                 liveness_deadline = EXCLUDED.liveness_deadline,
                 last_heartbeat_at = EXCLUDED.last_heartbeat_at,
@@ -322,6 +330,11 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             projection.node_type,
             projection.node_version,
             projection.capabilities.model_dump_json(),  # JSONB as JSON string
+            projection.contract_type,  # Capability fields (OMN-1134)
+            projection.intent_types,  # TEXT[]
+            projection.protocols,  # TEXT[]
+            projection.capability_tags,  # TEXT[]
+            projection.contract_version,
             projection.ack_deadline,
             projection.liveness_deadline,
             projection.last_heartbeat_at,
@@ -857,6 +870,12 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         ack_deadline: datetime | None = None,
         liveness_deadline: datetime | None = None,
         correlation_id: UUID | None = None,
+        # Capability fields (OMN-1134)
+        contract_type: str | None = None,
+        intent_types: list[str] | None = None,
+        protocols: list[str] | None = None,
+        capability_tags: list[str] | None = None,
+        contract_version: str | None = None,
     ) -> bool:
         """Persist a state transition for a registration entity.
 
@@ -926,17 +945,24 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         upsert_sql = """
             INSERT INTO registration_projections (
                 entity_id, domain, current_state, node_type, node_version,
-                capabilities, ack_deadline, liveness_deadline,
+                capabilities, contract_type, intent_types, protocols,
+                capability_tags, contract_version,
+                ack_deadline, liveness_deadline,
                 last_applied_event_id, last_applied_offset,
                 registered_at, updated_at, correlation_id
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, 0, $10, $10, $11
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, $15, $16
             )
             ON CONFLICT (entity_id, domain) DO UPDATE SET
                 current_state = EXCLUDED.current_state,
                 node_type = EXCLUDED.node_type,
                 node_version = EXCLUDED.node_version,
                 capabilities = EXCLUDED.capabilities,
+                contract_type = EXCLUDED.contract_type,
+                intent_types = EXCLUDED.intent_types,
+                protocols = EXCLUDED.protocols,
+                capability_tags = EXCLUDED.capability_tags,
+                contract_version = EXCLUDED.contract_version,
                 ack_deadline = EXCLUDED.ack_deadline,
                 liveness_deadline = EXCLUDED.liveness_deadline,
                 last_applied_event_id = EXCLUDED.last_applied_event_id,
@@ -955,6 +981,11 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             node_type,
             node_version,
             capabilities_json,
+            contract_type,  # Capability fields (OMN-1134)
+            intent_types or [],  # TEXT[]
+            protocols or [],  # TEXT[]
+            capability_tags or [],  # TEXT[]
+            contract_version,
             ack_deadline,
             liveness_deadline,
             event_id,

@@ -135,6 +135,29 @@ class ModelRegistrationProjection(BaseModel):
         description="Node capabilities snapshot at registration",
     )
 
+    # Capability fields for fast discovery queries (OMN-1134)
+    # These are denormalized from capabilities for GIN-indexed queries
+    contract_type: str | None = Field(
+        default=None,
+        description="Contract type (effect, compute, reducer, orchestrator)",
+    )
+    intent_types: list[str] = Field(
+        default_factory=list,
+        description="Intent types this node handles",
+    )
+    protocols: list[str] = Field(
+        default_factory=list,
+        description="Protocols this node implements",
+    )
+    capability_tags: list[str] = Field(
+        default_factory=list,
+        description="Capability tags for discovery",
+    )
+    contract_version: str | None = Field(
+        default=None,
+        description="Contract version string",
+    )
+
     # Timeout Deadlines (for C2 durable timeout handling)
     ack_deadline: datetime | None = Field(
         default=None,

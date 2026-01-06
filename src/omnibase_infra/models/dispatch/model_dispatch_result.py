@@ -56,7 +56,8 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.types import JsonType
+
+# JsonType replaced with object to avoid Pydantic recursive type issues
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
@@ -198,7 +199,7 @@ class ModelDispatchResult(BaseModel):
         default=None,
         description="Error code if the dispatch failed.",
     )
-    error_details: dict[str, JsonType] = Field(
+    error_details: dict[str, object] = Field(
         default_factory=dict,
         description="Additional JSON-serializable error details for debugging.",
     )
@@ -305,7 +306,7 @@ class ModelDispatchResult(BaseModel):
         status: EnumDispatchStatus,
         message: str,
         code: EnumCoreErrorCode | None = None,
-        details: dict[str, JsonType] | None = None,
+        details: dict[str, object] | None = None,
     ) -> "ModelDispatchResult":
         """
         Create a new result with error information.

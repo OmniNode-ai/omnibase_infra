@@ -61,6 +61,14 @@ CREATE TABLE IF NOT EXISTS registration_projections (
     node_version VARCHAR(32) NOT NULL DEFAULT '1.0.0',
     capabilities JSONB NOT NULL DEFAULT '{}',
 
+    -- Capability fields for fast discovery queries (OMN-1134)
+    -- Denormalized from capabilities for GIN-indexed array queries
+    contract_type TEXT,  -- effect, compute, reducer, orchestrator
+    intent_types TEXT[] DEFAULT ARRAY[]::TEXT[],  -- Array of intent types this node handles
+    protocols TEXT[] DEFAULT ARRAY[]::TEXT[],  -- Array of protocols this node implements
+    capability_tags TEXT[] DEFAULT ARRAY[]::TEXT[],  -- Array of capability tags for discovery
+    contract_version TEXT,  -- Contract version string
+
     -- Timeout Deadlines (for durable timeout handling per C2)
     ack_deadline TIMESTAMPTZ,
     liveness_deadline TIMESTAMPTZ,
@@ -141,6 +149,34 @@ CREATE INDEX IF NOT EXISTS idx_registration_last_event_id
 --                WHERE capabilities @> '{"postgres": true}'
 CREATE INDEX IF NOT EXISTS idx_registration_capabilities
     ON registration_projections USING GIN (capabilities);
+
+-- =============================================================================
+-- GIN INDEXES FOR CAPABILITY ARRAY QUERIES (OMN-1134)
+-- =============================================================================
+
+-- GIN index for capability_tags array queries
+-- Query pattern: SELECT * FROM registration_projections
+--                WHERE capability_tags @> ARRAY['postgres.storage']
+CREATE INDEX IF NOT EXISTS idx_registration_capability_tags
+    ON registration_projections USING GIN (capability_tags);
+
+-- GIN index for intent_types array queries
+-- Query pattern: SELECT * FROM registration_projections
+--                WHERE intent_types @> ARRAY['postgres.upsert']
+CREATE INDEX IF NOT EXISTS idx_registration_intent_types
+    ON registration_projections USING GIN (intent_types);
+
+-- GIN index for protocols array queries
+-- Query pattern: SELECT * FROM registration_projections
+--                WHERE protocols @> ARRAY['ProtocolDatabaseAdapter']
+CREATE INDEX IF NOT EXISTS idx_registration_protocols
+    ON registration_projections USING GIN (protocols);
+
+-- B-tree index for contract_type + state queries
+-- Query pattern: SELECT * FROM registration_projections
+--                WHERE contract_type = 'effect' AND current_state = 'active'
+CREATE INDEX IF NOT EXISTS idx_registration_contract_type_state
+    ON registration_projections (contract_type, current_state);
 
 -- Composite index for deadline + emission marker scans
 -- Optimizes the most common timeout check query
