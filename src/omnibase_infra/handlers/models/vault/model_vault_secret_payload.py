@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-from omnibase_core.types import JsonValue
 from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
@@ -19,6 +18,7 @@ from omnibase_infra.handlers.models.vault.model_payload_vault import (
     ModelPayloadVault,
     RegistryPayloadVault,
 )
+from omnibase_infra.models.types import JsonValue
 
 
 @RegistryPayloadVault.register("read_secret")

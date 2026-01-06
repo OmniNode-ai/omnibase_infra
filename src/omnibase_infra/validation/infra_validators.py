@@ -30,7 +30,10 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, TypedDict
+
+# Backward-compatible type aliases for renamed types in omnibase_core 0.6.2
+# Using TypeAlias for mypy compatibility
+from typing import Literal, TypeAlias, TypedDict
 
 # Third-party imports
 import yaml
@@ -39,16 +42,23 @@ from omnibase_core.models.common.model_validation_metadata import (
 )
 from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
 from omnibase_core.validation import (
-    CircularImportValidationResult,
     CircularImportValidator,
     ModelContractValidationResult,
+    # ModelImportValidationResult renamed from CircularImportValidationResult in 0.6.2
+    ModelImportValidationResult,
     ModelValidationResult,
-    ProtocolContractValidator,
+    # ServiceContractValidator replaced ProtocolContractValidator in 0.6.2
+    ServiceContractValidator,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage_file,
 )
+
+# CircularImportValidationResult was renamed to ModelImportValidationResult
+type CircularImportValidationResult = ModelImportValidationResult
+# ProtocolContractValidator was renamed to ServiceContractValidator
+type ProtocolContractValidator = ServiceContractValidator
 
 # Module-level initialization (AFTER all imports)
 logger = logging.getLogger(__name__)
@@ -684,11 +694,11 @@ def validate_infra_contract_deep(
     """
     Perform deep contract validation for ONEX compliance.
 
-    Uses ProtocolContractValidator for comprehensive contract checking
+    Uses ServiceContractValidator for comprehensive contract checking
     suitable for autonomous code generation.
 
     Performance Note:
-        This function uses a cached singleton ProtocolContractValidator instance
+        This function uses a cached singleton ServiceContractValidator instance
         for optimal performance in hot paths. The validator is stateless after
         initialization, making it safe to reuse across calls.
 
@@ -708,7 +718,7 @@ def validate_infra_contract_deep(
 # Module-Level Singleton Validators
 # ==============================================================================
 #
-# Performance Optimization: The ProtocolContractValidator is stateless after
+# Performance Optimization: The ServiceContractValidator is stateless after
 # initialization. Creating new instances on every validation call is wasteful
 # in hot paths. Instead, we use a module-level singleton.
 #
@@ -717,7 +727,7 @@ def validate_infra_contract_deep(
 # - All validation state is created fresh for each file
 # - No per-validation state is stored in the validator instance
 
-_contract_validator = ProtocolContractValidator()
+_contract_validator = ServiceContractValidator()
 
 
 # ==============================================================================

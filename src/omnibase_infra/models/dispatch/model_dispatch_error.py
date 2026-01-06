@@ -59,8 +59,9 @@ See Also:
 from __future__ import annotations
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from omnibase_infra.models.types import JsonValue
 
 # Sentinel values for "not set" state
 _SENTINEL_STR: str = ""

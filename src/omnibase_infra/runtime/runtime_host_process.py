@@ -71,7 +71,6 @@ from omnibase_infra.runtime.wiring import wire_default_handlers
 from omnibase_infra.utils.util_env_parsing import parse_env_float
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
     from omnibase_infra.event_bus.models import ModelEventMessage
@@ -79,6 +78,7 @@ if TYPE_CHECKING:
     from omnibase_infra.idempotency.protocol_idempotency_store import (
         ProtocolIdempotencyStore,
     )
+    from omnibase_infra.models.types import JsonValue
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
 # Tests patch "omnibase_infra.runtime.runtime_host_process.wire_handlers"

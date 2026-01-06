@@ -31,8 +31,9 @@ Example:
 
 from __future__ import annotations
 
-from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.models.types import JsonValue
 
 
 class ModelHealthCheckResult(BaseModel):

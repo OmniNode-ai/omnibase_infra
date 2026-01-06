@@ -61,10 +61,10 @@ from uuid import UUID, uuid4
 from omnibase_infra.enums import EnumRegistrationState
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
     from pydantic import BaseModel
 
     from omnibase_infra.handlers import ConsulHandler
+    from omnibase_infra.models.types import JsonValue
     from omnibase_infra.projectors import ProjectorRegistration
 from omnibase_infra.models.registration.events.model_node_registration_initiated import (
     ModelNodeRegistrationInitiated,

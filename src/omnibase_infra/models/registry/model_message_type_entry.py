@@ -22,13 +22,13 @@ Related:
 
 from datetime import datetime
 
-from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.registry.model_domain_constraint import (
     ModelDomainConstraint,
 )
+from omnibase_infra.models.types import JsonValue
 from omnibase_infra.models.validation import ModelValidationOutcome
 
 

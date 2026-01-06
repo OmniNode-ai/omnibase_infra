@@ -196,7 +196,7 @@ from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 # Type alias for DLQ callback functions
 DlqCallbackType = Callable[[ModelDlqEvent], Awaitable[None]]

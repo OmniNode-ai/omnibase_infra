@@ -352,6 +352,7 @@ from omnibase_core.models.intents import (
     ModelPostgresUpsertRegistrationIntent,
 )
 from omnibase_core.models.reducer.model_intent import ModelIntent
+from omnibase_core.models.reducer.payloads import ModelPayloadExtension
 from omnibase_core.nodes import ModelReducerOutput
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -876,7 +877,11 @@ class RegistrationReducer:
         return ModelIntent(
             intent_type="consul.register",
             target=f"consul://service/{service_name}",
-            payload=consul_intent.model_dump(mode="json"),
+            payload=ModelPayloadExtension(
+                extension_type="plugin.consul",
+                plugin_name="consul_register",
+                data=consul_intent.model_dump(mode="json"),
+            ),
         )
 
     def _build_postgres_intent(
@@ -927,7 +932,11 @@ class RegistrationReducer:
         return ModelIntent(
             intent_type="postgres.upsert_registration",
             target=f"postgres://node_registrations/{event.node_id}",
-            payload=postgres_intent.model_dump(mode="json", serialize_as_any=True),
+            payload=ModelPayloadExtension(
+                extension_type="plugin.postgres",
+                plugin_name="postgres_upsert_registration",
+                data=postgres_intent.model_dump(mode="json", serialize_as_any=True),
+            ),
         )
 
     # =========================================================================

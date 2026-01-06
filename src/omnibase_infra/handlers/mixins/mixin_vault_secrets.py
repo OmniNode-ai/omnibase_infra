@@ -19,7 +19,7 @@ from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 T = TypeVar("T")
 

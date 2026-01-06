@@ -66,7 +66,7 @@ from omnibase_infra.mixins import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 T = TypeVar("T")
 

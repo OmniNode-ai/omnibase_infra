@@ -44,7 +44,7 @@ from omnibase_infra.mixins import MixinEnvelopeExtraction
 from omnibase_infra.utils import parse_env_float, parse_env_int
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 logger = logging.getLogger(__name__)
 

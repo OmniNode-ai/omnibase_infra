@@ -98,7 +98,7 @@ from omnibase_infra.utils.correlation import generate_correlation_id
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 logger = logging.getLogger(__name__)
 

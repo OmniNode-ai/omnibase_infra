@@ -16,7 +16,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 from uuid import UUID
 
-from omnibase_core.types import JsonValue
+from omnibase_infra.models.types import JsonValue
 
 T = TypeVar("T")
 

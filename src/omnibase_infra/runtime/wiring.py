@@ -136,8 +136,9 @@ from omnibase_infra.runtime.handler_registry import (
 
 if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
-    from omnibase_core.types import JsonValue
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
+
+    from omnibase_infra.models.types import JsonValue
 
 logger = logging.getLogger(__name__)
 

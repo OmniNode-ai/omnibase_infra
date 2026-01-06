@@ -6,8 +6,9 @@ This module provides ModelNodeCapabilities for strongly-typed node capabilities
 in the ONEX 2-way registration pattern.
 """
 
-from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.models.types import JsonValue
 
 
 class ModelNodeCapabilities(BaseModel):

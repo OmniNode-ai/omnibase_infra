@@ -25,8 +25,7 @@ from omnibase_infra.errors import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
+    from omnibase_infra.models.types import JsonValue
     from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
 

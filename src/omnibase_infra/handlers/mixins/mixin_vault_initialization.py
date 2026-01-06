@@ -28,7 +28,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 logger = logging.getLogger(__name__)
 

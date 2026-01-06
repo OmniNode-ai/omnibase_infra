@@ -91,15 +91,25 @@ Security Design (Intentional Fail-Open Architecture):
     - routing_coverage_validator.py: Routing gap detection (module docstring)
 """
 
+# Validators re-exported from omnibase_core.validation in 0.6.2+
+# (moved from omnibase_core.validation.circular_import_validator to validator_circular_import)
+# ServiceContractValidator replaced ProtocolContractValidator in 0.6.2
 from omnibase_core.validation import (
+    CircularImportValidator,
+    ServiceContractValidator,
     validate_all,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage,
 )
-from omnibase_core.validation.circular_import_validator import CircularImportValidator
-from omnibase_core.validation.contract_validator import ProtocolContractValidator
+
+# ONEX-compliant naming: Validator<Name> prefix pattern
+ValidatorCircularImport = CircularImportValidator
+ValidatorServiceContract = ServiceContractValidator
+
+# Backward-compatible aliases (deprecated - use Validator* names)
+ProtocolContractValidator = ServiceContractValidator
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
@@ -209,7 +219,8 @@ __all__: list[str] = [
     # Chain propagation validation (OMN-951)
     "ChainPropagationError",
     "ChainPropagationValidator",
-    "CircularImportValidator",
+    "CircularImportValidator",  # Deprecated: use ValidatorCircularImport
+    "ValidatorCircularImport",  # ONEX-compliant name
     # Contract linting (PR #57)
     "ContractLinter",
     "EnumContractViolationSeverity",
@@ -220,7 +231,8 @@ __all__: list[str] = [
     "ModelContractLintResult",
     "ModelContractViolation",
     "ModelExecutionShapeValidationResult",
-    "ProtocolContractValidator",
+    "ProtocolContractValidator",  # Deprecated: use ValidatorServiceContract
+    "ValidatorServiceContract",  # ONEX-compliant name
     # Routing coverage validation (OMN-958)
     "RoutingCoverageError",
     "RoutingCoverageValidator",

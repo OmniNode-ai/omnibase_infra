@@ -33,7 +33,7 @@ from omnibase_infra.handlers.models.consul import ModelConsulHandlerConfig
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
 
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 logger = logging.getLogger(__name__)
 

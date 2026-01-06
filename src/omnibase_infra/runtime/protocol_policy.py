@@ -115,7 +115,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 from omnibase_infra.enums import EnumPolicyType
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 
 @runtime_checkable

@@ -41,7 +41,7 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 # Topic name pattern: alphanumeric, underscores, hyphens, and periods
 # This matches Kafka/Redpanda topic naming conventions and ONEX naming

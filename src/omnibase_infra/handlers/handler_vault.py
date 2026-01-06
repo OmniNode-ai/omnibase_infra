@@ -49,7 +49,7 @@ from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 logger = logging.getLogger(__name__)
 

@@ -60,7 +60,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 logger = logging.getLogger(__name__)
 

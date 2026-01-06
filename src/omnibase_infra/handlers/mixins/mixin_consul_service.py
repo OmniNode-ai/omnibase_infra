@@ -36,7 +36,8 @@ from omnibase_infra.handlers.models.model_consul_handler_response import (
 
 if TYPE_CHECKING:
     import consul as consul_lib
-    from omnibase_core.types import JsonValue
+
+    from omnibase_infra.models.types import JsonValue
 
 
 class ProtocolConsulServiceDependencies(Protocol):

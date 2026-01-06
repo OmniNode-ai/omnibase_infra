@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 
 class MixinEnvelopeExtraction:

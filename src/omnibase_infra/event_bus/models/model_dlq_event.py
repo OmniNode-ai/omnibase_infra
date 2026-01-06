@@ -44,7 +44,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+    from omnibase_infra.models.types import JsonValue
 
 
 class ModelDlqEvent(BaseModel):
