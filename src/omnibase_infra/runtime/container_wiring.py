@@ -58,8 +58,7 @@ from omnibase_core.models.primitives import ModelSemVer
 
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
-# Default semantic version constant (1.0.0) using core ModelSemVer
-# Previously imported from local model_semver; now defined inline
+# Default semantic version constant (1.0.0)
 SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.registry_compute import RegistryCompute
