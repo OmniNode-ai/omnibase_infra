@@ -811,13 +811,8 @@ async def wire_registration_handlers(
         >>> # Resolve handlers from container
         >>> handler = await container.service_registry.resolve_service(HandlerNodeIntrospected)
     """
-    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
-    if container.service_registry is None:
-        logger.warning(
-            "ServiceRegistry not available in container - skipping registration handler wiring. "
-            "This may indicate omnibase_core was initialized without service registry support."
-        )
-        return {"services": [], "status": "skipped"}
+    # Validate service_registry is available before attempting registration
+    _validate_service_registry(container, "wire_registration_handlers")
 
     # Deferred imports: These imports are placed inside the function to avoid circular
     # import issues and to delay loading registration infrastructure until this function
@@ -835,9 +830,6 @@ async def wire_registration_handlers(
         ProjectionReaderRegistration,
         ProjectorRegistration,
     )
-
-    # Validate service_registry is available before attempting registration
-    _validate_service_registry(container, "wire_registration_handlers")
 
     # Resolve the actual liveness interval (from param, env var, or default)
     resolved_liveness_interval = get_liveness_interval_seconds(
@@ -1219,13 +1211,8 @@ async def wire_registration_dispatchers(
         {'dispatchers': [...], 'routes': [...]}
         >>> engine.freeze()  # Must freeze after wiring
     """
-    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
-    if container.service_registry is None:
-        logger.warning(
-            "ServiceRegistry not available in container - skipping registration dispatcher wiring. "
-            "This may indicate omnibase_core was initialized without service registry support."
-        )
-        return {"dispatchers": [], "routes": [], "status": "skipped"}
+    # Validate service_registry is available
+    _validate_service_registry(container, "wire_registration_dispatchers")
 
     from omnibase_infra.enums.enum_message_category import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
@@ -1239,9 +1226,6 @@ async def wire_registration_dispatchers(
         DispatcherNodeRegistrationAcked,
         DispatcherRuntimeTick,
     )
-
-    # Validate service_registry is available
-    _validate_service_registry(container, "wire_registration_dispatchers")
 
     dispatchers_registered: list[str] = []
     routes_registered: list[str] = []
