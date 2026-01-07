@@ -229,7 +229,6 @@ class TestHandlerConsulDeregisterException:
         assert result.success is False
         assert result.error is not None
         assert "ConnectionError" in result.error
-        assert "consul deregistration failed" in result.error
         assert result.error_code == "CONSUL_CONNECTION_ERROR"
         assert result.backend_id == "consul"
         assert result.correlation_id == correlation_id

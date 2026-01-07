@@ -452,7 +452,7 @@ definitions:
         ge: 0.0
       retries:
         type: integer
-        description: "Number of retry attempts made before final result"
+        description: "Number of retry attempts made before final result. Note: At the orchestration layer, this value is always 0 because the orchestrator dispatches once per handler. Individual handlers may implement retry logic internally using the retry_policy configuration, but this field reflects handler-level retries, not orchestrator-level."
         default: 0
         ge: 0
       backend_id:

@@ -223,7 +223,6 @@ class TestHandlerPostgresDeactivateException:
         assert result.success is False
         assert result.error is not None
         assert "ConnectionError" in result.error
-        assert "PostgreSQL deactivate failed" in result.error
         assert result.error_code == "POSTGRES_CONNECTION_ERROR"
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id

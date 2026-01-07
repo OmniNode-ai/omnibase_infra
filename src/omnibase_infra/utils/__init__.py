@@ -30,6 +30,7 @@ from omnibase_infra.utils.util_error_sanitization import (
     SENSITIVE_PATTERNS,
     sanitize_backend_error,
     sanitize_error_message,
+    sanitize_error_string,
 )
 from omnibase_infra.utils.util_semver import (
     SEMVER_PATTERN,
@@ -51,6 +52,7 @@ __all__: list[str] = [
     "sanitize_backend_error",
     "sanitize_dsn",
     "sanitize_error_message",
+    "sanitize_error_string",
     "set_correlation_id",
     "validate_semver",
     "validate_version_lenient",
