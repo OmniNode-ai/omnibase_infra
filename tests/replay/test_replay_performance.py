@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import random
 import time
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
@@ -58,10 +57,6 @@ from tests.helpers.statistics_utils import (
     PerformanceStats,
     run_with_warmup_sync,
 )
-
-if TYPE_CHECKING:
-    from tests.replay.conftest import EventFactory
-
 
 # =============================================================================
 # Module-Level Markers

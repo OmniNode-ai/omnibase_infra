@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -16,9 +16,6 @@ from omnibase_infra.runtime.container_wiring import (
     get_projection_reader_from_container,
     wire_registration_handlers,
 )
-
-if TYPE_CHECKING:
-    from omnibase_core.container import ModelONEXContainer
 
 
 class TestWireRegistrationHandlers:

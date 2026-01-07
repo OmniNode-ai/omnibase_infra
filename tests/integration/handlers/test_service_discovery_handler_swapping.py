@@ -52,6 +52,9 @@ from omnibase_infra.handlers.service_discovery.models import (
 from omnibase_infra.handlers.service_discovery.protocol_service_discovery_handler import (
     ProtocolServiceDiscoveryHandler,
 )
+from omnibase_infra.nodes.node_service_discovery_effect.models import (
+    ModelServiceDiscoveryHealthCheckResult,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -152,7 +155,7 @@ class BaseHandlerSwappingTests:
     @pytest.fixture
     def handler(self) -> ProtocolServiceDiscoveryHandler:
         """Override in subclass to provide the handler to test."""
-        raise NotImplementedError("Subclasses must implement handler fixture")
+        pytest.skip("Subclasses must implement handler fixture")
 
     async def test_handler_conforms_to_protocol(
         self,
@@ -251,9 +254,14 @@ class BaseHandlerSwappingTests:
 
         health_status = await handler.health_check(correlation_id=correlation_id)
 
-        assert isinstance(health_status, dict), "health_check must return dict"
-        assert "healthy" in health_status or "backend_type" in health_status, (
-            "health_check must include health status information"
+        assert isinstance(health_status, ModelServiceDiscoveryHealthCheckResult), (
+            "health_check must return ModelServiceDiscoveryHealthCheckResult"
+        )
+        assert hasattr(health_status, "healthy"), (
+            "health_check result must have healthy attribute"
+        )
+        assert hasattr(health_status, "backend_type"), (
+            "health_check result must have backend_type attribute"
         )
 
 
@@ -500,8 +508,8 @@ class TestHandlerFactoryPattern:
         health1 = await handler1.health_check(correlation_id)
         health2 = await handler2.health_check(correlation_id)
 
-        assert isinstance(health1, dict)
-        assert isinstance(health2, dict)
+        assert isinstance(health1, ModelServiceDiscoveryHealthCheckResult)
+        assert isinstance(health2, ModelServiceDiscoveryHealthCheckResult)
 
 
 # =============================================================================
@@ -549,8 +557,8 @@ class TestRuntimeHandlerSwapping:
         assert result2.success
 
         # Both handlers should report healthy
-        assert (await current_handler.health_check())["healthy"]
-        assert (await new_handler.health_check())["healthy"]
+        assert (await current_handler.health_check()).healthy
+        assert (await new_handler.health_check()).healthy
 
     @pytest.mark.asyncio
     async def test_handler_interface_contract(self) -> None:

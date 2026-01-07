@@ -35,8 +35,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
 
 import pytest
 
@@ -49,10 +47,6 @@ from omnibase_infra.handlers.service_discovery.handler_mock_service_discovery im
 from omnibase_infra.handlers.service_discovery.protocol_service_discovery_handler import (
     ProtocolServiceDiscoveryHandler,
 )
-
-if TYPE_CHECKING:
-    from omnibase_infra.handlers.service_discovery.models import ModelServiceInfo
-
 
 # =============================================================================
 # Protocol Method Definitions

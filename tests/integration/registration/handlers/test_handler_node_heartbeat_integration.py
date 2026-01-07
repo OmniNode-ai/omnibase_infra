@@ -48,7 +48,6 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
     DEFAULT_LIVENESS_WINDOW_SECONDS,
     HandlerNodeHeartbeat,
-    ModelHeartbeatHandlerResult,
 )
 
 if TYPE_CHECKING:

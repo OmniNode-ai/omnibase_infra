@@ -8,7 +8,7 @@ registration record for storage in backend systems (e.g., PostgreSQL).
 Architecture:
     ModelRegistrationRecord captures all information about a registered node:
     - Identity: node_id, node_type, node_version
-    - Capabilities: List of capabilities the node provides
+    - Capabilities: Tuple of capabilities the node provides (immutable)
     - Endpoints: Service discovery endpoints
     - Metadata: Additional key-value metadata
     - Timestamps: created_at, updated_at for tracking
@@ -28,6 +28,7 @@ Related:
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
@@ -60,7 +61,7 @@ class ModelRegistrationRecord(BaseModel):
         node_id: Unique identifier for the registered node.
         node_type: Type of ONEX node (EnumNodeKind).
         node_version: Semantic version string of the node.
-        capabilities: List of capability names the node provides.
+        capabilities: Tuple of capability names the node provides (immutable).
         endpoints: Dict mapping endpoint type to URL.
         metadata: Additional key-value metadata (no secrets).
         created_at: Timestamp when the record was created (optional, backend may set).
@@ -75,7 +76,7 @@ class ModelRegistrationRecord(BaseModel):
         ...     node_id=uuid4(),
         ...     node_type=EnumNodeKind.EFFECT,
         ...     node_version="1.0.0",
-        ...     capabilities=["registration.storage", "registration.storage.query"],
+        ...     capabilities=("registration.storage", "registration.storage.query"),
         ...     endpoints={"health": "http://localhost:8080/health"},
         ...     metadata={"team": "platform"},
         ...     created_at=datetime.now(UTC),
@@ -101,9 +102,9 @@ class ModelRegistrationRecord(BaseModel):
         description="Semantic version string of the node (e.g., '1.0.0')",
         min_length=1,
     )
-    capabilities: list[str] = Field(
-        default_factory=list,
-        description="List of capability names the node provides",
+    capabilities: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Tuple of capability names the node provides (immutable)",
     )
     endpoints: dict[str, str] = Field(
         default_factory=dict,
@@ -125,6 +126,63 @@ class ModelRegistrationRecord(BaseModel):
         default=None,
         description="Correlation ID for distributed tracing (auto-generated if not provided)",
     )
+
+    @field_validator("capabilities", mode="before")
+    @classmethod
+    def _coerce_capabilities_to_tuple(cls, v: object) -> tuple[str, ...]:
+        """Convert list/sequence to tuple for immutability.
+
+        This validator ensures explicit handling of all input types rather than
+        silent fallback, which could mask invalid input. In strict mode, all
+        items must already be strings - no silent type coercion.
+
+        Args:
+            v: The input value to coerce.
+
+        Returns:
+            tuple[str, ...]: The coerced tuple of capability strings.
+
+        Raises:
+            ValueError: If input is not a valid sequence type or contains non-strings.
+
+        Type coercion rules:
+            - tuple: Validates contents are strings, returns as-is
+            - list/set/frozenset: Validates contents are strings, converts to tuple
+            - Non-string items: Raises ValueError (strict mode)
+            - None: Raises ValueError (use default_factory=tuple instead)
+            - Other types: Raises ValueError
+        """
+        if isinstance(v, tuple):
+            # Validate tuple contents in strict mode
+            for i, item in enumerate(v):
+                if not isinstance(item, str):
+                    raise ValueError(
+                        f"capabilities[{i}] must be a string, got {type(item).__name__}"
+                    )
+            return v
+        if isinstance(v, (list, set, frozenset)):
+            # Convert sequence to tuple, validating contents
+            result: list[str] = []
+            for i, item in enumerate(v):
+                if not isinstance(item, str):
+                    raise ValueError(
+                        f"capabilities[{i}] must be a string, got {type(item).__name__}"
+                    )
+                result.append(item)
+            return tuple(result)
+        if isinstance(v, Sequence) and not isinstance(v, str):
+            # Handle other sequence types
+            result_seq: list[str] = []
+            for i, item in enumerate(v):
+                if not isinstance(item, str):
+                    raise ValueError(
+                        f"capabilities[{i}] must be a string, got {type(item).__name__}"
+                    )
+                result_seq.append(item)
+            return tuple(result_seq)
+        raise ValueError(
+            f"capabilities must be a tuple, list, set, or frozenset, got {type(v).__name__}"
+        )
 
     @field_validator("created_at", "updated_at")
     @classmethod

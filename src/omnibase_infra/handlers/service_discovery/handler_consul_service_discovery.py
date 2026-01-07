@@ -41,6 +41,10 @@ from omnibase_infra.handlers.service_discovery.models import (
     ModelServiceInfo,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.nodes.node_service_discovery_effect.models import (
+    ModelServiceDiscoveryHealthCheckDetails,
+    ModelServiceDiscoveryHealthCheckResult,
+)
 from omnibase_infra.nodes.node_service_discovery_effect.models.enum_health_status import (
     EnumHealthStatus,
 )
@@ -563,14 +567,14 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
     async def health_check(
         self,
         correlation_id: UUID | None = None,
-    ) -> dict[str, object]:
+    ) -> ModelServiceDiscoveryHealthCheckResult:
         """Perform a health check on the Consul connection.
 
         Args:
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            Dict with health status information.
+            ModelServiceDiscoveryHealthCheckResult with health status information.
         """
         correlation_id = correlation_id or uuid4()
         start_time = time.monotonic()
@@ -579,7 +583,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             # Client is typed as consul.Consul (duck-typed for injected clients)
             client = self._consul_client
             loop = asyncio.get_running_loop()
-            status = await asyncio.wait_for(
+            leader = await asyncio.wait_for(
                 loop.run_in_executor(
                     self._executor,
                     lambda: client.status.leader(),  # type: ignore[union-attr]
@@ -589,29 +593,31 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
 
             duration_ms = (time.monotonic() - start_time) * 1000
 
-            return {
-                "healthy": True,
-                "backend_type": self.handler_type,
-                "consul_host": self._consul_host,
-                "consul_port": self._consul_port,
-                "leader": status,
-                "circuit_breaker_open": self._circuit_breaker_open,
-                "duration_ms": duration_ms,
-                "correlation_id": str(correlation_id),
-            }
+            return ModelServiceDiscoveryHealthCheckResult(
+                healthy=True,
+                backend_type=self.handler_type,
+                latency_ms=duration_ms,
+                reason="ok",
+                details=ModelServiceDiscoveryHealthCheckDetails(
+                    agent_address=f"{self._consul_host}:{self._consul_port}",
+                    leader=str(leader) if leader else None,
+                ),
+                correlation_id=correlation_id,
+            )
 
         except Exception as e:
             duration_ms = (time.monotonic() - start_time) * 1000
-            return {
-                "healthy": False,
-                "backend_type": self.handler_type,
-                "consul_host": self._consul_host,
-                "consul_port": self._consul_port,
-                "error": f"Health check failed: {type(e).__name__}",
-                "circuit_breaker_open": self._circuit_breaker_open,
-                "duration_ms": duration_ms,
-                "correlation_id": str(correlation_id),
-            }
+            return ModelServiceDiscoveryHealthCheckResult(
+                healthy=False,
+                backend_type=self.handler_type,
+                latency_ms=duration_ms,
+                reason=f"Health check failed: {type(e).__name__}",
+                error_type=type(e).__name__,
+                details=ModelServiceDiscoveryHealthCheckDetails(
+                    agent_address=f"{self._consul_host}:{self._consul_port}",
+                ),
+                correlation_id=correlation_id,
+            )
 
     async def shutdown(self) -> None:
         """Shutdown the handler and release resources.

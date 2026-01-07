@@ -15,7 +15,7 @@ until ModelHandlerValidationError is implemented.
     Created as part of OMN-1091 structured validation and error reporting.
 """
 
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError

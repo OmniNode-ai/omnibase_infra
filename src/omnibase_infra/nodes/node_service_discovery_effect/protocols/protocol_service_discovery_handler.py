@@ -43,6 +43,7 @@ if TYPE_CHECKING:
         ModelDiscoveryQuery,
         ModelDiscoveryResult,
         ModelRegistrationResult,
+        ModelServiceDiscoveryHealthCheckResult,
         ModelServiceRegistration,
     )
 
@@ -108,9 +109,12 @@ class ProtocolServiceDiscoveryHandler(Protocol):
                     # Consul-specific discovery logic
                     ...
 
-                async def health_check(self) -> dict[str, object]:
+                async def health_check(
+                    self,
+                    correlation_id: UUID | None = None,
+                ) -> ModelServiceDiscoveryHealthCheckResult:
                     # Check Consul agent connectivity
-                    return {"status": "healthy", "agent": "localhost:8500"}
+                    ...
 
     Note:
         Method bodies in this Protocol use ``...`` (Ellipsis) rather than
@@ -205,23 +209,45 @@ class ProtocolServiceDiscoveryHandler(Protocol):
         """
         ...
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(
+        self,
+        correlation_id: UUID | None = None,
+    ) -> ModelServiceDiscoveryHealthCheckResult:
         """Check health of the service discovery backend.
 
         Verifies connectivity and availability of the service
         discovery backend.
 
+        Args:
+            correlation_id: Optional correlation ID for distributed tracing.
+                If not provided, implementations should generate one.
+
         Returns:
-            Dict containing health status and backend-specific details.
-            Expected keys:
-            - "status": "healthy" | "unhealthy" | "degraded"
-            - "backend_type": Handler type identifier
-            - Additional backend-specific details
+            ModelServiceDiscoveryHealthCheckResult: Health status including:
+                - healthy: bool indicating overall health
+                - backend_type: str identifying the backend
+                - latency_ms: float connection latency
+                - reason: str explaining the health status
+                - error_type: str | None exception type if failed
+                - details: ModelServiceDiscoveryHealthCheckDetails with typed diagnostics
+                - correlation_id: UUID | None for tracing
 
         Example:
+            >>> from omnibase_infra.nodes.node_service_discovery_effect.models import (
+            ...     ModelServiceDiscoveryHealthCheckDetails,
+            ... )
             >>> health = await handler.health_check()
-            >>> health["status"]
-            'healthy'
+            >>> health
+            ModelServiceDiscoveryHealthCheckResult(
+                healthy=True,
+                backend_type="consul",
+                latency_ms=5.2,
+                reason="ok",
+                details=ModelServiceDiscoveryHealthCheckDetails(
+                    agent_address="localhost:8500",
+                    service_count=15,
+                ),
+            )
         """
         ...
 

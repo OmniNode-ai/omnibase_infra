@@ -36,7 +36,7 @@ from uuid import uuid4
 
 import pytest
 from omnibase_core.enums import EnumNodeKind
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import ValidationError
 
 from omnibase_infra.nodes.node_registration_orchestrator.models import (
     IntentRegistry,

@@ -27,6 +27,9 @@ from omnibase_infra.handlers.service_discovery.models import (
     ModelRegistrationResult,
     ModelServiceInfo,
 )
+from omnibase_infra.nodes.node_service_discovery_effect.models import (
+    ModelServiceDiscoveryHealthCheckResult,
+)
 
 
 @runtime_checkable
@@ -129,14 +132,21 @@ class ProtocolServiceDiscoveryHandler(Protocol):
     async def health_check(
         self,
         correlation_id: UUID | None = None,
-    ) -> dict[str, object]:
+    ) -> ModelServiceDiscoveryHealthCheckResult:
         """Perform a health check on the handler.
 
         Args:
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            Dict with health status information.
+            ModelServiceDiscoveryHealthCheckResult: Health status including:
+                - healthy: bool indicating overall health
+                - backend_type: str identifying the backend
+                - latency_ms: float connection latency
+                - reason: str explaining the health status
+                - error_type: str | None exception type if failed
+                - details: ModelServiceDiscoveryHealthCheckDetails with typed diagnostics
+                - correlation_id: UUID | None for tracing
         """
         ...
 

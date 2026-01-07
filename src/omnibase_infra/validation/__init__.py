@@ -96,7 +96,6 @@ from omnibase_core.models.validation.model_import_validation_result import (
 )
 from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
-    CircularImportValidator,
     validate_all,
     validate_architecture,
     validate_contracts,

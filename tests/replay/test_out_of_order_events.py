@@ -37,7 +37,7 @@ Related:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -52,7 +52,6 @@ from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 from tests.helpers.replay_utils import (
     EventSequenceEntry,
-    OrderingViolation,
     detect_sequence_number_violations,
     detect_timestamp_order_violations,
 )

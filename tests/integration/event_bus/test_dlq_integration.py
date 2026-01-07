@@ -28,7 +28,7 @@ import asyncio
 import json
 import os
 import uuid
-from collections.abc import AsyncGenerator, Callable, Coroutine
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 

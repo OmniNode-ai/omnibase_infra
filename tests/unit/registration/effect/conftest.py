@@ -46,7 +46,6 @@ from omnibase_infra.models.registration import (
     ModelNodeMetadata,
     ModelNodeRegistration,
 )
-from tests.helpers import create_introspection_event
 
 # -----------------------------------------------------------------------------
 # Idempotency Fixtures

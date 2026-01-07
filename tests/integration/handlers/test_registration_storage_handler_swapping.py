@@ -38,7 +38,6 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -136,7 +135,7 @@ class BaseHandlerSwappingTests:
     @pytest.fixture
     def handler(self) -> ProtocolRegistrationStorageHandler:
         """Override in subclass to provide the handler to test."""
-        raise NotImplementedError("Subclasses must implement handler fixture")
+        pytest.skip("Subclasses must implement handler fixture")
 
     async def test_handler_conforms_to_protocol(
         self,

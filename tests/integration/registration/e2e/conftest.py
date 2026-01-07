@@ -87,9 +87,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from tests.infrastructure_config import (
     DEFAULT_CONSUL_PORT,
-    DEFAULT_KAFKA_PORT,
     DEFAULT_POSTGRES_PORT,
-    REMOTE_INFRA_HOST,
 )
 
 if TYPE_CHECKING:

@@ -50,7 +50,6 @@ from __future__ import annotations
 import re
 from typing import Final
 
-from omnibase_infra.enums import EnumHandlerErrorType, EnumHandlerSourceType
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import ModelHandlerIdentifier
 

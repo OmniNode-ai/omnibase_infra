@@ -41,9 +41,6 @@ from omnibase_core.enums import EnumNodeKind
 # Fixed timestamp for deterministic tests
 TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
 )

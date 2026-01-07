@@ -67,8 +67,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
 # Import shared conformance helpers
 from tests.conftest import (
     assert_effect_protocol_interface,
-    assert_has_async_methods,
-    assert_has_methods,
     assert_reducer_protocol_interface,
 )
 

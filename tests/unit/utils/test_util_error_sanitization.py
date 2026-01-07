@@ -12,8 +12,6 @@ See Also:
 
 from __future__ import annotations
 
-import pytest
-
 from omnibase_infra.utils import SENSITIVE_PATTERNS, sanitize_error_message
 
 

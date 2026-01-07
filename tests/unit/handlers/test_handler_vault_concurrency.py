@@ -10,7 +10,6 @@ and concurrent operation handling under production load scenarios.
 from __future__ import annotations
 
 import asyncio
-import itertools
 import threading
 from itertools import cycle
 from unittest.mock import MagicMock, patch

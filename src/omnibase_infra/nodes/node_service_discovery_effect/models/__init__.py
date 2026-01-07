@@ -39,6 +39,12 @@ from .model_query_metadata import (
 from .model_registration_result import (
     ModelRegistrationResult,
 )
+from .model_service_discovery_health_check_details import (
+    ModelServiceDiscoveryHealthCheckDetails,
+)
+from .model_service_discovery_health_check_result import (
+    ModelServiceDiscoveryHealthCheckResult,
+)
 from .model_service_info import (
     ModelServiceInfo,
 )
@@ -54,6 +60,8 @@ __all__ = [
     "ModelHealthCheckConfig",
     "ModelQueryMetadata",
     "ModelRegistrationResult",
+    "ModelServiceDiscoveryHealthCheckDetails",
+    "ModelServiceDiscoveryHealthCheckResult",
     "ModelServiceInfo",
     "ModelServiceRegistration",
 ]

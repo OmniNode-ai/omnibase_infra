@@ -68,8 +68,6 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
     from omnibase_infra.projectors import ProjectionReaderRegistration
 

@@ -832,7 +832,7 @@ class TestDbHandlerCorrelationId:
         self, initialized_db_handler: DbHandler
     ) -> None:
         """Verify correlation_id from envelope is preserved in response."""
-        from uuid import UUID, uuid4
+        from uuid import uuid4
 
         test_correlation_id = uuid4()
 

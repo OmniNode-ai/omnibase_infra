@@ -33,7 +33,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus

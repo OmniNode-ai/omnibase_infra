@@ -23,6 +23,10 @@ from omnibase_infra.handlers.service_discovery.models import (
     ModelRegistrationResult,
     ModelServiceInfo,
 )
+from omnibase_infra.nodes.node_service_discovery_effect.models import (
+    ModelServiceDiscoveryHealthCheckDetails,
+    ModelServiceDiscoveryHealthCheckResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -198,26 +202,34 @@ class MockServiceDiscoveryHandler:
     async def health_check(
         self,
         correlation_id: UUID | None = None,
-    ) -> dict[str, object]:
+    ) -> ModelServiceDiscoveryHealthCheckResult:
         """Perform a health check on the mock handler.
 
         Args:
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            Dict with health status information.
+            ModelServiceDiscoveryHealthCheckResult with health status information.
         """
         correlation_id = correlation_id or uuid4()
+        start_time = time.monotonic()
 
         async with self._lock:
             service_count = len(self._services)
 
-        return {
-            "healthy": True,
-            "backend_type": self.handler_type,
-            "service_count": service_count,
-            "correlation_id": str(correlation_id),
-        }
+        latency_ms = (time.monotonic() - start_time) * 1000
+
+        return ModelServiceDiscoveryHealthCheckResult(
+            healthy=True,
+            backend_type=self.handler_type,
+            latency_ms=latency_ms,
+            reason="ok",
+            details=ModelServiceDiscoveryHealthCheckDetails(
+                server_version="mock-1.0.0",
+                service_count=service_count,
+            ),
+            correlation_id=correlation_id,
+        )
 
     async def clear(self) -> None:
         """Clear all services from the mock store.

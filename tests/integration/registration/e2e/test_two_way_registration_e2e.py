@@ -72,8 +72,6 @@ from .verification_helpers import (
     verify_dual_registration,
     verify_postgres_registration,
     wait_for_consul_registration,
-    wait_for_heartbeat_update,
-    wait_for_kafka_event,
     wait_for_postgres_registration,
 )
 
@@ -84,9 +82,6 @@ if TYPE_CHECKING:
     from omnibase_infra.handlers import ConsulHandler
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
-    )
-    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-        HandlerNodeIntrospected,
     )
     from omnibase_infra.projectors import (
         ProjectionReaderRegistration,
@@ -1590,9 +1585,6 @@ class TestSuite5RegistryRecovery:
         """
         from omnibase_infra.models.projection.model_registration_projection import (
             ModelRegistrationProjection,
-        )
-        from omnibase_infra.nodes.node_registration_orchestrator import (
-            NodeRegistrationOrchestrator,
         )
         from omnibase_infra.projectors import ProjectorRegistration
         from omnibase_infra.runtime.container_wiring import (

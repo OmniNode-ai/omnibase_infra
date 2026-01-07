@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError

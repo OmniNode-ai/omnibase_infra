@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import copy
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -54,7 +54,7 @@ from tests.helpers.replay_utils import compare_outputs
 if TYPE_CHECKING:
     from omnibase_core.nodes import ModelReducerOutput
 
-    from tests.replay.conftest import EventFactory, EventSequenceLog, NodeType
+    from tests.replay.conftest import EventFactory, NodeType
 
 
 # =============================================================================

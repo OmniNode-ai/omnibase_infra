@@ -36,11 +36,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
 
 import pytest
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 from omnibase_infra.handlers.registration_storage.handler_mock_registration_storage import (
     MockRegistrationStorageHandler,
@@ -51,12 +48,6 @@ from omnibase_infra.handlers.registration_storage.handler_postgres_registration_
 from omnibase_infra.handlers.registration_storage.protocol_registration_storage_handler import (
     ProtocolRegistrationStorageHandler,
 )
-
-if TYPE_CHECKING:
-    from omnibase_infra.handlers.registration_storage.models import (
-        ModelRegistrationRecord,
-    )
-
 
 # =============================================================================
 # Protocol Method Definitions
