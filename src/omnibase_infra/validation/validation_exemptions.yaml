@@ -361,16 +361,6 @@ pattern_exemptions:
 
     documentation:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
-      - docs/migrations/HANDLER_TO_DISPATCHER_MIGRATION.md
-    ticket: OMN-990
-  - file_pattern: 'message_dispatch_engine\.py'
-    method_pattern: "Function 'register_handler'"
-    violation_pattern: 'has \d+ parameters'
-    reason: >
-      Handler registration for backwards compatibility with RuntimeHostProcess. Takes handler_id, handler, category, message_types, node_kind. Legacy alias for register_dispatcher.
-
-    documentation:
-      - docs/migrations/HANDLER_TO_DISPATCHER_MIGRATION.md
     ticket: OMN-990
   # ==========================================================================
   # DispatcherRegistry Exemptions (OMN-934)
@@ -494,6 +484,30 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-1055
+  # ==========================================================================
+  # ServiceHealth Exemptions (OMN-529)
+  # ==========================================================================
+  # ServiceHealth follows the CLAUDE.md Service<Name> naming convention and
+  # requires multiple __init__ parameters to support dual initialization modes
+  # (direct runtime injection and container-based DI).
+  - file_pattern: 'service_health\.py'
+    class_pattern: "Class name 'ServiceHealth'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention for service classes. Service files use service_<name>.py with Service<Name> class names.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-529
+  - file_pattern: 'service_health\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      ServiceHealth supports dual initialization modes (direct runtime injection and container-based DI) requiring multiple optional parameters. This is intentional to support migration from legacy patterns to ONEX-compliant container injection.
+
+    documentation:
+      - CLAUDE.md (Container-Based Dependency Injection)
+    ticket: OMN-529
   # ==========================================================================
   # Consul Service ID Exemptions (OMN-889)
   # ==========================================================================

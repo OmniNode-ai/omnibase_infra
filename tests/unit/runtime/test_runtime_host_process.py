@@ -2527,6 +2527,355 @@ class TestRuntimeHostProcessDrainState:
 
 
 # =============================================================================
+# TestRuntimeHostProcessContainerInjection
+# =============================================================================
+
+
+class TestRuntimeHostProcessContainerInjection:
+    """Tests for container-based dependency injection per OMN-529.
+
+    These tests verify that RuntimeHostProcess properly supports container-based
+    dependency injection for handler registry resolution. The container pattern
+    follows ONEX conventions for testability and explicit dependency management.
+
+    Container Integration:
+        RuntimeHostProcess accepts ModelONEXContainer as optional first parameter.
+        When provided, the runtime host can resolve ProtocolBindingRegistry from
+        the container's service_registry during async start().
+
+        Resolution Order (during _get_handler_registry):
+            1. If handler_registry was provided to __init__, uses it
+            2. If container was provided and has ProtocolBindingRegistry, resolves from container
+            3. Falls back to singleton via get_handler_registry()
+    """
+
+    @pytest.mark.asyncio
+    async def test_container_property_returns_stored_container(self) -> None:
+        """Container property should return the stored container when provided.
+
+        When RuntimeHostProcess is initialized with a container parameter,
+        the container property should return that same container instance.
+        """
+        # Create a mock container
+        mock_container = AsyncMock()
+        mock_container.service_registry = None  # Will fall back to singleton
+
+        # Create process with container
+        process = RuntimeHostProcess(container=mock_container)
+
+        # Verify container property returns the stored container
+        assert process.container is mock_container
+        assert process.container is not None
+
+    @pytest.mark.asyncio
+    async def test_container_property_returns_none_when_not_provided(self) -> None:
+        """Container property should return None when not provided.
+
+        When RuntimeHostProcess is initialized without a container parameter
+        (legacy initialization), the container property should return None.
+        """
+        # Create process without container (legacy pattern)
+        process = RuntimeHostProcess()
+
+        # Verify container property returns None
+        assert process.container is None
+
+    @pytest.mark.asyncio
+    async def test_container_property_returns_none_with_explicit_none(self) -> None:
+        """Container property should return None when explicitly set to None.
+
+        When RuntimeHostProcess is initialized with container=None explicitly,
+        the container property should return None.
+        """
+        # Create process with explicit None container
+        process = RuntimeHostProcess(container=None)
+
+        # Verify container property returns None
+        assert process.container is None
+
+    @pytest.mark.asyncio
+    async def test_handler_registry_resolved_from_container(self) -> None:
+        """Handler registry should be resolved from container when provided.
+
+        When a container with a service_registry is provided, the runtime host
+        should attempt to resolve ProtocolBindingRegistry from the container
+        during _get_handler_registry() call.
+        """
+        from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+
+        # Create mock registry
+        mock_registry = ProtocolBindingRegistry()
+
+        # Create mock service_registry that returns our mock registry
+        mock_service_registry = AsyncMock()
+        mock_service_registry.resolve_service = AsyncMock(return_value=mock_registry)
+
+        # Create mock container with service_registry
+        mock_container = AsyncMock()
+        mock_container.service_registry = mock_service_registry
+
+        # Create process with container
+        process = RuntimeHostProcess(container=mock_container)
+
+        # Call _get_handler_registry
+        resolved_registry = await process._get_handler_registry()
+
+        # Verify resolve_service was called with ProtocolBindingRegistry
+        mock_service_registry.resolve_service.assert_called_once_with(
+            ProtocolBindingRegistry
+        )
+
+        # Verify the resolved registry is returned
+        assert resolved_registry is mock_registry
+
+    @pytest.mark.asyncio
+    async def test_handler_registry_falls_back_to_singleton_on_container_error(
+        self,
+    ) -> None:
+        """Handler registry should fall back to singleton when container resolution fails.
+
+        When container.service_registry.resolve_service() raises an exception,
+        the runtime host should gracefully fall back to the singleton registry
+        via get_handler_registry().
+        """
+        # Create mock service_registry that raises an error
+        # Note: Must use one of the caught exceptions (RuntimeError, ValueError,
+        # KeyError, AttributeError, LookupError) - generic Exception is not caught
+        mock_service_registry = AsyncMock()
+        mock_service_registry.resolve_service = AsyncMock(
+            side_effect=RuntimeError("Resolution failed")
+        )
+
+        # Create mock container with failing service_registry
+        mock_container = AsyncMock()
+        mock_container.service_registry = mock_service_registry
+
+        # Create process with container
+        process = RuntimeHostProcess(container=mock_container)
+
+        # Call _get_handler_registry - should fall back to singleton
+        # This should not raise an exception
+        resolved_registry = await process._get_handler_registry()
+
+        # Verify we got a registry (the singleton)
+        assert resolved_registry is not None
+
+        # Verify resolve_service was attempted
+        mock_service_registry.resolve_service.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handler_registry_falls_back_when_service_registry_is_none(
+        self,
+    ) -> None:
+        """Handler registry should fall back to singleton when service_registry is None.
+
+        When container is provided but container.service_registry is None,
+        the runtime host should fall back to the singleton registry.
+        """
+        # Create mock container with None service_registry
+        mock_container = AsyncMock()
+        mock_container.service_registry = None
+
+        # Create process with container
+        process = RuntimeHostProcess(container=mock_container)
+
+        # Call _get_handler_registry - should fall back to singleton
+        resolved_registry = await process._get_handler_registry()
+
+        # Verify we got a registry (the singleton)
+        assert resolved_registry is not None
+
+    @pytest.mark.asyncio
+    async def test_container_with_config_parameters(self) -> None:
+        """Container should work alongside other constructor parameters.
+
+        The container parameter should work correctly when combined with
+        other parameters like config, event_bus, etc.
+        """
+        # Create mock container
+        mock_container = AsyncMock()
+        mock_container.service_registry = None  # Will fall back to singleton
+
+        # Create process with container AND config
+        config = {
+            "input_topic": "custom.input",
+            "output_topic": "custom.output",
+            "group_id": "custom-group",
+        }
+        process = RuntimeHostProcess(container=mock_container, config=config)
+
+        # Verify container is stored
+        assert process.container is mock_container
+
+        # Verify config is also applied
+        assert process.input_topic == "custom.input"
+        assert process.output_topic == "custom.output"
+        assert process.group_id == "custom-group"
+
+    @pytest.mark.asyncio
+    async def test_container_instantiation_without_other_params(self) -> None:
+        """RuntimeHostProcess should work with only container parameter.
+
+        When only container is provided, all other parameters should use
+        their defaults.
+        """
+        # Create mock container
+        mock_container = AsyncMock()
+        mock_container.service_registry = None
+
+        # Create process with only container
+        process = RuntimeHostProcess(container=mock_container)
+
+        # Verify container is stored
+        assert process.container is mock_container
+
+        # Verify defaults are used
+        assert process.input_topic == "requests"  # DEFAULT_INPUT_TOPIC
+        assert process.output_topic == "responses"  # DEFAULT_OUTPUT_TOPIC
+        assert process.group_id == "runtime-host"  # DEFAULT_GROUP_ID
+        assert process.is_running is False
+
+    @pytest.mark.asyncio
+    async def test_explicit_handler_registry_takes_precedence_over_container(
+        self,
+    ) -> None:
+        """Explicit handler_registry parameter should take precedence over container.
+
+        When both handler_registry and container are provided, the explicit
+        handler_registry should be used instead of resolving from container.
+        """
+        from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+
+        # Create explicit registry
+        explicit_registry = ProtocolBindingRegistry()
+
+        # Create mock container with service_registry
+        mock_service_registry = AsyncMock()
+        mock_container = AsyncMock()
+        mock_container.service_registry = mock_service_registry
+
+        # Create process with both container and explicit registry
+        process = RuntimeHostProcess(
+            container=mock_container,
+            handler_registry=explicit_registry,
+        )
+
+        # Call _get_handler_registry
+        resolved_registry = await process._get_handler_registry()
+
+        # Verify explicit registry is returned (not container resolution)
+        assert resolved_registry is explicit_registry
+
+        # Verify container service_registry was NOT called
+        mock_service_registry.resolve_service.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handler_registry_caches_container_resolution(self) -> None:
+        """Handler registry should cache result after container resolution.
+
+        When _get_handler_registry() resolves from container, the result should
+        be cached so subsequent calls do not re-resolve from container.
+        """
+        from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+
+        # Create mock registry
+        mock_registry = ProtocolBindingRegistry()
+
+        # Create mock service_registry that returns our mock registry
+        mock_service_registry = AsyncMock()
+        mock_service_registry.resolve_service = AsyncMock(return_value=mock_registry)
+
+        # Create mock container with service_registry
+        mock_container = AsyncMock()
+        mock_container.service_registry = mock_service_registry
+
+        # Create process with container
+        process = RuntimeHostProcess(container=mock_container)
+
+        # First call - should resolve from container
+        resolved_registry_1 = await process._get_handler_registry()
+
+        # Second call - should return cached result
+        resolved_registry_2 = await process._get_handler_registry()
+
+        # Third call - should still return cached result
+        resolved_registry_3 = await process._get_handler_registry()
+
+        # All calls should return the same registry instance
+        assert resolved_registry_1 is mock_registry
+        assert resolved_registry_2 is mock_registry
+        assert resolved_registry_3 is mock_registry
+
+        # resolve_service should only be called once (first call)
+        assert mock_service_registry.resolve_service.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_handler_registry_caches_singleton_fallback(self) -> None:
+        """Handler registry should cache singleton fallback result.
+
+        When _get_handler_registry() falls back to singleton, the result should
+        be cached so subsequent calls return the same instance without re-calling
+        get_handler_registry().
+        """
+        # Create process without container (will use singleton fallback)
+        process = RuntimeHostProcess()
+
+        # First call - should get singleton
+        resolved_registry_1 = await process._get_handler_registry()
+
+        # Second call - should return cached result
+        resolved_registry_2 = await process._get_handler_registry()
+
+        # Third call - should still return cached result
+        resolved_registry_3 = await process._get_handler_registry()
+
+        # All calls should return the same registry instance
+        assert resolved_registry_1 is resolved_registry_2
+        assert resolved_registry_2 is resolved_registry_3
+
+        # Verify the internal cache is set
+        assert process._handler_registry is resolved_registry_1
+
+    @pytest.mark.asyncio
+    async def test_handler_registry_caches_after_container_failure(self) -> None:
+        """Handler registry should cache singleton result after container resolution fails.
+
+        When container resolution fails and we fall back to singleton, that singleton
+        should be cached for subsequent calls.
+        """
+        # Create mock service_registry that raises an error
+        # Note: Must use one of the caught exceptions (RuntimeError, ValueError,
+        # KeyError, AttributeError, LookupError) - generic Exception is not caught
+        mock_service_registry = AsyncMock()
+        mock_service_registry.resolve_service = AsyncMock(
+            side_effect=RuntimeError("Resolution failed")
+        )
+
+        # Create mock container with failing service_registry
+        mock_container = AsyncMock()
+        mock_container.service_registry = mock_service_registry
+
+        # Create process with container
+        process = RuntimeHostProcess(container=mock_container)
+
+        # First call - should fall back to singleton and cache it
+        resolved_registry_1 = await process._get_handler_registry()
+
+        # Second call - should return cached singleton
+        resolved_registry_2 = await process._get_handler_registry()
+
+        # Third call - should still return cached singleton
+        resolved_registry_3 = await process._get_handler_registry()
+
+        # All calls should return the same registry instance
+        assert resolved_registry_1 is resolved_registry_2
+        assert resolved_registry_2 is resolved_registry_3
+
+        # resolve_service should only be called once (first call before fallback)
+        assert mock_service_registry.resolve_service.call_count == 1
+
+
+# =============================================================================
 # Module Exports
 # =============================================================================
 
@@ -2546,6 +2895,7 @@ __all__: list[str] = [
     "TestRuntimeHostProcessGracefulDrain",
     "TestRuntimeHostProcessPendingMessageTracking",
     "TestRuntimeHostProcessDrainState",
+    "TestRuntimeHostProcessContainerInjection",
     "MockHandler",
     "MockFailingHandler",
     "MockEventBus",
