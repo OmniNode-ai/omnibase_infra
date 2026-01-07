@@ -212,9 +212,8 @@ __all__: list[str] = [
     # Chain propagation validation (OMN-951)
     "ChainPropagationError",
     "ChainPropagationValidator",
-    # ONEX-compliant validator names
-    "ValidatorCircularImport",
-    "ValidatorServiceContract",
+    # Circular import validation (from omnibase_core)
+    "CircularImportValidator",
     # Contract linting (PR #57)
     "ContractLinter",
     "EnumContractViolationSeverity",

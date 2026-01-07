@@ -444,17 +444,15 @@ class TestReducerPerformanceEdgeCases:
             f"Reduce with many endpoints took {elapsed_ms:.2f}ms, exceeds threshold"
         )
 
-    def test_reduce_reset_is_fast(
-        self,
-        reducer: RegistrationReducer,
-    ) -> None:
+    def test_reduce_reset_is_fast(self) -> None:
         """reduce_reset() should be fast as it's a simple state transition."""
         elapsed_times: list[float] = []
 
         for _ in range(TIMING_ITERATIONS):
-            # Create fresh state and reset_event_id per iteration to ensure
+            # Create fresh reducer, state, and reset_event_id per iteration to ensure
             # idempotent test behavior (no accumulated state between iterations,
-            # no duplicate detection early-exit bias)
+            # no duplicate detection early-exit bias, no reducer-level caching effects)
+            reducer = RegistrationReducer()
             failed_state = ModelRegistrationState(
                 status="failed",
                 failure_reason="consul_failed",

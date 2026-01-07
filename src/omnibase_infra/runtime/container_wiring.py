@@ -116,12 +116,11 @@ def _validate_service_registry(
         )
 
     if container.service_registry is None:
-        # TODO(upstream): Request omnibase_core API improvement for service_registry initialization.
+        # TODO(OMN-1258): Request upstream API - add public method
+        # `container.initialize_service_registry(config)` in omnibase_core.
         # Current behavior: service_registry returns None under several conditions, requiring
         # downstream validation. Proposed improvement: provide a factory method or builder pattern
-        # that ensures service_registry is always initialized, or a method like
-        # `container.ensure_service_registry()` that raises early with clear diagnostics.
-        # See: OMN-1258 for tracking.
+        # that ensures service_registry is always initialized with clear diagnostics.
         raise ServiceRegistryUnavailableError(
             "Container service_registry is None",
             operation=operation,
