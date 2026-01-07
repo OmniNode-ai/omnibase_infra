@@ -8,7 +8,7 @@ including three SINGLE SOURCE OF TRUTH registries and the runtime execution host
 Core Registries
 ---------------
 - **PolicyRegistry**: SINGLE SOURCE OF TRUTH for policy plugin registration
-    - Container-based dependency injection support (preferred) or singleton accessor (legacy)
+    - Container-based DI support (preferred) or singleton accessor (legacy)
     - Thread-safe registration by (policy_id, policy_type, version)
     - Enforces synchronous-by-default execution (async must be explicit)
     - Supports orchestrator and reducer policy types with version resolution
@@ -29,14 +29,13 @@ Runtime Components
 ------------------
 - **Kernel**: Contract-driven bootstrap entrypoint for the ONEX runtime
 - **RuntimeHostProcess**: Infrastructure-specific runtime host process implementation
-- **HealthServer**: HTTP health check endpoint for container orchestration
 - **Wiring functions**: Register handlers and event buses with registries
 - **Envelope validation**: Validate event envelope structures
 
 Message Dispatch Engine
 -----------------------
 - **MessageDispatchEngine**: Runtime dispatch engine for message routing
-- **DispatcherRegistry**: Thread-safe registry for message dispatchers with freeze pattern
+- **DispatcherRegistry**: Thread-safe registry for dispatchers with freeze pattern
 - **ProtocolMessageDispatcher**: Protocol for category-based message dispatchers
 
 Chain-Aware Dispatch (OMN-951)
@@ -85,11 +84,7 @@ from omnibase_infra.runtime.handler_registry import (
     get_handler_registry,
     register_handlers_from_config,
 )
-from omnibase_infra.runtime.health_server import (
-    DEFAULT_HTTP_HOST,
-    DEFAULT_HTTP_PORT,
-    HealthServer,
-)
+
 from omnibase_infra.runtime.kernel import bootstrap as kernel_bootstrap
 from omnibase_infra.runtime.kernel import load_runtime_config
 from omnibase_infra.runtime.kernel import main as kernel_main
@@ -158,8 +153,6 @@ from omnibase_infra.runtime.chain_aware_dispatch import (
 # isort: on
 
 __all__: list[str] = [
-    "DEFAULT_HTTP_HOST",
-    "DEFAULT_HTTP_PORT",
     # Event bus kind constants
     "EVENT_BUS_INMEMORY",
     "EVENT_BUS_KAFKA",
@@ -179,8 +172,6 @@ __all__: list[str] = [
     "DispatchContextEnforcer",
     "DispatcherRegistry",
     "EventBusBindingRegistry",
-    # Health server
-    "HealthServer",
     # Message dispatch engine
     "MessageDispatchEngine",
     # Message type registry (OMN-937)

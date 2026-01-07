@@ -181,8 +181,19 @@ def _check_consul_reachable() -> bool:
 
 CONSUL_AVAILABLE = _check_consul_reachable()
 
+
+# Import shared service registry availability check
+from tests.conftest import check_service_registry_available
+
+SERVICE_REGISTRY_AVAILABLE = check_service_registry_available()
+
 # Combined availability check
-ALL_INFRA_AVAILABLE = KAFKA_AVAILABLE and CONSUL_AVAILABLE and POSTGRES_AVAILABLE
+ALL_INFRA_AVAILABLE = (
+    KAFKA_AVAILABLE
+    and CONSUL_AVAILABLE
+    and POSTGRES_AVAILABLE
+    and SERVICE_REGISTRY_AVAILABLE
+)
 
 
 # =============================================================================
@@ -199,7 +210,8 @@ pytestmark = [
             "Full infrastructure required for E2E tests. "
             f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS)'}. "
             f"Consul: {'available' if CONSUL_AVAILABLE else 'MISSING (set CONSUL_HOST or unreachable)'}. "
-            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set POSTGRES_HOST and POSTGRES_PASSWORD)'}."
+            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
+            f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
         ),
     ),
 ]
@@ -396,11 +408,12 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
         The event bus is stopped and cleaned up after each test.
     """
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
     if not KAFKA_AVAILABLE:
         pytest.skip("Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)")
 
-    bus = KafkaEventBus(
+    config = ModelKafkaEventBusConfig(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         environment="e2e-test",
         group="registration-e2e",
@@ -409,6 +422,7 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
         circuit_breaker_threshold=5,
         circuit_breaker_reset_timeout=60.0,
     )
+    bus = KafkaEventBus(config=config)
 
     await bus.start()
 
@@ -984,6 +998,7 @@ __all__ = [
     "CONSUL_AVAILABLE",
     "KAFKA_AVAILABLE",
     "POSTGRES_AVAILABLE",
+    "SERVICE_REGISTRY_AVAILABLE",
     # Database fixtures
     "postgres_pool",
     # Container fixtures

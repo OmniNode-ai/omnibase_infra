@@ -572,7 +572,7 @@ class TestA6Observability:
         # Act
         result = registration_reducer.reduce(ModelRegistrationState(), event)
 
-        # Assert - Check each intent payload
+        # Assert - Check each intent payload (payload is wrapper with .data dict)
         for intent in result.intents:
             # Convert Pydantic model to dict for JSON serialization
             payload_dict = (
@@ -769,7 +769,7 @@ class TestA6Observability:
                 f"SECRET LEAKED in log message: {secret[:20]}..."
             )
 
-        # Assert 3: No secrets in intent payloads
+        # Assert 3: No secrets in intent payloads (payload is wrapper with .data dict)
         for intent in result.intents:
             # Convert Pydantic model to dict for JSON serialization
             payload_dict = (

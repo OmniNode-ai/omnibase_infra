@@ -11,7 +11,6 @@ Types from omnibase_core:
 
 Local types:
     - JsonDict: dict[str, object] for JSON object operations
-    - JsonValue: Alias for JsonType (backwards compatibility)
 """
 
 from omnibase_core.types import JsonPrimitive, JsonType
@@ -20,12 +19,8 @@ from omnibase_core.types import JsonPrimitive, JsonType
 # Use this when you need dict operations like .get(), indexing, or `in` checks.
 JsonDict = dict[str, object]
 
-# Backwards compatibility alias
-JsonValue = JsonType
-
 __all__ = [
     "JsonDict",
     "JsonPrimitive",
     "JsonType",
-    "JsonValue",
 ]

@@ -57,6 +57,7 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
 )
 
+# Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
 from .performance_utils import (
     PerformanceThresholds,
     assert_heartbeat_interval,
@@ -92,6 +93,8 @@ if TYPE_CHECKING:
 
 
 # Module-level markers
+# Note: conftest.py already applies pytest.mark.e2e and skipif(not ALL_INFRA_AVAILABLE)
+# to all tests in this directory. We only add the e2e marker here for explicit clarity.
 pytestmark = [
     pytest.mark.e2e,
 ]

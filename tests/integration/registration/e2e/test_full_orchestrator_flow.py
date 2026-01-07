@@ -62,6 +62,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 
+# Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
 from .verification_helpers import (
     wait_for_postgres_registration,
 )
@@ -78,6 +79,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Module-level markers
+# Note: conftest.py already applies pytest.mark.e2e and skipif(not ALL_INFRA_AVAILABLE)
+# to all tests in this directory. We only add the e2e marker here for explicit clarity.
 pytestmark = [
     pytest.mark.e2e,
 ]
