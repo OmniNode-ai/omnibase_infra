@@ -87,6 +87,7 @@ from omnibase_infra.runtime.container_wiring import (
     wire_registration_handlers,
 )
 from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
+from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.introspection_event_router import (
     IntrospectionEventRouter,
 )
@@ -495,7 +496,20 @@ async def bootstrap() -> int:
                 "services": []
             }  # Empty summary for degraded mode
         else:
-            wire_summary = await wire_infrastructure_services(container)
+            try:
+                wire_summary = await wire_infrastructure_services(container)
+            except RuntimeError as e:
+                logger.warning(
+                    "Container wiring failed, continuing in degraded mode "
+                    "(correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                    },
+                )
+                wire_summary = {"services": []}  # Empty summary for degraded mode
         container_duration = time.time() - container_start_time
         logger.debug(
             "Container wired in %.3fs (correlation_id=%s)",
@@ -679,13 +693,24 @@ async def bootstrap() -> int:
             )
 
         # 5. Resolve ProtocolBindingRegistry from container
-        from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
-
         handler_registry: ProtocolBindingRegistry | None = None
         if container.service_registry is not None:
-            handler_registry = await container.service_registry.resolve_service(
-                ProtocolBindingRegistry
-            )
+            try:
+                handler_registry = await container.service_registry.resolve_service(
+                    ProtocolBindingRegistry
+                )
+            except (RuntimeError, AttributeError) as e:
+                logger.warning(
+                    "Failed to resolve ProtocolBindingRegistry from container, "
+                    "falling back to singleton (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                    },
+                )
+                handler_registry = None
         # RuntimeHostProcess._get_handler_registry() handles None by falling back to singleton
 
         # 6. Create runtime host process with config and pre-resolved registry

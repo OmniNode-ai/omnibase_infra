@@ -6,13 +6,6 @@ This module provides a minimal HTTP service for exposing health check endpoints.
 It is designed to run alongside the ONEX runtime kernel to satisfy Docker/K8s
 health check requirements.
 
-.. important::
-    **Canonical Location (OMN-529)**
-
-    This is the canonical location for ServiceHealth as of v0.4.x.
-    Imports from ``omnibase_infra.runtime`` are deprecated and will be
-    removed in v0.5.0.
-
 The service exposes:
     - GET /health: Returns runtime health status as JSON
     - GET /ready: Returns readiness status as JSON (alias for /health)
@@ -27,7 +20,7 @@ Exports:
 
 Example (Direct Runtime Injection):
     >>> from omnibase_infra.services.service_health import ServiceHealth
-    >>> from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+    >>> from omnibase_infra.runtime import RuntimeHostProcess
     >>>
     >>> async def main():
     ...     runtime = RuntimeHostProcess()
@@ -49,18 +42,6 @@ Example (Container-Based Injection - ONEX-Compliant):
     ...     await server.start()
     ...     # Server is now running with container-resolved runtime
     ...     await server.stop()
-
-Migration from omnibase_infra.runtime (BREAKING CHANGE in v0.5.0):
-    If you are migrating from the old import location, update your imports::
-
-        # Before (deprecated - emits DeprecationWarning, removed in v0.5.0)
-        from omnibase_infra.runtime import ServiceHealth, DEFAULT_HTTP_PORT
-
-        # Before (direct file import - now raises ImportError)
-        from omnibase_infra.runtime.health_server import ServiceHealth, DEFAULT_HTTP_PORT
-
-        # After (recommended - canonical location)
-        from omnibase_infra.services.service_health import ServiceHealth, DEFAULT_HTTP_PORT
 
 Note:
     This service uses aiohttp for async HTTP handling, which is already a

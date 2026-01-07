@@ -24,17 +24,6 @@ to avoid circular imports with the runtime module.
     from omnibase_infra.services.service_health import DEFAULT_HTTP_HOST
     from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
-**MIGRATION NOTE (OMN-529)**:
-    If you are importing from ``omnibase_infra.runtime``, update your imports:
-
-    Before (deprecated - will be removed in v0.5.0)::
-
-        from omnibase_infra.runtime import ServiceHealth  # DeprecationWarning
-
-    After (recommended)::
-
-        from omnibase_infra.services.service_health import ServiceHealth
-
 Related Tickets:
     - OMN-529: ONEX Compliance container injection (ServiceHealth moved here)
     - OMN-932 (C2): Durable Timeout Handling
