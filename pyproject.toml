@@ -18,14 +18,13 @@ onex-runtime = "omnibase_infra.runtime.kernel:main"
 [tool.poetry.dependencies]
 python = "^3.12"
 
-# ONEX dependencies - pinned to tags for reproducible builds
-# SECURITY: Git commit SHAs are immutable and tamper-evident. Tags can be
-# force-pushed unless protected or GPG-signed. Prefer SHAs for production.
-# - Reproducible builds: Same commit = same code, regardless of branch/tag changes
-# - Supply chain security: SHAs cannot be retroactively modified
-# - Audit trail: Each SHA maps to a verifiable point in git history
-# To update: 1) Review changes in target repo, 2) Update tag/SHA, 3) Run tests
-# NOTE: Tags are acceptable for development; consider commit SHAs for production deployments.
+# ============================================================================
+# ONEX Internal Dependencies (omnibase-core, omnibase-spi)
+# ============================================================================
+# Semantic versioning (^X.Y.Z) is appropriate for these packages because:
+# - We control the release process and CI/CD validates compatibility
+# - Breaking changes are communicated through semver major versions
+# - Internal packages are co-developed with this codebase
 #
 # omnibase-core v0.6.2: Latest release with updated models and enums.
 # - Handler security models and EnumHandlerTypeCategory (OMN-1137)
@@ -33,6 +32,23 @@ python = "^3.12"
 #   circular import bug. container_wiring.py handles this gracefully.
 omnibase-core = "^0.6.2"
 omnibase-spi = "^0.4.1"
+
+# ============================================================================
+# External Dependency Security Guidance
+# ============================================================================
+# CURRENT STATE: All dependencies below are PyPI-sourced (no git dependencies).
+#
+# PyPI Dependencies (current - all deps below):
+# - Version pinning (^X.Y.Z) is acceptable for trusted packages when:
+#   1. Package is from established maintainers (PyPA, major OSS projects)
+#   2. poetry.lock captures exact resolved versions for reproducibility
+# - To update: 1) Review changelog for security fixes, 2) Update version, 3) Run tests
+# - See docs/decisions/adr-cryptography-upgrade-46.md for upgrade rationale examples
+#
+# Git Dependencies (FUTURE guidance - not currently used):
+# - If git-sourced external deps are added in the future, prefer commit SHAs over tags:
+#   - SHAs are immutable; tags can be force-pushed
+#   - SHAs provide audit trail and tamper-evidence
 
 # Core dependencies
 pydantic = "^2.11.7"
@@ -57,6 +73,7 @@ click = "^8.1.0"
 rich = "^13.7.0"
 
 # System utilities
+# cryptography v46.0.3: Security-reviewed upgrade (see docs/decisions/adr-cryptography-upgrade-46.md)
 cryptography = "^46.0.3"
 jinja2 = "^3.1.6"
 aiofiles = "^23.2.1"

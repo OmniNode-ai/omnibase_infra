@@ -86,8 +86,9 @@ async def kafka_event_bus(
     Yields a started KafkaEventBus instance and ensures cleanup after test.
     """
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
-    bus = KafkaEventBus(
+    config = ModelKafkaEventBusConfig(
         bootstrap_servers=kafka_bootstrap_servers,
         environment="integration-test",
         group="test-default",
@@ -97,6 +98,7 @@ async def kafka_event_bus(
         circuit_breaker_threshold=5,
         circuit_breaker_reset_timeout=10.0,
     )
+    bus = KafkaEventBus(config=config)
 
     yield bus
 
@@ -512,9 +514,10 @@ class TestKafkaEventBusResilience:
         reject new requests until the reset timeout.
         """
         from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+        from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
         # Create bus with invalid bootstrap servers to simulate failures
-        bus = KafkaEventBus(
+        config = ModelKafkaEventBusConfig(
             bootstrap_servers="invalid-host:9092",
             environment="test",
             group="test",
@@ -522,6 +525,7 @@ class TestKafkaEventBusResilience:
             circuit_breaker_threshold=2,
             circuit_breaker_reset_timeout=60.0,
         )
+        bus = KafkaEventBus(config=config)
 
         # First attempt should fail (connection error)
         from omnibase_infra.errors import InfraConnectionError, InfraTimeoutError

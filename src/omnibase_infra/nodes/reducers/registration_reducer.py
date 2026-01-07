@@ -362,6 +362,9 @@ from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
 )
+from omnibase_infra.nodes.reducers.models.model_registration_confirmation import (
+    ModelRegistrationConfirmation,
+)
 from omnibase_infra.nodes.reducers.models.model_registration_state import (
     ModelRegistrationState,
 )
@@ -946,14 +949,38 @@ class RegistrationReducer:
     # See module docstring section 6 for detailed implementation notes.
     # =========================================================================
 
+    def reduce_confirmation(
+        self,
+        state: ModelRegistrationState,
+        confirmation: ModelRegistrationConfirmation,
+    ) -> ModelReducerOutput[ModelRegistrationState]:
+        """Process confirmation event from Effect layer.
+
+        Not yet implemented. See OMN-996 for tracking.
+
+        Args:
+            state: Current registration state (immutable).
+            confirmation: Confirmation event from Effect layer.
+
+        Returns:
+            ModelReducerOutput with new state and no intents.
+
+        Raises:
+            NotImplementedError: Always raised until implementation is complete.
+        """
+        raise NotImplementedError(
+            "reduce_confirmation() is not yet implemented. "
+            "See ticket OMN-996: https://linear.app/omninode/issue/OMN-996"
+        )
+
     # TODO(OMN-996): Implement reduce_confirmation() using ModelRegistrationConfirmation
     # The model is now available at:
     #   from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
     #
-    # NOTE: reduce_confirmation() is not yet implemented. The stub below
-    # documents the expected interface and behavior.
+    # NOTE: The stub above raises NotImplementedError. The commented implementation
+    # below documents the expected behavior once implemented.
     #
-    # def reduce_confirmation(
+    # def _reduce_confirmation_impl(
     #     self,
     #     state: ModelRegistrationState,
     #     confirmation: "ModelRegistrationConfirmation",

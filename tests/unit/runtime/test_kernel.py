@@ -23,9 +23,11 @@ from omnibase_core.container import ModelONEXContainer
 
 from omnibase_infra.errors import ProtocolConfigurationError
 
+# Import shared service registry availability check
+from tests.conftest import check_service_registry_available
+
 # Check if service_registry is available (circular import bug in omnibase_core 0.6.2)
-_test_container = ModelONEXContainer()
-_SERVICE_REGISTRY_AVAILABLE = _test_container.service_registry is not None
+_SERVICE_REGISTRY_AVAILABLE = check_service_registry_available()
 _SKIP_REASON = (
     "service_registry is None due to circular import bug in omnibase_core 0.6.2. "
     "Upgrade to omnibase_core >= 0.6.3 to run these tests."

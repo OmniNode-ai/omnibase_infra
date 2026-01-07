@@ -55,8 +55,9 @@ import pytest
 from tests.integration.handlers.conftest import CONSUL_AVAILABLE
 
 if TYPE_CHECKING:
+    from omnibase_core.types import JsonType
+
     from omnibase_infra.handlers import ConsulHandler
-    from omnibase_infra.models.types import JsonValue
 
 # =============================================================================
 # Test Configuration and Skip Conditions
@@ -452,7 +453,7 @@ class TestConsulHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_execute_without_initialize_raises_error(
-        self, consul_config: dict[str, JsonValue]
+        self, consul_config: dict[str, JsonType]
     ) -> None:
         """Test that executing without initialization raises appropriate error.
 
@@ -590,7 +591,7 @@ class TestConsulHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_shutdown_and_reinitialize(
-        self, consul_config: dict[str, JsonValue]
+        self, consul_config: dict[str, JsonType]
     ) -> None:
         """Test that handler can be shutdown and reinitialized.
 
