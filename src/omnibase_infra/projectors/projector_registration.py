@@ -895,6 +895,11 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         For full projection persistence with ordering guarantees (e.g., during
         event replay), use persist() instead.
 
+        Warning:
+            This method does NOT check sequence ordering. If called concurrently
+            or during replay, older events may overwrite newer capability data.
+            Use persist() for replay scenarios where ordering matters.
+
         Args:
             entity_id: Node UUID (partition key)
             domain: Domain namespace (default: "registration")

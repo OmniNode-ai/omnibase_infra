@@ -753,21 +753,21 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             query_sql = """
                 SELECT * FROM registration_projections
                 WHERE domain = $1
-                  AND capability_tags @> ARRAY[$2]::text[]
+                  AND capability_tags @> $2::text[]
                   AND current_state = $3
                 ORDER BY updated_at DESC
                 LIMIT $4
             """
-            params = [domain, tag, state.value, limit]
+            params = [domain, [tag], state.value, limit]
         else:
             query_sql = """
                 SELECT * FROM registration_projections
                 WHERE domain = $1
-                  AND capability_tags @> ARRAY[$2]::text[]
+                  AND capability_tags @> $2::text[]
                 ORDER BY updated_at DESC
                 LIMIT $3
             """
-            params = [domain, tag, limit]
+            params = [domain, [tag], limit]
 
         try:
             async with self._pool.acquire() as conn:
@@ -849,21 +849,21 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             query_sql = """
                 SELECT * FROM registration_projections
                 WHERE domain = $1
-                  AND intent_types @> ARRAY[$2]::text[]
+                  AND intent_types @> $2::text[]
                   AND current_state = $3
                 ORDER BY updated_at DESC
                 LIMIT $4
             """
-            params = [domain, intent_type, state.value, limit]
+            params = [domain, [intent_type], state.value, limit]
         else:
             query_sql = """
                 SELECT * FROM registration_projections
                 WHERE domain = $1
-                  AND intent_types @> ARRAY[$2]::text[]
+                  AND intent_types @> $2::text[]
                 ORDER BY updated_at DESC
                 LIMIT $3
             """
-            params = [domain, intent_type, limit]
+            params = [domain, [intent_type], limit]
 
         try:
             async with self._pool.acquire() as conn:
@@ -944,21 +944,21 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             query_sql = """
                 SELECT * FROM registration_projections
                 WHERE domain = $1
-                  AND protocols @> ARRAY[$2]::text[]
+                  AND protocols @> $2::text[]
                   AND current_state = $3
                 ORDER BY updated_at DESC
                 LIMIT $4
             """
-            params = [domain, protocol_name, state.value, limit]
+            params = [domain, [protocol_name], state.value, limit]
         else:
             query_sql = """
                 SELECT * FROM registration_projections
                 WHERE domain = $1
-                  AND protocols @> ARRAY[$2]::text[]
+                  AND protocols @> $2::text[]
                 ORDER BY updated_at DESC
                 LIMIT $3
             """
-            params = [domain, protocol_name, limit]
+            params = [domain, [protocol_name], limit]
 
         try:
             async with self._pool.acquire() as conn:

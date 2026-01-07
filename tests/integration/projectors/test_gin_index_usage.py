@@ -179,6 +179,77 @@ def plan_uses_seq_scan(plan_lines: list[str]) -> bool:
 
 
 # =============================================================================
+# Shared Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+async def populated_db(
+    projector: ProjectorRegistration,
+    pg_pool: asyncpg.Pool,
+) -> asyncpg.Pool:
+    """Populate database with test data for index and query tests.
+
+    Inserts 100 projections with various capability combinations to
+    provide enough data for PostgreSQL to prefer index scans over
+    sequential scans, and to verify capability query methods return
+    correct results.
+
+    Returns:
+        The pg_pool fixture for use in tests.
+    """
+    # Insert 100 projections with diverse capability combinations
+    capability_tag_options = [
+        ["postgres.storage"],
+        ["kafka.consumer"],
+        ["http.client"],
+        ["redis.cache"],
+        ["postgres.storage", "kafka.consumer"],
+        ["http.client", "redis.cache"],
+        ["postgres.storage", "kafka.consumer", "http.client"],
+        [],
+    ]
+
+    intent_type_options = [
+        ["postgres.upsert"],
+        ["postgres.query"],
+        ["kafka.publish"],
+        ["http.request"],
+        ["postgres.upsert", "postgres.query"],
+        ["kafka.publish", "kafka.consume"],
+        [],
+    ]
+
+    protocol_options = [
+        ["ProtocolDatabaseAdapter"],
+        ["ProtocolEventPublisher"],
+        ["ProtocolHttpClient"],
+        ["ProtocolDatabaseAdapter", "ProtocolEventPublisher"],
+        [],
+    ]
+
+    for i in range(100):
+        projection = make_projection_with_capabilities(
+            capability_tags=capability_tag_options[i % len(capability_tag_options)],
+            intent_types=intent_type_options[i % len(intent_type_options)],
+            protocols=protocol_options[i % len(protocol_options)],
+            offset=1000 + i,
+        )
+        await projector.persist(
+            projection=projection,
+            entity_id=projection.entity_id,
+            domain=projection.domain,
+            sequence_info=make_sequence(1000 + i),
+        )
+
+    # Run ANALYZE to update table statistics for better query planning
+    async with pg_pool.acquire() as conn:
+        await conn.execute("ANALYZE registration_projections")
+
+    return pg_pool
+
+
+# =============================================================================
 # GIN Index Usage Tests
 # =============================================================================
 
@@ -194,71 +265,6 @@ class TestGinIndexUsage:
     planner's cost-based decisions can still vary based on statistics, so
     tests check for index usage OR verify the query returns correct results.
     """
-
-    @pytest.fixture
-    async def populated_db(
-        self,
-        projector: ProjectorRegistration,
-        pg_pool: asyncpg.Pool,
-    ) -> asyncpg.Pool:
-        """Populate database with test data for index usage tests.
-
-        Inserts 100 projections with various capability combinations to
-        provide enough data for PostgreSQL to prefer index scans over
-        sequential scans.
-
-        Returns:
-            The pg_pool fixture for use in tests.
-        """
-        # Insert 100 projections with diverse capability combinations
-        capability_tag_options = [
-            ["postgres.storage"],
-            ["kafka.consumer"],
-            ["http.client"],
-            ["redis.cache"],
-            ["postgres.storage", "kafka.consumer"],
-            ["http.client", "redis.cache"],
-            ["postgres.storage", "kafka.consumer", "http.client"],
-            [],
-        ]
-
-        intent_type_options = [
-            ["postgres.upsert"],
-            ["postgres.query"],
-            ["kafka.publish"],
-            ["http.request"],
-            ["postgres.upsert", "postgres.query"],
-            ["kafka.publish", "kafka.consume"],
-            [],
-        ]
-
-        protocol_options = [
-            ["ProtocolDatabaseAdapter"],
-            ["ProtocolEventPublisher"],
-            ["ProtocolHttpClient"],
-            ["ProtocolDatabaseAdapter", "ProtocolEventPublisher"],
-            [],
-        ]
-
-        for i in range(100):
-            projection = make_projection_with_capabilities(
-                capability_tags=capability_tag_options[i % len(capability_tag_options)],
-                intent_types=intent_type_options[i % len(intent_type_options)],
-                protocols=protocol_options[i % len(protocol_options)],
-                offset=1000 + i,
-            )
-            await projector.persist(
-                projection=projection,
-                entity_id=projection.entity_id,
-                domain=projection.domain,
-                sequence_info=make_sequence(1000 + i),
-            )
-
-        # Run ANALYZE to update table statistics for better query planning
-        async with pg_pool.acquire() as conn:
-            await conn.execute("ANALYZE registration_projections")
-
-        return pg_pool
 
     async def test_capability_tags_uses_gin_index(
         self,
@@ -576,3 +582,319 @@ class TestQueryPerformanceBaseline:
 
         # The projection with empty array should not match
         assert projection.entity_id not in [row["entity_id"] for row in rows]
+
+
+# =============================================================================
+# Capability Query Method Execution Tests
+# =============================================================================
+
+
+class TestCapabilityQueryMethodsExecution:
+    """Integration tests verifying capability query methods execute correctly.
+
+    These tests call the actual ProjectionReaderRegistration Python methods
+    (not raw SQL) to verify the complete code path works, including:
+
+    - SQL query construction with correct array syntax
+    - Parameter binding for GIN-indexed array queries
+    - Result deserialization to ModelRegistrationProjection
+    - State filtering with optional parameters
+
+    This complements TestGinIndexUsage which tests raw SQL query plans.
+
+    Related Tickets:
+        - OMN-1134: Registry Projection Extensions for Capabilities
+        - PR #118: Add capability fields and GIN indexes
+    """
+
+    async def test_get_by_capability_tag_executes_successfully(
+        self,
+        populated_db: asyncpg.Pool,
+    ) -> None:
+        """Verify get_by_capability_tag method executes without error.
+
+        Calls the actual Python method and verifies:
+        1. No exceptions raised (array syntax is correct)
+        2. Results are returned (data matching exists)
+        3. Results have the expected capability tag
+        """
+        from omnibase_infra.projectors import ProjectionReaderRegistration
+
+        reader = ProjectionReaderRegistration(populated_db)
+
+        # This should NOT raise - if array syntax is wrong, this will fail
+        results = await reader.get_by_capability_tag("postgres.storage")
+
+        # Verify we got results (data was inserted by populated_db fixture)
+        assert len(results) > 0, (
+            "Expected at least one result with postgres.storage tag"
+        )
+
+        # Verify results have the expected tag
+        for proj in results:
+            assert "postgres.storage" in proj.capability_tags, (
+                f"Result {proj.entity_id} missing expected tag. "
+                f"Has tags: {proj.capability_tags}"
+            )
+
+    async def test_get_by_intent_type_executes_successfully(
+        self,
+        populated_db: asyncpg.Pool,
+    ) -> None:
+        """Verify get_by_intent_type method executes without error.
+
+        Calls the actual Python method and verifies:
+        1. No exceptions raised (array syntax is correct)
+        2. Results are returned (data matching exists)
+        3. Results have the expected intent type
+        """
+        from omnibase_infra.projectors import ProjectionReaderRegistration
+
+        reader = ProjectionReaderRegistration(populated_db)
+
+        # This should NOT raise
+        results = await reader.get_by_intent_type("postgres.upsert")
+
+        # Verify we got results
+        assert len(results) > 0, (
+            "Expected at least one result with postgres.upsert intent"
+        )
+
+        # Verify results have the expected intent type
+        for proj in results:
+            assert "postgres.upsert" in proj.intent_types, (
+                f"Result {proj.entity_id} missing expected intent. "
+                f"Has intents: {proj.intent_types}"
+            )
+
+    async def test_get_by_protocol_executes_successfully(
+        self,
+        populated_db: asyncpg.Pool,
+    ) -> None:
+        """Verify get_by_protocol method executes without error.
+
+        Calls the actual Python method and verifies:
+        1. No exceptions raised (array syntax is correct)
+        2. Results are returned (data matching exists)
+        3. Results have the expected protocol
+        """
+        from omnibase_infra.projectors import ProjectionReaderRegistration
+
+        reader = ProjectionReaderRegistration(populated_db)
+
+        # This should NOT raise
+        results = await reader.get_by_protocol("ProtocolDatabaseAdapter")
+
+        # Verify we got results
+        assert len(results) > 0, (
+            "Expected at least one result with ProtocolDatabaseAdapter protocol"
+        )
+
+        # Verify results have the expected protocol
+        for proj in results:
+            assert "ProtocolDatabaseAdapter" in proj.protocols, (
+                f"Result {proj.entity_id} missing expected protocol. "
+                f"Has protocols: {proj.protocols}"
+            )
+
+    async def test_get_by_capability_tag_with_state_filter(
+        self,
+        populated_db: asyncpg.Pool,
+    ) -> None:
+        """Verify get_by_capability_tag with state filter executes correctly.
+
+        Tests the optional state parameter for filtering results by
+        registration state. All test data is inserted with ACTIVE state.
+        """
+        from omnibase_infra.projectors import ProjectionReaderRegistration
+
+        reader = ProjectionReaderRegistration(populated_db)
+
+        # Query with state filter - all test data is ACTIVE
+        results = await reader.get_by_capability_tag(
+            "postgres.storage",
+            state=EnumRegistrationState.ACTIVE,
+        )
+
+        # Verify we got results
+        assert len(results) > 0, (
+            "Expected at least one ACTIVE result with postgres.storage tag"
+        )
+
+        # Verify all results are ACTIVE and have the tag
+        for proj in results:
+            assert proj.current_state == EnumRegistrationState.ACTIVE, (
+                f"Result {proj.entity_id} has unexpected state: {proj.current_state}"
+            )
+            assert "postgres.storage" in proj.capability_tags
+
+    async def test_get_by_intent_type_with_state_filter(
+        self,
+        populated_db: asyncpg.Pool,
+    ) -> None:
+        """Verify get_by_intent_type with state filter executes correctly."""
+        from omnibase_infra.projectors import ProjectionReaderRegistration
+
+        reader = ProjectionReaderRegistration(populated_db)
+
+        # Query with state filter
+        results = await reader.get_by_intent_type(
+            "kafka.publish",
+            state=EnumRegistrationState.ACTIVE,
+        )
+
+        # Verify we got results
+        assert len(results) > 0, (
+            "Expected at least one ACTIVE result with kafka.publish intent"
+        )
+
+        # Verify all results are ACTIVE and have the intent
+        for proj in results:
+            assert proj.current_state == EnumRegistrationState.ACTIVE
+            assert "kafka.publish" in proj.intent_types
+
+    async def test_get_by_protocol_with_state_filter(
+        self,
+        populated_db: asyncpg.Pool,
+    ) -> None:
+        """Verify get_by_protocol with state filter executes correctly."""
+        from omnibase_infra.projectors import ProjectionReaderRegistration
+
+        reader = ProjectionReaderRegistration(populated_db)
+
+        # Query with state filter
+        results = await reader.get_by_protocol(
+            "ProtocolEventPublisher",
+            state=EnumRegistrationState.ACTIVE,
+        )
+
+        # Verify we got results
+        assert len(results) > 0, (
+            "Expected at least one ACTIVE result with ProtocolEventPublisher"
+        )
+
+        # Verify all results are ACTIVE and have the protocol
+        for proj in results:
+            assert proj.current_state == EnumRegistrationState.ACTIVE
+            assert "ProtocolEventPublisher" in proj.protocols
+
+    async def test_get_by_capability_tags_all_executes_successfully(
+        self,
+        populated_db: asyncpg.Pool,
+    ) -> None:
+        """Verify get_by_capability_tags_all method executes correctly.
+
+        Tests the multi-tag query that requires ALL tags to be present.
+        """
+        from omnibase_infra.projectors import ProjectionReaderRegistration
+
+        reader = ProjectionReaderRegistration(populated_db)
+
+        # Query for projections with both tags
+        results = await reader.get_by_capability_tags_all(
+            ["postgres.storage", "kafka.consumer"]
+        )
+
+        # Verify we got results (test data includes this combination)
+        assert len(results) > 0, (
+            "Expected results with both postgres.storage AND kafka.consumer"
+        )
+
+        # Verify ALL results have BOTH tags
+        for proj in results:
+            assert "postgres.storage" in proj.capability_tags, (
+                f"Result {proj.entity_id} missing postgres.storage"
+            )
+            assert "kafka.consumer" in proj.capability_tags, (
+                f"Result {proj.entity_id} missing kafka.consumer"
+            )
+
+    async def test_get_by_capability_tags_any_executes_successfully(
+        self,
+        populated_db: asyncpg.Pool,
+    ) -> None:
+        """Verify get_by_capability_tags_any method executes correctly.
+
+        Tests the multi-tag query that requires ANY tag to be present.
+        """
+        from omnibase_infra.projectors import ProjectionReaderRegistration
+
+        reader = ProjectionReaderRegistration(populated_db)
+
+        # Query for projections with any of these tags
+        results = await reader.get_by_capability_tags_any(
+            ["postgres.storage", "kafka.consumer"]
+        )
+
+        # Verify we got results
+        assert len(results) > 0, (
+            "Expected results with postgres.storage OR kafka.consumer"
+        )
+
+        # Verify ALL results have at least ONE of the tags
+        for proj in results:
+            has_postgres = "postgres.storage" in proj.capability_tags
+            has_kafka = "kafka.consumer" in proj.capability_tags
+            assert has_postgres or has_kafka, (
+                f"Result {proj.entity_id} missing both expected tags. "
+                f"Has tags: {proj.capability_tags}"
+            )
+
+    async def test_get_by_contract_type_executes_successfully(
+        self,
+        populated_db: asyncpg.Pool,
+    ) -> None:
+        """Verify get_by_contract_type method executes correctly."""
+        from omnibase_infra.projectors import ProjectionReaderRegistration
+
+        reader = ProjectionReaderRegistration(populated_db)
+
+        # Query for effect nodes (all test data is contract_type="effect")
+        results = await reader.get_by_contract_type("effect")
+
+        # Verify we got results
+        assert len(results) > 0, "Expected at least one effect node"
+
+        # Verify all results have the expected contract type
+        for proj in results:
+            assert proj.contract_type == "effect", (
+                f"Result {proj.entity_id} has unexpected contract_type: {proj.contract_type}"
+            )
+
+    async def test_nonexistent_capability_tag_returns_empty(
+        self,
+        populated_db: asyncpg.Pool,
+    ) -> None:
+        """Verify querying nonexistent capability tag returns empty list."""
+        from omnibase_infra.projectors import ProjectionReaderRegistration
+
+        reader = ProjectionReaderRegistration(populated_db)
+
+        # Query for a tag that doesn't exist
+        results = await reader.get_by_capability_tag("nonexistent.tag.12345")
+
+        # Should return empty list, not error
+        assert results == [], f"Expected empty list, got {len(results)} results"
+
+    async def test_state_filter_with_non_matching_state_returns_empty(
+        self,
+        populated_db: asyncpg.Pool,
+    ) -> None:
+        """Verify state filter correctly excludes non-matching states.
+
+        All test data is ACTIVE, so filtering for SUSPENDED should return empty.
+        """
+        from omnibase_infra.projectors import ProjectionReaderRegistration
+
+        reader = ProjectionReaderRegistration(populated_db)
+
+        # All test data is ACTIVE, so SUSPENDED should return nothing
+        results = await reader.get_by_capability_tag(
+            "postgres.storage",
+            state=EnumRegistrationState.SUSPENDED,
+        )
+
+        # Should return empty list
+        assert results == [], (
+            f"Expected empty list for SUSPENDED filter, got {len(results)} results"
+        )

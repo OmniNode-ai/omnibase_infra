@@ -652,33 +652,42 @@ async def _process_batch_dry_run(
     for row in rows:
         entity_id: UUID = row["entity_id"]
         domain: str = row["domain"]
-        # Explicit str() coercion for safety - database may return unexpected types
-        node_type: str = str(row["node_type"]) if row["node_type"] else ""
-        capabilities = _parse_capabilities(row["capabilities"])
+        try:
+            # Explicit str() coercion for safety - database may return unexpected types
+            node_type: str = str(row["node_type"]) if row["node_type"] else ""
+            capabilities = _parse_capabilities(row["capabilities"])
 
-        # Extract fields
-        contract_type = extract_contract_type(capabilities, node_type)
-        intent_types = extract_intent_types(capabilities)
-        protocols = extract_protocols(capabilities)
-        capability_tags = extract_capability_tags(capabilities)
-        contract_version = extract_contract_version(capabilities)
+            # Extract fields
+            contract_type = extract_contract_type(capabilities, node_type)
+            intent_types = extract_intent_types(capabilities)
+            protocols = extract_protocols(capabilities)
+            capability_tags = extract_capability_tags(capabilities)
+            contract_version = extract_contract_version(capabilities)
 
-        # Track records that will get 'unknown' as fallback
-        if contract_type == "unknown":
-            unknown_count += 1
-            type_note = " (fallback - no type determinable)"
-        else:
-            type_note = ""
+            # Track records that will get 'unknown' as fallback
+            if contract_type == "unknown":
+                unknown_count += 1
+                type_note = " (fallback - no type determinable)"
+            else:
+                type_note = ""
 
-        print(
-            f"Would update {entity_id} ({domain}):\n"
-            f"  contract_type: {contract_type}{type_note}\n"
-            f"  intent_types: {intent_types}\n"
-            f"  protocols: {protocols}\n"
-            f"  capability_tags: {capability_tags}\n"
-            f"  contract_version: {contract_version}"
-        )
-        analyzed += 1
+            print(
+                f"Would update {entity_id} ({domain}):\n"
+                f"  contract_type: {contract_type}{type_note}\n"
+                f"  intent_types: {intent_types}\n"
+                f"  protocols: {protocols}\n"
+                f"  capability_tags: {capability_tags}\n"
+                f"  contract_version: {contract_version}"
+            )
+            analyzed += 1
+        except Exception:
+            # Log which entity failed for debugging
+            logger.exception(
+                "Failed to process entity %s (domain=%s)",
+                entity_id,
+                domain,
+            )
+            raise
 
     current_total = processed_so_far + analyzed
     print(
@@ -717,36 +726,45 @@ async def _process_batch_update(
         for row in rows:
             entity_id = row["entity_id"]
             domain = row["domain"]
-            # Explicit str() coercion for safety - database may return unexpected types
-            node_type = str(row["node_type"]) if row["node_type"] else ""
-            capabilities = _parse_capabilities(row["capabilities"])
+            try:
+                # Explicit str() coercion for safety - database may return unexpected types
+                node_type = str(row["node_type"]) if row["node_type"] else ""
+                capabilities = _parse_capabilities(row["capabilities"])
 
-            # Extract fields
-            contract_type = extract_contract_type(capabilities, node_type)
-            intent_types = extract_intent_types(capabilities)
-            protocols = extract_protocols(capabilities)
-            capability_tags = extract_capability_tags(capabilities)
-            contract_version = extract_contract_version(capabilities)
+                # Extract fields
+                contract_type = extract_contract_type(capabilities, node_type)
+                intent_types = extract_intent_types(capabilities)
+                protocols = extract_protocols(capabilities)
+                capability_tags = extract_capability_tags(capabilities)
+                contract_version = extract_contract_version(capabilities)
 
-            await conn.execute(
-                """
-                UPDATE registration_projections
-                SET contract_type = $3,
-                    intent_types = $4,
-                    protocols = $5,
-                    capability_tags = $6,
-                    contract_version = $7
-                WHERE entity_id = $1 AND domain = $2
-                """,
-                entity_id,
-                domain,
-                contract_type,
-                intent_types,
-                protocols,
-                capability_tags,
-                contract_version,
-            )
-            updated += 1
+                await conn.execute(
+                    """
+                    UPDATE registration_projections
+                    SET contract_type = $3,
+                        intent_types = $4,
+                        protocols = $5,
+                        capability_tags = $6,
+                        contract_version = $7
+                    WHERE entity_id = $1 AND domain = $2
+                    """,
+                    entity_id,
+                    domain,
+                    contract_type,
+                    intent_types,
+                    protocols,
+                    capability_tags,
+                    contract_version,
+                )
+                updated += 1
+            except Exception:
+                # Log which entity failed for debugging
+                logger.exception(
+                    "Failed to update entity %s (domain=%s)",
+                    entity_id,
+                    domain,
+                )
+                raise  # Re-raise to rollback transaction
 
     current_total = processed_so_far + updated
     print(
