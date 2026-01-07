@@ -267,38 +267,82 @@ error_handling:
   # Error codes used in ModelBackendResult.error_code field
   # These codes provide programmatic error categorization for handlers.
   # Each code maps to a specific operation failure scenario.
+  #
+  # Error Code Classification:
+  #   - *_CONNECTION_ERROR: Retriable - network/connection issues
+  #   - *_TIMEOUT_ERROR: Retriable - operation exceeded timeout
+  #   - *_AUTH_ERROR: Non-retriable - authentication/authorization failed
+  #   - *_UNKNOWN_ERROR: Unknown - unclassified exceptions
+  #   - *_REGISTRATION_ERROR, *_DEREGISTRATION_ERROR, etc.: Operation-specific failures
   error_codes:
     # Consul backend error codes
     - code: "CONSUL_REGISTRATION_ERROR"
       backend: "consul"
       operation: "register_node"
       description: "Consul service registration failed (non-connection error)"
+      retriable: false
     - code: "CONSUL_DEREGISTRATION_ERROR"
       backend: "consul"
       operation: "deregister_node"
       description: "Consul service deregistration failed (non-connection error)"
+      retriable: false
     - code: "CONSUL_CONNECTION_ERROR"
       backend: "consul"
       operation: "all"
       description: "Connection to Consul server failed"
+      retriable: true
+    - code: "CONSUL_TIMEOUT_ERROR"
+      backend: "consul"
+      operation: "all"
+      description: "Consul operation exceeded timeout"
+      retriable: true
+    - code: "CONSUL_AUTH_ERROR"
+      backend: "consul"
+      operation: "all"
+      description: "Authentication with Consul server failed"
+      retriable: false
+    - code: "CONSUL_UNKNOWN_ERROR"
+      backend: "consul"
+      operation: "all"
+      description: "Unknown error during Consul operation"
+      retriable: false
     # PostgreSQL backend error codes
     - code: "POSTGRES_UPSERT_ERROR"
       backend: "postgres"
       operation: "register_node"
       description: "PostgreSQL upsert operation failed (non-connection error)"
+      retriable: false
     - code: "POSTGRES_DEACTIVATION_ERROR"
       backend: "postgres"
       operation: "deregister_node"
       description: "PostgreSQL deactivation operation failed (non-connection error)"
+      retriable: false
     - code: "POSTGRES_CONNECTION_ERROR"
       backend: "postgres"
       operation: "all"
       description: "Connection to PostgreSQL server failed"
+      retriable: true
+    - code: "POSTGRES_TIMEOUT_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "PostgreSQL operation exceeded timeout"
+      retriable: true
+    - code: "POSTGRES_AUTH_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Authentication with PostgreSQL server failed"
+      retriable: false
+    - code: "POSTGRES_UNKNOWN_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Unknown error during PostgreSQL operation"
+      retriable: false
     # Retry operation error codes
     - code: "INVALID_TARGET_BACKEND"
       backend: "dynamic"
       operation: "retry_partial_failure"
       description: "Invalid target_backend specified for retry (must be 'consul' or 'postgres')"
+      retriable: false
 # IO operations (EFFECT node specific)
 # Note: Input fields reference ModelRegistryRequest, output fields reference ModelRegistryResponse
 io_operations:
@@ -485,11 +529,6 @@ definitions:
         description: "Time taken for the operation in milliseconds"
         default: 0.0
         ge: 0.0
-      retries:
-        type: integer
-        description: "Number of retry attempts made before final result. Note: At the orchestration layer, this value is always 0 because the orchestrator dispatches once per handler. Individual handlers may implement retry logic internally using the retry_policy configuration, but this field reflects handler-level retries, not orchestrator-level."
-        default: 0
-        ge: 0
       backend_id:
         type: string
         nullable: true

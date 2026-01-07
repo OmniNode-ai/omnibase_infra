@@ -39,6 +39,11 @@ import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from omnibase_infra.errors import (
+    InfraAuthenticationError,
+    InfraConnectionError,
+    InfraTimeoutError,
+)
 from omnibase_infra.nodes.node_registry_effect.models import ModelBackendResult
 from omnibase_infra.utils import sanitize_backend_error, sanitize_error_message
 
@@ -151,14 +156,53 @@ class HandlerPostgresDeactivate:
                     correlation_id=correlation_id,
                 )
 
-        except Exception as e:
+        except (TimeoutError, InfraTimeoutError) as e:
+            # Timeout during deactivation - retriable error
             elapsed_ms = (time.perf_counter() - start_time) * 1000
-            # Sanitize error message to prevent credential exposure
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="POSTGRES_TIMEOUT_ERROR",
+                duration_ms=elapsed_ms,
+                backend_id="postgres",
+                correlation_id=correlation_id,
+            )
+
+        except InfraAuthenticationError as e:
+            # Authentication failure - non-retriable error
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="POSTGRES_AUTH_ERROR",
+                duration_ms=elapsed_ms,
+                backend_id="postgres",
+                correlation_id=correlation_id,
+            )
+
+        except InfraConnectionError as e:
+            # Connection failure - retriable error
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
             sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
                 error_code="POSTGRES_CONNECTION_ERROR",
+                duration_ms=elapsed_ms,
+                backend_id="postgres",
+                correlation_id=correlation_id,
+            )
+
+        except Exception as e:
+            # Unknown exception - sanitize to prevent credential exposure
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="POSTGRES_UNKNOWN_ERROR",
                 duration_ms=elapsed_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,

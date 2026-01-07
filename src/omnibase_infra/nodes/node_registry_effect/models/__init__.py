@@ -29,9 +29,15 @@ from omnibase_infra.nodes.effects.models import (
     ModelRegistryResponse,
 )
 
+# Node-specific models
+from omnibase_infra.nodes.node_registry_effect.models.model_partial_retry_request import (
+    ModelPartialRetryRequest,
+)
+
 __all__ = [
     "ModelBackendResult",
     "ModelEffectIdempotencyConfig",
+    "ModelPartialRetryRequest",
     "ModelRegistryRequest",
     "ModelRegistryResponse",
 ]

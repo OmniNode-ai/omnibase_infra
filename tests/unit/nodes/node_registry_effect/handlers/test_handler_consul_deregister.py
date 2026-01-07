@@ -196,7 +196,11 @@ class TestHandlerConsulDeregisterException:
 
     @pytest.mark.asyncio
     async def test_exception_is_caught_and_returned_as_error(self) -> None:
-        """Test that exceptions are captured in result, not raised."""
+        """Test that exceptions are captured in result, not raised.
+
+        Note: Python's built-in ConnectionError is not InfraConnectionError,
+        so it maps to CONSUL_UNKNOWN_ERROR (generic exception handling).
+        """
         # Arrange
         mock_client = create_mock_consul_client()
         mock_client.deregister_service.side_effect = ConnectionError(
@@ -214,13 +218,14 @@ class TestHandlerConsulDeregisterException:
         assert result.success is False
         assert result.error is not None
         assert "ConnectionError" in result.error
-        assert result.error_code == "CONSUL_CONNECTION_ERROR"
+        # Python's ConnectionError maps to UNKNOWN (not InfraConnectionError)
+        assert result.error_code == "CONSUL_UNKNOWN_ERROR"
         assert result.backend_id == "consul"
         assert result.correlation_id == correlation_id
 
     @pytest.mark.asyncio
     async def test_timeout_exception_returns_error(self) -> None:
-        """Test that timeout exceptions are handled."""
+        """Test that timeout exceptions return TIMEOUT_ERROR code."""
         # Arrange
         mock_client = create_mock_consul_client()
         mock_client.deregister_service.side_effect = TimeoutError("Operation timed out")
@@ -235,11 +240,12 @@ class TestHandlerConsulDeregisterException:
         # Assert
         assert result.success is False
         assert "TimeoutError" in result.error
-        assert result.error_code == "CONSUL_CONNECTION_ERROR"
+        # TimeoutError maps to specific timeout error code
+        assert result.error_code == "CONSUL_TIMEOUT_ERROR"
 
     @pytest.mark.asyncio
     async def test_generic_exception_returns_error(self) -> None:
-        """Test that generic exceptions are handled."""
+        """Test that generic exceptions return UNKNOWN_ERROR code."""
         # Arrange
         mock_client = create_mock_consul_client()
         mock_client.deregister_service.side_effect = RuntimeError(
@@ -256,7 +262,8 @@ class TestHandlerConsulDeregisterException:
         # Assert
         assert result.success is False
         assert "RuntimeError" in result.error
-        assert result.error_code == "CONSUL_CONNECTION_ERROR"
+        # Generic exceptions map to UNKNOWN error code
+        assert result.error_code == "CONSUL_UNKNOWN_ERROR"
 
 
 class TestHandlerConsulDeregisterCorrelationId:

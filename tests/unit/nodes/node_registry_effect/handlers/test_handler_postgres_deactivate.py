@@ -192,7 +192,11 @@ class TestHandlerPostgresDeactivateException:
 
     @pytest.mark.asyncio
     async def test_exception_is_caught_and_returned_as_error(self) -> None:
-        """Test that exceptions are captured in result, not raised."""
+        """Test that exceptions are captured in result, not raised.
+
+        Note: Python's built-in ConnectionError is not InfraConnectionError,
+        so it maps to POSTGRES_UNKNOWN_ERROR (generic exception handling).
+        """
         # Arrange
         mock_adapter = create_mock_postgres_adapter()
         mock_adapter.deactivate.side_effect = ConnectionError("Connection refused")
@@ -208,13 +212,14 @@ class TestHandlerPostgresDeactivateException:
         assert result.success is False
         assert result.error is not None
         assert "ConnectionError" in result.error
-        assert result.error_code == "POSTGRES_CONNECTION_ERROR"
+        # Python's ConnectionError maps to UNKNOWN (not InfraConnectionError)
+        assert result.error_code == "POSTGRES_UNKNOWN_ERROR"
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
     @pytest.mark.asyncio
     async def test_timeout_exception_returns_error(self) -> None:
-        """Test that timeout exceptions are handled."""
+        """Test that timeout exceptions return TIMEOUT_ERROR code."""
         # Arrange
         mock_adapter = create_mock_postgres_adapter()
         mock_adapter.deactivate.side_effect = TimeoutError("Operation timed out")
@@ -229,11 +234,12 @@ class TestHandlerPostgresDeactivateException:
         # Assert
         assert result.success is False
         assert "TimeoutError" in result.error
-        assert result.error_code == "POSTGRES_CONNECTION_ERROR"
+        # TimeoutError maps to specific timeout error code
+        assert result.error_code == "POSTGRES_TIMEOUT_ERROR"
 
     @pytest.mark.asyncio
     async def test_generic_exception_returns_error(self) -> None:
-        """Test that generic exceptions are handled."""
+        """Test that generic exceptions return UNKNOWN_ERROR code."""
         # Arrange
         mock_adapter = create_mock_postgres_adapter()
         mock_adapter.deactivate.side_effect = RuntimeError("Unexpected error occurred")
@@ -248,11 +254,12 @@ class TestHandlerPostgresDeactivateException:
         # Assert
         assert result.success is False
         assert "RuntimeError" in result.error
-        assert result.error_code == "POSTGRES_CONNECTION_ERROR"
+        # Generic exceptions map to UNKNOWN error code
+        assert result.error_code == "POSTGRES_UNKNOWN_ERROR"
 
     @pytest.mark.asyncio
     async def test_database_exception_returns_error(self) -> None:
-        """Test that database-specific exceptions are handled."""
+        """Test that database-specific exceptions return UNKNOWN_ERROR code."""
         # Arrange
         mock_adapter = create_mock_postgres_adapter()
         # Simulate a database constraint violation
@@ -270,7 +277,8 @@ class TestHandlerPostgresDeactivateException:
         # Assert
         assert result.success is False
         assert "ValueError" in result.error
-        assert result.error_code == "POSTGRES_CONNECTION_ERROR"
+        # ValueError is a generic exception, maps to UNKNOWN error code
+        assert result.error_code == "POSTGRES_UNKNOWN_ERROR"
 
 
 class TestHandlerPostgresDeactivateCorrelationId:
