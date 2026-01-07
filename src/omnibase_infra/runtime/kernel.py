@@ -507,9 +507,16 @@ async def bootstrap() -> int:
         container = ModelONEXContainer()
         if container.service_registry is None:
             logger.warning(
-                "service_registry is None (omnibase_core circular import bug?), "
+                "DEGRADED_MODE: service_registry is None (omnibase_core circular import bug?), "
                 "skipping container wiring (correlation_id=%s)",
                 correlation_id,
+                extra={
+                    "error_type": "NoneType",
+                    "correlation_id": correlation_id,
+                    "degraded_mode": True,
+                    "degraded_reason": "service_registry_unavailable",
+                    "component": "container_wiring",
+                },
             )
             wire_summary: dict[str, list[str] | str] = {
                 "services": [],
@@ -518,18 +525,38 @@ async def bootstrap() -> int:
         else:
             try:
                 wire_summary = await wire_infrastructure_services(container)
-            except RuntimeError as e:
+            except ServiceResolutionError as e:
+                # Service resolution failed during wiring - container configuration issue.
                 logger.warning(
-                    "Container wiring failed, continuing in degraded mode "
-                    "(correlation_id=%s): %s",
+                    "DEGRADED_MODE: Container wiring failed due to service resolution error, "
+                    "continuing in degraded mode (correlation_id=%s): %s",
                     correlation_id,
                     e,
                     extra={
                         "error_type": type(e).__name__,
                         "correlation_id": correlation_id,
+                        "degraded_mode": True,
+                        "degraded_reason": "service_resolution_error",
+                        "component": "container_wiring",
                     },
                 )
-                wire_summary = {"services": []}  # Empty summary for degraded mode
+                wire_summary = {"services": [], "status": "degraded"}
+            except (RuntimeError, AttributeError) as e:
+                # Unexpected error during wiring - container internals issue.
+                logger.warning(
+                    "DEGRADED_MODE: Container wiring failed with unexpected error, "
+                    "continuing in degraded mode (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                        "degraded_mode": True,
+                        "degraded_reason": "wiring_error",
+                        "component": "container_wiring",
+                    },
+                )
+                wire_summary = {"services": [], "status": "degraded"}
         container_duration = time.time() - container_start_time
         logger.debug(
             "Container wired in %.3fs (correlation_id=%s)",
@@ -656,6 +683,8 @@ async def bootstrap() -> int:
                         "DEGRADED_MODE: ServiceRegistry not available, skipping introspection dispatcher creation (correlation_id=%s)",
                         correlation_id,
                         extra={
+                            "error_type": "NoneType",
+                            "correlation_id": correlation_id,
                             "degraded_mode": True,
                             "degraded_reason": "service_registry_unavailable",
                             "component": "introspection_dispatcher",
@@ -782,6 +811,8 @@ async def bootstrap() -> int:
                 "DEGRADED_MODE: ServiceRegistry not available, creating ProtocolBindingRegistry directly (correlation_id=%s)",
                 correlation_id,
                 extra={
+                    "error_type": "NoneType",
+                    "correlation_id": correlation_id,
                     "degraded_mode": True,
                     "degraded_reason": "service_registry_unavailable",
                     "component": "handler_registry",

@@ -85,8 +85,6 @@ from omnibase_infra.runtime.handler_registry import (
     register_handlers_from_config,
 )
 
-# ServiceHealth moved to services/ directory (OMN-529)
-# Import from omnibase_infra.services.service_health instead
 from omnibase_infra.runtime.kernel import bootstrap as kernel_bootstrap
 from omnibase_infra.runtime.kernel import load_runtime_config
 from omnibase_infra.runtime.kernel import main as kernel_main

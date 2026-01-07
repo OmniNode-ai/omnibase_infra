@@ -20,7 +20,7 @@ Exports:
 
 Example (Direct Runtime Injection):
     >>> from omnibase_infra.services.service_health import ServiceHealth
-    >>> from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+    >>> from omnibase_infra.runtime import RuntimeHostProcess
     >>>
     >>> async def main():
     ...     runtime = RuntimeHostProcess()
@@ -404,26 +404,6 @@ class ServiceHealth:
 
         Returns:
             Initialized ServiceHealth with runtime resolved from container.
-
-        Migration Note:
-            When migrating from direct runtime injection to container-based
-            initialization:
-
-            **Before (direct injection)**::
-
-                runtime = RuntimeHostProcess()
-                server = ServiceHealth(runtime=runtime, port=8085)
-
-            **After (container-based)**::
-
-                container = ModelONEXContainer()
-                await wire_infrastructure_services(container)
-                server = await ServiceHealth.create_from_container(
-                    container, port=8085
-                )
-
-            The factory method handles RuntimeHostProcess resolution internally,
-            so you no longer need to instantiate or manage the runtime directly.
 
         Raises:
             ProtocolConfigurationError: If RuntimeHostProcess cannot be resolved

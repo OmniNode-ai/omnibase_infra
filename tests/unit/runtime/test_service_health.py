@@ -67,6 +67,7 @@ class TestServiceHealthInit:
 class TestServiceHealthLifecycle:
     """Tests for ServiceHealth start/stop lifecycle."""
 
+    @pytest.mark.asyncio
     async def test_start_creates_app_and_runner(self) -> None:
         """Test that start() creates aiohttp app and runner."""
         mock_runtime = MagicMock()
@@ -106,6 +107,7 @@ class TestServiceHealthLifecycle:
                     mock_runner_instance.cleanup = AsyncMock()
                     await server.stop()
 
+    @pytest.mark.asyncio
     async def test_start_idempotent(self) -> None:
         """Test that calling start() twice is safe."""
         mock_runtime = MagicMock()
@@ -143,6 +145,7 @@ class TestServiceHealthLifecycle:
                     mock_runner_instance.cleanup = AsyncMock()
                     await server.stop()
 
+    @pytest.mark.asyncio
     async def test_stop_idempotent(self) -> None:
         """Test that calling stop() twice is safe."""
         mock_runtime = MagicMock()
@@ -154,6 +157,7 @@ class TestServiceHealthLifecycle:
 
         assert not server.is_running
 
+    @pytest.mark.asyncio
     async def test_start_raises_on_port_binding_error(self) -> None:
         """Test that port binding errors raise RuntimeHostError."""
         mock_runtime = MagicMock()
@@ -192,6 +196,7 @@ class TestServiceHealthLifecycle:
 class TestServiceHealthEndpoints:
     """Tests for health endpoint responses."""
 
+    @pytest.mark.asyncio
     async def test_health_endpoint_healthy(self) -> None:
         """Test /health returns 200 when runtime is healthy."""
         mock_runtime = MagicMock()
@@ -218,6 +223,7 @@ class TestServiceHealthEndpoints:
         assert '"status":"healthy"' in response_text
         assert '"version":"1.0.0"' in response_text
 
+    @pytest.mark.asyncio
     async def test_health_endpoint_degraded(self) -> None:
         """Test /health returns 200 when runtime is degraded.
 
@@ -244,6 +250,7 @@ class TestServiceHealthEndpoints:
         # Pydantic model_dump_json() uses compact JSON format (no space after colon)
         assert '"status":"degraded"' in response_text
 
+    @pytest.mark.asyncio
     async def test_health_endpoint_unhealthy(self) -> None:
         """Test /health returns 503 when runtime is unhealthy."""
         mock_runtime = MagicMock()
@@ -266,6 +273,7 @@ class TestServiceHealthEndpoints:
         # Pydantic model_dump_json() uses compact JSON format (no space after colon)
         assert '"status":"unhealthy"' in response_text
 
+    @pytest.mark.asyncio
     async def test_health_endpoint_exception(self) -> None:
         """Test /health returns 503 on exception."""
         mock_runtime = MagicMock()
@@ -290,6 +298,7 @@ class TestServiceHealthEndpoints:
 class TestServiceHealthIntegration:
     """Integration tests for ServiceHealth with real HTTP requests."""
 
+    @pytest.mark.asyncio
     async def test_real_health_endpoint(self) -> None:
         """Test health endpoint with real HTTP server."""
         mock_runtime = MagicMock()
@@ -788,6 +797,122 @@ class TestServiceHealthContainerInjection:
         container_ref1 = server.container
         container_ref2 = server.container
         assert container_ref1 is container_ref2
+
+    @pytest.mark.asyncio
+    async def test_create_from_container_with_none_service_registry(self) -> None:
+        """Test factory method when container.service_registry is None.
+
+        When the container has a None service_registry, the factory method should
+        raise ProtocolConfigurationError with appropriate error context rather than
+        an unhandled AttributeError.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_container.service_registry = None
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await ServiceHealth.create_from_container(container=mock_container)
+
+        # Should indicate resolution failure
+        assert "Failed to resolve RuntimeHostProcess from container" in str(
+            exc_info.value
+        )
+        # Original AttributeError should be chained
+        assert exc_info.value.__cause__ is not None
+
+    @pytest.mark.asyncio
+    async def test_create_from_container_when_resolve_returns_none(self) -> None:
+        """Test factory method when service_registry.resolve_service returns None.
+
+        When resolve_service returns None instead of a RuntimeHostProcess instance,
+        the factory should still complete but accessing runtime property will raise.
+        This tests the edge case where the service registry doesn't throw but also
+        doesn't return a valid runtime.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_container.service_registry = MagicMock()
+        mock_container.service_registry.resolve_service = AsyncMock(return_value=None)
+
+        # Factory should complete (None is a valid return, constructor accepts it)
+        server = await ServiceHealth.create_from_container(container=mock_container)
+
+        # Container should be preserved
+        assert server.container is mock_container
+
+        # But runtime property should raise since runtime is None
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            _ = server.runtime
+
+        assert "RuntimeHostProcess not available" in str(exc_info.value)
+
+    def test_container_preserved_when_runtime_is_none_after_init(self) -> None:
+        """Verify container property returns container when runtime is None.
+
+        When ServiceHealth is initialized with only a container (no runtime),
+        the container property should still return the container correctly,
+        even though the runtime is None. This ensures container access does
+        not depend on runtime being set.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+
+        server = ServiceHealth(container=mock_container)
+
+        # Verify runtime is None
+        assert server._runtime is None
+
+        # Container should still be accessible and correct
+        assert server.container is mock_container
+        assert server._container is mock_container
+
+        # Multiple accesses should work consistently
+        assert server.container is server.container
+
+    @pytest.mark.asyncio
+    async def test_health_endpoint_raises_when_runtime_not_resolved(self) -> None:
+        """Test health endpoint behavior when runtime was never resolved.
+
+        When ServiceHealth is initialized with container-only (no runtime)
+        and create_from_container was not used, the health endpoint should
+        raise ProtocolConfigurationError when trying to access runtime.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        server = ServiceHealth(container=mock_container)
+
+        mock_request = MagicMock(spec=web.Request)
+
+        # Health endpoint should return 503 with error details
+        response = await server._handle_health(mock_request)
+
+        assert response.status == 503
+        response_text = response.text
+        assert response_text is not None
+        assert '"status":"unhealthy"' in response_text
+        # The error should mention runtime not available
+        assert "RuntimeHostProcess not available" in response_text
+
+    @pytest.mark.asyncio
+    async def test_container_with_service_registry_returning_wrong_type(self) -> None:
+        """Test factory when service_registry returns wrong type.
+
+        When resolve_service returns something other than RuntimeHostProcess
+        (e.g., a string or different object), the server should still initialize
+        but may fail at runtime depending on how the object is used.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_container.service_registry = MagicMock()
+        # Return a string instead of RuntimeHostProcess
+        mock_container.service_registry.resolve_service = AsyncMock(
+            return_value="not_a_runtime"
+        )
+
+        # Factory completes - Python doesn't enforce type at runtime here
+        server = await ServiceHealth.create_from_container(container=mock_container)
+
+        # Container should still be set
+        assert server.container is mock_container
+
+        # Runtime returns the wrong type - this is a bug in wiring, not in ServiceHealth
+        # The server stores whatever was returned
+        assert server._runtime == "not_a_runtime"
 
 
 @pytest.mark.unit

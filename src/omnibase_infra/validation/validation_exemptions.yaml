@@ -361,16 +361,6 @@ pattern_exemptions:
 
     documentation:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
-      - docs/migrations/HANDLER_TO_DISPATCHER_MIGRATION.md
-    ticket: OMN-990
-  - file_pattern: 'message_dispatch_engine\.py'
-    method_pattern: "Function 'register_handler'"
-    violation_pattern: 'has \d+ parameters'
-    reason: >
-      Handler registration for backwards compatibility with RuntimeHostProcess. Takes handler_id, handler, category, message_types, node_kind. Legacy alias for register_dispatcher.
-
-    documentation:
-      - docs/migrations/HANDLER_TO_DISPATCHER_MIGRATION.md
     ticket: OMN-990
   # ==========================================================================
   # DispatcherRegistry Exemptions (OMN-934)
