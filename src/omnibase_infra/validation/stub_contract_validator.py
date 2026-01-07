@@ -41,19 +41,14 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import yaml
 from omnibase_core.enums import EnumNodeType
 from omnibase_core.errors import OnexError
-from omnibase_core.models.contracts import ModelContractBase
 from omnibase_core.validation import ModelContractValidationResult
-from omnibase_core.validation.contract_validator import ProtocolContractValidator
-
-if TYPE_CHECKING:
-    from omnibase_core.models import ModelSemVer
 
 logger = logging.getLogger(__name__)
 
@@ -222,12 +217,10 @@ class StubContractValidator:
                 contract_path,
             )
 
-        # Use the validation functions from omnibase_core.validation
+        # NOTE: omnibase_core.validation.validate_contracts expects a directory, not a
+        # single file. This stub performs simpler per-file validation until the real
+        # validator supports single-file mode. See OMN-1104 for migration tracking.
         try:
-            from omnibase_core.validation import validate_contracts
-
-            # validate_contracts expects a directory, not a single file
-            # So we use a simpler validation for now
             if not contract_path.exists():
                 return ModelContractValidationResult(
                     valid=False,
@@ -348,19 +341,31 @@ class StubContractValidator:
                 contract_path,
                 type(e).__name__,
             )
+            # Generate correlation_id for error tracking per ONEX error patterns
+            correlation_id = str(uuid.uuid4())
             raise OnexError(
                 message=(
                     f"Unexpected error during contract validation: {e!s}. "
                     "This may indicate a bug in the stub validator or an unexpected "
-                    "contract format. See logs for full traceback."
+                    "contract format. See logs for full traceback. "
+                    f"(correlation_id={correlation_id})"
                 ),
                 error_code="STUB_VALIDATION_UNEXPECTED_ERROR",
                 context={
+                    "correlation_id": correlation_id,
+                    "operation": "validate_contract_file",
                     "contract_path": str(contract_path),
+                    "contract_type": (
+                        contract_type.value if contract_type is not None else None
+                    ),
                     "exception_type": type(e).__name__,
                     "exception_message": str(e),
                     "validator": "StubContractValidator",
                     "migration_ticket": "OMN-1104",
+                    "security_note": (
+                        "This stub validator performs MINIMAL validation. "
+                        "Do not rely on it for production validation."
+                    ),
                 },
             ) from e
 

@@ -7,23 +7,39 @@
 
 ---
 
-## IMPORTANT: CLAUDE.md Rule Reconciliation
+## CRITICAL: Scope Boundaries and CLAUDE.md Alignment
+
+### CLAUDE.md Rule Remains Absolute
 
 **CLAUDE.md states**: `NEVER use Any - Use object for generic payloads`
 
-**This ADR grants a NARROW EXCEPTION** for ONE specific case:
+**This rule is ABSOLUTE and remains in FULL EFFECT.** This ADR grants a NARROW, TEMPORARY EXCEPTION for exactly ONE context: Pydantic model `Field()` type annotations for JSON-serializable data.
 
-| Context | Type to Use | Rule Source |
-|---------|-------------|-------------|
-| Pydantic model `Field()` definitions | `Any` (with required comment) | This ADR exception |
-| Function parameters | `object` | CLAUDE.md rule |
-| Function return types | `object` or specific type | CLAUDE.md rule |
-| Variable annotations | `object` or specific type | CLAUDE.md rule |
-| Type aliases | `object` | CLAUDE.md rule |
-| Protocol method signatures | `object` | CLAUDE.md rule |
-| Generic containers | `object` | CLAUDE.md rule |
+### Strict Scope Definition
 
-**The CLAUDE.md "NEVER use Any" rule remains in full effect for all code EXCEPT Pydantic model field type annotations where `JsonType` would otherwise be used.**
+| Context | Allowed Type | Governing Rule | Rationale |
+|---------|--------------|----------------|-----------|
+| **Pydantic model `Field()` definitions** | `Any` (with required `NOTE:` comment) | This ADR exception | Pydantic 2.x cannot handle recursive `JsonType` |
+| **Function parameters** | `object` ONLY | CLAUDE.md (absolute) | Static type safety |
+| **Function return types** | `object` or specific type ONLY | CLAUDE.md (absolute) | Static type safety |
+| **Variable annotations** | `object` or specific type ONLY | CLAUDE.md (absolute) | Static type safety |
+| **Type aliases** | `object` ONLY | CLAUDE.md (absolute) | Prevents type erosion |
+| **Protocol method signatures** | `object` ONLY | CLAUDE.md (absolute) | Contract clarity |
+| **Generic containers** (outside Pydantic) | `object` ONLY | CLAUDE.md (absolute) | Type checker support |
+| **dataclasses, TypedDicts, NamedTuples** | `object` or specific type ONLY | CLAUDE.md (absolute) | Not Pydantic models |
+
+### Why This Exception Does NOT Contradict CLAUDE.md
+
+1. **Limited to Pydantic runtime validation context**: Pydantic's `Field()` provides runtime type validation that compensates for static type checker blindness to `Any`
+2. **Temporary workaround**: Will be removed when `JsonType` fix is available in omnibase_core
+3. **Explicit documentation required**: The mandatory `NOTE:` comment ensures traceability and prevents silent proliferation
+4. **No expansion permitted**: This exception CANNOT be extended to other contexts without a new ADR
+
+### Enforcement
+
+- **New code with `Any` outside Pydantic model fields**: **AUTOMATIC PR REJECTION**
+- **New code with `Any` in Pydantic field without `NOTE:` comment**: **AUTOMATIC PR REJECTION**
+- **Legacy code violations**: Tracked under OMN-1262 for mandatory cleanup
 
 ---
 
@@ -125,7 +141,14 @@ This exception is EXTREMELY NARROW. The `Any` type is permitted ONLY when ALL of
 3. **For fields that would otherwise use `JsonType`** from omnibase_core
 4. **With the required `NOTE:` comment** documenting the workaround
 
-Any other use of `Any` is a **violation of CLAUDE.md** and must use `object` instead.
+**CRITICAL**: Any use of `Any` outside these conditions is a **violation of CLAUDE.md** and MUST use `object` instead. The `object` type is Python's proper "unknown type" marker and must be used for:
+
+- All function parameters accepting unknown/generic data
+- All function return types returning unknown/generic data
+- All variable annotations for unknown types
+- All type aliases for generic payloads
+- All protocol method signatures
+- All non-Pydantic data structures (dataclasses, TypedDicts, NamedTuples)
 
 **Examples of PERMITTED usage (inside Pydantic models only):**
 
@@ -221,6 +244,42 @@ class ModelEventEnvelope(BaseModel, Generic[T]):
 - Using `Any` outside Pydantic defeats the purpose of type hints entirely
 - `object` is the proper "unknown type" marker in Python's type system
 - `dict[str, object]` still allows any value but enables type checker warnings on unsafe operations
+
+### Migration Path: JsonType to object
+
+When migrating code that previously used `JsonType` (or `Any` as a workaround) in non-Pydantic contexts, use `object`:
+
+**Before (incorrect):**
+```python
+# WRONG - using JsonType or Any outside Pydantic
+from omnibase_core.types import JsonType
+
+def parse_json_payload(data: JsonType) -> JsonType:
+    ...
+```
+
+**After (correct):**
+```python
+# CORRECT - using object for generic payloads
+# ONEX: Using object instead of Any per ADR guidelines
+def parse_json_payload(data: object) -> object:
+    ...
+```
+
+**For structured JSON data**, consider using `TypedDict` for stronger typing:
+```python
+from typing import TypedDict
+
+class PayloadDict(TypedDict, total=False):
+    """Typed dictionary for structured payloads."""
+    event_type: str
+    timestamp: str
+    data: object  # Nested unknown data uses object
+
+# ONEX: Using TypedDict for stronger return type safety
+def parse_structured_payload(raw: object) -> PayloadDict:
+    ...
+```
 
 ### Annotation Patterns
 
