@@ -80,8 +80,9 @@ import pytest
 from tests.integration.handlers.conftest import POSTGRES_AVAILABLE
 
 if TYPE_CHECKING:
+    from omnibase_core.types import JsonType
+
     from omnibase_infra.handlers import DbHandler
-    from omnibase_infra.models.types import JsonValue
 
 # =============================================================================
 # Test Configuration and Skip Conditions
@@ -112,7 +113,7 @@ class TestDbHandlerConnection:
     """Tests for DbHandler connection and lifecycle management."""
 
     @pytest.mark.asyncio
-    async def test_db_describe(self, db_config: dict[str, JsonValue]) -> None:
+    async def test_db_describe(self, db_config: dict[str, JsonType]) -> None:
         """Verify describe() returns correct handler metadata."""
         from omnibase_infra.handlers import DbHandler
 
@@ -132,7 +133,7 @@ class TestDbHandlerConnection:
             await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_db_shutdown_cleans_up(self, db_config: dict[str, JsonValue]) -> None:
+    async def test_db_shutdown_cleans_up(self, db_config: dict[str, JsonType]) -> None:
         """Verify shutdown properly closes connection pool.
 
         After shutdown, the handler should reject execute() calls with

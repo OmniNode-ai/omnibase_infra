@@ -598,34 +598,48 @@ async def bootstrap() -> int:
                     HandlerNodeIntrospected,
                 )
 
-                logger.debug(
-                    "Resolving HandlerNodeIntrospected from container (correlation_id=%s)",
-                    correlation_id,
-                )
-                handler_introspected: HandlerNodeIntrospected = (
-                    await container.service_registry.resolve_service(
-                        HandlerNodeIntrospected
+                # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+                if container.service_registry is None:
+                    logger.warning(
+                        "DEGRADED_MODE: ServiceRegistry not available, skipping introspection dispatcher creation (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "degraded_mode": True,
+                            "degraded_reason": "service_registry_unavailable",
+                            "component": "introspection_dispatcher",
+                        },
                     )
-                )
-                logger.debug(
-                    "HandlerNodeIntrospected resolved successfully (correlation_id=%s)",
-                    correlation_id,
-                    extra={
-                        "handler_class": handler_introspected.__class__.__name__,
-                    },
-                )
+                    # Set introspection_dispatcher to None and continue without it
+                    introspection_dispatcher = None
+                else:
+                    logger.debug(
+                        "Resolving HandlerNodeIntrospected from container (correlation_id=%s)",
+                        correlation_id,
+                    )
+                    handler_introspected: HandlerNodeIntrospected = (
+                        await container.service_registry.resolve_service(
+                            HandlerNodeIntrospected
+                        )
+                    )
+                    logger.debug(
+                        "HandlerNodeIntrospected resolved successfully (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "handler_class": handler_introspected.__class__.__name__,
+                        },
+                    )
 
-                introspection_dispatcher = DispatcherNodeIntrospected(
-                    handler_introspected
-                )
-                logger.info(
-                    "Introspection dispatcher created and wired (correlation_id=%s)",
-                    correlation_id,
-                    extra={
-                        "dispatcher_class": introspection_dispatcher.__class__.__name__,
-                        "handler_class": handler_introspected.__class__.__name__,
-                    },
-                )
+                    introspection_dispatcher = DispatcherNodeIntrospected(
+                        handler_introspected
+                    )
+                    logger.info(
+                        "Introspection dispatcher created and wired (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "dispatcher_class": introspection_dispatcher.__class__.__name__,
+                            "handler_class": handler_introspected.__class__.__name__,
+                        },
+                    )
 
             except Exception as pool_error:
                 # Log warning but continue without registration support
@@ -660,12 +674,28 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
-        # 5. Resolve ProtocolBindingRegistry from container
+        # 5. Resolve ProtocolBindingRegistry from container or create new instance
         from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
-        handler_registry: ProtocolBindingRegistry = (
-            await container.service_registry.resolve_service(ProtocolBindingRegistry)
-        )
+        # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+        if container.service_registry is not None:
+            handler_registry: ProtocolBindingRegistry = (
+                await container.service_registry.resolve_service(
+                    ProtocolBindingRegistry
+                )
+            )
+        else:
+            # ServiceRegistry not available, create a new ProtocolBindingRegistry directly
+            logger.warning(
+                "DEGRADED_MODE: ServiceRegistry not available, creating ProtocolBindingRegistry directly (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "degraded_mode": True,
+                    "degraded_reason": "service_registry_unavailable",
+                    "component": "handler_registry",
+                },
+            )
+            handler_registry = ProtocolBindingRegistry()
 
         # 6. Create runtime host process with config and pre-resolved registry
         # RuntimeHostProcess accepts config as dict; cast model_dump() result to

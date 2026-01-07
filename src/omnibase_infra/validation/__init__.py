@@ -91,9 +91,6 @@ Security Design (Intentional Fail-Open Architecture):
     - routing_coverage_validator.py: Routing gap detection (module docstring)
 """
 
-from omnibase_core.models.validation.model_import_validation_result import (
-    ModelModuleImportResult as ModelImportValidationResult,
-)
 from omnibase_core.validation import (
     CircularImportValidator,
     validate_all,
@@ -101,6 +98,9 @@ from omnibase_core.validation import (
     validate_contracts,
     validate_patterns,
     validate_union_usage,
+)
+from omnibase_core.validation import (
+    ModelModuleImportResult as ModelImportValidationResult,
 )
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
@@ -217,9 +217,6 @@ __all__: list[str] = [
     # Chain propagation validation (OMN-951)
     "ChainPropagationError",
     "ChainPropagationValidator",
-    # ONEX-compliant validator names
-    "ValidatorCircularImport",
-    "ValidatorServiceContract",
     # Contract linting (PR #57)
     "ContractLinter",
     "EnumContractViolationSeverity",
