@@ -485,7 +485,17 @@ async def bootstrap() -> int:
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
         container = ModelONEXContainer()
-        wire_summary = await wire_infrastructure_services(container)
+        if container.service_registry is None:
+            logger.warning(
+                "service_registry is None (omnibase_core circular import bug?), "
+                "skipping container wiring (correlation_id=%s)",
+                correlation_id,
+            )
+            wire_summary: dict[str, list[str]] = {
+                "services": []
+            }  # Empty summary for degraded mode
+        else:
+            wire_summary = await wire_infrastructure_services(container)
         container_duration = time.time() - container_start_time
         logger.debug(
             "Container wired in %.3fs (correlation_id=%s)",
@@ -671,9 +681,12 @@ async def bootstrap() -> int:
         # 5. Resolve ProtocolBindingRegistry from container
         from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
-        handler_registry: ProtocolBindingRegistry = (
-            await container.service_registry.resolve_service(ProtocolBindingRegistry)
-        )
+        handler_registry: ProtocolBindingRegistry | None = None
+        if container.service_registry is not None:
+            handler_registry = await container.service_registry.resolve_service(
+                ProtocolBindingRegistry
+            )
+        # RuntimeHostProcess._get_handler_registry() handles None by falling back to singleton
 
         # 6. Create runtime host process with config and pre-resolved registry
         # RuntimeHostProcess accepts config as dict; cast model_dump() result to
