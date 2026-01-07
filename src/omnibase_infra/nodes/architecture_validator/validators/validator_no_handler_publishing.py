@@ -275,12 +275,21 @@ def validate_no_handler_publishing(file_path: str) -> ModelArchitectureValidatio
     try:
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source)
-    except SyntaxError:
-        # Handle files with syntax errors gracefully
-        # Return valid=True with no violations (can't analyze)
+    except SyntaxError as e:
+        # Return WARNING violation for syntax error
         return ModelArchitectureValidationResult(
-            valid=True,
-            violations=[],
+            valid=True,  # Still valid (not a rule violation), but with warning
+            violations=[
+                ModelArchitectureViolation(
+                    rule_id=RULE_ID,
+                    rule_name=RULE_NAME,
+                    severity=EnumViolationSeverity.WARNING,
+                    file_path=file_path,
+                    line_number=e.lineno,
+                    message=f"File has syntax error and could not be validated: {e.msg}",
+                    suggestion="Fix the syntax error to enable architecture validation",
+                )
+            ],
             files_checked=1,
             rules_checked=[RULE_ID],
         )

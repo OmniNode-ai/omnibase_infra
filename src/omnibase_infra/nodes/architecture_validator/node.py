@@ -127,7 +127,7 @@ class NodeArchitectureValidator(NodeCompute):
             ("ARCH-003", validate_no_orchestrator_fsm),
         ]
 
-    async def compute(
+    def compute(
         self,
         request: ModelArchitectureValidationRequest,
     ) -> ModelArchitectureValidationResult:
@@ -156,11 +156,13 @@ class NodeArchitectureValidator(NodeCompute):
             5. If fail_fast=True, stop on first violation
         """
         all_violations: list[ModelArchitectureViolation] = []
-        files_checked = 0
         rules_checked: list[str] = []
 
         # Collect Python files from paths
         files_to_check = self._collect_files(request.paths)
+
+        # Count files once, not per validator
+        files_checked = len(files_to_check)
 
         # Determine which rules to run
         validators_to_run = self._validators
@@ -177,7 +179,6 @@ class NodeArchitectureValidator(NodeCompute):
 
             for file_path in files_to_check:
                 result = validator(str(file_path))
-                files_checked += result.files_checked
                 all_violations.extend(result.violations)
 
                 # Fail fast if requested
@@ -205,15 +206,30 @@ class NodeArchitectureValidator(NodeCompute):
         Returns:
             List of Python file paths to validate.
 
+        Raises:
+            ValueError: If path attempts directory traversal or is absolute outside cwd.
+
         Examples:
             - File: "src/module/file.py" -> [Path("src/module/file.py")]
             - Directory: "src/" -> [all .py files recursively]
             - Glob: "src/**/*.py" -> [matched files]
         """
         files: list[Path] = []
+        cwd = Path.cwd().resolve()
 
         for path_str in paths:
+            # Security: reject path traversal attempts
+            if ".." in path_str:
+                raise ValueError(f"Path traversal not allowed: {path_str}")
+
             path = Path(path_str)
+
+            # Security: resolve and verify path is within cwd or is relative
+            resolved = path.resolve() if path.exists() else (cwd / path).resolve()
+            if path.is_absolute() and not str(resolved).startswith(str(cwd)):
+                raise ValueError(
+                    f"Absolute path outside working directory not allowed: {path_str}"
+                )
 
             if path.is_file() and path.suffix == ".py":
                 files.append(path)

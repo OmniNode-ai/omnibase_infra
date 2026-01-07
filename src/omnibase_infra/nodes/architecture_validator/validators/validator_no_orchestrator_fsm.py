@@ -304,11 +304,21 @@ def validate_no_orchestrator_fsm(file_path: str) -> ModelArchitectureValidationR
     try:
         source = path.read_text()
         tree = ast.parse(source)
-    except SyntaxError:
-        # Skip files with syntax errors
+    except SyntaxError as e:
+        # Return WARNING violation for syntax error
         return ModelArchitectureValidationResult(
-            valid=True,
-            violations=[],
+            valid=True,  # Still valid (not a rule violation), but with warning
+            violations=[
+                ModelArchitectureViolation(
+                    rule_id=RULE_ID,
+                    rule_name=RULE_NAME,
+                    severity=EnumViolationSeverity.WARNING,
+                    file_path=file_path,
+                    line_number=e.lineno,
+                    message=f"File has syntax error and could not be validated: {e.msg}",
+                    suggestion="Fix the syntax error to enable architecture validation",
+                )
+            ],
             files_checked=1,
             rules_checked=[RULE_ID],
         )
