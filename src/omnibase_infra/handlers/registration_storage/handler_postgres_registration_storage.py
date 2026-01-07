@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS node_registrations (
     node_id UUID PRIMARY KEY,
     node_type VARCHAR(64) NOT NULL,
     node_version VARCHAR(32) NOT NULL,
+    capabilities JSONB NOT NULL DEFAULT '[]',
     endpoints JSONB NOT NULL DEFAULT '{}',
     metadata JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -78,11 +79,12 @@ CREATE TABLE IF NOT EXISTS node_registrations (
 """
 
 SQL_UPSERT = """
-INSERT INTO node_registrations (node_id, node_type, node_version, endpoints, metadata, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO node_registrations (node_id, node_type, node_version, capabilities, endpoints, metadata, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (node_id) DO UPDATE SET
     node_type = EXCLUDED.node_type,
     node_version = EXCLUDED.node_version,
+    capabilities = EXCLUDED.capabilities,
     endpoints = EXCLUDED.endpoints,
     metadata = EXCLUDED.metadata,
     updated_at = EXCLUDED.updated_at
@@ -90,7 +92,7 @@ RETURNING (xmax = 0) AS was_insert;
 """
 
 SQL_QUERY_BASE = """
-SELECT node_id, node_type, node_version, endpoints, metadata, created_at, updated_at
+SELECT node_id, node_type, node_version, capabilities, endpoints, metadata, created_at, updated_at
 FROM node_registrations
 """
 
@@ -100,8 +102,10 @@ SELECT COUNT(*) FROM node_registrations
 
 SQL_UPDATE = """
 UPDATE node_registrations SET
-    endpoints = COALESCE($2, endpoints),
-    metadata = COALESCE($3, metadata),
+    capabilities = COALESCE($2, capabilities),
+    endpoints = COALESCE($3, endpoints),
+    metadata = COALESCE($4, metadata),
+    node_version = COALESCE($5, node_version),
     updated_at = NOW()
 WHERE node_id = $1
 RETURNING node_id;
@@ -329,6 +333,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             pool = await self._ensure_pool()
 
             now = datetime.now(UTC)
+            capabilities_json = json.dumps(record.capabilities)
             endpoints_json = json.dumps(record.endpoints)
             metadata_json = json.dumps(record.metadata)
 
@@ -339,6 +344,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
                         record.node_id,
                         record.node_type.value,
                         record.node_version,
+                        capabilities_json,
                         endpoints_json,
                         metadata_json,
                         record.created_at or now,
@@ -491,6 +497,9 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             # Convert rows to records
             records: list[ModelRegistrationRecord] = []
             for row in rows:
+                capabilities = (
+                    json.loads(row["capabilities"]) if row["capabilities"] else []
+                )
                 endpoints = json.loads(row["endpoints"]) if row["endpoints"] else {}
                 metadata = json.loads(row["metadata"]) if row["metadata"] else {}
 
@@ -499,6 +508,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
                         node_id=row["node_id"],
                         node_type=EnumNodeKind(row["node_type"]),
                         node_version=row["node_version"],
+                        capabilities=capabilities,
                         endpoints=endpoints,
                         metadata=metadata,
                         created_at=row["created_at"],
@@ -602,14 +612,25 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             pool = await self._ensure_pool()
 
             # Extract fields from the update model
+            capabilities_json = (
+                json.dumps(updates.capabilities) if updates.capabilities else None
+            )
             endpoints_json = (
                 json.dumps(updates.endpoints) if updates.endpoints else None
             )
             metadata_json = json.dumps(updates.metadata) if updates.metadata else None
+            node_version = updates.node_version
 
             async with pool.acquire() as conn:
                 result = await asyncio.wait_for(
-                    conn.fetchval(SQL_UPDATE, node_id, endpoints_json, metadata_json),
+                    conn.fetchval(
+                        SQL_UPDATE,
+                        node_id,
+                        capabilities_json,
+                        endpoints_json,
+                        metadata_json,
+                        node_version,
+                    ),
                     timeout=self._timeout_seconds,
                 )
 

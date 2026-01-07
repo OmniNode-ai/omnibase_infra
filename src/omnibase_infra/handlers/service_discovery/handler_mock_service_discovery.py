@@ -88,6 +88,7 @@ class MockServiceDiscoveryHandler:
                     address=service_info.address,
                     port=service_info.port,
                     tags=service_info.tags,
+                    health_status=service_info.health_status,
                     metadata=service_info.metadata,
                     health_check_url=service_info.health_check_url,
                     registered_at=datetime.now(UTC),

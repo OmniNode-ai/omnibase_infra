@@ -46,6 +46,7 @@ class ModelRegistrationResult(BaseModel):
         service_id: ID of the registered/deregistered service.
         operation: Type of operation performed (register or deregister).
         error: Error message if operation failed (None on success).
+        duration_ms: Time taken for the operation in milliseconds.
         backend_type: Type of backend that processed the operation.
         correlation_id: Correlation ID for distributed tracing.
 
@@ -56,6 +57,7 @@ class ModelRegistrationResult(BaseModel):
         ...     success=True,
         ...     service_id=uuid4(),
         ...     operation=EnumServiceDiscoveryOperation.REGISTER,
+        ...     duration_ms=45.2,
         ...     backend_type="consul",
         ... )
         >>> result.success
@@ -67,6 +69,7 @@ class ModelRegistrationResult(BaseModel):
         ...     service_id=uuid4(),
         ...     operation=EnumServiceDiscoveryOperation.DEREGISTER,
         ...     error="Connection timeout to Consul agent",
+        ...     duration_ms=5000.0,
         ...     backend_type="consul",
         ... )
         >>> result.success
@@ -90,6 +93,11 @@ class ModelRegistrationResult(BaseModel):
     error: str | None = Field(
         default=None,
         description="Error message if operation failed (None on success)",
+    )
+    duration_ms: float = Field(
+        default=0.0,
+        description="Time taken for the operation in milliseconds",
+        ge=0.0,
     )
     backend_type: str | None = Field(
         default=None,

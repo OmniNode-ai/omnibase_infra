@@ -18,8 +18,6 @@ import time
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
-
 from omnibase_infra.handlers.registration_storage.models import (
     ModelRegistrationRecord,
     ModelStorageResult,
@@ -27,8 +25,10 @@ from omnibase_infra.handlers.registration_storage.models import (
 )
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelDeleteResult,
+    ModelRegistrationUpdate,
     ModelStorageHealthCheckDetails,
     ModelStorageHealthCheckResult,
+    ModelStorageQuery,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,6 +95,7 @@ class MockRegistrationStorageHandler:
                 node_id=record.node_id,
                 node_type=record.node_type,
                 node_version=record.node_version,
+                capabilities=record.capabilities,
                 endpoints=record.endpoints,
                 metadata=record.metadata,
                 created_at=record.created_at or now,
@@ -126,19 +127,13 @@ class MockRegistrationStorageHandler:
 
     async def query_registrations(
         self,
-        node_type: EnumNodeKind | None = None,
-        node_version: str | None = None,
-        limit: int = 100,
-        offset: int = 0,
+        query: ModelStorageQuery,
         correlation_id: UUID | None = None,
     ) -> ModelStorageResult:
         """Query registration records from the mock store.
 
         Args:
-            node_type: Optional node type to filter by.
-            node_version: Optional version pattern to filter by.
-            limit: Maximum number of records to return.
-            offset: Number of records to skip (for pagination).
+            query: Query parameters including filters and pagination.
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
@@ -151,15 +146,18 @@ class MockRegistrationStorageHandler:
             matching_records: list[ModelRegistrationRecord] = []
 
             for record in self._records.values():
-                # Filter by node type
-                if node_type is not None and record.node_type != node_type:
+                # Filter by node_id (exact match)
+                if query.node_id is not None and record.node_id != query.node_id:
                     continue
 
-                # Filter by version prefix
-                if node_version is not None and not record.node_version.startswith(
-                    node_version
-                ):
+                # Filter by node type
+                if query.node_type is not None and record.node_type != query.node_type:
                     continue
+
+                # Filter by capability (contains match)
+                if query.capability_filter is not None:
+                    if query.capability_filter not in record.capabilities:
+                        continue
 
                 matching_records.append(record)
 
@@ -172,7 +170,7 @@ class MockRegistrationStorageHandler:
             total_count = len(matching_records)
 
             # Apply pagination
-            paginated = matching_records[offset : offset + limit]
+            paginated = matching_records[query.offset : query.offset + query.limit]
 
         duration_ms = (time.monotonic() - start_time) * 1000
 
@@ -197,16 +195,14 @@ class MockRegistrationStorageHandler:
     async def update_registration(
         self,
         node_id: UUID,
-        endpoints: dict[str, str] | None = None,
-        metadata: dict[str, str] | None = None,
+        updates: ModelRegistrationUpdate,
         correlation_id: UUID | None = None,
     ) -> ModelUpsertResult:
         """Update an existing registration record in the mock store.
 
         Args:
             node_id: ID of the node to update.
-            endpoints: Optional new endpoints dict.
-            metadata: Optional new metadata dict.
+            updates: ModelRegistrationUpdate containing fields to update.
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
@@ -231,13 +227,30 @@ class MockRegistrationStorageHandler:
             existing = self._records[node_id]
             now = datetime.now(UTC)
 
-            # Update with new values
+            # Update with new values from ModelRegistrationUpdate
             updated_record = ModelRegistrationRecord(
                 node_id=existing.node_id,
                 node_type=existing.node_type,
-                node_version=existing.node_version,
-                endpoints=endpoints if endpoints is not None else existing.endpoints,
-                metadata=metadata if metadata is not None else existing.metadata,
+                node_version=(
+                    updates.node_version
+                    if updates.node_version is not None
+                    else existing.node_version
+                ),
+                capabilities=(
+                    updates.capabilities
+                    if updates.capabilities is not None
+                    else existing.capabilities
+                ),
+                endpoints=(
+                    updates.endpoints
+                    if updates.endpoints is not None
+                    else existing.endpoints
+                ),
+                metadata=(
+                    updates.metadata
+                    if updates.metadata is not None
+                    else existing.metadata
+                ),
                 created_at=existing.created_at,
                 updated_at=now,
                 correlation_id=correlation_id,

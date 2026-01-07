@@ -53,6 +53,7 @@ from omnibase_infra.handlers.registration_storage.protocol_registration_storage_
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelDeleteResult,
     ModelStorageHealthCheckResult,
+    ModelStorageQuery,
 )
 from omnibase_infra.nodes.node_registration_storage_effect.models.model_registration_record import (
     ModelRegistrationRecord,
@@ -174,8 +175,9 @@ class BaseHandlerSwappingTests:
         assert store_result.node_id == sample_registration_record.node_id
 
         # Query the record back
+        query = ModelStorageQuery(node_type=sample_registration_record.node_type)
         query_result = await handler.query_registrations(
-            node_type=sample_registration_record.node_type,
+            query=query,
             correlation_id=correlation_id,
         )
 
@@ -313,8 +315,9 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
             assert result.success
 
         # Query all EFFECT nodes
+        query = ModelStorageQuery(node_type=EnumNodeKind.EFFECT)
         query_result = await handler.query_registrations(
-            node_type=EnumNodeKind.EFFECT,
+            query=query,
             correlation_id=correlation_id,
         )
 
@@ -339,9 +342,9 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
             )
 
         # Query with limit
+        query = ModelStorageQuery(limit=2, offset=0)
         query_result = await handler.query_registrations(
-            limit=2,
-            offset=0,
+            query=query,
             correlation_id=correlation_id,
         )
 
@@ -349,9 +352,9 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
         assert len(query_result.records) == 2
 
         # Query next page
+        query_page2 = ModelStorageQuery(limit=2, offset=2)
         query_result_page2 = await handler.query_registrations(
-            limit=2,
-            offset=2,
+            query=query_page2,
             correlation_id=correlation_id,
         )
 
@@ -593,8 +596,9 @@ class TestRuntimeHandlerSwapping:
             store_result = await handler.store_registration(record, correlation_id)
 
             # Query
+            query = ModelStorageQuery(node_type=EnumNodeKind.EFFECT)
             query_result = await handler.query_registrations(
-                node_type=EnumNodeKind.EFFECT,
+                query=query,
                 correlation_id=correlation_id,
             )
 

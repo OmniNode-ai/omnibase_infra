@@ -35,6 +35,7 @@ from typing import Literal
 from uuid import uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from omnibase_infra.nodes.node_registration_orchestrator.models import (
@@ -85,7 +86,7 @@ def sample_postgres_payload() -> ModelPostgresIntentPayload:
     """Create a sample PostgreSQL intent payload for testing."""
     return ModelPostgresIntentPayload(
         node_id=uuid4(),
-        node_type="effect",
+        node_type=EnumNodeKind.EFFECT,
         node_version="1.0.0",
         correlation_id=uuid4(),
         timestamp="2025-01-01T00:00:00Z",
@@ -629,7 +630,7 @@ class TestIntentSerialization:
             "correlation_id": uuid4(),
             "payload": {
                 "node_id": uuid4(),
-                "node_type": "effect",
+                "node_type": EnumNodeKind.EFFECT,
                 "correlation_id": uuid4(),
                 "timestamp": "2025-01-01T00:00:00Z",
             },
@@ -769,7 +770,7 @@ class TestReducerExecutionResultIntegration:
             "correlation_id": uuid4(),
             "payload": {
                 "node_id": node_id,
-                "node_type": "effect",
+                "node_type": EnumNodeKind.EFFECT,
                 "correlation_id": correlation_id,
                 "timestamp": "2025-01-01T00:00:00Z",
             },
@@ -808,7 +809,7 @@ class TestReducerExecutionResultIntegration:
             "correlation_id": uuid4(),
             "payload": {
                 "node_id": uuid4(),
-                "node_type": "compute",
+                "node_type": EnumNodeKind.COMPUTE,
                 "correlation_id": uuid4(),
                 "timestamp": "2025-01-02T00:00:00Z",
             },

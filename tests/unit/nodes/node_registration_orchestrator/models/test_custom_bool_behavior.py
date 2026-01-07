@@ -40,6 +40,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
 from pydantic import ValidationError
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -95,7 +96,7 @@ def sample_postgres_intent() -> ModelPostgresUpsertIntent:
         correlation_id=uuid4(),
         payload=ModelPostgresIntentPayload(
             node_id=uuid4(),
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_version="1.0.0",
             correlation_id=uuid4(),
             timestamp="2025-01-01T00:00:00Z",

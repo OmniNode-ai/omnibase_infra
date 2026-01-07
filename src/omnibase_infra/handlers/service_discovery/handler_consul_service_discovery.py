@@ -41,6 +41,9 @@ from omnibase_infra.handlers.service_discovery.models import (
     ModelServiceInfo,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.nodes.node_service_discovery_effect.models.enum_health_status import (
+    EnumHealthStatus,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.nodes.effects.protocol_consul_client import ProtocolConsulClient
@@ -493,6 +496,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
                             address=str(address),
                             port=port,
                             tags=tuple(svc_tags or []),
+                            health_status=EnumHealthStatus.HEALTHY,
                             metadata=svc_meta or {},
                             registered_at=datetime.now(UTC),
                             correlation_id=correlation_id,

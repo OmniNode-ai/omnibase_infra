@@ -321,7 +321,7 @@ class HandlerNodeIntrospected:
             ack_deadline = now + timedelta(seconds=self._ack_timeout_seconds)
 
             # Extract node type and version from introspection event
-            # node_type is Literal["effect", "compute", "reducer", "orchestrator"]
+            # node_type is EnumNodeKind (enum with values: effect, compute, reducer, orchestrator)
             node_type = event.node_type
             node_version = event.node_version
 

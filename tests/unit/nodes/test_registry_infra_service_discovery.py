@@ -20,8 +20,7 @@ Related:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -32,10 +31,6 @@ from omnibase_infra.handlers.service_discovery.handler_mock_service_discovery im
 from omnibase_infra.nodes.node_service_discovery_effect.registry import (
     RegistryInfraServiceDiscovery,
 )
-
-if TYPE_CHECKING:
-    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-
 
 # =============================================================================
 # Test Fixtures

@@ -20,7 +20,6 @@ Related:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -31,12 +30,6 @@ from omnibase_infra.handlers.registration_storage.handler_mock_registration_stor
 from omnibase_infra.nodes.node_registration_storage_effect.registry import (
     RegistryInfraRegistrationStorage,
 )
-
-if TYPE_CHECKING:
-    from omnibase_infra.nodes.node_registration_storage_effect.protocols import (
-        ProtocolRegistrationStorageHandler,
-    )
-
 
 # =============================================================================
 # Test Fixtures

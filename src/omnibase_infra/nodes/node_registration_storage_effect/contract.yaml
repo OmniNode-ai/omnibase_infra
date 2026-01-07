@@ -78,7 +78,7 @@ io_operations:
     description: "Update specific fields of a registration record"
     input_fields:
       - node_id: "UUID"
-      - updates: "dict[str, object]"
+      - updates: "ModelRegistrationUpdate"
       - correlation_id: "UUID"
     output_fields:
       - result: "ModelUpsertResult"
@@ -93,10 +93,54 @@ io_operations:
     idempotent: true
   - operation: "health_check"
     description: "Check storage backend health and connectivity"
-    input_fields: []
+    input_fields:
+      - correlation_id: "UUID | None"
     output_fields:
-      - health: "dict[str, object]"
+      - result: "ModelStorageHealthCheckResult"
     idempotent: true
+# Database schema definition (for PostgreSQL backend)
+database_schema:
+  table_name: "node_registrations"
+  columns:
+    - name: "node_id"
+      type: "UUID"
+      constraints: "PRIMARY KEY"
+      description: "Unique identifier for the registered node"
+    - name: "node_type"
+      type: "VARCHAR(64)"
+      constraints: "NOT NULL"
+      description: "Node archetype (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)"
+    - name: "node_version"
+      type: "VARCHAR(32)"
+      constraints: "NOT NULL"
+      description: "Semantic version of the node"
+    - name: "capabilities"
+      type: "JSONB"
+      constraints: "NOT NULL DEFAULT '[]'"
+      description: "Array of capability identifiers the node provides"
+    - name: "endpoints"
+      type: "JSONB"
+      constraints: "NOT NULL DEFAULT '{}'"
+      description: "Map of endpoint names to URLs"
+    - name: "metadata"
+      type: "JSONB"
+      constraints: "NOT NULL DEFAULT '{}'"
+      description: "Additional key-value metadata"
+    - name: "created_at"
+      type: "TIMESTAMPTZ"
+      constraints: "NOT NULL DEFAULT NOW()"
+      description: "Timestamp when the registration was created"
+    - name: "updated_at"
+      type: "TIMESTAMPTZ"
+      constraints: "NOT NULL DEFAULT NOW()"
+      description: "Timestamp when the registration was last updated"
+  indexes:
+    - name: "idx_node_registrations_type"
+      columns: ["node_type"]
+      description: "Index for filtering by node type"
+    - name: "idx_node_registrations_updated"
+      columns: ["updated_at"]
+      description: "Index for ordering by recency"
 # Dependencies (protocols this node requires)
 dependencies:
   - name: "protocol_registration_storage_handler"
