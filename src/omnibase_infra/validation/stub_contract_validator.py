@@ -231,7 +231,9 @@ class StubContractValidator:
                 )
 
             with contract_path.open("r", encoding="utf-8") as f:
-                contract_data = yaml.safe_load(f)
+                # yaml.safe_load returns Any; we use object to satisfy ONEX typing rules
+                # and rely on isinstance check below for type narrowing
+                contract_data: object = yaml.safe_load(f)
 
             if not isinstance(contract_data, dict):
                 return ModelContractValidationResult(
@@ -342,7 +344,13 @@ class StubContractValidator:
                 type(e).__name__,
             )
             # Generate correlation_id for error tracking per ONEX error patterns
-            correlation_id = str(uuid.uuid4())
+            correlation_id = uuid.uuid4()
+
+            # NOTE: transport_type is intentionally omitted from context.
+            # EnumInfraTransportType covers infrastructure transports (HTTP, DATABASE,
+            # KAFKA, CONSUL, VAULT, VALKEY, GRPC, RUNTIME) but not filesystem I/O.
+            # File validation is a core operation, not an infrastructure transport.
+            # We use resource_type="filesystem" to indicate the operation type.
             raise OnexError(
                 message=(
                     f"Unexpected error during contract validation: {e!s}. "
@@ -352,19 +360,26 @@ class StubContractValidator:
                 ),
                 error_code="STUB_VALIDATION_UNEXPECTED_ERROR",
                 context={
-                    "correlation_id": correlation_id,
+                    # ONEX error context fields (per CLAUDE.md error patterns)
+                    "correlation_id": str(correlation_id),
                     "operation": "validate_contract_file",
-                    "contract_path": str(contract_path),
+                    # resource_type used instead of transport_type for filesystem I/O
+                    "resource_type": "filesystem",
+                    "target_path": str(contract_path),
+                    # Validation-specific context
                     "contract_type": (
                         contract_type.value if contract_type is not None else None
                     ),
+                    "validator_class": "StubContractValidator",
+                    # Exception details (sanitized - no sensitive data in file paths)
                     "exception_type": type(e).__name__,
                     "exception_message": str(e),
-                    "validator": "StubContractValidator",
+                    # Migration and security metadata
                     "migration_ticket": "OMN-1104",
-                    "security_note": (
-                        "This stub validator performs MINIMAL validation. "
-                        "Do not rely on it for production validation."
+                    "security_warning": (
+                        "STUB VALIDATOR: Performs MINIMAL validation only. "
+                        "Do NOT rely on this for production contract verification. "
+                        "Migrate to omnibase_core.validation API."
                     ),
                 },
             ) from e
