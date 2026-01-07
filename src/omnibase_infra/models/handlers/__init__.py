@@ -7,12 +7,29 @@ and error reporting in ONEX handlers.
 
 .. versionadded:: 0.6.1
     Created as part of OMN-1091 structured validation and error reporting.
+
+.. versionchanged:: 0.6.2
+    Added ModelHandlerDescriptor and ModelContractDiscoveryResult for
+    OMN-1097 filesystem handler discovery.
+
+Note:
+    ModelContractDiscoveryResult uses a forward reference to
+    ModelHandlerValidationError to avoid circular imports. The model
+    is rebuilt in handler_contract_source.py before first use.
 """
 
+from omnibase_infra.models.handlers.model_contract_discovery_result import (
+    ModelContractDiscoveryResult,
+)
+from omnibase_infra.models.handlers.model_handler_descriptor import (
+    ModelHandlerDescriptor,
+)
 from omnibase_infra.models.handlers.model_handler_identifier import (
     ModelHandlerIdentifier,
 )
 
 __all__ = [
+    "ModelContractDiscoveryResult",
+    "ModelHandlerDescriptor",
     "ModelHandlerIdentifier",
 ]
