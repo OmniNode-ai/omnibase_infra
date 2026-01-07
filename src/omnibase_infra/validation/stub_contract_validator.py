@@ -23,7 +23,7 @@ Security Note:
     2. A passing result does NOT guarantee ONEX compliance
     3. Unexpected errors are RAISED (not silently returned) to prevent masking
     4. Use in production pipelines is STRONGLY DISCOURAGED
-    5. The 85% compliance score indicates incomplete validation
+    5. The 65% compliance score indicates incomplete validation
 
 Appropriate Use Cases:
     - Local development iteration
@@ -133,8 +133,8 @@ class StubContractValidator:
         contract validation.
 
     Limitations:
-        - Returns 85% compliance score for contracts that only pass basic checks
-          (reduced from 100% to indicate incomplete validation)
+        - Returns 65% compliance score for contracts that only pass basic checks
+          (reduced from 100% to clearly indicate incomplete validation)
         - Cannot detect malformed contract structures beyond basic YAML
         - Does not validate against ONEX contract schema
         - May allow invalid contracts to pass validation
@@ -186,8 +186,10 @@ class StubContractValidator:
 
         Returns:
             ModelContractValidationResult with validation status and score.
-            Note: A score of 85.0 indicates basic checks passed, not full compliance.
+            Note: A score of 65.0 indicates basic checks passed, not full compliance.
             Full compliance (100%) is only returned by the real validator.
+            The 65% threshold was chosen to clearly distinguish stub validation
+            from real ONEX compliance validation and prevent masking failures.
 
         Raises:
             OnexError: For unexpected errors that cannot be safely captured in
@@ -279,20 +281,25 @@ class StubContractValidator:
                         compliance_score=75.0,
                     )
 
-            # WARNING: Stub validator returns reduced compliance score (85%) to indicate
+            # WARNING: Stub validator returns reduced compliance score (65%) to indicate
             # that FULL ONEX compliance validation has NOT been performed. A score of
             # 100% should only be returned by the real validator after complete checks.
+            # The 65% threshold was chosen to:
+            # 1. Clearly distinguish from real validation (which returns 100%)
+            # 2. Prevent masking real validation failures in CI/CD pipelines
+            # 3. Signal to consumers that additional validation is required
             # TODO(OMN-1104): Implement real validator that performs full ONEX checks
             return ModelContractValidationResult(
                 valid=True,
-                score=85.0,
+                score=65.0,
                 errors=[],
                 warnings=[
-                    "STUB VALIDATOR: Only basic checks performed. "
+                    "STUB VALIDATOR: Only basic checks performed (65% compliance). "
                     "Full ONEX compliance validation was NOT executed. "
+                    "This score intentionally low to prevent masking failures. "
                     "See OMN-1104 for migration to real validator."
                 ],
-                compliance_score=85.0,
+                compliance_score=65.0,
             )
 
         except yaml.YAMLError as e:

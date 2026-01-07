@@ -53,14 +53,14 @@ See Also:
 """
 
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from pydantic import BaseModel, ConfigDict, Field
 
-# NOTE: Using `Any` instead of `JsonType` from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
+# NOTE: Using `object` instead of `JsonType` from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases. Per ONEX ADR, `Any` is not permitted
+# in function signatures - use `object` for generic payload types.
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
@@ -200,7 +200,7 @@ class ModelDispatchResult(BaseModel):
         default=None,
         description="Error code if the dispatch failed.",
     )
-    error_details: dict[str, Any] = Field(
+    error_details: dict[str, object] = Field(
         default_factory=dict,
         description="Additional JSON-serializable error details for debugging.",
     )

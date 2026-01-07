@@ -5,6 +5,28 @@
 **Related Tickets**: OMN-1104, OMN-1262
 **Tracking Issue**: [OMN-1262](https://linear.app/omninode/issue/OMN-1262) - Migration tracking
 
+---
+
+## IMPORTANT: CLAUDE.md Rule Reconciliation
+
+**CLAUDE.md states**: `NEVER use Any - Use object for generic payloads`
+
+**This ADR grants a NARROW EXCEPTION** for ONE specific case:
+
+| Context | Type to Use | Rule Source |
+|---------|-------------|-------------|
+| Pydantic model `Field()` definitions | `Any` (with required comment) | This ADR exception |
+| Function parameters | `object` | CLAUDE.md rule |
+| Function return types | `object` or specific type | CLAUDE.md rule |
+| Variable annotations | `object` or specific type | CLAUDE.md rule |
+| Type aliases | `object` | CLAUDE.md rule |
+| Protocol method signatures | `object` | CLAUDE.md rule |
+| Generic containers | `object` | CLAUDE.md rule |
+
+**The CLAUDE.md "NEVER use Any" rule remains in full effect for all code EXCEPT Pydantic model field type annotations where `JsonType` would otherwise be used.**
+
+---
+
 ## Context
 
 The CLAUDE.md coding standards explicitly state:
@@ -94,13 +116,16 @@ This decision explicitly deviates from the CLAUDE.md "NEVER use Any" rule due to
 
 ### Scope of Deviation
 
-**POLICY: `Any` is ONLY permitted in Pydantic `Field()` definitions.**
+**STRICT POLICY: `Any` is ONLY permitted in Pydantic model field type annotations.**
 
-The `Any` type is permitted ONLY for:
+This exception is EXTREMELY NARROW. The `Any` type is permitted ONLY when ALL of these conditions are met:
 
-1. **Pydantic model field type annotations** (the `Field()` definition context)
-2. Fields that previously used `JsonType`
-3. Fields representing arbitrary JSON-serializable data
+1. **Inside a Pydantic `BaseModel` class definition**
+2. **As a field type annotation** (the `Field()` definition context)
+3. **For fields that would otherwise use `JsonType`** from omnibase_core
+4. **With the required `NOTE:` comment** documenting the workaround
+
+Any other use of `Any` is a **violation of CLAUDE.md** and must use `object` instead.
 
 **Examples of PERMITTED usage (inside Pydantic models only):**
 
@@ -117,14 +142,17 @@ class ModelDLQEvent(BaseModel):
     metadata: Any = Field(default=None, description="Event metadata")
 ```
 
-The `Any` type is **STRICTLY FORBIDDEN** for:
+The `Any` type is **STRICTLY FORBIDDEN** (per CLAUDE.md) for:
 
-1. **Function parameter types** - use `object` instead
-2. **Function return types** - use `object` or specific types
-3. **Variable type annotations** - use `object` for unknown types
-4. **Type aliases** - use `object` in union types
-5. **Generic containers** - use `object` for unknown payload types
-6. **Non-Pydantic data structures** (dataclasses, TypedDicts, etc.)
+1. **Function parameter types** - MUST use `object` instead
+2. **Function return types** - MUST use `object` or specific types
+3. **Variable type annotations** - MUST use `object` for unknown types
+4. **Type aliases** - MUST use `object` in union types (e.g., `dict[str, object]`)
+5. **Generic containers** - MUST use `object` for unknown payload types
+6. **Non-Pydantic data structures** (dataclasses, TypedDicts, NamedTuples, etc.)
+7. **Protocol method signatures** - MUST use `object` for generic parameters
+
+**VIOLATION OF THESE RULES IS A PR REJECTION CRITERION.**
 
 **Examples of FORBIDDEN usage and correct alternatives:**
 
@@ -388,6 +416,25 @@ pytest tests/
 
 ## Affected Files
 
+### Migration Status Summary
+
+| Category | Files | Status |
+|----------|-------|--------|
+| Event Bus | 4 | `Any` in Pydantic fields - Compliant with this ADR |
+| Handlers | 4 | `Any` in Pydantic fields - Compliant with this ADR |
+| Handler Mixins | 6 | `Any` in Pydantic fields - Compliant with this ADR |
+| Handler Models | 4 | `Any` in Pydantic fields - Compliant with this ADR |
+| Mixins | 1 | `Any` in Pydantic fields - Compliant with this ADR |
+| Models | 2 | `Any` in Pydantic fields - Compliant with this ADR |
+| Nodes | 1 | `Any` in Pydantic fields - Compliant with this ADR |
+| Plugins | 3 | `Any` in Pydantic fields - Compliant with this ADR |
+| Runtime | 8 | `Any` in Pydantic fields - Compliant with this ADR |
+| **TOTAL** | **33** | **Pending `JsonType` fix in omnibase_core** |
+
+**Migration Tracking**: [OMN-1262](https://linear.app/omninode/issue/OMN-1262)
+
+### File List
+
 The following 33 files use `Any` as a workaround for `JsonType`:
 
 ### Event Bus (4 files)
@@ -585,40 +632,49 @@ async def process_event(envelope: ModelEventEnvelope[object]) -> str | None:
     ...
 ```
 
-#### Known Policy Violations (Pending Cleanup)
+#### Known Policy Violations (MUST Be Cleaned Up)
 
-The following patterns in the codebase still violate the strict `Any` policy and are tracked for cleanup:
+**These violations are NOT covered by this ADR exception and MUST be migrated to `object`:**
 
-| Violation Type | Location Pattern | Tracking |
-|----------------|------------------|----------|
-| Function signatures with `Any` | Some legacy handler methods | [OMN-1262](https://linear.app/omninode/issue/OMN-1262) |
-| Return types with `Any` | Some utility functions | [OMN-1262](https://linear.app/omninode/issue/OMN-1262) |
-| Type aliases with `Any` | Internal type definitions outside Pydantic | [OMN-1262](https://linear.app/omninode/issue/OMN-1262) |
+| Violation Type | Location Pattern | Required Fix | Tracking |
+|----------------|------------------|--------------|----------|
+| Function signatures with `Any` | Legacy handler methods | Change to `object` | [OMN-1262](https://linear.app/omninode/issue/OMN-1262) |
+| Return types with `Any` | Utility functions | Change to `object` or specific type | [OMN-1262](https://linear.app/omninode/issue/OMN-1262) |
+| Type aliases with `Any` | Internal type definitions | Change to `object` | [OMN-1262](https://linear.app/omninode/issue/OMN-1262) |
 
-**Violation identification command:**
+**ACTION REQUIRED**: These violations existed before this ADR and need cleanup. New code introducing these patterns will be rejected in PR review.
+
+**Violation identification commands:**
 
 ```bash
-# Find Any usage in function signatures (violations)
+# Find Any usage in function signatures (VIOLATIONS - must fix)
 grep -rn "def.*Any" src/ | grep -v "Field\|BaseModel" | grep -v "__pycache__"
 
-# Find Any in return types (violations)
+# Find Any in return types (VIOLATIONS - must fix)
 grep -rn "-> Any" src/ | grep -v "__pycache__"
 
-# Compare against compliant object usage
-grep -rn "object" src/ | grep -E "(def|async def|->)" | grep -v "__pycache__"
+# Find Any in type aliases outside Pydantic (VIOLATIONS - must fix)
+grep -rn "TypeAlias.*Any\|= dict\[str, Any\]" src/ | grep -v "BaseModel" | grep -v "__pycache__"
+
+# Verify compliant object usage in signatures
+grep -rn ": object\|-> object" src/ | grep -E "(def|async def)" | grep -v "__pycache__"
 ```
 
 #### Policy vs Reality Summary
 
-| Aspect | Policy (This ADR) | Current Reality |
-|--------|-------------------|-----------------|
-| `Any` in Pydantic fields | Permitted with `NOTE:` comment | Implemented correctly |
-| `Any` in function params | Forbidden (use `object`) | Mostly migrated, some legacy |
-| `Any` in return types | Forbidden (use `object`) | Mostly migrated, some legacy |
-| `object` in signatures | Required for generic payloads | Implemented in new code |
-| Comment patterns | Required for both `Any` and `object` | Partially implemented |
+| Aspect | Policy (This ADR) | Current Reality | Action |
+|--------|-------------------|-----------------|--------|
+| `Any` in Pydantic fields | Permitted with `NOTE:` comment | Implemented correctly | None - compliant |
+| `Any` in function params | **FORBIDDEN** (use `object`) | Some legacy violations | Must migrate to `object` |
+| `Any` in return types | **FORBIDDEN** (use `object`) | Some legacy violations | Must migrate to `object` |
+| `Any` in type aliases | **FORBIDDEN** (use `object`) | Some legacy violations | Must migrate to `object` |
+| `object` in signatures | Required for generic payloads | Implemented in new code | Enforce in PR review |
+| Comment patterns | Required for `Any` in Pydantic fields | Implemented | Enforce in PR review |
 
-**Action Required**: New code MUST follow the policy. Legacy violations are being tracked and will be cleaned up under [OMN-1262](https://linear.app/omninode/issue/OMN-1262).
+**Enforcement**:
+- **New code**: MUST follow policy. PRs with violations will be rejected.
+- **Legacy code**: Tracked under [OMN-1262](https://linear.app/omninode/issue/OMN-1262) for cleanup.
+- **Exception requests**: Must go through ADR process (not automatic approval).
 
 ## References
 

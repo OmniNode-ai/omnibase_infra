@@ -893,6 +893,41 @@ pattern_exemptions:
     documentation:
       - docs/patterns/security_patterns.md
     ticket: OMN-1091
+  # ==========================================================================
+  # Validation Result Model Exemptions (OMN-1104)
+  # ==========================================================================
+  # field_name in ModelValidationResult is a validation field path identifier,
+  # not an entity reference. It represents which field in the validated object
+  # failed validation (e.g., "node_id", "node_type").
+  - file_pattern: 'model_validation_result\.py'
+    violation_pattern: "Field 'field_name' might reference an entity"
+    reason: >
+      field_name is a validation field path (e.g., "node_id"), not an entity reference. It indicates which field in the validated object failed validation.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+    ticket: OMN-1104
+  # ==========================================================================
+  # Consul Registration Payload Exemptions (OMN-1104)
+  # ==========================================================================
+  # service_id and service_name are Consul native formats (strings), not UUIDs
+  # or entity references. Consul service registry uses string identifiers.
+  - file_pattern: 'model_payload_consul_register\.py'
+    violation_pattern: "Field 'service_id' should use UUID type"
+    reason: >
+      service_id is Consul's native string format for service identifiers. Consul does not use UUIDs for service identification - it uses human-readable string IDs.
+
+    documentation:
+      - docs/patterns/consul_integration.md
+    ticket: OMN-1104
+  - file_pattern: 'model_payload_consul_register\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name is a display string for the Consul service catalog, not an entity reference. It's the human-readable name shown in Consul's UI.
+
+    documentation:
+      - docs/patterns/consul_integration.md
+    ticket: OMN-1104
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

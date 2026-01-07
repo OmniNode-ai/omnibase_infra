@@ -32,9 +32,9 @@ Example:
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
+# NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
 # recursion issues with recursive type aliases.
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -80,7 +80,7 @@ class ModelHealthCheckResponse(BaseModel):
         ...,
         description="Runtime version string",
     )
-    details: dict[str, Any] | None = Field(
+    details: dict[str, object] | None = Field(
         default=None,
         description="Full health check data from RuntimeHostProcess",
     )
