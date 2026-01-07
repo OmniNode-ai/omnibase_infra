@@ -14,7 +14,7 @@ Security Features:
 All secret operations MUST use proper authentication and authorization.
 
 Return Type:
-    All operations return ModelHandlerOutput[dict[str, Any]] per OMN-975.
+    All operations return ModelHandlerOutput[dict[str, object]] per OMN-975.
     Uses ModelHandlerOutput.for_compute() since handlers return synchronous results
     rather than emitting events to the event bus.
 """
@@ -46,9 +46,6 @@ from omnibase_infra.handlers.mixins import (
 )
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
-
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +293,7 @@ class VaultHandler(
                 - envelope_id: Optional envelope ID for causality tracking
 
         Returns:
-            ModelHandlerOutput[dict[str, Any]] with status, payload, and correlation_id
+            ModelHandlerOutput[dict[str, object]] with status, payload, and correlation_id
             per OMN-975 handler output standardization.
 
         Raises:

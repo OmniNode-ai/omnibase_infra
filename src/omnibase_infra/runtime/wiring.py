@@ -114,6 +114,7 @@ Example Usage:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from omnibase_infra.errors import ProtocolConfigurationError
@@ -279,7 +280,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
 
 
 def wire_handlers_from_contract(
-    contract_config: Any,
+    contract_config: Mapping[str, object],
 ) -> dict[str, list[str]]:
     """Register handlers and event buses based on contract configuration.
 

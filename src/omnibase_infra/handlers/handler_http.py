@@ -42,9 +42,6 @@ from omnibase_infra.handlers.models.http import ModelHttpBodyContent
 from omnibase_infra.mixins import MixinEnvelopeExtraction
 from omnibase_infra.utils import parse_env_float, parse_env_int
 
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
-
 logger = logging.getLogger(__name__)
 
 
@@ -312,7 +309,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
                 - envelope_id: Optional envelope ID for causality tracking
 
         Returns:
-            ModelHandlerOutput[dict[str, Any]] containing:
+            ModelHandlerOutput[dict[str, object]] containing:
                 - result: dict with status, payload (status_code, headers, body), and correlation_id
                 - input_envelope_id: UUID for causality tracking
                 - correlation_id: UUID for request/response correlation
@@ -719,7 +716,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
                 instead of re-serializing the body, avoiding double serialization.
 
         Returns:
-            ModelHandlerOutput[dict[str, Any]] with wrapped response data
+            ModelHandlerOutput[dict[str, object]] with wrapped response data
         """
         if self._client is None:
             ctx = ModelInfraErrorContext(

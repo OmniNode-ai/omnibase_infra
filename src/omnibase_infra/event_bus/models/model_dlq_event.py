@@ -38,13 +38,9 @@ See Also:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
-
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
 
 
 class ModelDlqEvent(BaseModel):
@@ -150,7 +146,7 @@ class ModelDlqEvent(BaseModel):
         description="Consumer group that processed the message",
     )
 
-    def to_log_context(self) -> dict[str, Any]:
+    def to_log_context(self) -> dict[str, object]:
         """Convert to a dictionary suitable for structured logging.
 
         Returns a dictionary with all fields formatted for logging,

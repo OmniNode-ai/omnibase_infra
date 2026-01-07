@@ -13,7 +13,7 @@ Operations:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
 from uuid import UUID
 
 T = TypeVar("T")
@@ -106,7 +106,7 @@ class MixinConsulService:
 
     async def _register_service(
         self,
-        payload: dict[str, Any],
+        payload: dict[str, object],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
@@ -154,7 +154,9 @@ class MixinConsulService:
             tags_list = [str(t) for t in tags]
 
         check = payload.get("check")
-        check_dict: dict[str, Any] | None = check if isinstance(check, dict) else None
+        check_dict: dict[str, object] | None = (
+            check if isinstance(check, dict) else None
+        )
 
         if self._client is None:
             raise RuntimeError("Client not initialized")
@@ -187,7 +189,7 @@ class MixinConsulService:
 
     async def _deregister_service(
         self,
-        payload: dict[str, Any],
+        payload: dict[str, object],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:

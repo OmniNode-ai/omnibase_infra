@@ -102,7 +102,7 @@ class ModelHealthCheckResponse(BaseModel):
         cls,
         status: Literal["healthy", "degraded", "unhealthy"],
         version: str,
-        details: dict[str, Any],
+        details: dict[str, object],
     ) -> ModelHealthCheckResponse:
         """Create a successful health check response.
 

@@ -50,12 +50,8 @@ See Also:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
-
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
 
 
 class ModelDlqMetrics(BaseModel):
@@ -270,7 +266,7 @@ class ModelDlqMetrics(BaseModel):
         """
         return self.error_type_counts.get(error_type, 0)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         """Convert to dictionary with computed properties included.
 
         Returns:

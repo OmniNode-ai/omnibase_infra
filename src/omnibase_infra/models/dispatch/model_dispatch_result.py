@@ -307,7 +307,7 @@ class ModelDispatchResult(BaseModel):
         status: EnumDispatchStatus,
         message: str,
         code: EnumCoreErrorCode | None = None,
-        details: dict[str, Any] | None = None,
+        details: dict[str, object] | None = None,
     ) -> "ModelDispatchResult":
         """
         Create a new result with error information.

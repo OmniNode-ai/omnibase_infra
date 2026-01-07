@@ -176,7 +176,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
@@ -675,7 +675,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     servers=sanitized_servers,
                 ) from e
 
-    async def initialize(self, config: dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize the event bus with configuration.
 
         Protocol method for compatibility with ProtocolEventBus.
@@ -1436,7 +1436,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     async def broadcast_to_environment(
         self,
         command: str,
-        payload: dict[str, Any],
+        payload: dict[str, object],
         target_environment: str | None = None,
     ) -> None:
         """Broadcast command to environment.
@@ -1465,7 +1465,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     async def send_to_group(
         self,
         command: str,
-        payload: dict[str, Any],
+        payload: dict[str, object],
         target_group: str,
     ) -> None:
         """Send command to specific group.
@@ -1490,7 +1490,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
 
         await self.publish(topic, None, value, headers)
 
-    async def health_check(self) -> dict[str, Any]:
+    async def health_check(self) -> dict[str, object]:
         """Check event bus health.
 
         Protocol method for ProtocolEventBus compatibility.

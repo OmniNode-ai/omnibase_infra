@@ -65,9 +65,6 @@ from omnibase_infra.mixins import (
     RetryErrorClassification,
 )
 
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
-
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)

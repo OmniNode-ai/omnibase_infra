@@ -13,7 +13,7 @@ import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, TypeVar
+from typing import TypeVar
 from uuid import UUID, uuid4
 
 import hvac
@@ -25,9 +25,6 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
-
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
 
 T = TypeVar("T")
 
@@ -170,7 +167,7 @@ class MixinVaultToken:
 
     def _extract_ttl_from_renewal_response(
         self,
-        result: dict[str, Any],
+        result: dict[str, object],
         default_ttl: int,
         correlation_id: UUID,
     ) -> int:
@@ -247,7 +244,9 @@ class MixinVaultToken:
 
         return current_ttl
 
-    async def renew_token(self, correlation_id: UUID | None = None) -> dict[str, Any]:
+    async def renew_token(
+        self, correlation_id: UUID | None = None
+    ) -> dict[str, object]:
         """Renew Vault authentication token.
 
         Token TTL Extraction Logic:
@@ -279,10 +278,10 @@ class MixinVaultToken:
         assert self._client is not None
         assert self._config is not None
 
-        def renew_func() -> dict[str, Any]:
+        def renew_func() -> dict[str, object]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, Any] = self._client.auth.token.renew_self()
+            result: dict[str, object] = self._client.auth.token.renew_self()
             return result
 
         # _execute_with_retry already raises properly typed errors:
@@ -322,7 +321,7 @@ class MixinVaultToken:
         self,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, Any]]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Execute token renewal operation from envelope.
 
         Args:

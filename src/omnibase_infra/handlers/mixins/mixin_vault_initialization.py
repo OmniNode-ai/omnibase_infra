@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
 from uuid import UUID
 
 import hvac
@@ -85,7 +84,7 @@ class MixinVaultInitialization:
         )
 
     def _parse_vault_config(
-        self, config: dict[str, Any], correlation_id: UUID
+        self, config: dict[str, object], correlation_id: UUID
     ) -> ModelVaultHandlerConfig:
         """Parse and validate vault configuration.
 

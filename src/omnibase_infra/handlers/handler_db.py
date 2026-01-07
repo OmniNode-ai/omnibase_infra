@@ -91,9 +91,6 @@ from omnibase_infra.handlers.models import (
 from omnibase_infra.mixins import MixinEnvelopeExtraction
 from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
 
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
-
 logger = logging.getLogger(__name__)
 
 # MVP pool size fixed at 5 connections.

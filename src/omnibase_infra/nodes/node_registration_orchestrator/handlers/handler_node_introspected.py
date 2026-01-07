@@ -61,10 +61,6 @@ from uuid import UUID, uuid4
 from omnibase_infra.enums import EnumRegistrationState
 
 if TYPE_CHECKING:
-    from typing import Any
-
-    # NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-    # recursion issues with recursive type aliases.
     from pydantic import BaseModel
 
     from omnibase_infra.handlers import ConsulHandler
@@ -486,7 +482,7 @@ class HandlerNodeIntrospected:
                     )
 
         # Build Consul registration payload
-        consul_payload: dict[str, Any] = {
+        consul_payload: dict[str, object] = {
             "name": service_name,
             "service_id": service_id,
             "tags": ["onex", f"node-type:{node_type}"],
@@ -498,7 +494,7 @@ class HandlerNodeIntrospected:
 
         try:
             # Build envelope for ConsulHandler.execute()
-            envelope: dict[str, Any] = {
+            envelope: dict[str, object] = {
                 "operation": "consul.register",
                 "payload": consul_payload,
                 "correlation_id": str(correlation_id),

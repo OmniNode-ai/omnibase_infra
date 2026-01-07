@@ -71,10 +71,6 @@ from omnibase_infra.runtime.wiring import wire_default_handlers
 from omnibase_infra.utils.util_env_parsing import parse_env_float
 
 if TYPE_CHECKING:
-    from typing import Any
-
-    # NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-    # recursion issues with recursive type aliases.
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
     from omnibase_infra.event_bus.models import ModelEventMessage
@@ -175,7 +171,7 @@ class RuntimeHostProcess:
         event_bus: InMemoryEventBus | KafkaEventBus | None = None,
         input_topic: str = DEFAULT_INPUT_TOPIC,
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
-        config: Any | None = None,
+        config: dict[str, object] | None = None,
         handler_registry: ProtocolBindingRegistry | None = None,
     ) -> None:
         """Initialize the runtime host process.
@@ -345,7 +341,7 @@ class RuntimeHostProcess:
         )
 
         # Store full config for handler initialization
-        self._config: Any = config
+        self._config: dict[str, object] | None = config
 
         # Runtime state
         self._is_running: bool = False
@@ -910,7 +906,7 @@ class RuntimeHostProcess:
             async with self._pending_lock:
                 self._pending_message_count -= 1
 
-    async def _handle_envelope(self, envelope: Any) -> None:
+    async def _handle_envelope(self, envelope: dict[str, object]) -> None:
         """Route envelope to appropriate handler.
 
         Validates envelope before dispatch and routes it to the appropriate
@@ -1090,7 +1086,7 @@ class RuntimeHostProcess:
         self,
         error: str,
         correlation_id: UUID | None,
-    ) -> Any:
+    ) -> dict[str, object]:
         """Create a standardized error response envelope.
 
         Args:
@@ -1109,7 +1105,9 @@ class RuntimeHostProcess:
             "correlation_id": final_correlation_id,
         }
 
-    def _serialize_envelope(self, envelope: Any | BaseModel) -> Any:
+    def _serialize_envelope(
+        self, envelope: dict[str, object] | BaseModel
+    ) -> dict[str, object]:
         """Recursively convert UUID objects to strings for JSON serialization.
 
         Handles both dict envelopes and Pydantic models (e.g., ModelDuplicateResponse).
@@ -1137,7 +1135,7 @@ class RuntimeHostProcess:
         return {k: convert_value(v) for k, v in envelope_dict.items()}
 
     async def _publish_envelope_safe(
-        self, envelope: Any | BaseModel, topic: str
+        self, envelope: dict[str, object] | BaseModel, topic: str
     ) -> None:
         """Publish envelope with UUID serialization support.
 
@@ -1152,7 +1150,7 @@ class RuntimeHostProcess:
         json_safe_envelope = self._serialize_envelope(envelope)
         await self._event_bus.publish_envelope(json_safe_envelope, topic)
 
-    async def health_check(self) -> Any:
+    async def health_check(self) -> dict[str, object]:
         """Return health check status.
 
         Returns:
@@ -1197,7 +1195,7 @@ class RuntimeHostProcess:
             config, default: 5.0 seconds) to prevent slow handlers from blocking.
         """
         # Get event bus health if available
-        event_bus_health: Any = {}
+        event_bus_health: dict[str, object] = {}
         event_bus_healthy = False
 
         try:
@@ -1237,7 +1235,7 @@ class RuntimeHostProcess:
 
         # Check handler health for all registered handlers concurrently
         # Delegates to ProtocolLifecycleExecutor with configured timeout to prevent blocking
-        handler_health_results: dict[str, Any] = {}
+        handler_health_results: dict[str, object] = {}
         handlers_all_healthy = True
 
         if self._handlers:
@@ -1334,6 +1332,11 @@ class RuntimeHostProcess:
             - idempotency.skip_operations: list[str] (default: [])
             - idempotency_database: dict (PostgreSQL connection config)
         """
+        # Check if config exists
+        if self._config is None:
+            logger.debug("No runtime config provided, skipping idempotency setup")
+            return
+
         # Check if config has idempotency section
         idempotency_raw = self._config.get("idempotency")
         if idempotency_raw is None:

@@ -48,7 +48,7 @@ import logging
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -206,7 +206,7 @@ class InMemoryEventBus:
             extra={"environment": self._environment, "group": self._group},
         )
 
-    async def initialize(self, config: dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize the event bus with configuration.
 
         Protocol method for compatibility with ProtocolEventBus.
@@ -487,7 +487,7 @@ class InMemoryEventBus:
     async def broadcast_to_environment(
         self,
         command: str,
-        payload: dict[str, Any],
+        payload: dict[str, object],
         target_environment: str | None = None,
     ) -> None:
         """Broadcast command to environment.
@@ -516,7 +516,7 @@ class InMemoryEventBus:
     async def send_to_group(
         self,
         command: str,
-        payload: dict[str, Any],
+        payload: dict[str, object],
         target_group: str,
     ) -> None:
         """Send command to specific group.
@@ -556,7 +556,7 @@ class InMemoryEventBus:
             extra={"environment": self._environment, "group": self._group},
         )
 
-    async def health_check(self) -> dict[str, Any]:
+    async def health_check(self) -> dict[str, object]:
         """Check event bus health.
 
         Protocol method for ProtocolEventBus compatibility.
@@ -690,7 +690,7 @@ class InMemoryEventBus:
                 return True
             return False
 
-    async def get_circuit_breaker_status(self) -> dict[str, Any]:
+    async def get_circuit_breaker_status(self) -> dict[str, object]:
         """Get circuit breaker status for all subscribers.
 
         Returns:

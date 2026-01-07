@@ -94,7 +94,7 @@ This decision explicitly deviates from the CLAUDE.md "NEVER use Any" rule due to
 
 ### Scope of Deviation
 
-**CRITICAL: `Any` is ONLY permitted in Pydantic `Field()` definitions.**
+**POLICY: `Any` is ONLY permitted in Pydantic `Field()` definitions.**
 
 The `Any` type is permitted ONLY for:
 
@@ -126,7 +126,7 @@ The `Any` type is **STRICTLY FORBIDDEN** for:
 5. **Generic containers** - use `object` for unknown payload types
 6. **Non-Pydantic data structures** (dataclasses, TypedDicts, etc.)
 
-**Examples of FORBIDDEN usage:**
+**Examples of FORBIDDEN usage and correct alternatives:**
 
 ```python
 # WRONG: Any in function signature
@@ -134,7 +134,8 @@ def process_event(payload: Any) -> Any:  # FORBIDDEN
     ...
 
 # CORRECT: Use object for generic payloads
-def process_event(payload: object) -> object:  # CORRECT
+# ONEX: Using object instead of Any per ADR guidelines
+def process_event(payload: object) -> object:
     ...
 
 # WRONG: Any in variable annotation
@@ -151,16 +152,55 @@ PayloadType = dict[str, Any]  # FORBIDDEN outside Pydantic
 PayloadType = dict[str, object]  # CORRECT
 ```
 
+### When to Use `dict[str, object]` vs `dict[str, Any]`
+
+| Context | Type to Use | Reason |
+|---------|-------------|--------|
+| Pydantic model field | `dict[str, Any]` | Required for JSON serialization with Pydantic 2.x |
+| Function parameter | `dict[str, object]` | Maintains type safety in signatures |
+| Function return type | `dict[str, object]` | Preserves type checking at call sites |
+| Protocol method signature | `dict[str, object]` | Protocols define contracts, not Pydantic models |
+| Generic event envelope payload | `object` | Allows any payload type with type safety |
+
+**Examples:**
+
+```python
+# Pydantic model - Any is acceptable
+class ModelEventPayload(BaseModel):
+    # NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
+    # recursion issues with recursive type aliases.
+    data: dict[str, Any] = Field(default_factory=dict)
+
+# Function signature - use object
+# ONEX: Using object instead of Any per ADR guidelines
+def extract_metadata(payload: dict[str, object]) -> dict[str, object]:
+    ...
+
+# Protocol method - use object
+class ProtocolEventHandler(Protocol):
+    # ONEX: Using object instead of Any per ADR guidelines
+    def handle(self, payload: object) -> object: ...
+
+# Generic envelope - use object for payload type parameter
+class ModelEventEnvelope(BaseModel, Generic[T]):
+    payload: T  # T should be bound to object, not Any
+```
+
 **Why This Distinction Matters:**
 
 - Pydantic's `Field()` context has runtime validation that provides type safety
 - Function signatures/return types rely solely on static type checking
 - Using `Any` outside Pydantic defeats the purpose of type hints entirely
 - `object` is the proper "unknown type" marker in Python's type system
+- `dict[str, object]` still allows any value but enables type checker warnings on unsafe operations
 
-### Annotation Pattern
+### Annotation Patterns
 
-When using `Any` for this workaround, include a comment explaining the deviation:
+This ADR defines **two distinct comment patterns** for different contexts:
+
+#### Pattern 1: `Any` in Pydantic Models (JsonType Workaround)
+
+When using `Any` as a workaround for `JsonType` in Pydantic model fields:
 
 ```python
 from typing import Any
@@ -174,8 +214,44 @@ class MyModel(BaseModel):
 
 The `NOTE:` comment pattern serves as:
 - Documentation explaining the deviation
-- Search anchor for future migration
+- Search anchor for future migration (`grep -r "NOTE: Using Any instead of JsonType"`)
 - Code review signal that this is intentional
+
+#### Pattern 2: `object` in Function Signatures
+
+When using `object` instead of `Any` for generic payloads in function signatures, method parameters, or return types:
+
+```python
+# ONEX: Using object instead of Any per ADR guidelines
+def process_payload(data: object) -> object:
+    """Process arbitrary payload data."""
+    ...
+
+# ONEX: Using object instead of Any per ADR guidelines
+async def handle_event(envelope: ModelEventEnvelope[object]) -> str | None:
+    """Handle any event type with generic payload."""
+    ...
+```
+
+The `ONEX:` comment pattern serves as:
+- Documentation that `object` is intentional, not a placeholder
+- Indication that the developer considered and rejected `Any`
+- Search anchor for auditing type safety compliance (`grep -r "ONEX: Using object"`)
+
+#### When to Use Each Pattern
+
+| Situation | Comment Pattern |
+|-----------|-----------------|
+| `Any` in Pydantic `Field()` for JSON data | `# NOTE: Using Any instead of JsonType...` |
+| `object` in function parameter | `# ONEX: Using object instead of Any per ADR guidelines` |
+| `object` in return type | `# ONEX: Using object instead of Any per ADR guidelines` |
+| `object` in protocol method | `# ONEX: Using object instead of Any per ADR guidelines` |
+| `dict[str, object]` in non-Pydantic context | `# ONEX: Using object instead of Any per ADR guidelines` |
+
+**Note**: The `ONEX:` comment is optional for simple cases where `object` usage is obvious from context. It is recommended when:
+- The code previously used `Any` and was migrated
+- Code reviewers might question why `object` was chosen over a specific type
+- The pattern is establishing precedent for similar code
 
 ## Rationale
 
@@ -447,11 +523,23 @@ grep -rn "from typing import.*Any" src/ | grep -v "__pycache__"
 
 ### Ensuring Compliance
 
-New uses of `Any` without the required comment should be flagged in code review. The comment pattern `NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x` serves as both documentation and a search anchor for future migration.
+**For `Any` usage in Pydantic models:**
+New uses of `Any` without the required `NOTE:` comment should be flagged in code review. The comment pattern `NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x` serves as both documentation and a search anchor for future migration.
+
+**For `object` usage in function signatures:**
+When migrating from `Any` to `object` in function signatures, add the `ONEX:` comment pattern. This documents the intentional choice and provides audit trail:
+
+```bash
+# Find compliant object usage with comment
+grep -rn "ONEX: Using object instead of Any" src/
+
+# Find object usage in signatures (may or may not need comment)
+grep -rn "def.*object" src/ | grep -v "__pycache__"
+```
 
 ### Code Review Checklist
 
-When reviewing PRs with `Any` usage:
+#### For PRs with `Any` usage:
 
 - [ ] Is the `NOTE:` comment present exactly as specified?
 - [ ] Is `Any` used ONLY for Pydantic model field type annotations?
@@ -460,6 +548,13 @@ When reviewing PRs with `Any` usage:
 - [ ] Could a more specific type be used instead?
 - [ ] Is this a new occurrence or modification of existing workaround?
 
+#### For PRs with `object` usage in signatures:
+
+- [ ] Is `object` the correct choice? (Could a more specific type be used?)
+- [ ] Is the `ONEX:` comment present for migrated code or non-obvious usage?
+- [ ] Is `object` used consistently across the interface? (e.g., both parameter and return)
+- [ ] Are type narrowing patterns used where the actual type is known?
+
 **Automatic rejection criteria:**
 
 - `Any` in function parameter types (use `object`)
@@ -467,16 +562,63 @@ When reviewing PRs with `Any` usage:
 - `Any` in variable annotations outside Pydantic models
 - `Any` without the required `NOTE:` comment
 - `Any` in non-Pydantic data structures (dataclasses, TypedDicts)
+- `Any` in protocol method signatures (use `object`)
 
-### Known Policy Violations
+### Current Implementation State
 
-The following patterns in the codebase may violate the strict `Any` policy and should be reviewed during migration:
+**Important**: This section documents the actual implementation state as of PR #116, distinguishing between policy (what SHOULD be) and reality (what IS).
 
-1. **Function signatures with `Any`**: Some handler methods may use `Any` for payload parameters
-2. **Return types with `Any`**: Some utility functions may return `Any`
-3. **Type aliases with `Any`**: Some internal type definitions may use `Any`
+#### Compliant Patterns (Already Implemented)
 
-These violations are tracked under [OMN-1262](https://linear.app/omninode/issue/OMN-1262) for cleanup.
+The following patterns have been successfully migrated to use `object` instead of `Any`:
+
+1. **Method signatures in infrastructure code**: Handler methods use `object` for generic payload parameters
+2. **Protocol definitions**: `ProtocolHandler` and similar interfaces use `object` for payload types
+3. **Generic envelope types**: `ModelEventEnvelope[object]` pattern for dispatchers handling any event type
+
+**Example of compliant implementation:**
+
+```python
+# From dispatcher code - COMPLIANT
+async def process_event(envelope: ModelEventEnvelope[object]) -> str | None:
+    """Process any event type - uses object for generic payloads."""
+    ...
+```
+
+#### Known Policy Violations (Pending Cleanup)
+
+The following patterns in the codebase still violate the strict `Any` policy and are tracked for cleanup:
+
+| Violation Type | Location Pattern | Tracking |
+|----------------|------------------|----------|
+| Function signatures with `Any` | Some legacy handler methods | [OMN-1262](https://linear.app/omninode/issue/OMN-1262) |
+| Return types with `Any` | Some utility functions | [OMN-1262](https://linear.app/omninode/issue/OMN-1262) |
+| Type aliases with `Any` | Internal type definitions outside Pydantic | [OMN-1262](https://linear.app/omninode/issue/OMN-1262) |
+
+**Violation identification command:**
+
+```bash
+# Find Any usage in function signatures (violations)
+grep -rn "def.*Any" src/ | grep -v "Field\|BaseModel" | grep -v "__pycache__"
+
+# Find Any in return types (violations)
+grep -rn "-> Any" src/ | grep -v "__pycache__"
+
+# Compare against compliant object usage
+grep -rn "object" src/ | grep -E "(def|async def|->)" | grep -v "__pycache__"
+```
+
+#### Policy vs Reality Summary
+
+| Aspect | Policy (This ADR) | Current Reality |
+|--------|-------------------|-----------------|
+| `Any` in Pydantic fields | Permitted with `NOTE:` comment | Implemented correctly |
+| `Any` in function params | Forbidden (use `object`) | Mostly migrated, some legacy |
+| `Any` in return types | Forbidden (use `object`) | Mostly migrated, some legacy |
+| `object` in signatures | Required for generic payloads | Implemented in new code |
+| Comment patterns | Required for both `Any` and `object` | Partially implemented |
+
+**Action Required**: New code MUST follow the policy. Legacy violations are being tracked and will be cleaned up under [OMN-1262](https://linear.app/omninode/issue/OMN-1262).
 
 ## References
 

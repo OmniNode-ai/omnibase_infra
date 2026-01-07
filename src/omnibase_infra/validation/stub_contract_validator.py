@@ -17,11 +17,30 @@ Security Note:
     This stub may MASK REAL VALIDATION FAILURES by returning success for
     contracts that would fail full ONEX compliance validation. Do not rely
     on this validator for production contract verification.
+
+    CRITICAL SECURITY CONSIDERATIONS:
+    1. This validator performs MINIMAL checks only - see class docstring for gaps
+    2. A passing result does NOT guarantee ONEX compliance
+    3. Unexpected errors are RAISED (not silently returned) to prevent masking
+    4. Use in production pipelines is STRONGLY DISCOURAGED
+    5. The 85% compliance score indicates incomplete validation
+
+Appropriate Use Cases:
+    - Local development iteration
+    - Rapid prototyping
+    - Test fixtures that need basic contract structure
+
+Inappropriate Use Cases (SECURITY RISK):
+    - Production deployment validation
+    - CI/CD pipeline gates
+    - Security-sensitive contract verification
+    - Any context where false positives could cause harm
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -41,6 +60,41 @@ logger = logging.getLogger(__name__)
 # Module-level flag to track if warning has been shown (avoid spam)
 # Mutable container for warning state (avoids global statement)
 _warning_state: dict[str, bool] = {"shown": False}
+
+# Environment variable to detect production context
+_PRODUCTION_INDICATORS = frozenset(
+    {
+        "production",
+        "prod",
+        "staging",
+        "stg",
+    }
+)
+
+
+def _is_production_context() -> bool:
+    """Detect if running in a production-like environment.
+
+    Checks common environment variables that indicate production deployment.
+    This is used to emit stronger warnings when stub validator is used
+    inappropriately.
+
+    Returns:
+        True if environment appears to be production-like.
+    """
+    env_value = os.environ.get("ENVIRONMENT", "").lower()
+    if env_value in _PRODUCTION_INDICATORS:
+        return True
+
+    # Also check common CI/CD indicators
+    if os.environ.get("CI") == "true":
+        return True
+
+    # Check for Kubernetes/container deployment indicators
+    if os.environ.get("KUBERNETES_SERVICE_HOST"):
+        return True
+
+    return False
 
 
 class StubContractValidator:
@@ -79,11 +133,13 @@ class StubContractValidator:
         contract validation.
 
     Limitations:
-        - Returns 100% compliance score for contracts that only pass basic checks
+        - Returns 85% compliance score for contracts that only pass basic checks
+          (reduced from 100% to indicate incomplete validation)
         - Cannot detect malformed contract structures beyond basic YAML
         - Does not validate against ONEX contract schema
         - May allow invalid contracts to pass validation
         - Should NOT be used in production validation pipelines
+        - Raises OnexError for unexpected errors (to prevent masking issues)
 
     Migration Path:
         1. Migrate to ``omnibase_core.validation`` API directly
@@ -130,10 +186,14 @@ class StubContractValidator:
 
         Returns:
             ModelContractValidationResult with validation status and score.
-            Note: A score of 100.0 only means basic checks passed, not full compliance.
+            Note: A score of 85.0 indicates basic checks passed, not full compliance.
+            Full compliance (100%) is only returned by the real validator.
 
         Raises:
-            No exceptions are raised; all errors are captured in the result.
+            OnexError: For unexpected errors that cannot be safely captured in
+                a validation result. This follows ONEX error patterns and prevents
+                masking of serious issues. Expected errors (YAML parsing, file
+                access) are captured in the result to support batch validation.
         """
         # Emit runtime warning (once per session to avoid spam)
         if not _warning_state["shown"]:
@@ -146,6 +206,19 @@ class StubContractValidator:
                 stacklevel=2,
             )
             _warning_state["shown"] = True
+
+        # SECURITY: Log warning for production-like environments
+        if _is_production_context():
+            logger.warning(
+                "SECURITY WARNING: StubContractValidator used in production-like "
+                "environment (ENVIRONMENT=%s, CI=%s). This validator performs "
+                "MINIMAL validation and may allow invalid contracts to pass. "
+                "Migrate to omnibase_core.validation API immediately. "
+                "See OMN-1104 for migration guidance. (path=%s)",
+                os.environ.get("ENVIRONMENT", ""),
+                os.environ.get("CI", ""),
+                contract_path,
+            )
 
         # Use the validation functions from omnibase_core.validation
         try:
@@ -258,27 +331,31 @@ class StubContractValidator:
             )
 
         except Exception as e:
-            # ONEX Error Pattern: Catch-all with proper logging and context
-            # NOTE: In a real validator, we would use `raise OnexError(...) from e`.
-            # The stub validator returns errors in results to allow batch validation,
-            # but still logs with full context for debugging.
+            # ONEX Error Pattern: Raise OnexError for unexpected exceptions
+            # SECURITY: Unexpected errors MUST be raised, not silently returned,
+            # to prevent masking serious issues that could allow invalid contracts
+            # to pass validation. Expected errors (YAML, OSError) are handled above.
             logger.exception(
                 "Unexpected validation error: %s (path=%s, type=%s)",
                 str(e),
                 contract_path,
                 type(e).__name__,
             )
-            return ModelContractValidationResult(
-                valid=False,
-                score=0.0,
-                errors=[
-                    f"Validation error ({type(e).__name__}): {e!s}. "
+            raise OnexError(
+                message=(
+                    f"Unexpected error during contract validation: {e!s}. "
                     "This may indicate a bug in the stub validator or an unexpected "
                     "contract format. See logs for full traceback."
-                ],
-                warnings=[],
-                compliance_score=0.0,
-            )
+                ),
+                error_code="STUB_VALIDATION_UNEXPECTED_ERROR",
+                context={
+                    "contract_path": str(contract_path),
+                    "exception_type": type(e).__name__,
+                    "exception_message": str(e),
+                    "validator": "StubContractValidator",
+                    "migration_ticket": "OMN-1104",
+                },
+            ) from e
 
 
 # Alias for backwards compatibility
