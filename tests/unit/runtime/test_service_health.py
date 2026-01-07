@@ -26,6 +26,7 @@ from omnibase_infra.services.service_health import (
 )
 
 
+@pytest.mark.unit
 class TestServiceHealthInit:
     """Tests for ServiceHealth initialization."""
 
@@ -62,6 +63,7 @@ class TestServiceHealthInit:
         assert server.port == 9999
 
 
+@pytest.mark.unit
 class TestServiceHealthLifecycle:
     """Tests for ServiceHealth start/stop lifecycle."""
 
@@ -186,6 +188,7 @@ class TestServiceHealthLifecycle:
                     assert "Address already in use" in str(exc_info.value)
 
 
+@pytest.mark.unit
 class TestServiceHealthEndpoints:
     """Tests for health endpoint responses."""
 
@@ -283,6 +286,7 @@ class TestServiceHealthEndpoints:
         assert "Health check failed" in response_text
 
 
+@pytest.mark.unit
 class TestServiceHealthIntegration:
     """Integration tests for ServiceHealth with real HTTP requests."""
 
@@ -343,6 +347,7 @@ class TestServiceHealthIntegration:
             assert not server.is_running
 
 
+@pytest.mark.unit
 class TestServiceHealthConstants:
     """Tests for health server constants."""
 
@@ -356,6 +361,7 @@ class TestServiceHealthConstants:
         assert DEFAULT_HTTP_HOST == "0.0.0.0"  # noqa: S104
 
 
+@pytest.mark.unit
 class TestServiceHealthContainerInjection:
     """Tests for container-based dependency injection per OMN-529.
 
@@ -622,3 +628,260 @@ class TestServiceHealthContainerInjection:
         assert response_text is not None
         assert '"status":"healthy"' in response_text
         assert '"version":"resolved-1.0.0"' in response_text
+
+    def test_container_none_after_runtime_only_init(self) -> None:
+        """Verify container property returns None when initialized with runtime only.
+
+        This test ensures backward compatibility with the legacy runtime-only
+        initialization pattern. When only runtime is provided, container should
+        be None but runtime should work correctly.
+        """
+        mock_runtime = MagicMock()
+        server = ServiceHealth(runtime=mock_runtime)
+
+        # Container should be None when not provided
+        assert server.container is None
+        # But runtime should work
+        assert server.runtime is mock_runtime
+        # And server should be functional
+        assert server._port == DEFAULT_HTTP_PORT
+        assert not server.is_running
+
+    @pytest.mark.asyncio
+    async def test_create_from_container_wraps_resolution_exception(self) -> None:
+        """Verify exception wrapping when container resolution fails.
+
+        When the container's service_registry.resolve_service() raises an exception,
+        the create_from_container() factory should wrap it in ProtocolConfigurationError
+        with correlation_id context for proper error tracking and debugging.
+
+        This verifies that:
+        1. The original error message is preserved
+        2. correlation_id is logged for tracing
+        3. The exception is properly chained (from e)
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_container.service_registry = MagicMock()
+        mock_container.service_registry.resolve_service = AsyncMock(
+            side_effect=KeyError("RuntimeHostProcess not registered")
+        )
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await ServiceHealth.create_from_container(container=mock_container)
+
+        # Original error message should be included
+        assert "RuntimeHostProcess not registered" in str(exc_info.value)
+        # Should be wrapped in ProtocolConfigurationError
+        assert "Failed to resolve RuntimeHostProcess from container" in str(
+            exc_info.value
+        )
+        # Original exception should be chained
+        assert exc_info.value.__cause__ is not None
+
+    @pytest.mark.asyncio
+    async def test_create_from_container_wraps_attribute_error(self) -> None:
+        """Verify AttributeError wrapping when container lacks service_registry.
+
+        This tests the edge case where a malformed container is provided that
+        doesn't have the expected service_registry attribute or method.
+        The exception should be wrapped in ProtocolConfigurationError with
+        correlation_id for debugging.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        # Simulate missing resolve_service method
+        mock_container.service_registry = MagicMock()
+        mock_container.service_registry.resolve_service = AsyncMock(
+            side_effect=AttributeError(
+                "'NoneType' object has no attribute 'resolve_service'"
+            )
+        )
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await ServiceHealth.create_from_container(container=mock_container)
+
+        # Original error message should be included
+        assert "resolve_service" in str(exc_info.value)
+        # Should indicate resolution failure
+        assert "Failed to resolve RuntimeHostProcess from container" in str(
+            exc_info.value
+        )
+        # Original exception should be chained
+        assert exc_info.value.__cause__ is not None
+
+    @pytest.mark.asyncio
+    async def test_create_from_container_logs_correlation_id_on_failure(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Verify correlation_id is logged when container resolution fails.
+
+        The create_from_container() factory method should log errors with
+        correlation_id for distributed tracing and debugging support.
+        """
+        import logging
+
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_container.service_registry = MagicMock()
+        mock_container.service_registry.resolve_service = AsyncMock(
+            side_effect=Exception("Test resolution failure")
+        )
+
+        with caplog.at_level(logging.ERROR):
+            with pytest.raises(ProtocolConfigurationError):
+                await ServiceHealth.create_from_container(container=mock_container)
+
+        # Verify correlation_id was logged
+        assert any("correlation_id=" in record.message for record in caplog.records)
+        # Verify error was logged with appropriate context
+        assert any(
+            "Failed to resolve RuntimeHostProcess from container" in record.message
+            for record in caplog.records
+        )
+
+    def test_error_context_includes_transport_type_on_missing_deps(self) -> None:
+        """Verify ProtocolConfigurationError includes proper error context.
+
+        When neither container nor runtime is provided, the raised
+        ProtocolConfigurationError should include ModelInfraErrorContext
+        with the HTTP transport type for debugging infrastructure issues.
+        """
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            ServiceHealth()
+
+        error = exc_info.value
+        assert "requires either 'container' or 'runtime'" in str(error)
+        # Verify the error has context (implementation detail but important for debugging)
+        assert hasattr(error, "context")
+
+    def test_container_only_init_does_not_create_app_components(self) -> None:
+        """Verify container-only initialization doesn't prematurely create aiohttp components.
+
+        When ServiceHealth is initialized with only a container (no runtime),
+        it should not create any aiohttp Application, AppRunner, or TCPSite
+        components until start() is called.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+
+        server = ServiceHealth(container=mock_container)
+
+        # Verify no aiohttp components created during init
+        assert server._app is None
+        assert server._runner is None
+        assert server._site is None
+        assert not server.is_running
+
+    def test_container_preserved_through_lifecycle(self) -> None:
+        """Verify container reference is preserved throughout server lifecycle.
+
+        The container reference should remain accessible after initialization
+        and should not be modified during normal server operations.
+        """
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        mock_runtime = MagicMock()
+
+        server = ServiceHealth(container=mock_container, runtime=mock_runtime)
+
+        # Container should be same object (identity check)
+        assert server.container is mock_container
+        assert server._container is mock_container
+
+        # Multiple accesses should return same object
+        container_ref1 = server.container
+        container_ref2 = server.container
+        assert container_ref1 is container_ref2
+
+
+@pytest.mark.unit
+class TestServiceHealthPrivateAttributeDocumentation:
+    """Documentation tests for private attribute access patterns.
+
+    These tests document and validate the use of private attributes in test code.
+    Private attributes like `_site`, `_server`, `_app`, `_runner` are accessed
+    in integration tests to verify internal state that has no public API.
+
+    IMPORTANT NOTE ON PRIVATE ATTRIBUTE ACCESS:
+    -------------------------------------------
+    Some integration tests in this module access private attributes such as:
+
+    - `server._site`: The aiohttp TCPSite instance, accessed to get actual
+      bound port when using port=0 (auto-assign). There is no public API to
+      retrieve the actual port after binding.
+
+    - `server._site._server`: The underlying server object containing sockets,
+      accessed to get socket information for verifying port binding.
+
+    - `server._app`, `server._runner`: Internal aiohttp components, accessed
+      to verify initialization state in tests.
+
+    - `server._runtime`, `server._container`: Internal state storage, accessed
+      to verify proper initialization in unit tests.
+
+    This private attribute access is ACCEPTABLE IN TESTS because:
+
+    1. Tests need to verify internal behavior that has no public API
+    2. Port 0 binding requires inspecting actual bound port from sockets
+    3. State verification requires checking internal attributes
+    4. Breaking changes to internals should break tests (canary behavior)
+
+    This private attribute access should NEVER be done in production code.
+    Production code should only use the public API.
+    """
+
+    def test_private_attribute_access_documented(self) -> None:
+        """Document that integration tests may access private attributes.
+
+        NOTE: Some integration tests access private attributes like `_site` and `_server`
+        to get the actual bound port when using port=0 (auto-assign). This is necessary
+        because there's no public API to get the actual port after binding.
+
+        This is acceptable in tests but should not be done in production code.
+
+        Private attributes accessed in this test module:
+        - _site: TCPSite instance for getting bound socket info
+        - _site._server: Server object containing sockets list
+        - _app: aiohttp Application instance
+        - _runner: aiohttp AppRunner instance
+        - _runtime: RuntimeHostProcess reference
+        - _container: ModelONEXContainer reference
+        - _port, _host, _version: Configuration values
+        - _is_running: Server running state flag
+
+        See TestServiceHealthIntegration.test_real_health_endpoint() for an
+        example of necessary private attribute access for port discovery.
+        """
+        # This is a documentation test - verify basic initialization works
+        mock_runtime = MagicMock()
+        server = ServiceHealth(runtime=mock_runtime)
+
+        # Document the private attributes that exist
+        assert hasattr(server, "_site")
+        assert hasattr(server, "_app")
+        assert hasattr(server, "_runner")
+        assert hasattr(server, "_runtime")
+        assert hasattr(server, "_container")
+        assert hasattr(server, "_port")
+        assert hasattr(server, "_host")
+        assert hasattr(server, "_version")
+        assert hasattr(server, "_is_running")
+
+    def test_port_discovery_requires_private_attribute_access(self) -> None:
+        """Document why port=0 tests require private attribute access.
+
+        When using port=0 for automatic port assignment (to avoid test conflicts),
+        there is no public API to discover the actual assigned port. The only way
+        to get this information is through private attribute access:
+
+            server._site._server.sockets[0].getsockname()[1]
+
+        This pattern is necessary for integration tests that need to make real
+        HTTP requests to the server after it binds to an auto-assigned port.
+
+        Alternative approaches considered:
+        1. Adding a public `actual_port` property - Would add API surface just for tests
+        2. Using fixed ports - Risk of test conflicts in parallel execution
+        3. Mocking everything - Loses integration test value
+
+        The chosen approach (private attribute access in tests only) provides
+        the best balance of test coverage without polluting the public API.
+        """
+        # This test documents the pattern, no assertions needed
+        # The actual usage is in TestServiceHealthIntegration.test_real_health_endpoint()

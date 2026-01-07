@@ -20,7 +20,7 @@ Exports:
 
 Example (Direct Runtime Injection):
     >>> from omnibase_infra.services.service_health import ServiceHealth
-    >>> from omnibase_infra.runtime import RuntimeHostProcess
+    >>> from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
     >>>
     >>> async def main():
     ...     runtime = RuntimeHostProcess()
@@ -315,12 +315,19 @@ class ServiceHealth:
 
     @property
     def runtime(self) -> RuntimeHostProcess:
-        """Return the RuntimeHostProcess instance used for health checks.
+        """Return the RuntimeHostProcess instance, or raise if not available.
 
         This property provides access to the RuntimeHostProcess that handles
         the actual health status determination. The runtime must be provided
         either directly via ``__init__`` or resolved from a container via
         :meth:`create_from_container`.
+
+        Behavior:
+            - **When runtime is set**: Returns the RuntimeHostProcess instance.
+            - **When runtime is None**: Raises :exc:`ProtocolConfigurationError`
+              immediately. This happens when ``ServiceHealth(container=container)``
+              was called without using :meth:`create_from_container` to resolve
+              the runtime from the container's service registry.
 
         Returns:
             The RuntimeHostProcess instance used to determine health status.
@@ -376,10 +383,21 @@ class ServiceHealth:
         """Create a ServiceHealth by resolving RuntimeHostProcess from container.
 
         This is the preferred ONEX-compliant way to create a ServiceHealth when
-        using container-based dependency injection.
+        using container-based dependency injection. It performs async service
+        resolution that cannot be done in the synchronous ``__init__`` method.
+
+        Parameters:
+            This factory method accepts 4 parameters (1 required, 3 optional):
+
+            - ``container`` (required): The ONEX container with registered services
+            - ``port`` (optional): Override for HTTP port
+            - ``host`` (optional): Override for bind address
+            - ``version`` (optional): Version string for health response
 
         Args:
-            container: ONEX dependency injection container.
+            container: ONEX dependency injection container. Must have
+                RuntimeHostProcess registered in its service registry via
+                ``wire_infrastructure_services(container)`` or equivalent.
             port: Port to listen on. If None, uses ONEX_HTTP_PORT env var or 8085.
             host: Host to bind to (default: 0.0.0.0 for container networking).
             version: Runtime version string for health response.
@@ -387,15 +405,77 @@ class ServiceHealth:
         Returns:
             Initialized ServiceHealth with runtime resolved from container.
 
+        Migration Note:
+            When migrating from direct runtime injection to container-based
+            initialization:
+
+            **Before (direct injection)**::
+
+                runtime = RuntimeHostProcess()
+                server = ServiceHealth(runtime=runtime, port=8085)
+
+            **After (container-based)**::
+
+                container = ModelONEXContainer()
+                await wire_infrastructure_services(container)
+                server = await ServiceHealth.create_from_container(
+                    container, port=8085
+                )
+
+            The factory method handles RuntimeHostProcess resolution internally,
+            so you no longer need to instantiate or manage the runtime directly.
+
+        Raises:
+            ProtocolConfigurationError: If RuntimeHostProcess cannot be resolved
+                from the container's service registry. This typically occurs when:
+
+                1. ``wire_infrastructure_services()`` was not called before this method.
+                2. The container's service registry does not have RuntimeHostProcess
+                   registered.
+                3. The service registry's ``resolve_service()`` method failed
+                   for an infrastructure-related reason.
+
+                The error includes :class:`ModelInfraErrorContext` with correlation_id
+                for distributed tracing.
+
         Example:
             >>> container = ModelONEXContainer()
             >>> await wire_infrastructure_services(container)
             >>> server = await ServiceHealth.create_from_container(container)
             >>> await server.start()
+
+        Example Error:
+            >>> container = ModelONEXContainer()  # No wiring!
+            >>> server = await ServiceHealth.create_from_container(container)
+            ProtocolConfigurationError: Failed to resolve RuntimeHostProcess from container: ...
+            (correlation_id: 123e4567-e89b-12d3-a456-426614174000)
         """
         from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
-        runtime = await container.service_registry.resolve_service(RuntimeHostProcess)
+        correlation_id = generate_correlation_id()
+        try:
+            runtime = await container.service_registry.resolve_service(
+                RuntimeHostProcess
+            )
+        except Exception as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="resolve_runtime_from_container",
+                target_name="ServiceHealth.create_from_container",
+                correlation_id=correlation_id,
+            )
+            logger.exception(
+                "Failed to resolve RuntimeHostProcess from container (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "error_type": type(e).__name__,
+                },
+            )
+            raise ProtocolConfigurationError(
+                f"Failed to resolve RuntimeHostProcess from container: {e}",
+                context=context,
+            ) from e
+
         return cls(
             container=container,
             runtime=runtime,

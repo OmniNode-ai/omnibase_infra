@@ -73,6 +73,7 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
+    ServiceResolutionError,
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
@@ -94,8 +95,25 @@ from omnibase_infra.runtime.introspection_event_router import (
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
-# ServiceHealth import moved to bootstrap() to avoid circular import
-# from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT, ServiceHealth
+# Circular Import Note (OMN-529):
+# ---------------------------------
+# ServiceHealth and DEFAULT_HTTP_PORT are imported inside bootstrap() rather than
+# at module level to avoid a circular import. The import chain is:
+#
+#   1. omnibase_infra/runtime/__init__.py imports kernel_bootstrap from kernel.py
+#   2. If kernel.py imported ServiceHealth at module level, it would load service_health.py
+#   3. service_health.py imports ModelHealthCheckResponse from runtime.models
+#   4. This triggers initialization of omnibase_infra.runtime package (step 1)
+#   5. Runtime package tries to import kernel.py which is still initializing -> circular!
+#
+# The lazy import in bootstrap() is acceptable because:
+#   - ServiceHealth is only instantiated at runtime, not at import time
+#   - Type checking uses forward references (no import needed)
+#   - No import-time side effects are bypassed
+#   - The omnibase_infra.services.__init__.py already excludes ServiceHealth exports
+#     to prevent accidental circular imports from other modules
+#
+# See also: omnibase_infra/services/__init__.py "ServiceHealth Import Guide" section
 from omnibase_infra.runtime.validation import validate_runtime_config
 from omnibase_infra.utils.correlation import generate_correlation_id
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
@@ -371,7 +389,8 @@ async def bootstrap() -> int:
         Health endpoint: http://0.0.0.0:8085/health
         ============================================================
     """
-    # Lazy import to avoid circular import with services.service_health
+    # Lazy import to break circular dependency chain - see "Circular Import Note"
+    # comment near line 98 for detailed explanation of the import cycle.
     from omnibase_infra.services.service_health import (
         DEFAULT_HTTP_PORT,
         ServiceHealth,
@@ -693,24 +712,53 @@ async def bootstrap() -> int:
             )
 
         # 5. Resolve ProtocolBindingRegistry from container
+        # NOTE: Fallback to singleton is intentional degraded mode behavior.
+        # The handler registry is optional for basic runtime operation - core event
+        # processing continues even without explicit handler bindings. However,
+        # ProtocolConfigurationError should NOT be masked as it indicates invalid
+        # configuration that would cause undefined behavior.
         handler_registry: ProtocolBindingRegistry | None = None
         if container.service_registry is not None:
             try:
                 handler_registry = await container.service_registry.resolve_service(
                     ProtocolBindingRegistry
                 )
-            except (RuntimeError, AttributeError) as e:
+            except ServiceResolutionError as e:
+                # Service not registered - expected in minimal configurations.
+                # Fall back to singleton pattern which provides default bindings.
                 logger.warning(
-                    "Failed to resolve ProtocolBindingRegistry from container, "
+                    "ProtocolBindingRegistry not registered in container, "
                     "falling back to singleton (correlation_id=%s): %s",
                     correlation_id,
                     e,
                     extra={
                         "error_type": type(e).__name__,
                         "correlation_id": correlation_id,
+                        "service_name": "ProtocolBindingRegistry",
+                        "fallback_mode": "singleton",
                     },
                 )
                 handler_registry = None
+            except (RuntimeError, AttributeError) as e:
+                # Unexpected resolution failure - container internals issue.
+                # Log with more diagnostic context but still allow degraded operation.
+                logger.warning(
+                    "Unexpected error resolving ProtocolBindingRegistry from container, "
+                    "falling back to singleton (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                        "service_name": "ProtocolBindingRegistry",
+                        "fallback_mode": "singleton",
+                        "container_has_registry": container.service_registry
+                        is not None,
+                    },
+                )
+                handler_registry = None
+            # NOTE: ProtocolConfigurationError is NOT caught here - configuration
+            # errors should propagate and stop startup to prevent undefined behavior.
         # RuntimeHostProcess._get_handler_registry() handles None by falling back to singleton
 
         # 6. Create runtime host process with config and pre-resolved registry

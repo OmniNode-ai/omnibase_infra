@@ -155,7 +155,7 @@ class RuntimeHostProcess:
         health = await process.health_check()
         await process.stop()
 
-        # Legacy initialization (backwards compatible, no container)
+        # Direct initialization (without container)
         process = RuntimeHostProcess()  # Uses singleton registries
         ```
 
@@ -921,7 +921,7 @@ class RuntimeHostProcess:
                     extra={"error": str(e)},
                 )
 
-        # Backwards compatibility: fall back to singleton pattern
+        # Graceful degradation: fall back to singleton pattern when container unavailable
         from omnibase_infra.runtime.handler_registry import get_handler_registry
 
         singleton_registry = get_handler_registry()
