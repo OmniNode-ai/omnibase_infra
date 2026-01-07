@@ -9,7 +9,6 @@ It contains the same data as ModelConsulRegisterIntent but with an
 Related:
     - ModelConsulRegisterIntent: Core intent model (uses `kind` discriminator)
     - ProtocolIntentPayload: Protocol requiring `intent_type` property
-    - OMN-1260: Fix JsonValue/JsonType and validation import migration
 """
 
 from __future__ import annotations
