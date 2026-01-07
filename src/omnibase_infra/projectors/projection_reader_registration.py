@@ -39,6 +39,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.projection import ModelRegistrationProjection
+from omnibase_infra.models.projection.model_registration_projection import ContractType
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
@@ -133,6 +134,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             node_type=row["node_type"],
             node_version=row["node_version"],
             capabilities=capabilities,
+            # Capability fields (OMN-1134)
+            contract_type=row.get("contract_type"),
+            intent_types=row.get("intent_types") or [],
+            protocols=row.get("protocols") or [],
+            capability_tags=row.get("capability_tags") or [],
+            contract_version=row.get("contract_version"),
+            # Timeout fields
             ack_deadline=row["ack_deadline"],
             liveness_deadline=row["liveness_deadline"],
             last_heartbeat_at=row["last_heartbeat_at"],
@@ -656,6 +664,603 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("count_by_state", corr_id)
             raise RuntimeHostError(
                 f"Failed to count by state: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    # ============================================================
+    # Capability Query Methods (OMN-1134)
+    # ============================================================
+
+    async def get_by_capability_tag(
+        self,
+        tag: str,
+        state: EnumRegistrationState | None = None,
+        domain: str = "registration",
+        limit: int = 100,
+        correlation_id: UUID | None = None,
+    ) -> list[ModelRegistrationProjection]:
+        """Find all registrations with the specified capability tag.
+
+        Uses GIN index on capability_tags column for efficient lookup.
+
+        Args:
+            tag: The capability tag to search for (e.g., "postgres.storage")
+            state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            domain: Domain namespace (default: "registration")
+            limit: Maximum results to return (default: 100)
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            List of matching registration projections
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If query times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> adapters = await reader.get_by_capability_tag("kafka.consumer")
+            >>> for adapter in adapters:
+            ...     print(f"{adapter.entity_id}: {adapter.node_type}")
+            >>> # Filter by state
+            >>> active = await reader.get_by_capability_tag(
+            ...     "postgres.storage",
+            ...     state=EnumRegistrationState.ACTIVE,
+            ... )
+        """
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="get_by_capability_tag",
+            target_name="projection_reader.registration",
+            correlation_id=corr_id,
+        )
+
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("get_by_capability_tag", corr_id)
+
+        # Build query with optional state filter
+        if state is not None:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND capability_tags @> ARRAY[$2]::text[]
+                  AND current_state = $3
+                ORDER BY updated_at DESC
+                LIMIT $4
+            """
+            params = [domain, tag, state.value, limit]
+        else:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND capability_tags @> ARRAY[$2]::text[]
+                ORDER BY updated_at DESC
+                LIMIT $3
+            """
+            params = [domain, tag, limit]
+
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(query_sql, *params)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            return [self._row_to_projection(row) for row in rows]
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_capability_tag", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for capability tag query",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_capability_tag", corr_id)
+            raise InfraTimeoutError(
+                "Capability tag query timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_capability_tag", corr_id)
+            raise RuntimeHostError(
+                f"Failed to query by capability tag: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def get_by_intent_type(
+        self,
+        intent_type: str,
+        state: EnumRegistrationState | None = None,
+        domain: str = "registration",
+        limit: int = 100,
+        correlation_id: UUID | None = None,
+    ) -> list[ModelRegistrationProjection]:
+        """Find all registrations that handle the specified intent type.
+
+        Uses GIN index on intent_types column for efficient lookup.
+
+        Args:
+            intent_type: The intent type to search for (e.g., "postgres.upsert")
+            state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            domain: Domain namespace (default: "registration")
+            limit: Maximum results to return (default: 100)
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            List of matching registration projections
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If query times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> handlers = await reader.get_by_intent_type("postgres.query")
+            >>> for handler in handlers:
+            ...     print(f"Can handle postgres.query: {handler.entity_id}")
+        """
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="get_by_intent_type",
+            target_name="projection_reader.registration",
+            correlation_id=corr_id,
+        )
+
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("get_by_intent_type", corr_id)
+
+        if state is not None:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND intent_types @> ARRAY[$2]::text[]
+                  AND current_state = $3
+                ORDER BY updated_at DESC
+                LIMIT $4
+            """
+            params = [domain, intent_type, state.value, limit]
+        else:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND intent_types @> ARRAY[$2]::text[]
+                ORDER BY updated_at DESC
+                LIMIT $3
+            """
+            params = [domain, intent_type, limit]
+
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(query_sql, *params)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            return [self._row_to_projection(row) for row in rows]
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_intent_type", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for intent type query",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_intent_type", corr_id)
+            raise InfraTimeoutError(
+                "Intent type query timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_intent_type", corr_id)
+            raise RuntimeHostError(
+                f"Failed to query by intent type: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def get_by_protocol(
+        self,
+        protocol_name: str,
+        state: EnumRegistrationState | None = None,
+        domain: str = "registration",
+        limit: int = 100,
+        correlation_id: UUID | None = None,
+    ) -> list[ModelRegistrationProjection]:
+        """Find all registrations implementing the specified protocol.
+
+        Uses GIN index on protocols column for efficient lookup.
+
+        Args:
+            protocol_name: The protocol name (e.g., "ProtocolDatabaseAdapter")
+            state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            domain: Domain namespace (default: "registration")
+            limit: Maximum results to return (default: 100)
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            List of matching registration projections
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If query times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> adapters = await reader.get_by_protocol("ProtocolEventPublisher")
+            >>> print(f"Found {len(adapters)} event publishers")
+        """
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="get_by_protocol",
+            target_name="projection_reader.registration",
+            correlation_id=corr_id,
+        )
+
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("get_by_protocol", corr_id)
+
+        if state is not None:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND protocols @> ARRAY[$2]::text[]
+                  AND current_state = $3
+                ORDER BY updated_at DESC
+                LIMIT $4
+            """
+            params = [domain, protocol_name, state.value, limit]
+        else:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND protocols @> ARRAY[$2]::text[]
+                ORDER BY updated_at DESC
+                LIMIT $3
+            """
+            params = [domain, protocol_name, limit]
+
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(query_sql, *params)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            return [self._row_to_projection(row) for row in rows]
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_protocol", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for protocol query",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_protocol", corr_id)
+            raise InfraTimeoutError(
+                "Protocol query timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_protocol", corr_id)
+            raise RuntimeHostError(
+                f"Failed to query by protocol: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def get_by_contract_type(
+        self,
+        contract_type: ContractType,
+        state: EnumRegistrationState | None = None,
+        domain: str = "registration",
+        limit: int = 100,
+        correlation_id: UUID | None = None,
+    ) -> list[ModelRegistrationProjection]:
+        """Find all registrations of the specified contract type.
+
+        Uses B-tree index on contract_type column for efficient lookup.
+
+        Args:
+            contract_type: The contract type. Must be one of: "effect", "compute",
+                "reducer", or "orchestrator"
+            state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            domain: Domain namespace (default: "registration")
+            limit: Maximum results to return (default: 100)
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            List of matching registration projections
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If query times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> effects = await reader.get_by_contract_type("effect")
+            >>> print(f"Found {len(effects)} effect nodes")
+        """
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="get_by_contract_type",
+            target_name="projection_reader.registration",
+            correlation_id=corr_id,
+        )
+
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("get_by_contract_type", corr_id)
+
+        if state is not None:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND contract_type = $2
+                  AND current_state = $3
+                ORDER BY updated_at DESC
+                LIMIT $4
+            """
+            params = [domain, contract_type, state.value, limit]
+        else:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND contract_type = $2
+                ORDER BY updated_at DESC
+                LIMIT $3
+            """
+            params = [domain, contract_type, limit]
+
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(query_sql, *params)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            return [self._row_to_projection(row) for row in rows]
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_contract_type", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for contract type query",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_contract_type", corr_id)
+            raise InfraTimeoutError(
+                "Contract type query timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_contract_type", corr_id)
+            raise RuntimeHostError(
+                f"Failed to query by contract type: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def get_by_capability_tags_all(
+        self,
+        tags: list[str],
+        state: EnumRegistrationState | None = None,
+        domain: str = "registration",
+        limit: int = 100,
+        correlation_id: UUID | None = None,
+    ) -> list[ModelRegistrationProjection]:
+        """Find registrations with ALL specified capability tags.
+
+        Uses GIN index with @> (contains all) operator.
+
+        Args:
+            tags: List of capability tags that must all be present
+            state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            domain: Domain namespace (default: "registration")
+            limit: Maximum results to return (default: 100)
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            List of matching registration projections
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If query times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> adapters = await reader.get_by_capability_tags_all(
+            ...     ["postgres.storage", "transactions"]
+            ... )
+        """
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="get_by_capability_tags_all",
+            target_name="projection_reader.registration",
+            correlation_id=corr_id,
+        )
+
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("get_by_capability_tags_all", corr_id)
+
+        if state is not None:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND capability_tags @> $2::text[]
+                  AND current_state = $3
+                ORDER BY updated_at DESC
+                LIMIT $4
+            """
+            params = [domain, tags, state.value, limit]
+        else:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND capability_tags @> $2::text[]
+                ORDER BY updated_at DESC
+                LIMIT $3
+            """
+            params = [domain, tags, limit]
+
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(query_sql, *params)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            return [self._row_to_projection(row) for row in rows]
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "get_by_capability_tags_all", corr_id
+                )
+            raise InfraConnectionError(
+                "Failed to connect to database for capability tags query",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "get_by_capability_tags_all", corr_id
+                )
+            raise InfraTimeoutError(
+                "Capability tags query timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "get_by_capability_tags_all", corr_id
+                )
+            raise RuntimeHostError(
+                f"Failed to query by capability tags: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def get_by_capability_tags_any(
+        self,
+        tags: list[str],
+        state: EnumRegistrationState | None = None,
+        domain: str = "registration",
+        limit: int = 100,
+        correlation_id: UUID | None = None,
+    ) -> list[ModelRegistrationProjection]:
+        """Find registrations with ANY of the specified capability tags.
+
+        Uses GIN index with && (overlaps) operator.
+
+        Args:
+            tags: List of capability tags, at least one must be present
+            state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            domain: Domain namespace (default: "registration")
+            limit: Maximum results to return (default: 100)
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            List of matching registration projections
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If query times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> adapters = await reader.get_by_capability_tags_any(
+            ...     ["postgres.storage", "mysql.storage", "sqlite.storage"]
+            ... )
+        """
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="get_by_capability_tags_any",
+            target_name="projection_reader.registration",
+            correlation_id=corr_id,
+        )
+
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("get_by_capability_tags_any", corr_id)
+
+        if state is not None:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND capability_tags && $2::text[]
+                  AND current_state = $3
+                ORDER BY updated_at DESC
+                LIMIT $4
+            """
+            params = [domain, tags, state.value, limit]
+        else:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND capability_tags && $2::text[]
+                ORDER BY updated_at DESC
+                LIMIT $3
+            """
+            params = [domain, tags, limit]
+
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(query_sql, *params)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            return [self._row_to_projection(row) for row in rows]
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "get_by_capability_tags_any", corr_id
+                )
+            raise InfraConnectionError(
+                "Failed to connect to database for capability tags query",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "get_by_capability_tags_any", corr_id
+                )
+            raise InfraTimeoutError(
+                "Capability tags query timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "get_by_capability_tags_any", corr_id
+                )
+            raise RuntimeHostError(
+                f"Failed to query by capability tags: {type(e).__name__}",
                 context=ctx,
             ) from e
 
