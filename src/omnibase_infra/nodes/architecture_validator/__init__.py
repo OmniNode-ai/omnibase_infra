@@ -1,11 +1,20 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Architecture validator node for ONEX compliance checking.
+"""Architecture Validator Node Package.
 
-This module provides the NodeArchitectureValidatorCompute node for validating
-architecture compliance against ONEX rules. The validator can check nodes,
-handlers, and other architectural components for compliance with patterns
-defined in ProtocolArchitectureRule implementations.
+This package provides architecture validation COMPUTE nodes for validating
+ONEX architecture patterns and compliance rules.
+
+Available Validators:
+    NodeArchitectureValidator (OMN-1099):
+        Validates three core architecture rules:
+        - ARCH-001: No Direct Handler Dispatch
+        - ARCH-002: No Handler Publishing Events
+        - ARCH-003: No Workflow FSM in Orchestrators
+
+    NodeArchitectureValidatorCompute (OMN-1138):
+        Generic architecture validator supporting pluggable rules via
+        ProtocolArchitectureRule implementations.
 
 Example:
     >>> from omnibase_core.models.container import ModelONEXContainer
@@ -28,15 +37,21 @@ Example:
 
 .. versionadded:: 0.8.0
     Added NodeArchitectureValidatorCompute as part of OMN-1138.
+    Added NodeArchitectureValidator as part of OMN-1099.
 """
 
+# OMN-1138: Generic architecture validator with pluggable rules
 from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+
+# OMN-1099: Core architecture pattern validator
 from omnibase_infra.nodes.architecture_validator.models import (
+    EnumViolationSeverity,
     ModelArchitectureValidationRequest,
     ModelArchitectureValidationResult,
     ModelArchitectureViolation,
     ModelRuleCheckResult,
 )
+from omnibase_infra.nodes.architecture_validator.node import NodeArchitectureValidator
 from omnibase_infra.nodes.architecture_validator.node_architecture_validator import (
     SUPPORTED_RULE_IDS,
     NodeArchitectureValidatorCompute,
@@ -44,19 +59,23 @@ from omnibase_infra.nodes.architecture_validator.node_architecture_validator imp
 from omnibase_infra.nodes.architecture_validator.protocols import (
     ProtocolArchitectureRule,
 )
+from omnibase_infra.nodes.architecture_validator.registry import (
+    RegistryInfraArchitectureValidator,
+)
 
 __all__ = [
-    # Node
+    # OMN-1138: NodeArchitectureValidatorCompute
     "NodeArchitectureValidatorCompute",
-    # Constants
     "SUPPORTED_RULE_IDS",
-    # Enums
     "EnumValidationSeverity",
-    # Models
+    "ModelRuleCheckResult",
+    "ProtocolArchitectureRule",
+    # OMN-1099: NodeArchitectureValidator
+    "NodeArchitectureValidator",
+    "RegistryInfraArchitectureValidator",
+    "EnumViolationSeverity",
+    # Shared models
     "ModelArchitectureValidationRequest",
     "ModelArchitectureValidationResult",
     "ModelArchitectureViolation",
-    "ModelRuleCheckResult",
-    # Protocols
-    "ProtocolArchitectureRule",
 ]
