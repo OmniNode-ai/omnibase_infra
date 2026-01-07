@@ -36,8 +36,11 @@ class ModelValidationResult(BaseModel):
         - None for error_code (unavoidable for Literal type safety)
         - Use ``has_field_name``, ``has_error_message`` to check
 
-    Backwards Compatibility:
-        Constructors accept ``None`` for string fields and convert to sentinel.
+    Input Normalization:
+        Constructors accept ``None`` for string fields and convert to sentinel
+        for developer convenience. This is NOT backwards compatibility (per
+        CLAUDE.md policy) - it is input normalization that may be removed in
+        future versions without notice.
 
     Attributes:
         is_valid: Whether the event passed validation.
@@ -61,7 +64,7 @@ class ModelValidationResult(BaseModel):
     @field_validator("field_name", "error_message", mode="before")
     @classmethod
     def _convert_none_to_str_sentinel(cls, v: object) -> str:
-        """Convert None to empty string sentinel for backwards compatibility."""
+        """Convert None to empty string sentinel for input normalization."""
         if v is None:
             return _SENTINEL_STR
         if isinstance(v, str):
@@ -100,7 +103,7 @@ class ModelValidationResult(BaseModel):
         )
 
 
-# Backwards compatibility alias
+# Convenience alias (not backwards compatibility - may be removed without notice)
 ValidationResult = ModelValidationResult
 
 __all__ = [

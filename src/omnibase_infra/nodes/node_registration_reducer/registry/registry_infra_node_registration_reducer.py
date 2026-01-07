@@ -21,6 +21,19 @@ if TYPE_CHECKING:
 class RegistryInfraNodeRegistrationReducer:
     """Registry for NodeRegistrationReducer dependency injection.
 
+    Why a class instead of a function?
+        ONEX registry pattern (CLAUDE.md) requires registry classes with
+        the naming convention ``RegistryInfra<NodeName>``. This enables:
+
+        - **Future extension**: Additional factory methods can be added
+          (e.g., ``create_reducer_with_cache()``, ``create_test_reducer()``)
+        - **Service registry resolution**: Classes can be registered in the
+          ONEX service registry for container-based resolution
+        - **Consistent pattern**: All node registries follow the same class-based
+          structure, making the codebase predictable and navigable
+        - **Container lifecycle management**: The registry can implement caching,
+          scoping, or other lifecycle behaviors in the future
+
     Provides factory methods for creating NodeRegistrationReducer instances
     with properly configured dependencies from the ONEX container.
 

@@ -36,15 +36,18 @@ Related Modules:
 
 Testing Notes:
     - Unit tests: tests/unit/nodes/node_registration_reducer/
-    - Integration tests: TODO (OMN-1263) - Need tests for:
+    - Integration tests: REQUIRED before production (OMN-1263)
+        WARNING: This reducer MUST NOT be deployed to production without
+        the following integration tests implemented and passing:
         * Intent emission through RuntimeHostProcess
         * End-to-end registration workflow with Consul/PostgreSQL mocks
         * FSM state persistence via RegistrationProjector
-    - See ADR: docs/decisions/adr-any-type-pydantic-workaround.md for test coverage matrix
+    - Test coverage matrix: docs/decisions/adr-any-type-pydantic-workaround.md
 
 Tracking:
     - OMN-1104: Declarative reducer refactoring
-    - OMN-1263: Pre-existing test failures and integration test coverage
+    - OMN-1263: Integration test coverage (https://linear.app/omninode/issue/OMN-1263)
+        Pre-production blocker - prioritize before deployment
 """
 
 from __future__ import annotations

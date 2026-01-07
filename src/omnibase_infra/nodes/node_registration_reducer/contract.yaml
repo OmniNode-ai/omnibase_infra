@@ -19,6 +19,12 @@ contract_version:
 node_version: "1.0.0"
 name: "node_registration_reducer"
 node_type: "REDUCER"
+# Enum Usage (CLAUDE.md reference):
+#   - node_type uses EnumNodeOutputType.REDUCER for validation
+#   - Reducer outputs are PROJECTION type (state + intents) via EnumNodeOutputType
+#   - Incoming messages are routed via EnumMessageCategory (EVENT/COMMAND)
+#   - PROJECTION exists only in EnumNodeOutputType and is only valid for REDUCER nodes
+#   - See: docs/decisions/adr-enum-message-category-vs-node-output-type.md
 description: "Pure reducer for node registration workflow - processes introspection events and emits registration intents for Consul and PostgreSQL backends."
 input_model:
   name: "ModelReducerInput"
