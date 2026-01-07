@@ -192,7 +192,6 @@ class HandlerPartialRetry:
                 error=error_msg,
                 error_code="INVALID_TARGET_BACKEND",
                 duration_ms=duration_ms,
-                retries=0,
                 backend_id=target_backend,
                 correlation_id=correlation_id,
             )
@@ -231,7 +230,6 @@ class HandlerPartialRetry:
                 return ModelBackendResult(
                     success=True,
                     duration_ms=duration_ms,
-                    retries=0,
                     backend_id="consul",
                     correlation_id=correlation_id,
                 )
@@ -243,7 +241,6 @@ class HandlerPartialRetry:
                     error=sanitized_error,
                     error_code="CONSUL_REGISTRATION_ERROR",
                     duration_ms=duration_ms,
-                    retries=0,
                     backend_id="consul",
                     correlation_id=correlation_id,
                 )
@@ -257,7 +254,6 @@ class HandlerPartialRetry:
                 error=sanitized_error,
                 error_code="CONSUL_CONNECTION_ERROR",
                 duration_ms=duration_ms,
-                retries=0,
                 backend_id="consul",
                 correlation_id=correlation_id,
             )
@@ -293,7 +289,6 @@ class HandlerPartialRetry:
                 return ModelBackendResult(
                     success=True,
                     duration_ms=elapsed_ms,
-                    retries=0,
                     backend_id="postgres",
                     correlation_id=correlation_id,
                 )
@@ -305,7 +300,6 @@ class HandlerPartialRetry:
                     error=sanitized_error,
                     error_code="POSTGRES_UPSERT_ERROR",
                     duration_ms=elapsed_ms,
-                    retries=0,
                     backend_id="postgres",
                     correlation_id=correlation_id,
                 )
@@ -319,7 +313,6 @@ class HandlerPartialRetry:
                 error=sanitized_error,
                 error_code="POSTGRES_CONNECTION_ERROR",
                 duration_ms=elapsed_ms,
-                retries=0,
                 backend_id="postgres",
                 correlation_id=correlation_id,
             )

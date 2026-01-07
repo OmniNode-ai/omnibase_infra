@@ -264,6 +264,41 @@ error_handling:
       description: "Backend service is unavailable (circuit open)"
       recoverable: true
       retry_strategy: "exponential_backoff"
+  # Error codes used in ModelBackendResult.error_code field
+  # These codes provide programmatic error categorization for handlers.
+  # Each code maps to a specific operation failure scenario.
+  error_codes:
+    # Consul backend error codes
+    - code: "CONSUL_REGISTRATION_ERROR"
+      backend: "consul"
+      operation: "register_node"
+      description: "Consul service registration failed (non-connection error)"
+    - code: "CONSUL_DEREGISTRATION_ERROR"
+      backend: "consul"
+      operation: "deregister_node"
+      description: "Consul service deregistration failed (non-connection error)"
+    - code: "CONSUL_CONNECTION_ERROR"
+      backend: "consul"
+      operation: "all"
+      description: "Connection to Consul server failed"
+    # PostgreSQL backend error codes
+    - code: "POSTGRES_UPSERT_ERROR"
+      backend: "postgres"
+      operation: "register_node"
+      description: "PostgreSQL upsert operation failed (non-connection error)"
+    - code: "POSTGRES_DEACTIVATION_ERROR"
+      backend: "postgres"
+      operation: "deregister_node"
+      description: "PostgreSQL deactivation operation failed (non-connection error)"
+    - code: "POSTGRES_CONNECTION_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Connection to PostgreSQL server failed"
+    # Retry operation error codes
+    - code: "INVALID_TARGET_BACKEND"
+      backend: "dynamic"
+      operation: "retry_partial_failure"
+      description: "Invalid target_backend specified for retry (must be 'consul' or 'postgres')"
 # IO operations (EFFECT node specific)
 # Note: Input fields reference ModelRegistryRequest, output fields reference ModelRegistryResponse
 io_operations:
@@ -528,7 +563,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2025-01-01"
-  updated: "2025-01-07"
+  updated: "2026-01-07"
   tags:
     - effect
     - registration

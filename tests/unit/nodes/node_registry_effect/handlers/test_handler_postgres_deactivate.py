@@ -98,21 +98,6 @@ class TestHandlerPostgresDeactivateSuccess:
         # Assert - verify node_id is passed correctly
         mock_adapter.deactivate.assert_called_once_with(node_id=node_id)
 
-    @pytest.mark.asyncio
-    async def test_deactivation_retries_is_zero_on_success(self) -> None:
-        """Test that retries is 0 when operation succeeds immediately."""
-        # Arrange
-        mock_adapter = create_mock_postgres_adapter()
-        handler = HandlerPostgresDeactivate(mock_adapter)
-        request = create_registry_request()
-        correlation_id = uuid4()
-
-        # Act
-        result = await handler.handle(request, correlation_id)
-
-        # Assert
-        assert result.retries == 0
-
 
 class TestHandlerPostgresDeactivateNodeTypes:
     """Test deactivation works for all node types."""

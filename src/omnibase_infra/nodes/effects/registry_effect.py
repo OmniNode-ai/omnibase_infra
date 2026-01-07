@@ -248,7 +248,6 @@ class NodeRegistryEffect:
             consul_result = ModelBackendResult(
                 success=True,
                 duration_ms=0.0,
-                retries=0,
                 correlation_id=correlation_id,
             )
         else:
@@ -261,7 +260,6 @@ class NodeRegistryEffect:
             postgres_result = ModelBackendResult(
                 success=True,
                 duration_ms=0.0,
-                retries=0,
                 correlation_id=correlation_id,
             )
         else:
@@ -290,7 +288,6 @@ class NodeRegistryEffect:
             ModelBackendResult with operation outcome.
         """
         start_time = time.perf_counter()
-        retries = 0
 
         try:
             service_id = f"onex-{request.node_type}-{request.node_id}"
@@ -309,7 +306,6 @@ class NodeRegistryEffect:
                 return ModelBackendResult(
                     success=True,
                     duration_ms=duration_ms,
-                    retries=retries,
                     backend_id="consul",
                     correlation_id=request.correlation_id,
                 )
@@ -322,7 +318,6 @@ class NodeRegistryEffect:
                     error=sanitized_error,
                     error_code="CONSUL_REGISTRATION_ERROR",
                     duration_ms=duration_ms,
-                    retries=retries,
                     backend_id="consul",
                     correlation_id=request.correlation_id,
                 )
@@ -336,7 +331,6 @@ class NodeRegistryEffect:
                 error=sanitized_error,
                 error_code="CONSUL_CONNECTION_ERROR",
                 duration_ms=duration_ms,
-                retries=retries,
                 backend_id="consul",
                 correlation_id=request.correlation_id,
             )
@@ -354,7 +348,6 @@ class NodeRegistryEffect:
             ModelBackendResult with operation outcome.
         """
         start_time = time.perf_counter()
-        retries = 0
 
         try:
             result = await self._postgres_adapter.upsert(
@@ -371,7 +364,6 @@ class NodeRegistryEffect:
                 return ModelBackendResult(
                     success=True,
                     duration_ms=duration_ms,
-                    retries=retries,
                     backend_id="postgres",
                     correlation_id=request.correlation_id,
                 )
@@ -384,7 +376,6 @@ class NodeRegistryEffect:
                     error=sanitized_error,
                     error_code="POSTGRES_UPSERT_ERROR",
                     duration_ms=duration_ms,
-                    retries=retries,
                     backend_id="postgres",
                     correlation_id=request.correlation_id,
                 )
@@ -398,7 +389,6 @@ class NodeRegistryEffect:
                 error=sanitized_error,
                 error_code="POSTGRES_CONNECTION_ERROR",
                 duration_ms=duration_ms,
-                retries=retries,
                 backend_id="postgres",
                 correlation_id=request.correlation_id,
             )

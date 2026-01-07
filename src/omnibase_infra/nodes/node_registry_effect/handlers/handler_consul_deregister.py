@@ -132,7 +132,6 @@ class HandlerConsulDeregister:
                 return ModelBackendResult(
                     success=True,
                     duration_ms=duration_ms,
-                    retries=0,
                     backend_id="consul",
                     correlation_id=correlation_id,
                 )
@@ -144,7 +143,6 @@ class HandlerConsulDeregister:
                     error=sanitized_error,
                     error_code="CONSUL_DEREGISTRATION_ERROR",
                     duration_ms=duration_ms,
-                    retries=0,
                     backend_id="consul",
                     correlation_id=correlation_id,
                 )
@@ -158,7 +156,6 @@ class HandlerConsulDeregister:
                 error=sanitized_error,
                 error_code="CONSUL_CONNECTION_ERROR",
                 duration_ms=duration_ms,
-                retries=0,
                 backend_id="consul",
                 correlation_id=correlation_id,
             )

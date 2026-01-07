@@ -10,7 +10,6 @@ Architecture:
     - success: Whether the operation completed successfully
     - error: Error message if the operation failed (sanitized)
     - duration_ms: Time taken for the operation
-    - retries: Number of retry attempts made
 
     This model is used within ModelRegistryResponse to report per-backend status,
     enabling partial failure detection and targeted retry strategies.
@@ -64,14 +63,12 @@ class ModelBackendResult(BaseModel):
         error: Sanitized error message if success is False.
         error_code: Optional error code for programmatic handling.
         duration_ms: Time taken for the operation in milliseconds.
-        retries: Number of retry attempts made before final result.
         backend_id: Optional identifier for the backend instance.
 
     Example:
         >>> result = ModelBackendResult(
         ...     success=True,
         ...     duration_ms=45.2,
-        ...     retries=0,
         ... )
         >>> result.success
         True
@@ -82,7 +79,6 @@ class ModelBackendResult(BaseModel):
         ...     error="Connection refused to database host",
         ...     error_code="DATABASE_CONNECTION_ERROR",
         ...     duration_ms=5000.0,
-        ...     retries=3,
         ... )
         >>> result.success
         False
@@ -154,19 +150,6 @@ class ModelBackendResult(BaseModel):
         default=0.0,
         description="Time taken for the operation in milliseconds",
         ge=0.0,
-    )
-    retries: int = Field(
-        default=0,
-        description=(
-            "Number of retry attempts made before final result. "
-            "IMPORTANT: At the effect node layer, this value is always 0. "
-            "Effect nodes execute operations exactly once - retry logic is the "
-            "responsibility of the orchestrator layer, not the effect layer. "
-            "This field exists for future use when handlers implement internal "
-            "retries or when orchestrators populate retry counts in aggregated results. "
-            "See contract.yaml retry_policy comments for architectural rationale."
-        ),
-        ge=0,
     )
     backend_id: str | None = Field(
         default=None,

@@ -103,21 +103,6 @@ class TestHandlerConsulDeregisterSuccess:
             service_id=expected_service_id
         )
 
-    @pytest.mark.asyncio
-    async def test_deregistration_retries_is_zero_on_success(self) -> None:
-        """Test that retries is 0 when operation succeeds immediately."""
-        # Arrange
-        mock_client = create_mock_consul_client()
-        handler = HandlerConsulDeregister(mock_client)
-        request = create_registry_request()
-        correlation_id = uuid4()
-
-        # Act
-        result = await handler.handle(request, correlation_id)
-
-        # Assert
-        assert result.retries == 0
-
 
 class TestHandlerConsulDeregisterServiceIdGeneration:
     """Test service ID generation for different node types."""

@@ -634,7 +634,6 @@ class TestModelBackendResult:
         result = ModelBackendResult(
             success=True,
             duration_ms=45.2,
-            retries=0,
             backend_id="consul",
             correlation_id=uuid4(),
         )
@@ -650,14 +649,12 @@ class TestModelBackendResult:
             error="Connection refused",
             error_code="DATABASE_CONNECTION_ERROR",
             duration_ms=5000.0,
-            retries=3,
             backend_id="postgres",
             correlation_id=correlation_id,
         )
         assert result.success is False
         assert result.error == "Connection refused"
         assert result.error_code == "DATABASE_CONNECTION_ERROR"
-        assert result.retries == 3
         assert result.correlation_id == correlation_id
 
 
