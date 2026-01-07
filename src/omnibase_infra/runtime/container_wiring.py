@@ -204,19 +204,17 @@ async def wire_infrastructure_services(
     Note: This function is async because ModelONEXContainer.service_registry.register_instance()
     is async in omnibase_core v0.5.6 and later (see omnibase_core.container.ModelONEXContainer).
 
-    If the container's service_registry is None (e.g., in omnibase_core 0.6.x when not
-    configured), this function will log a warning and return early with status="skipped".
-
     Args:
         container: ONEX container instance to register services in.
 
     Returns:
         Summary dict with:
             - services: List of registered service class names
-            - status: "success" on success, "skipped" if service_registry was unavailable
+            - status: "success" on success
 
     Raises:
-        RuntimeError: If service registration fails
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
+        RuntimeError: If service registration fails.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
@@ -235,15 +233,7 @@ async def wire_infrastructure_services(
         >>> hasattr(compute_reg, 'register_plugin') and callable(compute_reg.register_plugin)
         True
     """
-    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
-    if container.service_registry is None:
-        logger.warning(
-            "wire_infrastructure_services: service_registry is None, "
-            "skipping service registration"
-        )
-        return {"services": [], "status": "skipped"}
-
-    # Validate service_registry has required methods
+    # Validate service_registry is available and has required methods
     _validate_service_registry(container, "wire_infrastructure_services")
 
     services_registered: list[str] = []
@@ -782,9 +772,6 @@ async def wire_registration_handlers(
     This enables declarative dependency resolution when constructing the
     NodeRegistrationOrchestrator.
 
-    If the container's service_registry is None (e.g., in omnibase_core 0.6.x when not
-    configured), this function will log a warning and return early with status="skipped".
-
     Args:
         container: ONEX container instance to register services in.
         pool: asyncpg connection pool for database access.
@@ -801,10 +788,11 @@ async def wire_registration_handlers(
     Returns:
         Summary dict with:
             - services: List of registered service class names
-            - status: "success" on success, "skipped" if service_registry was unavailable
+            - status: "success" on success
 
     Raises:
-        RuntimeError: If service registration fails
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
+        RuntimeError: If service registration fails.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
@@ -819,15 +807,7 @@ async def wire_registration_handlers(
         >>> # Resolve handlers from container
         >>> handler = await container.service_registry.resolve_service(HandlerNodeIntrospected)
     """
-    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
-    if container.service_registry is None:
-        logger.warning(
-            "wire_registration_handlers: service_registry is None, "
-            "skipping handler registration"
-        )
-        return {"services": [], "status": "skipped"}
-
-    # Validate service_registry has required methods.
+    # Validate service_registry is available and has required methods.
     # NOTE: Validation is done BEFORE imports for fail-fast behavior - no point loading
     # heavy infrastructure modules if service_registry is unavailable.
     _validate_service_registry(container, "wire_registration_handlers")
@@ -1186,9 +1166,6 @@ async def wire_registration_dispatchers(
           frozen, dispatcher registration will fail with a RuntimeError from the
           engine's register_dispatcher() method.
 
-    If the container's service_registry is None (e.g., in omnibase_core 0.6.x when not
-    configured), this function will log a warning and return early with status="skipped".
-
     Args:
         container: ONEX container with registered handlers.
         engine: MessageDispatchEngine instance to register dispatchers with.
@@ -1201,11 +1178,12 @@ async def wire_registration_dispatchers(
             - routes: List of registered route IDs (e.g.,
               ['route.registration.node-introspection', 'route.registration.runtime-tick',
                'route.registration.node-registration-acked'])
-            - status: "success" on success, "skipped" if service_registry was unavailable
+            - status: "success" on success
 
         This diagnostic output can be logged or used to verify correct wiring.
 
     Raises:
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
         RuntimeError: If required handlers are not registered in the container,
             or if the engine is already frozen (cannot register new dispatchers).
 
@@ -1229,15 +1207,7 @@ async def wire_registration_dispatchers(
         {'dispatchers': [...], 'routes': [...]}
         >>> engine.freeze()  # Must freeze after wiring
     """
-    # Check if service_registry is available (may be None in omnibase_core 0.6.x)
-    if container.service_registry is None:
-        logger.warning(
-            "wire_registration_dispatchers: service_registry is None, "
-            "skipping dispatcher registration"
-        )
-        return {"dispatchers": [], "routes": [], "status": "skipped"}
-
-    # Validate service_registry has required methods.
+    # Validate service_registry is available and has required methods.
     # NOTE: Validation is done BEFORE imports for fail-fast behavior - no point loading
     # heavy infrastructure modules if service_registry is unavailable.
     _validate_service_registry(container, "wire_registration_dispatchers")

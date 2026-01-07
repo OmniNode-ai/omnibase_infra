@@ -70,6 +70,7 @@ click = "^8.1.0"
 rich = "^13.7.0"
 
 # System utilities
+# cryptography v46.0.3: Security-reviewed upgrade (see docs/decisions/adr-cryptography-upgrade-46.md)
 cryptography = "^46.0.3"
 jinja2 = "^3.1.6"
 aiofiles = "^23.2.1"
