@@ -128,6 +128,9 @@ class HandlerPostgresUpsert:
                 return ModelBackendResult(
                     success=True,
                     duration_ms=elapsed_ms,
+                    # retries=0: Effect nodes execute exactly once. Retry logic is
+                    # the responsibility of the orchestrator layer, not effects.
+                    # See contract.yaml retry_policy section for architectural details.
                     retries=0,
                     backend_id="postgres",
                     correlation_id=correlation_id,

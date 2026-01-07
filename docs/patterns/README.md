@@ -18,6 +18,7 @@ This directory contains detailed implementation guides and best practices for ON
 
 ### Architecture
 - **[Container Dependency Injection](./container_dependency_injection.md)** - Service registration, resolution, and testing patterns
+- **[Utility Directory Structure](./utility_directory_structure.md)** - Distinction between `utils/` and `shared/utils/` directories
 
 ### Security
 - **[Security Patterns](./security_patterns.md)** - Comprehensive security guide covering error sanitization, input validation, authentication, authorization, secret management, network security, and production checklists
@@ -50,6 +51,7 @@ This directory contains detailed implementation guides and best practices for ON
 | Implement resilient dispatchers | [Dispatcher Resilience](./dispatcher_resilience.md) | Dispatcher Implementation Pattern |
 | Track requests across services | [Correlation ID](./correlation_id_tracking.md) | Correlation ID Flow |
 | Inject dependencies | [Container DI](./container_dependency_injection.md) | Constructor Injection |
+| Choose utility location | [Utility Directory Structure](./utility_directory_structure.md) | Decision Matrix |
 | Handle cache fallback | [Error Recovery](./error_recovery_patterns.md) | Graceful Degradation |
 | Refresh expired tokens | [Error Recovery](./error_recovery_patterns.md) | Credential Refresh |
 | Sanitize error messages | [Error Sanitization](./error_sanitization_patterns.md) | Implementation Patterns |
@@ -118,6 +120,11 @@ Container Dependency Injection
     ├── Service management and resolution
     ├── Used by: All infrastructure services
     └── References: Bootstrap, testing patterns
+
+Utility Directory Structure
+    ├── Documents utils/ vs shared/utils/ distinction
+    ├── Provides decision matrix for utility placement
+    └── References: Error Sanitization, Correlation ID
 
 Policy Registry Trust Model
     ├── Documents security boundaries for policy registration

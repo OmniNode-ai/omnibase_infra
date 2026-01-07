@@ -157,7 +157,15 @@ class ModelBackendResult(BaseModel):
     )
     retries: int = Field(
         default=0,
-        description="Number of retry attempts made before final result",
+        description=(
+            "Number of retry attempts made before final result. "
+            "IMPORTANT: At the effect node layer, this value is always 0. "
+            "Effect nodes execute operations exactly once - retry logic is the "
+            "responsibility of the orchestrator layer, not the effect layer. "
+            "This field exists for future use when handlers implement internal "
+            "retries or when orchestrators populate retry counts in aggregated results. "
+            "See contract.yaml retry_policy comments for architectural rationale."
+        ),
         ge=0,
     )
     backend_id: str | None = Field(

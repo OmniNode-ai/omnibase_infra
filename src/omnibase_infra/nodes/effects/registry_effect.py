@@ -97,81 +97,7 @@ from omnibase_infra.nodes.effects.protocol_postgres_adapter import (
 from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
     InMemoryEffectIdempotencyStore,
 )
-
-# Safe error patterns that don't contain secrets.
-# These are checked in order - longer/more specific patterns should come first
-# to ensure they match before shorter substrings.
-_SAFE_ERROR_PATTERNS: tuple[str, ...] = (
-    # Connection patterns (longer first)
-    "connection refused",
-    "connection reset",
-    "connection timeout",
-    "connection closed",
-    # Network patterns
-    "network unreachable",
-    "host not found",
-    "dns lookup failed",
-    # Availability patterns
-    "service unavailable",
-    "too many connections",
-    "resource exhausted",
-    # Auth patterns (type only, not details)
-    "authentication failed",
-    "permission denied",
-    "access denied",
-    # State patterns
-    "already exists",
-    "not found",
-    "conflict",
-    # Generic patterns (last, most generic)
-    "timeout",
-    "unavailable",
-)
-
-
-def _sanitize_backend_error(backend_name: str, raw_error: object) -> str:
-    """Sanitize a backend error message to avoid exposing secrets.
-
-    Backend error messages (from Consul, PostgreSQL, etc.) may contain
-    sensitive information like connection strings, credentials, or internal
-    hostnames. This function extracts only safe, generic error information.
-
-    Args:
-        backend_name: Name of the backend (e.g., "Consul", "PostgreSQL").
-        raw_error: Raw error from the backend (string, exception, or any object).
-
-    Returns:
-        Sanitized error message safe for logging and user-facing responses.
-
-    Examples:
-        >>> _sanitize_backend_error("PostgreSQL", "connection refused")
-        'PostgreSQL operation failed: connection refused'
-
-        >>> _sanitize_backend_error("Consul", "auth failed: password=secret123")
-        'Consul operation failed'
-
-        >>> _sanitize_backend_error("Consul", None)
-        'Consul operation failed'
-
-        >>> _sanitize_backend_error("PostgreSQL", {"error": "timeout"})
-        'PostgreSQL operation failed: timeout'
-    """
-    if raw_error is None:
-        return f"{backend_name} operation failed"
-
-    # Convert to string for analysis
-    error_str = str(raw_error).lower().strip()
-
-    if not error_str:
-        return f"{backend_name} operation failed"
-
-    # Check for safe, generic error patterns (checked in order - first match wins)
-    for safe_pattern in _SAFE_ERROR_PATTERNS:
-        if safe_pattern in error_str:
-            return f"{backend_name} operation failed: {safe_pattern}"
-
-    # Default: don't expose the raw error, use generic message
-    return f"{backend_name} operation failed"
+from omnibase_infra.utils import sanitize_backend_error, sanitize_error_message
 
 
 class NodeRegistryEffect:
@@ -390,7 +316,7 @@ class NodeRegistryEffect:
             else:
                 # Sanitize backend error to avoid exposing secrets
                 # (connection strings, credentials, internal hostnames)
-                sanitized_error = _sanitize_backend_error("Consul", result.error)
+                sanitized_error = sanitize_backend_error("consul", result.error)
                 return ModelBackendResult(
                     success=False,
                     error=sanitized_error,
@@ -403,9 +329,8 @@ class NodeRegistryEffect:
 
         except Exception as e:
             duration_ms = (time.perf_counter() - start_time) * 1000
-            # Sanitize error message to avoid exposing secrets (connection strings, credentials)
-            # Use exception type name for debugging without exposing raw message
-            sanitized_error = f"{type(e).__name__}: Consul registration failed"
+            # Sanitize error message to prevent credential exposure
+            sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
@@ -453,7 +378,7 @@ class NodeRegistryEffect:
             else:
                 # Sanitize backend error to avoid exposing secrets
                 # (connection strings, credentials, internal hostnames)
-                sanitized_error = _sanitize_backend_error("PostgreSQL", result.error)
+                sanitized_error = sanitize_backend_error("postgres", result.error)
                 return ModelBackendResult(
                     success=False,
                     error=sanitized_error,
@@ -466,9 +391,8 @@ class NodeRegistryEffect:
 
         except Exception as e:
             duration_ms = (time.perf_counter() - start_time) * 1000
-            # Sanitize error message to avoid exposing secrets (connection strings, credentials)
-            # Use exception type name for debugging without exposing raw message
-            sanitized_error = f"{type(e).__name__}: PostgreSQL upsert failed"
+            # Sanitize error message to prevent credential exposure
+            sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,

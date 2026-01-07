@@ -59,6 +59,47 @@ output_model:
 #   4. Aggregate results with partial failure handling
 #   5. Return ModelRegistryResponse with combined status
 #
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │                    OPERATION ROUTING ARCHITECTURE                       │
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │                                                                         │
+# │  ┌────────────────────┐                                                 │
+# │  │ ModelRegistryRequest│                                                │
+# │  │   operation: "X"   │                                                 │
+# │  └─────────┬──────────┘                                                 │
+# │            │                                                            │
+# │            ▼                                                            │
+# │  ┌─────────────────────┐                                                │
+# │  │  Operation Router   │  routing_strategy: "operation_match"          │
+# │  │  (Contract-Driven)  │  Matches operation field to handlers           │
+# │  └─────────┬───────────┘                                                │
+# │            │                                                            │
+# │            │ operation == "register_node"                               │
+# │            │                                                            │
+# │     ┌──────┴──────┐     execution_mode: "parallel"                      │
+# │     │             │     (asyncio.gather)                                │
+# │     ▼             ▼                                                     │
+# │ ┌────────────┐ ┌────────────┐                                           │
+# │ │  Handler   │ │  Handler   │                                           │
+# │ │  Consul    │ │  Postgres  │                                           │
+# │ │  Register  │ │  Upsert    │                                           │
+# │ └─────┬──────┘ └─────┬──────┘                                           │
+# │       │              │                                                  │
+# │       ▼              ▼                                                  │
+# │ ┌──────────────────────────┐                                            │
+# │ │   Result Aggregator      │  aggregation_strategy: "all_or_partial"   │
+# │ │   partial_failure: true  │                                            │
+# │ └────────────┬─────────────┘                                            │
+# │              │                                                          │
+# │              ▼                                                          │
+# │  ┌─────────────────────────┐                                            │
+# │  │  ModelRegistryResponse  │  status: "success"/"partial"/"failed"     │
+# │  │  consul_result: Result  │  consul_result.success: bool               │
+# │  │  postgres_result: Result│  postgres_result.success: bool             │
+# │  └─────────────────────────┘                                            │
+# │                                                                         │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
 # Parallel Execution Behavior:
 #   When execution_mode is "parallel", handlers for the same operation execute
 #   concurrently using asyncio.gather(). For dual-backend operations like
@@ -67,8 +108,9 @@ output_model:
 #   rather than consul_time + postgres_time.
 #
 #   Partial failure (partial_failure_handling: true) means if Consul succeeds
-#   but PostgreSQL fails (or vice versa), the operation returns success=false
-#   with partial_failure=true, allowing callers to retry the failed backend
+#   but PostgreSQL fails (or vice versa), the operation returns status="partial"
+#   with the successful backend's result.success=true and the failed backend's
+#   result.success=false, allowing callers to retry the failed backend
 #   via the "retry_partial_failure" operation.
 #
 # Handler Responsibility:
@@ -223,26 +265,47 @@ error_handling:
       recoverable: true
       retry_strategy: "exponential_backoff"
 # IO operations (EFFECT node specific)
+# Note: Input fields reference ModelRegistryRequest, output fields reference ModelRegistryResponse
 io_operations:
   - operation: "register_node"
     description: "Register a node with both Consul and PostgreSQL backends"
     input_fields:
       - node_id
+      - node_type
+      - node_version
+      - correlation_id
       - service_name
-      - health_endpoint
+      - endpoints
+      - tags
       - metadata
+      - health_check_config
+      - timestamp
     output_fields:
-      - consul_registered
-      - postgres_registered
-      - registration_id
+      - status
+      - node_id
+      - correlation_id
+      - consul_result
+      - postgres_result
+      - processing_time_ms
+      - timestamp
+      - error_summary
   - operation: "deregister_node"
     description: "Deregister a node from both backends"
     input_fields:
       - node_id
-      - service_name
+      - node_type
+      - node_version
+      - correlation_id
+      - timestamp
     output_fields:
-      - consul_deregistered
-      - postgres_deregistered
+      - status
+      - node_id
+      - correlation_id
+      - consul_result
+      - postgres_result
+      - processing_time_ms
+      - timestamp
+      - error_summary
   - operation: "retry_partial_failure"
     description: "Retry registration for a specific backend after partial failure"
     input_fields:
@@ -250,8 +313,14 @@ io_operations:
       - target_backend
       - idempotency_key
     output_fields:
-      - success
-      - backend_status
+      - status
+      - node_id
+      - correlation_id
+      - consul_result
+      - postgres_result
+      - processing_time_ms
+      - timestamp
+      - error_summary
 # Dependencies (protocols this node requires)
 dependencies:
   - name: "protocol_consul_client"
@@ -289,10 +358,16 @@ capabilities:
   - name: "parallel_execution"
     description: "Execute backend operations in parallel for reduced latency"
 # Model definitions
+# These definitions must exactly match the Pydantic models in:
+#   - omnibase_infra.nodes.effects.models.model_registry_request
+#   - omnibase_infra.nodes.effects.models.model_registry_response
+#   - omnibase_infra.nodes.effects.models.model_backend_result
 definitions:
   ModelRegistryRequest:
     type: object
     description: "Request model for dual-backend registration operations"
+    frozen: true
+    extra: "forbid"
     properties:
       node_id:
         type: uuid
@@ -313,77 +388,129 @@ definitions:
       correlation_id:
         type: uuid
         description: "Correlation ID for distributed tracing"
-        default: "auto-generated"
+        default_factory: "uuid4"
       service_name:
         type: string
         nullable: true
         description: "Name for service discovery registration"
       endpoints:
         type: object
+        key_type: string
+        value_type: string
         description: "Dict of endpoint type to URL (e.g., {'health': 'http://...'})"
-        default: {}
+        default_factory: "dict"
       tags:
         type: array
         items:
           type: string
         description: "List of tags for service discovery"
-        default: []
+        default_factory: "list"
       metadata:
         type: object
+        key_type: string
+        value_type: string
         description: "Additional metadata for the registration record"
-        default: {}
+        default_factory: "dict"
       health_check_config:
         type: object
+        key_type: string
+        value_type: string
         nullable: true
         description: "Optional health check configuration for Consul"
       timestamp:
         type: datetime
-        description: "When this request was created (must be timezone-aware)"
+        description: "When this request was created (must be timezone-aware, explicitly provided)"
+        validation:
+          - name: "validate_timestamp_timezone_aware"
+            description: "Validates that timestamp has timezone info"
     required:
       - node_id
       - node_type
       - node_version
       - timestamp
-  ModelRegistryResponse:
+  ModelBackendResult:
     type: object
-    description: "Output model for registry effect operations"
+    description: "Result of an individual backend operation (Consul or PostgreSQL)"
+    frozen: true
+    extra: "forbid"
     properties:
       success:
         type: boolean
-        description: "Whether the operation succeeded (all backends)"
-      consul_registered:
-        type: boolean
-        description: "Whether Consul registration succeeded"
-      postgres_registered:
-        type: boolean
-        description: "Whether PostgreSQL registration succeeded"
-      consul_service_id:
+        description: "Whether the backend operation completed successfully"
+      error:
         type: string
-        description: "Consul service ID for the registered node"
-      registration_id:
+        nullable: true
+        description: "Sanitized error message if success is False"
+      error_code:
         type: string
-        description: "PostgreSQL registration record ID"
-      partial_failure:
-        type: boolean
-        description: "Whether a partial failure occurred"
-      failed_backend:
-        type: string
-        description: "Which backend failed (if partial failure)"
-        enum:
-          - "consul"
-          - "postgres"
-      error_message:
-        type: string
-        description: "Sanitized error message if operation failed"
-      correlation_id:
-        type: string
-        description: "Request correlation ID for tracing"
-      execution_time_ms:
+        nullable: true
+        description: "Error code for programmatic handling (e.g., DATABASE_CONNECTION_ERROR)"
+      duration_ms:
+        type: float
+        description: "Time taken for the operation in milliseconds"
+        default: 0.0
+        ge: 0.0
+      retries:
         type: integer
-        description: "Total execution time in milliseconds"
+        description: "Number of retry attempts made before final result"
+        default: 0
+        ge: 0
+      backend_id:
+        type: string
+        nullable: true
+        description: "Optional identifier for the backend instance"
+      correlation_id:
+        type: uuid
+        nullable: true
+        description: "Correlation ID for tracing the operation"
     required:
       - success
+  ModelRegistryResponse:
+    type: object
+    description: "Response model for dual-backend registration operations with partial failure support"
+    frozen: true
+    extra: "forbid"
+    properties:
+      status:
+        type: string
+        description: "Overall status: success (both succeeded), partial (one succeeded), or failed (both failed)"
+        enum:
+          - "success"
+          - "partial"
+          - "failed"
+      node_id:
+        type: uuid
+        description: "UUID of the node that was registered"
+      correlation_id:
+        type: uuid
+        description: "Correlation ID for distributed tracing"
+      consul_result:
+        type: ref
+        ref: "ModelBackendResult"
+        description: "Result of the Consul registration operation"
+      postgres_result:
+        type: ref
+        ref: "ModelBackendResult"
+        description: "Result of the PostgreSQL upsert operation"
+      processing_time_ms:
+        type: float
+        description: "Total time for the dual-registration operation in milliseconds"
+        default: 0.0
+        ge: 0.0
+      timestamp:
+        type: datetime
+        description: "When this response was created (must be explicitly provided)"
+      error_summary:
+        type: string
+        nullable: true
+        description: "Aggregated error message for failed operations (e.g., 'Consul: error; PostgreSQL: error')"
+    required:
+      - status
+      - node_id
       - correlation_id
+      - consul_result
+      - postgres_result
+      - timestamp
 # Health check configuration
 health_check:
   enabled: true
@@ -401,7 +528,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2025-01-01"
-  updated: "2025-01-06"
+  updated: "2025-01-07"
   tags:
     - effect
     - registration
