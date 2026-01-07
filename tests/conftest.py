@@ -24,6 +24,54 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
+# Service Registry Availability Check
+# =============================================================================
+
+
+def check_service_registry_available() -> bool:
+    """Check if ServiceRegistry is available in ModelONEXContainer.
+
+    Creates a temporary container to check for service_registry availability,
+    then explicitly cleans up the container to prevent resource leaks.
+
+    This function is used by test modules to determine whether to skip tests
+    that require ServiceRegistry. The check is needed because omnibase_core 0.6.x
+    has a circular import issue that causes ServiceRegistry to be None when
+    the container is initialized.
+
+    Returns:
+        True if service_registry is available and not None, False otherwise.
+
+    Note:
+        The circular import path in omnibase_core 0.6.2 is:
+        model_onex_container.py -> container_service_registry.py ->
+        container/__init__.py -> container_service_resolver.py ->
+        ModelONEXContainer (still loading)
+
+        Tests requiring ServiceRegistry should skip gracefully when this
+        function returns False. Upgrade to omnibase_core >= 0.6.3 to resolve.
+    """
+    container = None
+    try:
+        from omnibase_core.container import ModelONEXContainer
+
+        container = ModelONEXContainer()
+        return container.service_registry is not None
+    except AttributeError:
+        # service_registry attribute removed in omnibase_core 0.6.x
+        return False
+    except TypeError:
+        # ModelONEXContainer.__init__ signature changed (new required params)
+        return False
+    except ImportError:
+        # omnibase_core not installed or import failed
+        return False
+    finally:
+        # Explicit cleanup of temporary container
+        del container
+
+
+# =============================================================================
 # Duck Typing Conformance Helpers
 # =============================================================================
 

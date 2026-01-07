@@ -63,8 +63,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
+    from omnibase_core.types import JsonType
+
     from omnibase_infra.handlers import VaultHandler
-    from omnibase_infra.models.types import JsonValue
 
 # Import fixture availability flags from conftest
 from tests.integration.handlers.conftest import VAULT_AVAILABLE, VAULT_REACHABLE
@@ -138,7 +139,7 @@ async def cleanup_secret(
     # Cleanup: delete the test secret
     # Idempotent: succeeds even if secret doesn't exist
     try:
-        envelope: dict[str, JsonValue] = {
+        envelope: dict[str, JsonType] = {
             "operation": "vault.delete_secret",
             "payload": {
                 "path": unique_secret_path,
@@ -204,7 +205,7 @@ class TestVaultHandlerSecretCRUD:
         correlation_id = str(uuid.uuid4())
 
         # Write secret
-        write_envelope: dict[str, JsonValue] = {
+        write_envelope: dict[str, JsonType] = {
             "operation": "vault.write_secret",
             "payload": {
                 "path": secret_path,
@@ -219,7 +220,7 @@ class TestVaultHandlerSecretCRUD:
         assert "version" in write_result.result["payload"]
 
         # Read secret back
-        read_envelope: dict[str, JsonValue] = {
+        read_envelope: dict[str, JsonType] = {
             "operation": "vault.read_secret",
             "payload": {
                 "path": secret_path,
@@ -251,7 +252,7 @@ class TestVaultHandlerSecretCRUD:
         test_data = {"key": "value_to_delete"}
 
         # Write secret first
-        write_envelope: dict[str, JsonValue] = {
+        write_envelope: dict[str, JsonType] = {
             "operation": "vault.write_secret",
             "payload": {
                 "path": secret_path,
@@ -263,7 +264,7 @@ class TestVaultHandlerSecretCRUD:
         await vault_handler.execute(write_envelope)
 
         # Delete the secret
-        delete_envelope: dict[str, JsonValue] = {
+        delete_envelope: dict[str, JsonType] = {
             "operation": "vault.delete_secret",
             "payload": {
                 "path": secret_path,
@@ -279,7 +280,7 @@ class TestVaultHandlerSecretCRUD:
         # Verify secret no longer exists (should raise SecretResolutionError)
         from omnibase_infra.errors import SecretResolutionError
 
-        read_envelope: dict[str, JsonValue] = {
+        read_envelope: dict[str, JsonType] = {
             "operation": "vault.read_secret",
             "payload": {
                 "path": secret_path,
@@ -312,7 +313,7 @@ class TestVaultHandlerSecretCRUD:
                 secret_path = f"{base_path}/{name}"
                 created_paths.append(secret_path)
 
-                write_envelope: dict[str, JsonValue] = {
+                write_envelope: dict[str, JsonType] = {
                     "operation": "vault.write_secret",
                     "payload": {
                         "path": secret_path,
@@ -324,7 +325,7 @@ class TestVaultHandlerSecretCRUD:
                 await vault_handler.execute(write_envelope)
 
             # List secrets at base path
-            list_envelope: dict[str, JsonValue] = {
+            list_envelope: dict[str, JsonType] = {
                 "operation": "vault.list_secrets",
                 "payload": {
                     "path": base_path,
@@ -346,7 +347,7 @@ class TestVaultHandlerSecretCRUD:
             # Cleanup: delete all created secrets
             for path in created_paths:
                 try:
-                    delete_envelope: dict[str, JsonValue] = {
+                    delete_envelope: dict[str, JsonType] = {
                         "operation": "vault.delete_secret",
                         "payload": {
                             "path": path,
@@ -372,7 +373,7 @@ class TestVaultHandlerSecretCRUD:
 
         # Write initial secret
         initial_data = {"version": "1", "value": "initial"}
-        write_envelope: dict[str, JsonValue] = {
+        write_envelope: dict[str, JsonType] = {
             "operation": "vault.write_secret",
             "payload": {
                 "path": secret_path,
@@ -387,7 +388,7 @@ class TestVaultHandlerSecretCRUD:
 
         # Update with new data
         updated_data = {"version": "2", "value": "updated", "new_field": "added"}
-        update_envelope: dict[str, JsonValue] = {
+        update_envelope: dict[str, JsonType] = {
             "operation": "vault.write_secret",
             "payload": {
                 "path": secret_path,
@@ -404,7 +405,7 @@ class TestVaultHandlerSecretCRUD:
         assert updated_version > initial_version
 
         # Read and verify updated data
-        read_envelope: dict[str, JsonValue] = {
+        read_envelope: dict[str, JsonType] = {
             "operation": "vault.read_secret",
             "payload": {
                 "path": secret_path,
@@ -443,7 +444,7 @@ class TestVaultHandlerErrors:
 
         nonexistent_path = f"{TEST_SECRET_PATH_PREFIX}/nonexistent-{uuid.uuid4().hex}"
 
-        read_envelope: dict[str, JsonValue] = {
+        read_envelope: dict[str, JsonType] = {
             "operation": "vault.read_secret",
             "payload": {
                 "path": nonexistent_path,
@@ -477,7 +478,7 @@ class TestVaultHandlerErrors:
             f"{TEST_SECRET_PATH_PREFIX}/nonexistent-dir-{uuid.uuid4().hex}"
         )
 
-        list_envelope: dict[str, JsonValue] = {
+        list_envelope: dict[str, JsonType] = {
             "operation": "vault.list_secrets",
             "payload": {
                 "path": nonexistent_path,
@@ -511,7 +512,7 @@ class TestVaultHandlerTokenRenewal:
         from omnibase_infra.errors import InfraAuthenticationError
 
         correlation_id = str(uuid.uuid4())
-        renew_envelope: dict[str, JsonValue] = {
+        renew_envelope: dict[str, JsonType] = {
             "operation": "vault.renew_token",
             "payload": {},
             "correlation_id": correlation_id,
