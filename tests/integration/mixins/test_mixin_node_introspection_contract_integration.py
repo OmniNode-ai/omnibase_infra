@@ -93,7 +93,7 @@ class MockEventBus:
                 since all event envelopes are Pydantic models.
             topic: Event topic.
         """
-        if isinstance(envelope, ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent):
+        if isinstance(envelope, (ModelNodeIntrospectionEvent, ModelNodeHeartbeatEvent)):
             self.published_envelopes.append((envelope, topic))
 
     async def publish(

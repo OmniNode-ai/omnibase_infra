@@ -27,6 +27,9 @@ from omnibase_infra.nodes.node_service_discovery_effect.models import (
     ModelServiceDiscoveryHealthCheckDetails,
     ModelServiceDiscoveryHealthCheckResult,
 )
+from omnibase_infra.nodes.node_service_discovery_effect.models.enum_service_discovery_operation import (
+    EnumServiceDiscoveryOperation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +118,7 @@ class MockServiceDiscoveryHandler:
         return ModelRegistrationResult(
             success=True,
             service_id=service_info.service_id,
+            operation=EnumServiceDiscoveryOperation.REGISTER,
             duration_ms=duration_ms,
             backend_type=self.handler_type,
             correlation_id=correlation_id,

@@ -22,7 +22,13 @@ Related:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import re
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Duration string pattern: supports formats like "10s", "1m", "500ms", "1h", "2d"
+# Format: <positive_number><unit> where unit is one of: ms, s, m, h, d
+DURATION_PATTERN = re.compile(r"^([1-9]\d*|0)(\.\d+)?(ms|s|m|h|d)$")
 
 
 class ModelHealthCheckConfig(BaseModel):
@@ -76,6 +82,40 @@ class ModelHealthCheckConfig(BaseModel):
         ge=100,
         le=599,
     )
+
+    @field_validator("interval", "timeout")
+    @classmethod
+    def validate_duration_format(cls, v: str) -> str:
+        """Validate that duration strings follow the expected format.
+
+        Supported formats:
+            - "10s" (seconds)
+            - "1m" (minutes)
+            - "500ms" (milliseconds)
+            - "1h" (hours)
+            - "2d" (days)
+            - Decimal values like "1.5s" are supported
+
+        Args:
+            v: The duration string to validate.
+
+        Returns:
+            The validated duration string.
+
+        Raises:
+            ValueError: If the duration string format is invalid.
+
+        Example:
+            >>> ModelHealthCheckConfig(interval="10s", timeout="5s")  # Valid
+            >>> ModelHealthCheckConfig(interval="invalid")  # Raises ValueError
+        """
+        if not DURATION_PATTERN.match(v):
+            raise ValueError(
+                f"Invalid duration format: '{v}'. "
+                f"Expected format: <number><unit> where unit is one of: ms, s, m, h, d. "
+                f"Examples: '10s', '1m', '500ms', '1.5h'"
+            )
+        return v
 
 
 __all__ = ["ModelHealthCheckConfig"]

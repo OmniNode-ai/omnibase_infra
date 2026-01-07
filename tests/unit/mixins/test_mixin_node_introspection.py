@@ -111,7 +111,7 @@ class MockEventBus:
         if self.should_fail:
             raise RuntimeError("Event bus publish failed")
         # Store envelopes - supports both introspection and heartbeat events
-        if isinstance(envelope, ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent):
+        if isinstance(envelope, (ModelNodeIntrospectionEvent, ModelNodeHeartbeatEvent)):
             self.published_envelopes.append((envelope, topic))
 
     async def publish(

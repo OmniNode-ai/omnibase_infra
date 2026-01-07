@@ -466,6 +466,13 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
                 params.append(query.node_type.value)
                 param_idx += 1
 
+            # Filter by capability (JSONB array contains match)
+            if query.capability_filter is not None:
+                # Use JSONB containment operator to check if capability exists in array
+                conditions.append(f"capabilities @> ${param_idx}::jsonb")
+                params.append(json.dumps([query.capability_filter]))
+                param_idx += 1
+
             where_clause = ""
             if conditions:
                 where_clause = " WHERE " + " AND ".join(conditions)

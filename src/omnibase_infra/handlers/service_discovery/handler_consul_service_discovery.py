@@ -48,6 +48,9 @@ from omnibase_infra.nodes.node_service_discovery_effect.models import (
 from omnibase_infra.nodes.node_service_discovery_effect.models.enum_health_status import (
     EnumHealthStatus,
 )
+from omnibase_infra.nodes.node_service_discovery_effect.models.enum_service_discovery_operation import (
+    EnumServiceDiscoveryOperation,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.nodes.effects.protocol_consul_client import ProtocolConsulClient
@@ -114,7 +117,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         _threshold_raw = config.get("threshold", DEFAULT_CIRCUIT_BREAKER_THRESHOLD)
         threshold = (
             int(_threshold_raw)
-            if isinstance(_threshold_raw, int | float | str)
+            if isinstance(_threshold_raw, (int, float, str))
             else DEFAULT_CIRCUIT_BREAKER_THRESHOLD
         )
         _reset_timeout_raw = config.get(
@@ -122,7 +125,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         )
         reset_timeout = (
             float(_reset_timeout_raw)
-            if isinstance(_reset_timeout_raw, int | float | str)
+            if isinstance(_reset_timeout_raw, (int, float, str))
             else DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT
         )
         _service_name_raw = config.get("service_name", "consul.discovery")
@@ -268,6 +271,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             return ModelRegistrationResult(
                 success=True,
                 service_id=service_info.service_id,
+                operation=EnumServiceDiscoveryOperation.REGISTER,
                 duration_ms=duration_ms,
                 backend_type=self.handler_type,
                 correlation_id=correlation_id,
@@ -480,7 +484,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
                 svc_name = svc_data.get("Service", "")
                 address = svc_data.get("Address", "") or node_data.get("Address", "")
                 port_raw = svc_data.get("Port", 0)
-                port = int(port_raw) if isinstance(port_raw, int | float | str) else 0
+                port = int(port_raw) if isinstance(port_raw, (int, float, str)) else 0
                 svc_tags = cast(list[str], svc_data.get("Tags", []))
                 svc_meta = cast(dict[str, str], svc_data.get("Meta", {}))
 

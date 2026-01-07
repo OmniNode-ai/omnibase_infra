@@ -589,7 +589,7 @@ class TestCircuitBreakerStress:
 
         # Filter out expected InfraUnavailableError
         unexpected_errors = [
-            e for e in errors if not isinstance(e, ValueError | InfraUnavailableError)
+            e for e in errors if not isinstance(e, (ValueError, InfraUnavailableError))
         ]
         assert len(unexpected_errors) == 0, f"Unexpected errors: {unexpected_errors}"
 

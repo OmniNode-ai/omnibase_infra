@@ -40,9 +40,9 @@ Related:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 from uuid import UUID
 
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.intents import ModelRegistrationRecordBase
 from pydantic import Field
 
@@ -82,6 +82,7 @@ class ModelNodeRegistrationRecord(ModelRegistrationRecordBase):
     Example:
         >>> from datetime import datetime, UTC
         >>> from uuid import uuid4
+        >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
         >>> from omnibase_infra.models.registration import (
         ...     ModelNodeCapabilities,
         ...     ModelNodeMetadata,
@@ -89,7 +90,7 @@ class ModelNodeRegistrationRecord(ModelRegistrationRecordBase):
         >>> now = datetime.now(UTC)
         >>> record = ModelNodeRegistrationRecord(
         ...     node_id=uuid4(),
-        ...     node_type="effect",
+        ...     node_type=EnumNodeKind.EFFECT,
         ...     node_version="1.0.0",
         ...     capabilities=ModelNodeCapabilities(postgres=True),
         ...     endpoints={"health": "http://localhost:8080/health"},
@@ -104,9 +105,7 @@ class ModelNodeRegistrationRecord(ModelRegistrationRecordBase):
 
     # Identity
     node_id: UUID = Field(..., description="Unique node identifier")
-    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = Field(
-        ..., description="ONEX node type"
-    )
+    node_type: EnumNodeKind = Field(..., description="ONEX node type")
     node_version: str = Field(
         default="1.0.0", description="Semantic version of the node"
     )

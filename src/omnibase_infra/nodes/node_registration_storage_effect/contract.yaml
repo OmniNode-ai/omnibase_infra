@@ -57,12 +57,14 @@ capabilities:
   - name: "registration.storage.health"
     description: "Health check for storage backend connectivity"
 # IO operations (EFFECT node specific)
+# Note: correlation_id is optional (UUID | None) for all operations.
+# If not provided, implementations should generate one for tracing.
 io_operations:
   - operation: "store_registration"
     description: "Store a new registration record or update existing"
     input_fields:
       - record: "ModelRegistrationRecord"
-      - correlation_id: "UUID"
+      - correlation_id: "UUID | None"
     output_fields:
       - result: "ModelUpsertResult"
     idempotent: true
@@ -70,7 +72,7 @@ io_operations:
     description: "Query registration records with optional filters"
     input_fields:
       - query: "ModelStorageQuery"
-      - correlation_id: "UUID"
+      - correlation_id: "UUID | None"
     output_fields:
       - result: "ModelStorageResult"
     idempotent: true
@@ -79,7 +81,7 @@ io_operations:
     input_fields:
       - node_id: "UUID"
       - updates: "ModelRegistrationUpdate"
-      - correlation_id: "UUID"
+      - correlation_id: "UUID | None"
     output_fields:
       - result: "ModelUpsertResult"
     idempotent: true
@@ -87,7 +89,7 @@ io_operations:
     description: "Delete a registration record by node ID"
     input_fields:
       - node_id: "UUID"
-      - correlation_id: "UUID"
+      - correlation_id: "UUID | None"
     output_fields:
       - success: "bool"
     idempotent: true

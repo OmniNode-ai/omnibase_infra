@@ -93,7 +93,6 @@ Security Design (Intentional Fail-Open Architecture):
 
 from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
-    CircularImportValidator,
     ModelImportValidationResult,
     validate_all,
     validate_architecture,

@@ -22,8 +22,6 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
-
 from omnibase_infra.handlers.registration_storage.models import (
     ModelRegistrationRecord,
     ModelStorageResult,
@@ -31,7 +29,9 @@ from omnibase_infra.handlers.registration_storage.models import (
 )
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelDeleteResult,
+    ModelRegistrationUpdate,
     ModelStorageHealthCheckResult,
+    ModelStorageQuery,
 )
 
 
@@ -92,19 +92,15 @@ class ProtocolRegistrationStorageHandler(Protocol):
 
     async def query_registrations(
         self,
-        node_type: EnumNodeKind | None = None,
-        node_version: str | None = None,
-        limit: int = 100,
-        offset: int = 0,
+        query: ModelStorageQuery,
         correlation_id: UUID | None = None,
     ) -> ModelStorageResult:
         """Query registration records from storage.
 
         Args:
-            node_type: Optional node type to filter by.
-            node_version: Optional version pattern to filter by.
-            limit: Maximum number of records to return.
-            offset: Number of records to skip (for pagination).
+            query: ModelStorageQuery containing filter and pagination parameters.
+                Supports filtering by node_id, node_type, capability_filter,
+                and pagination via limit/offset.
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
@@ -121,16 +117,15 @@ class ProtocolRegistrationStorageHandler(Protocol):
     async def update_registration(
         self,
         node_id: UUID,
-        endpoints: dict[str, str] | None = None,
-        metadata: dict[str, str] | None = None,
+        updates: ModelRegistrationUpdate,
         correlation_id: UUID | None = None,
     ) -> ModelUpsertResult:
         """Update an existing registration record.
 
         Args:
             node_id: ID of the node to update.
-            endpoints: Optional new endpoints dict.
-            metadata: Optional new metadata dict.
+            updates: ModelRegistrationUpdate containing fields to update.
+                Only non-None fields will be applied.
             correlation_id: Optional correlation ID for tracing.
 
         Returns:

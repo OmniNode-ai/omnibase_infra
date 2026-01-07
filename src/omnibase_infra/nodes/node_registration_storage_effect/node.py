@@ -29,22 +29,27 @@ Pluggable Backends:
     - PostgreSQL (default): For relational storage requirements
     - Mock: For testing and development
 
-    To configure a backend:
+    Backend configuration is done through the registry at bootstrap:
     ```python
+    from omnibase_core.models.container import ModelONEXContainer
     from omnibase_infra.nodes.node_registration_storage_effect import (
         NodeRegistrationStorageEffect,
     )
-    from omnibase_infra.handlers.storage import HandlerPostgresRegistrationStorage
+    from omnibase_infra.nodes.node_registration_storage_effect.registry import (
+        RegistryInfraRegistrationStorage,
+    )
+    from omnibase_infra.handlers.registration_storage import (
+        PostgresRegistrationStorageHandler,
+    )
 
-    # Create node with container
+    # Create container and register handler
+    container = ModelONEXContainer()
+    handler = PostgresRegistrationStorageHandler(dsn="postgresql://...")
+    RegistryInfraRegistrationStorage.register(container)
+    RegistryInfraRegistrationStorage.register_handler(container, handler)
+
+    # Create node with container (handler resolved via DI)
     node = NodeRegistrationStorageEffect(container)
-
-    # Wire PostgreSQL handler
-    handler = HandlerPostgresRegistrationStorage(pool_manager, config)
-    node.set_storage_handler(handler)
-
-    # Execute operations
-    result = await node.store_registration(record, correlation_id)
     ```
 
 Design Decisions:
