@@ -57,11 +57,11 @@ from typing import TYPE_CHECKING
 from omnibase_core.models.primitives import ModelSemVer
 
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+from omnibase_infra.runtime.policy_registry import PolicyRegistry
+from omnibase_infra.runtime.registry_compute import RegistryCompute
 
 # Default semantic version constant (1.0.0)
 SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
-from omnibase_infra.runtime.policy_registry import PolicyRegistry
-from omnibase_infra.runtime.registry_compute import RegistryCompute
 
 if TYPE_CHECKING:
     import asyncpg
@@ -116,7 +116,7 @@ def _validate_service_registry(
         )
 
     if container.service_registry is None:
-        # TODO(OMN-1258): Request upstream API - add public method
+        # TODO(OMN-1265): Request upstream API - add public method
         # `container.initialize_service_registry(config)` in omnibase_core.
         # Current behavior: service_registry returns None under several conditions, requiring
         # downstream validation. Proposed improvement: provide a factory method or builder pattern

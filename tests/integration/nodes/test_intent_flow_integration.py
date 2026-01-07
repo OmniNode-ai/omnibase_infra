@@ -8,16 +8,18 @@ the ONEX registration workflow:
     Reducer -> Runtime/Dispatcher -> Effect -> Confirmation
 
 Architecture:
-    The RegistrationReducer emits intents with typed payloads:
-        - intent_type="extension"
+    The RegistrationReducer emits intents using typed payload models:
+        - intent_type="extension" (outer ModelIntent level)
+        - payload: typed Pydantic model (ModelPayloadConsulRegister or
+          ModelPayloadPostgresUpsertRegistration)
         - payload.intent_type="consul.register" or "postgres.upsert_registration"
-        - payload.plugin_name="consul" or "postgres"
-        - payload.data contains the serialized typed intent
+        - Direct field access on typed payloads (e.g., payload.service_name,
+          payload.correlation_id, payload.record)
 
-    This format enables:
-    1. Generic intent routing by the Runtime layer
-    2. Plugin-based dispatch to appropriate Effect nodes
-    3. Type-safe intent payloads while maintaining flexibility
+    This two-layer structure enables:
+    1. Generic intent routing by the Runtime layer (via intent_type="extension")
+    2. Type-safe routing to appropriate Effect nodes (via payload.intent_type)
+    3. Strong typing with direct field access (no .data dict wrapper)
 
 Test Categories:
     - TestReducerIntentTypeEmission: Verify reducer uses intent_type format
