@@ -14,11 +14,40 @@ Concurrency Safety:
     Note: This is not thread-safe. For multi-threaded access, additional
     synchronization would be required.
 
+State Filtering on Capability Queries:
+    All capability query methods (get_by_capability_tag, get_by_intent_type,
+    get_by_protocol, get_by_contract_type, get_by_capability_tags_all,
+    get_by_capability_tags_any) support an optional `state` parameter for
+    filtering results by registration state.
+
+    This is particularly useful for service discovery patterns where you
+    typically want to find only ACTIVE nodes that provide specific capabilities:
+
+    Example - Find active Kafka consumers:
+        >>> active_consumers = await reader.get_by_capability_tag(
+        ...     "kafka.consumer",
+        ...     state=EnumRegistrationState.ACTIVE,
+        ... )
+
+    Example - Find active nodes implementing a protocol:
+        >>> active_publishers = await reader.get_by_protocol(
+        ...     "ProtocolEventPublisher",
+        ...     state=EnumRegistrationState.ACTIVE,
+        ... )
+
+    Example - Find all effect nodes (including inactive):
+        >>> all_effects = await reader.get_by_contract_type("effect")
+
+    When state is None (default), all registrations matching the capability
+    criteria are returned regardless of their current FSM state. When state
+    is provided, an additional WHERE clause filters on current_state.
+
 Related Tickets:
     - OMN-944 (F1): Implement Registration Projection Schema
     - OMN-940 (F0): Define Projector Execution Model
     - OMN-930 (C0): Projection Reader Protocol
     - OMN-932 (C2): Durable Timeout Handling
+    - OMN-1134: Registry Projection Extensions for Capabilities
 """
 
 from __future__ import annotations

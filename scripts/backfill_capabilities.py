@@ -10,19 +10,38 @@ JSONB column for all registration projections.
 Related Tickets:
     - OMN-1134: Registry Projection Extensions for Capabilities
 
-Idempotency:
-    This script is idempotent and safe to run multiple times. It uses
-    `contract_type IS NULL` as the sole indicator that a record needs
-    processing. Once processed:
+Idempotency Strategy:
+    This script is idempotent and safe to run multiple times. The idempotency
+    mechanism uses `contract_type IS NULL` as the SOLE indicator that a record
+    needs processing.
 
-    - contract_type is ALWAYS set to a non-NULL value:
-      - Extracted from capabilities.config.contract_type, OR
-      - Derived from node_type (if valid: effect/compute/reducer/orchestrator), OR
-      - Set to 'unknown' as a fallback marker
-    - The record will NOT be selected on subsequent runs
-    - Running again will only process newly inserted (unprocessed) records
-    - Array fields (intent_types, protocols, capability_tags) may be empty
-      but this does NOT indicate "needs processing"
+    Why contract_type IS NULL (not array fields)?
+        The migration (008_add_capability_fields.py) creates GIN indexes on 4
+        columns for efficient querying:
+        - capability_tags (GIN index for array containment queries)
+        - intent_types (GIN index for array containment queries)
+        - protocols (GIN index for array containment queries)
+        - contract_type + current_state (B-tree composite index)
+
+        However, these indexes are for QUERY PERFORMANCE, not for backfill
+        tracking. Empty arrays (capability_tags = '{}') are valid states for
+        nodes that simply don't have those capabilities - they do NOT indicate
+        "needs processing".
+
+        The contract_type column is the correct idempotency marker because:
+        - It is ALWAYS set to a non-NULL value after processing
+        - Even records with no determinable type get 'unknown' as a marker
+        - NULL contract_type unambiguously means "never processed"
+
+    Once processed:
+        - contract_type is ALWAYS set to a non-NULL value:
+          - Extracted from capabilities.config.contract_type, OR
+          - Derived from node_type (if valid: effect/compute/reducer/orchestrator), OR
+          - Set to 'unknown' as a fallback marker
+        - The record will NOT be selected on subsequent runs
+        - Running again will only process newly inserted (unprocessed) records
+        - Array fields (intent_types, protocols, capability_tags) may be empty
+          but this does NOT indicate "needs processing"
 
 Usage:
     # Dry run (shows what would be updated)
@@ -30,6 +49,9 @@ Usage:
 
     # Execute backfill
     python scripts/backfill_capabilities.py
+
+    # With custom batch size (default: 1000)
+    python scripts/backfill_capabilities.py --batch-size 500
 
     # With custom connection
     POSTGRES_HOST=localhost POSTGRES_PORT=5432 python scripts/backfill_capabilities.py
@@ -556,7 +578,176 @@ def _handle_unexpected_error(exc: Exception) -> NoReturn:
     sys.exit(1)
 
 
-async def backfill(dry_run: bool = False) -> int:
+def _parse_capabilities(
+    capabilities_raw: str | dict[str, object] | None,
+) -> dict[str, object]:
+    """Parse capabilities from raw database value.
+
+    Args:
+        capabilities_raw: Raw capabilities value from database (JSONB)
+
+    Returns:
+        Parsed capabilities dictionary
+    """
+    if isinstance(capabilities_raw, str):
+        result = json.loads(capabilities_raw)
+        if isinstance(result, dict):
+            return result
+        return {}
+    elif isinstance(capabilities_raw, dict):
+        return capabilities_raw
+    else:
+        return {}
+
+
+async def _get_total_count(conn: asyncpg.Connection) -> int:
+    """Get total count of records needing processing.
+
+    Args:
+        conn: Database connection
+
+    Returns:
+        Total count of unprocessed records
+    """
+    result = await conn.fetchval(
+        """
+        SELECT COUNT(*)
+        FROM registration_projections
+        WHERE contract_type IS NULL
+        """
+    )
+    return int(result) if result else 0
+
+
+async def _process_batch_dry_run(
+    rows: list[asyncpg.Record],
+    batch_num: int,
+    total_batches: int,
+    processed_so_far: int,
+    total_rows: int,
+) -> tuple[int, int]:
+    """Process a batch of rows in dry-run mode.
+
+    Args:
+        rows: Batch of database records
+        batch_num: Current batch number (1-indexed)
+        total_batches: Total number of batches
+        processed_so_far: Count of records processed before this batch
+        total_rows: Total records to process
+
+    Returns:
+        Tuple of (records_analyzed, unknown_count)
+    """
+    analyzed = 0
+    unknown_count = 0
+
+    for row in rows:
+        entity_id: UUID = row["entity_id"]
+        domain: str = row["domain"]
+        node_type: str = row["node_type"]
+        capabilities = _parse_capabilities(row["capabilities"])
+
+        # Extract fields
+        contract_type = extract_contract_type(capabilities, node_type)
+        intent_types = extract_intent_types(capabilities)
+        protocols = extract_protocols(capabilities)
+        capability_tags = extract_capability_tags(capabilities)
+        contract_version = extract_contract_version(capabilities)
+
+        # Track records that will get 'unknown' as fallback
+        if contract_type == "unknown":
+            unknown_count += 1
+            type_note = " (fallback - no type determinable)"
+        else:
+            type_note = ""
+
+        print(
+            f"Would update {entity_id} ({domain}):\n"
+            f"  contract_type: {contract_type}{type_note}\n"
+            f"  intent_types: {intent_types}\n"
+            f"  protocols: {protocols}\n"
+            f"  capability_tags: {capability_tags}\n"
+            f"  contract_version: {contract_version}"
+        )
+        analyzed += 1
+
+    current_total = processed_so_far + analyzed
+    print(
+        f"[Batch {batch_num}/{total_batches}] "
+        f"Analyzed {current_total}/{total_rows} records"
+    )
+
+    return analyzed, unknown_count
+
+
+async def _process_batch_update(
+    conn: asyncpg.Connection,
+    rows: list[asyncpg.Record],
+    batch_num: int,
+    total_batches: int,
+    processed_so_far: int,
+    total_rows: int,
+) -> int:
+    """Process a batch of rows and execute updates.
+
+    Args:
+        conn: Database connection
+        rows: Batch of database records
+        batch_num: Current batch number (1-indexed)
+        total_batches: Total number of batches
+        processed_so_far: Count of records processed before this batch
+        total_rows: Total records to process
+
+    Returns:
+        Number of records updated in this batch
+    """
+    updated = 0
+
+    # Execute updates within a transaction for batch atomicity
+    async with conn.transaction():
+        for row in rows:
+            entity_id = row["entity_id"]
+            domain = row["domain"]
+            node_type = row["node_type"]
+            capabilities = _parse_capabilities(row["capabilities"])
+
+            # Extract fields
+            contract_type = extract_contract_type(capabilities, node_type)
+            intent_types = extract_intent_types(capabilities)
+            protocols = extract_protocols(capabilities)
+            capability_tags = extract_capability_tags(capabilities)
+            contract_version = extract_contract_version(capabilities)
+
+            await conn.execute(
+                """
+                UPDATE registration_projections
+                SET contract_type = $3,
+                    intent_types = $4,
+                    protocols = $5,
+                    capability_tags = $6,
+                    contract_version = $7
+                WHERE entity_id = $1 AND domain = $2
+                """,
+                entity_id,
+                domain,
+                contract_type,
+                intent_types,
+                protocols,
+                capability_tags,
+                contract_version,
+            )
+            updated += 1
+
+    current_total = processed_so_far + updated
+    print(
+        f"[Batch {batch_num}/{total_batches}] "
+        f"Updated {current_total}/{total_rows} records"
+    )
+
+    return updated
+
+
+async def backfill(dry_run: bool = False, batch_size: int = 1000) -> int:
     """Backfill capability fields from existing capabilities JSONB.
 
     Idempotency:
@@ -566,35 +757,24 @@ async def backfill(dry_run: bool = False) -> int:
         is always set to a non-NULL value ('unknown' if no type can be
         determined), so the record will not be selected on subsequent runs.
 
-    All updates are wrapped in a transaction for atomicity - either all
-    records are updated or none are (in case of failure).
+    Batch Processing:
+        For large datasets, records are processed in configurable batches
+        to avoid loading all rows into memory at once. Each batch is
+        wrapped in its own transaction for atomicity.
 
     Args:
         dry_run: If True, only print what would be done
+        batch_size: Number of records to process per batch (default: 1000)
 
     Returns:
         Number of records updated
     """
-    logger.info("Starting backfill (dry_run=%s)", dry_run)
+    logger.info("Starting backfill (dry_run=%s, batch_size=%d)", dry_run, batch_size)
 
     conn = await get_connection()
     try:
-        logger.debug("Fetching registrations to process")
-
-        # Fetch all registrations that haven't been processed yet.
-        # We use `contract_type IS NULL` as the sole indicator because:
-        # - contract_type is ALWAYS set after processing (never None)
-        # - Empty arrays for intent_types/protocols/capability_tags are valid
-        #   (they indicate "no data to extract", not "needs processing")
-        rows = await conn.fetch(
-            """
-            SELECT entity_id, domain, node_type, capabilities
-            FROM registration_projections
-            WHERE contract_type IS NULL
-            """
-        )
-
-        total_rows = len(rows)
+        # First, get total count without loading all rows into memory
+        total_rows = await _get_total_count(conn)
         print(f"Found {total_rows} registrations needing processing")
         logger.info("Found %d registrations to process", total_rows)
 
@@ -602,60 +782,74 @@ async def backfill(dry_run: bool = False) -> int:
             print("No unprocessed records found (script is idempotent)")
             return 0
 
-        updated = 0
+        # Calculate total batches for progress reporting
+        total_batches = (total_rows + batch_size - 1) // batch_size
+        print(f"Processing in {total_batches} batch(es) of up to {batch_size} records")
 
-        if dry_run:
-            # Dry run: show what would be done with accurate counts
-            # Since contract_type IS NULL is the sole selection criteria
-            # and we ALWAYS set contract_type to non-NULL, all selected
-            # records will be updated.
-            unknown_count = 0
-            for row in rows:
-                entity_id: UUID = row["entity_id"]
-                domain: str = row["domain"]
-                node_type: str = row["node_type"]
-                capabilities_raw = row["capabilities"]
+        total_updated = 0
+        total_unknown = 0
+        batch_num = 0
+        offset = 0
 
-                # Parse capabilities JSONB
-                if isinstance(capabilities_raw, str):
-                    capabilities = json.loads(capabilities_raw)
-                elif isinstance(capabilities_raw, dict):
-                    capabilities = capabilities_raw
-                else:
-                    capabilities = {}
+        # Process in batches using LIMIT/OFFSET
+        # We use ORDER BY to ensure consistent ordering across batches
+        while offset < total_rows:
+            batch_num += 1
+            logger.debug(
+                "Fetching batch %d (offset=%d, limit=%d)",
+                batch_num,
+                offset,
+                batch_size,
+            )
 
-                # Extract fields
-                contract_type = extract_contract_type(capabilities, node_type)
-                intent_types = extract_intent_types(capabilities)
-                protocols = extract_protocols(capabilities)
-                capability_tags = extract_capability_tags(capabilities)
-                contract_version = extract_contract_version(capabilities)
+            rows = await conn.fetch(
+                """
+                SELECT entity_id, domain, node_type, capabilities
+                FROM registration_projections
+                WHERE contract_type IS NULL
+                ORDER BY entity_id, domain
+                LIMIT $1 OFFSET $2
+                """,
+                batch_size,
+                offset,
+            )
 
-                # Track records that will get 'unknown' as fallback
-                if contract_type == "unknown":
-                    unknown_count += 1
-                    type_note = " (fallback - no type determinable)"
-                else:
-                    type_note = ""
+            if not rows:
+                # No more rows to process (could happen if records were
+                # processed by another instance between count and fetch)
+                break
 
-                print(
-                    f"Would update {entity_id} ({domain}):\n"
-                    f"  contract_type: {contract_type}{type_note}\n"
-                    f"  intent_types: {intent_types}\n"
-                    f"  protocols: {protocols}\n"
-                    f"  capability_tags: {capability_tags}\n"
-                    f"  contract_version: {contract_version}"
+            if dry_run:
+                analyzed, unknown = await _process_batch_dry_run(
+                    rows,
+                    batch_num,
+                    total_batches,
+                    total_updated,
+                    total_rows,
                 )
-                updated += 1
+                total_updated += analyzed
+                total_unknown += unknown
+            else:
+                updated = await _process_batch_update(
+                    conn,
+                    rows,
+                    batch_num,
+                    total_batches,
+                    total_updated,
+                    total_rows,
+                )
+                total_updated += updated
 
-                if updated % 100 == 0:
-                    print(f"Analyzed {updated}/{total_rows} records...")
+            offset += batch_size
 
-            # Summary for dry-run
-            print(f"\nDry-run summary: Would update {updated} registrations")
-            if unknown_count > 0:
+        # Final summary
+        if dry_run:
+            print(f"\nDry-run summary: Would update {total_updated} registrations")
+            print(f"  Total records analyzed: {total_updated}")
+            print(f"  Batches processed: {batch_num}")
+            if total_unknown > 0:
                 print(
-                    f"Note: {unknown_count} records will use 'unknown' as "
+                    f"  Note: {total_unknown} records will use 'unknown' as "
                     "contract_type (no type could be determined from capabilities "
                     "or node_type)"
                 )
@@ -663,57 +857,12 @@ async def backfill(dry_run: bool = False) -> int:
                 "After backfill, these records will NOT be selected on subsequent runs"
             )
         else:
-            # Execute updates within a transaction for atomicity
-            logger.debug("Starting transaction for %d updates", total_rows)
-            async with conn.transaction():
-                for row in rows:
-                    entity_id = row["entity_id"]
-                    domain = row["domain"]
-                    node_type = row["node_type"]
-                    capabilities_raw = row["capabilities"]
+            logger.info("All batches committed successfully")
+            print(f"\nBackfill complete: Updated {total_updated} registrations")
+            print(f"  Total records processed: {total_updated}")
+            print(f"  Batches committed: {batch_num}")
 
-                    # Parse capabilities JSONB
-                    if isinstance(capabilities_raw, str):
-                        capabilities = json.loads(capabilities_raw)
-                    elif isinstance(capabilities_raw, dict):
-                        capabilities = capabilities_raw
-                    else:
-                        capabilities = {}
-
-                    # Extract fields
-                    contract_type = extract_contract_type(capabilities, node_type)
-                    intent_types = extract_intent_types(capabilities)
-                    protocols = extract_protocols(capabilities)
-                    capability_tags = extract_capability_tags(capabilities)
-                    contract_version = extract_contract_version(capabilities)
-
-                    await conn.execute(
-                        """
-                        UPDATE registration_projections
-                        SET contract_type = $3,
-                            intent_types = $4,
-                            protocols = $5,
-                            capability_tags = $6,
-                            contract_version = $7
-                        WHERE entity_id = $1 AND domain = $2
-                        """,
-                        entity_id,
-                        domain,
-                        contract_type,
-                        intent_types,
-                        protocols,
-                        capability_tags,
-                        contract_version,
-                    )
-                    updated += 1
-
-                    if updated % 100 == 0:
-                        print(f"Updated {updated}/{total_rows} records...")
-
-            logger.info("Transaction committed successfully")
-            print(f"Updated {updated} registrations")
-
-        return updated
+        return total_updated
 
     finally:
         logger.debug("Closing database connection")
@@ -730,7 +879,21 @@ def main() -> int:
         action="store_true",
         help="Print what would be done without making changes",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1000,
+        metavar="N",
+        help="Number of records to process per batch (default: 1000)",
+    )
     args = parser.parse_args()
+
+    # Validate batch size
+    if args.batch_size < 1:
+        print("ERROR: --batch-size must be at least 1")
+        return 1
+    if args.batch_size > 100000:
+        print("WARNING: Large batch sizes (>100000) may cause memory issues")
 
     if not os.getenv("POSTGRES_PASSWORD"):
         print(
@@ -741,7 +904,9 @@ def main() -> int:
         return 1
 
     try:
-        updated = asyncio.run(backfill(dry_run=args.dry_run))
+        updated = asyncio.run(
+            backfill(dry_run=args.dry_run, batch_size=args.batch_size)
+        )
         logger.info("Backfill completed successfully (updated=%d)", updated)
         return 0 if updated >= 0 else 1
     except ConfigurationError as e:

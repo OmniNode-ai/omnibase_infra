@@ -108,11 +108,10 @@ def projector(mock_pool: MagicMock) -> ProjectorRegistration:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 class TestCapabilityFieldsModel:
     """Test that ModelRegistrationProjection accepts capability fields."""
 
-    async def test_projection_accepts_capability_fields(self) -> None:
+    def test_projection_accepts_capability_fields(self) -> None:
         """Test that projection model accepts new capability fields."""
         projection = create_test_projection_with_capabilities(
             contract_type="effect",
@@ -131,7 +130,7 @@ class TestCapabilityFieldsModel:
         assert projection.capability_tags == ["postgres.storage", "kafka.consumer"]
         assert projection.contract_version == "2.1.0"
 
-    async def test_projection_capability_fields_default_to_empty(self) -> None:
+    def test_projection_capability_fields_default_to_empty(self) -> None:
         """Test that capability fields have sensible defaults."""
         now = datetime.now(UTC)
         projection = ModelRegistrationProjection(
@@ -151,7 +150,7 @@ class TestCapabilityFieldsModel:
         assert projection.capability_tags == []
         assert projection.contract_version is None
 
-    async def test_projection_serializes_capability_arrays(self) -> None:
+    def test_projection_serializes_capability_arrays(self) -> None:
         """Test that capability arrays serialize correctly to JSON."""
         projection = create_test_projection_with_capabilities(
             intent_types=["intent.a", "intent.b"],
@@ -254,11 +253,10 @@ class TestCapabilityFieldsPersistence:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 class TestCapabilityFieldsExtraction:
     """Test extraction of capability fields from ModelNodeCapabilities."""
 
-    async def test_extract_capability_fields_from_extra(self) -> None:
+    def test_extract_capability_fields_from_extra(self) -> None:
         """Test extracting capability fields from model_extra."""
         # ModelNodeCapabilities uses extra="allow" so we can add custom fields
         capabilities = ModelNodeCapabilities(
@@ -274,7 +272,7 @@ class TestCapabilityFieldsExtraction:
         assert extra.get("contract_type") == "effect"
         assert extra.get("intent_types") == ["postgres.query"]
 
-    async def test_get_capability_field_with_fallback(self) -> None:
+    def test_get_capability_field_with_fallback(self) -> None:
         """Test getting capability field with fallback to None."""
         capabilities = ModelNodeCapabilities(postgres=True)
 
@@ -343,6 +341,114 @@ class TestCapabilityFieldsValidation:
         tags = ["postgres.storage", "kafka.consumer", "http.client"]
         projection = create_test_projection_with_capabilities(capability_tags=tags)
         assert projection.capability_tags == tags
+
+
+@pytest.mark.unit
+class TestNodeTypeStringCoercion:
+    """Test that node_type field properly coerces string values to EnumNodeKind."""
+
+    def test_node_type_coerces_string_to_enum(self) -> None:
+        """Test that node_type accepts string 'effect' and coerces to EnumNodeKind.EFFECT."""
+        now = datetime.now(UTC)
+        projection = ModelRegistrationProjection(
+            entity_id=uuid4(),
+            domain="registration",
+            current_state=EnumRegistrationState.ACTIVE,
+            node_type="effect",  # String input
+            last_applied_event_id=uuid4(),
+            registered_at=now,
+            updated_at=now,
+        )
+
+        # Verify coercion to enum
+        assert projection.node_type == EnumNodeKind.EFFECT
+        assert isinstance(projection.node_type, EnumNodeKind)
+
+    def test_node_type_accepts_all_valid_string_values(self) -> None:
+        """Test that node_type accepts all valid string values and coerces correctly."""
+        now = datetime.now(UTC)
+        string_to_enum = {
+            "effect": EnumNodeKind.EFFECT,
+            "compute": EnumNodeKind.COMPUTE,
+            "reducer": EnumNodeKind.REDUCER,
+            "orchestrator": EnumNodeKind.ORCHESTRATOR,
+        }
+
+        for string_value, expected_enum in string_to_enum.items():
+            projection = ModelRegistrationProjection(
+                entity_id=uuid4(),
+                domain="registration",
+                current_state=EnumRegistrationState.ACTIVE,
+                node_type=string_value,
+                last_applied_event_id=uuid4(),
+                registered_at=now,
+                updated_at=now,
+            )
+            assert projection.node_type == expected_enum, (
+                f"Expected node_type='{string_value}' to coerce to {expected_enum}"
+            )
+
+    def test_node_type_serializes_to_string_in_json_mode(self) -> None:
+        """Test that node_type serializes to string value in JSON mode."""
+        now = datetime.now(UTC)
+        projection = ModelRegistrationProjection(
+            entity_id=uuid4(),
+            domain="registration",
+            current_state=EnumRegistrationState.ACTIVE,
+            node_type="effect",
+            last_applied_event_id=uuid4(),
+            registered_at=now,
+            updated_at=now,
+        )
+
+        # Serialize to JSON-compatible dict
+        data = projection.model_dump(mode="json")
+
+        # Should serialize as string "effect", not the enum repr
+        assert data["node_type"] == "effect"
+        assert isinstance(data["node_type"], str)
+
+    def test_node_type_accepts_enum_value_directly(self) -> None:
+        """Test that node_type accepts EnumNodeKind value directly."""
+        now = datetime.now(UTC)
+        projection = ModelRegistrationProjection(
+            entity_id=uuid4(),
+            domain="registration",
+            current_state=EnumRegistrationState.ACTIVE,
+            node_type=EnumNodeKind.REDUCER,
+            last_applied_event_id=uuid4(),
+            registered_at=now,
+            updated_at=now,
+        )
+
+        assert projection.node_type == EnumNodeKind.REDUCER
+        assert isinstance(projection.node_type, EnumNodeKind)
+
+        # JSON serialization should still produce string
+        data = projection.model_dump(mode="json")
+        assert data["node_type"] == "reducer"
+
+    def test_node_type_deserialization_from_dict(self) -> None:
+        """Test that node_type deserializes correctly from dict with string value."""
+        now = datetime.now(UTC)
+        entity_id = uuid4()
+        event_id = uuid4()
+
+        # Create dict with string node_type (simulates JSON deserialization)
+        data = {
+            "entity_id": str(entity_id),
+            "domain": "registration",
+            "current_state": "active",
+            "node_type": "orchestrator",
+            "last_applied_event_id": str(event_id),
+            "registered_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        projection = ModelRegistrationProjection.model_validate(data)
+
+        assert projection.node_type == EnumNodeKind.ORCHESTRATOR
+        assert isinstance(projection.node_type, EnumNodeKind)
 
 
 __all__: list[str] = []
