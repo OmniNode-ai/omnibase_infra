@@ -56,6 +56,9 @@ Migration from omnibase_infra.runtime (BREAKING CHANGE in v0.5.0):
         # Before (deprecated - emits DeprecationWarning, removed in v0.5.0)
         from omnibase_infra.runtime import ServiceHealth, DEFAULT_HTTP_PORT
 
+        # Before (direct file import - now raises ImportError)
+        from omnibase_infra.runtime.health_server import ServiceHealth, DEFAULT_HTTP_PORT
+
         # After (recommended - canonical location)
         from omnibase_infra.services.service_health import ServiceHealth, DEFAULT_HTTP_PORT
 

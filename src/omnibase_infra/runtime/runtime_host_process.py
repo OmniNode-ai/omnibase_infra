@@ -908,7 +908,13 @@ class RuntimeHostProcess:
                     extra={"registry_type": type(resolved_registry).__name__},
                 )
                 return resolved_registry
-            except Exception as e:
+            except (
+                RuntimeError,
+                ValueError,
+                KeyError,
+                AttributeError,
+                LookupError,
+            ) as e:
                 # Container resolution failed, fall through to singleton
                 logger.debug(
                     "Container registry resolution failed, falling back to singleton",

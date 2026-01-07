@@ -2639,9 +2639,11 @@ class TestRuntimeHostProcessContainerInjection:
         via get_handler_registry().
         """
         # Create mock service_registry that raises an error
+        # Note: Must use one of the caught exceptions (RuntimeError, ValueError,
+        # KeyError, AttributeError, LookupError) - generic Exception is not caught
         mock_service_registry = AsyncMock()
         mock_service_registry.resolve_service = AsyncMock(
-            side_effect=Exception("Resolution failed")
+            side_effect=RuntimeError("Resolution failed")
         )
 
         # Create mock container with failing service_registry
@@ -2842,9 +2844,11 @@ class TestRuntimeHostProcessContainerInjection:
         should be cached for subsequent calls.
         """
         # Create mock service_registry that raises an error
+        # Note: Must use one of the caught exceptions (RuntimeError, ValueError,
+        # KeyError, AttributeError, LookupError) - generic Exception is not caught
         mock_service_registry = AsyncMock()
         mock_service_registry.resolve_service = AsyncMock(
-            side_effect=Exception("Resolution failed")
+            side_effect=RuntimeError("Resolution failed")
         )
 
         # Create mock container with failing service_registry
