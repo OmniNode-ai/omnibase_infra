@@ -39,12 +39,22 @@ class ModelRegistrationRecord(BaseModel):
     """Registration record for node storage operations.
 
     Represents a complete node registration record that can be stored in
-    any backend (PostgreSQL, MongoDB). This model is capability-oriented,
+    any backend (PostgreSQL, etc.). This model is capability-oriented,
     focusing on what the node does rather than implementation details.
 
     Immutability:
         This model uses frozen=True to ensure records are immutable
         once created, supporting safe concurrent access and comparison.
+
+    Note on correlation_id:
+        The correlation_id field is optional and is used for distributed
+        tracing. When not provided, handlers should auto-generate one
+        for observability. This design choice allows callers to either:
+        1. Pass an existing correlation_id for trace continuity
+        2. Omit it and let the handler generate one
+
+        The auto-generation approach ensures every operation has traceability
+        even when callers don't provide explicit IDs.
 
     Attributes:
         node_id: Unique identifier for the registered node.
@@ -53,8 +63,9 @@ class ModelRegistrationRecord(BaseModel):
         capabilities: List of capability names the node provides.
         endpoints: Dict mapping endpoint type to URL.
         metadata: Additional key-value metadata (no secrets).
-        created_at: Timestamp when the record was created.
-        updated_at: Timestamp when the record was last updated.
+        created_at: Timestamp when the record was created (optional, backend may set).
+        updated_at: Timestamp when the record was last updated (optional, backend may set).
+        correlation_id: Optional correlation ID for distributed tracing.
 
     Example:
         >>> from datetime import UTC, datetime
@@ -69,6 +80,7 @@ class ModelRegistrationRecord(BaseModel):
         ...     metadata={"team": "platform"},
         ...     created_at=datetime.now(UTC),
         ...     updated_at=datetime.now(UTC),
+        ...     correlation_id=uuid4(),
         ... )
         >>> record.node_type
         <EnumNodeKind.EFFECT: 'effect'>
@@ -101,30 +113,34 @@ class ModelRegistrationRecord(BaseModel):
         default_factory=dict,
         description="Additional key-value metadata (no secrets)",
     )
-    created_at: datetime = Field(
-        ...,
-        description="Timestamp when the record was created (must be timezone-aware)",
+    created_at: datetime | None = Field(
+        default=None,
+        description="Timestamp when the record was created (timezone-aware if provided, backend may auto-set)",
     )
-    updated_at: datetime = Field(
-        ...,
-        description="Timestamp when the record was last updated (must be timezone-aware)",
+    updated_at: datetime | None = Field(
+        default=None,
+        description="Timestamp when the record was last updated (timezone-aware if provided, backend may auto-set)",
+    )
+    correlation_id: UUID | None = Field(
+        default=None,
+        description="Correlation ID for distributed tracing (auto-generated if not provided)",
     )
 
     @field_validator("created_at", "updated_at")
     @classmethod
-    def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
-        """Validate that timestamps are timezone-aware.
+    def validate_timestamp_timezone_aware(cls, v: datetime | None) -> datetime | None:
+        """Validate that timestamps are timezone-aware when provided.
 
         Args:
-            v: The timestamp value to validate.
+            v: The timestamp value to validate (or None).
 
         Returns:
-            The validated timestamp.
+            The validated timestamp or None.
 
         Raises:
             ValueError: If timestamp is naive (no timezone info).
         """
-        if v.tzinfo is None:
+        if v is not None and v.tzinfo is None:
             raise ValueError(
                 "Timestamp must be timezone-aware. Use datetime.now(UTC) or "
                 "datetime(..., tzinfo=timezone.utc) instead of naive datetime."

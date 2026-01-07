@@ -19,6 +19,7 @@ All models are:
 """
 
 from .model_registration_record import ModelRegistrationRecord
+from .model_registration_update import ModelRegistrationUpdate
 from .model_storage_health_check_result import (
     ModelStorageHealthCheckResult,
 )
@@ -28,6 +29,7 @@ from .model_upsert_result import ModelUpsertResult
 
 __all__ = [
     "ModelRegistrationRecord",
+    "ModelRegistrationUpdate",
     "ModelStorageHealthCheckResult",
     "ModelStorageQuery",
     "ModelStorageResult",

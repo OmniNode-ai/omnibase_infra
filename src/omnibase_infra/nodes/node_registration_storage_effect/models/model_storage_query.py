@@ -25,7 +25,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelStorageQuery(BaseModel):
@@ -86,21 +86,6 @@ class ModelStorageQuery(BaseModel):
         description="Number of records to skip for pagination",
         ge=0,
     )
-
-    @model_validator(mode="after")
-    def validate_query_constraints(self) -> ModelStorageQuery:
-        """Validate query constraint combinations.
-
-        When node_id is specified, other filters should typically not be used
-        as node_id already identifies a unique record. This validator logs
-        a warning but does not block - the node_id filter takes precedence.
-
-        Returns:
-            The validated query model.
-        """
-        # If node_id is specified, warn about redundant filters
-        # (but don't block - node_id takes precedence)
-        return self
 
     def is_single_record_query(self) -> bool:
         """Check if this query targets a single record by node_id.

@@ -41,17 +41,22 @@ class ModelStorageResult(BaseModel):
         once created, enabling safe sharing and caching.
 
     Attributes:
+        success: Whether the query completed successfully.
         records: List of matching registration records.
         total_count: Total number of records matching the query.
-        query_metadata: Optional metadata about query execution.
+        error: Error message if query failed (sanitized).
+        duration_ms: Time taken for the operation in milliseconds.
+        backend_type: The backend that handled the query.
         correlation_id: Correlation ID for request tracing.
 
     Example:
         >>> # Result with pagination info
         >>> result = ModelStorageResult(
-        ...     records=[record1, record2],
+        ...     success=True,
+        ...     records=(record1, record2),
         ...     total_count=150,  # More records exist
-        ...     query_metadata={"execution_time_ms": 45.2},
+        ...     duration_ms=45.2,
+        ...     backend_type="postgresql",
         ...     correlation_id=correlation_id,
         ... )
         >>> result.has_more_records()
@@ -60,18 +65,31 @@ class ModelStorageResult(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    success: bool = Field(
+        ...,
+        description="Whether the query completed successfully",
+    )
     records: tuple[ModelRegistrationRecord, ...] = Field(
         default_factory=tuple,
         description="List of matching registration records",
     )
     total_count: int = Field(
-        ...,
+        default=0,
         description="Total number of records matching the query (for pagination)",
         ge=0,
     )
-    query_metadata: dict[str, object] = Field(
-        default_factory=dict,
-        description="Optional metadata about query execution (e.g., execution_time_ms)",
+    error: str | None = Field(
+        default=None,
+        description="Sanitized error message if query failed",
+    )
+    duration_ms: float = Field(
+        default=0.0,
+        description="Time taken for the operation in milliseconds",
+        ge=0.0,
+    )
+    backend_type: str = Field(
+        default="unknown",
+        description="The backend type that handled the query",
     )
     correlation_id: UUID | None = Field(
         default=None,

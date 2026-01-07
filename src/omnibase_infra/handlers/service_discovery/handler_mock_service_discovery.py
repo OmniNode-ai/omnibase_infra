@@ -117,39 +117,25 @@ class MockServiceDiscoveryHandler:
 
     async def deregister_service(
         self,
-        service_id: str,
+        service_id: UUID,
         correlation_id: UUID | None = None,
     ) -> None:
         """Deregister a service from the mock store.
 
         Args:
-            service_id: ID of the service to deregister.
+            service_id: UUID of the service to deregister.
             correlation_id: Optional correlation ID for tracing.
         """
         correlation_id = correlation_id or uuid4()
 
-        # Convert string service_id to UUID for dict lookup
-        try:
-            uuid_service_id = UUID(service_id)
-        except ValueError:
-            # Invalid UUID format, service won't be found
-            logger.debug(
-                "Invalid service_id format for deregistration",
-                extra={
-                    "service_id": service_id,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return
-
         async with self._lock:
-            if uuid_service_id in self._services:
-                del self._services[uuid_service_id]
+            if service_id in self._services:
+                del self._services[service_id]
 
         logger.debug(
             "Mock service deregistered",
             extra={
-                "service_id": service_id,
+                "service_id": str(service_id),
                 "correlation_id": str(correlation_id),
             },
         )

@@ -222,12 +222,14 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             # Cast to Any for duck-typed consul client access
             client: Any = self._consul_client
             loop = asyncio.get_running_loop()
+            # Convert UUID to string for Consul API compatibility
+            service_id_str = str(service_info.service_id)
             await asyncio.wait_for(
                 loop.run_in_executor(
                     self._executor,
                     lambda: client.agent.service.register(
                         name=service_info.service_name,
-                        service_id=service_info.service_id,
+                        service_id=service_id_str,
                         address=service_info.address,
                         port=service_info.port,
                         tags=list(service_info.tags),
@@ -247,7 +249,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             logger.info(
                 "Service registered with Consul",
                 extra={
-                    "service_id": service_info.service_id,
+                    "service_id": service_id_str,
                     "service_name": service_info.service_name,
                     "duration_ms": duration_ms,
                     "correlation_id": str(correlation_id),
@@ -319,13 +321,13 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
 
     async def deregister_service(
         self,
-        service_id: str,
+        service_id: UUID,
         correlation_id: UUID | None = None,
     ) -> None:
         """Deregister a service from Consul.
 
         Args:
-            service_id: ID of the service to deregister.
+            service_id: UUID of the service to deregister.
             correlation_id: Optional correlation ID for tracing.
 
         Raises:
@@ -334,6 +336,8 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             InfraUnavailableError: If circuit breaker is open.
         """
         correlation_id = correlation_id or uuid4()
+        # Convert UUID to string for Consul API
+        service_id_str = str(service_id)
 
         # Check circuit breaker
         async with self._circuit_breaker_lock:
@@ -349,7 +353,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             await asyncio.wait_for(
                 loop.run_in_executor(
                     self._executor,
-                    lambda: client.agent.service.deregister(service_id),
+                    lambda: client.agent.service.deregister(service_id_str),
                 ),
                 timeout=self._timeout_seconds,
             )
@@ -361,7 +365,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             logger.info(
                 "Service deregistered from Consul",
                 extra={
-                    "service_id": service_id,
+                    "service_id": service_id_str,
                     "correlation_id": str(correlation_id),
                 },
             )

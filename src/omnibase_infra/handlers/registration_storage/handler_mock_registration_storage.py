@@ -113,7 +113,7 @@ class MockRegistrationStorageHandler:
         return ModelUpsertResult(
             success=True,
             node_id=record.node_id,
-            was_insert=was_insert,
+            operation="insert" if was_insert else "update",
             duration_ms=duration_ms,
             backend_type=self.handler_type,
             correlation_id=correlation_id,
@@ -216,7 +216,7 @@ class MockRegistrationStorageHandler:
                 return ModelUpsertResult(
                     success=False,
                     node_id=node_id,
-                    was_insert=False,
+                    operation="update",
                     error="Record not found",
                     duration_ms=duration_ms,
                     backend_type=self.handler_type,
@@ -253,7 +253,7 @@ class MockRegistrationStorageHandler:
         return ModelUpsertResult(
             success=True,
             node_id=node_id,
-            was_insert=False,
+            operation="update",
             duration_ms=duration_ms,
             backend_type=self.handler_type,
             correlation_id=correlation_id,

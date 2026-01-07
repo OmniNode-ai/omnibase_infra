@@ -1,65 +1,22 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Upsert Result Model.
+"""Upsert Result Model - Re-exported from node model.
 
-This module provides the ModelUpsertResult class representing the outcome
-of an upsert operation on registration storage.
+This module re-exports ModelUpsertResult from the canonical location
+in the node_registration_storage_effect models package.
+
+Note:
+    This re-export exists for backwards compatibility with existing handler
+    imports. New code should import directly from
+    ``omnibase_infra.nodes.node_registration_storage_effect.models``.
+
+Related:
+    - omnibase_infra.nodes.node_registration_storage_effect.models.model_upsert_result:
+        Canonical model definition
 """
 
-from __future__ import annotations
-
-from uuid import UUID
-
-from pydantic import BaseModel, ConfigDict, Field
-
-
-class ModelUpsertResult(BaseModel):
-    """Result of an upsert operation on registration storage.
-
-    Captures the outcome of inserting or updating a registration record.
-    Immutable once created.
-
-    Attributes:
-        success: Whether the upsert completed successfully.
-        node_id: The node ID that was upserted.
-        was_insert: True if this was an insert, False if update.
-        error: Sanitized error message if upsert failed.
-        duration_ms: Time taken for the operation in milliseconds.
-        backend_type: The backend that handled the upsert.
-        correlation_id: Correlation ID for tracing.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    success: bool = Field(
-        ...,
-        description="Whether the upsert completed successfully",
-    )
-    node_id: UUID = Field(
-        ...,
-        description="The node ID that was upserted",
-    )
-    was_insert: bool = Field(
-        default=False,
-        description="True if this was an insert, False if update",
-    )
-    error: str | None = Field(
-        default=None,
-        description="Sanitized error message if upsert failed",
-    )
-    duration_ms: float = Field(
-        default=0.0,
-        description="Time taken for the operation in milliseconds",
-        ge=0.0,
-    )
-    backend_type: str = Field(
-        default="unknown",
-        description="The backend type that handled the upsert",
-    )
-    correlation_id: UUID | None = Field(
-        default=None,
-        description="Correlation ID for tracing",
-    )
-
+from omnibase_infra.nodes.node_registration_storage_effect.models.model_upsert_result import (
+    ModelUpsertResult,
+)
 
 __all__ = ["ModelUpsertResult"]

@@ -86,13 +86,13 @@ class ProtocolServiceDiscoveryHandler(Protocol):
 
     async def deregister_service(
         self,
-        service_id: str,
+        service_id: UUID,
         correlation_id: UUID | None = None,
     ) -> None:
         """Deregister a service from the discovery backend.
 
         Args:
-            service_id: ID of the service to deregister.
+            service_id: UUID of the service to deregister.
             correlation_id: Optional correlation ID for tracing.
 
         Raises:

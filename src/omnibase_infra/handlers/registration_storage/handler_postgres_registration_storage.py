@@ -41,6 +41,11 @@ from omnibase_infra.handlers.registration_storage.models import (
     ModelUpsertResult,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.nodes.node_registration_storage_effect.models import (
+    ModelRegistrationUpdate,
+    ModelStorageHealthCheckResult,
+    ModelStorageQuery,
+)
 
 if TYPE_CHECKING:
     import asyncpg
@@ -345,13 +350,14 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
                 await self._reset_circuit_breaker()
 
             was_insert = result["was_insert"] if result else False
+            operation = "insert" if was_insert else "update"
             duration_ms = (time.monotonic() - start_time) * 1000
 
             logger.info(
                 "Registration stored in PostgreSQL",
                 extra={
                     "node_id": str(record.node_id),
-                    "was_insert": was_insert,
+                    "operation": operation,
                     "duration_ms": duration_ms,
                     "correlation_id": str(correlation_id),
                 },
@@ -360,7 +366,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             return ModelUpsertResult(
                 success=True,
                 node_id=record.node_id,
-                was_insert=was_insert,
+                operation=operation,
                 duration_ms=duration_ms,
                 backend_type=self.handler_type,
                 correlation_id=correlation_id,
@@ -405,19 +411,13 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
 
     async def query_registrations(
         self,
-        node_type: EnumNodeKind | None = None,
-        node_version: str | None = None,
-        limit: int = 100,
-        offset: int = 0,
+        query: ModelStorageQuery,
         correlation_id: UUID | None = None,
     ) -> ModelStorageResult:
         """Query registration records from PostgreSQL.
 
         Args:
-            node_type: Optional node type to filter by.
-            node_version: Optional version pattern to filter by.
-            limit: Maximum number of records to return.
-            offset: Number of records to skip (for pagination).
+            query: ModelStorageQuery containing filter and pagination parameters.
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
@@ -441,28 +441,30 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
         try:
             pool = await self._ensure_pool()
 
-            # Build query with filters
+            # Build query with filters from ModelStorageQuery
             conditions: list[str] = []
             params: list[object] = []
             param_idx = 1
 
-            if node_type is not None:
-                conditions.append(f"node_type = ${param_idx}")
-                params.append(node_type.value)
+            # Filter by node_id if specified (exact match)
+            if query.node_id is not None:
+                conditions.append(f"node_id = ${param_idx}")
+                params.append(query.node_id)
                 param_idx += 1
 
-            if node_version is not None:
-                conditions.append(f"node_version LIKE ${param_idx}")
-                params.append(f"{node_version}%")
+            # Filter by node_type if specified
+            if query.node_type is not None:
+                conditions.append(f"node_type = ${param_idx}")
+                params.append(query.node_type.value)
                 param_idx += 1
 
             where_clause = ""
             if conditions:
                 where_clause = " WHERE " + " AND ".join(conditions)
 
-            # Query for records
-            query = f"{SQL_QUERY_BASE}{where_clause} ORDER BY updated_at DESC LIMIT ${param_idx} OFFSET ${param_idx + 1}"
-            params.extend([limit, offset])
+            # Query for records with pagination
+            sql_query = f"{SQL_QUERY_BASE}{where_clause} ORDER BY updated_at DESC LIMIT ${param_idx} OFFSET ${param_idx + 1}"
+            params.extend([query.limit, query.offset])
 
             # Query for total count
             count_query = f"{SQL_QUERY_COUNT}{where_clause}"
@@ -471,7 +473,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             async with pool.acquire() as conn:
                 rows, count_result = await asyncio.gather(
                     asyncio.wait_for(
-                        conn.fetch(query, *params),
+                        conn.fetch(sql_query, *params),
                         timeout=self._timeout_seconds,
                     ),
                     asyncio.wait_for(
@@ -565,16 +567,15 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
     async def update_registration(
         self,
         node_id: UUID,
-        endpoints: dict[str, str] | None = None,
-        metadata: dict[str, str] | None = None,
+        updates: ModelRegistrationUpdate,
         correlation_id: UUID | None = None,
     ) -> ModelUpsertResult:
         """Update an existing registration record.
 
         Args:
             node_id: ID of the node to update.
-            endpoints: Optional new endpoints dict.
-            metadata: Optional new metadata dict.
+            updates: ModelRegistrationUpdate containing fields to update.
+                Only non-None fields will be applied.
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
@@ -598,8 +599,11 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
         try:
             pool = await self._ensure_pool()
 
-            endpoints_json = json.dumps(endpoints) if endpoints else None
-            metadata_json = json.dumps(metadata) if metadata else None
+            # Extract fields from the update model
+            endpoints_json = (
+                json.dumps(updates.endpoints) if updates.endpoints else None
+            )
+            metadata_json = json.dumps(updates.metadata) if updates.metadata else None
 
             async with pool.acquire() as conn:
                 result = await asyncio.wait_for(
@@ -627,7 +631,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             return ModelUpsertResult(
                 success=success,
                 node_id=node_id,
-                was_insert=False,
+                operation="update",
                 error="Record not found" if not success else None,
                 duration_ms=duration_ms,
                 backend_type=self.handler_type,
@@ -766,14 +770,14 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
     async def health_check(
         self,
         correlation_id: UUID | None = None,
-    ) -> dict[str, object]:
+    ) -> ModelStorageHealthCheckResult:
         """Perform a health check on the PostgreSQL connection.
 
         Args:
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            Dict with health status information.
+            ModelStorageHealthCheckResult with health status information.
         """
         correlation_id = correlation_id or uuid4()
         start_time = time.monotonic()
@@ -782,38 +786,44 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             pool = await self._ensure_pool()
 
             async with pool.acquire() as conn:
-                result = await asyncio.wait_for(
+                await asyncio.wait_for(
                     conn.fetchval("SELECT 1"),
                     timeout=5.0,  # Short timeout for health check
                 )
 
             duration_ms = (time.monotonic() - start_time) * 1000
 
-            return {
-                "healthy": True,
-                "backend_type": self.handler_type,
-                "host": self._host,
-                "port": self._port,
-                "database": self._database,
-                "pool_size": self._pool_size,
-                "circuit_breaker_open": self._circuit_breaker_open,
-                "duration_ms": duration_ms,
-                "correlation_id": str(correlation_id),
-            }
+            return ModelStorageHealthCheckResult(
+                healthy=True,
+                backend_type=self.handler_type,
+                latency_ms=duration_ms,
+                reason="ok",
+                details={
+                    "host": self._host,
+                    "port": self._port,
+                    "database": self._database,
+                    "pool_size": self._pool_size,
+                    "circuit_breaker_open": self._circuit_breaker_open,
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
         except Exception as e:
             duration_ms = (time.monotonic() - start_time) * 1000
-            return {
-                "healthy": False,
-                "backend_type": self.handler_type,
-                "host": self._host,
-                "port": self._port,
-                "database": self._database,
-                "error": f"Health check failed: {type(e).__name__}",
-                "circuit_breaker_open": self._circuit_breaker_open,
-                "duration_ms": duration_ms,
-                "correlation_id": str(correlation_id),
-            }
+            return ModelStorageHealthCheckResult(
+                healthy=False,
+                backend_type=self.handler_type,
+                latency_ms=duration_ms,
+                reason=f"Health check failed: {type(e).__name__}",
+                error_type=type(e).__name__,
+                details={
+                    "host": self._host,
+                    "port": self._port,
+                    "database": self._database,
+                    "circuit_breaker_open": self._circuit_breaker_open,
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
     async def shutdown(self) -> None:
         """Shutdown the handler and release resources."""

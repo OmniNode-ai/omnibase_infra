@@ -14,8 +14,7 @@ Architecture:
     - health_check: Backend health and connectivity check
 
     Implementations include:
-    - HandlerPostgresRegistrationStorage: PostgreSQL backend
-    - HandlerMongoRegistrationStorage: MongoDB backend
+    - PostgresRegistrationStorageHandler: PostgreSQL backend
 
     The handler_type property identifies the backend for routing.
 
@@ -26,6 +25,7 @@ Thread Safety:
 Related:
     - NodeRegistrationStorageEffect: Effect node that uses this protocol
     - ModelRegistrationRecord: Record type for storage operations
+    - ModelRegistrationUpdate: Update parameters for partial updates
     - ModelStorageQuery: Query parameters for retrieval
     - ModelStorageResult: Query result container
     - ModelStorageHealthCheckResult: Health check result for handlers
@@ -42,6 +42,7 @@ from uuid import UUID
 if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_storage_effect.models import (
         ModelRegistrationRecord,
+        ModelRegistrationUpdate,
         ModelStorageHealthCheckResult,
         ModelStorageQuery,
         ModelStorageResult,
@@ -53,16 +54,15 @@ if TYPE_CHECKING:
 class ProtocolRegistrationStorageHandler(Protocol):
     """Protocol for registration storage backend handlers.
 
-    Defines the interface for pluggable storage backends (PostgreSQL, MongoDB).
-    Each implementation provides the same operations but uses different
-    storage technology.
+    Defines the interface for pluggable storage backends. Each implementation
+    provides the same operations but uses different storage technology.
 
     Core Principle:
         "I'm interested in what you do, not what you are"
 
         The protocol is named by capability (registration storage), not by
-        implementation (PostgreSQL/MongoDB). Consumers interact with the
-        protocol interface without knowing the underlying storage technology.
+        implementation. Consumers interact with the protocol interface
+        without knowing the underlying storage technology.
 
     Protocol Verification:
         Per ONEX conventions, protocol compliance is verified via duck typing
@@ -77,13 +77,12 @@ class ProtocolRegistrationStorageHandler(Protocol):
                 registry.register_handler(handler)
 
     Implementations:
-        - HandlerPostgresRegistrationStorage: PostgreSQL backend
-        - HandlerMongoRegistrationStorage: MongoDB backend
+        - PostgresRegistrationStorageHandler: PostgreSQL backend
 
     Example:
         .. code-block:: python
 
-            class HandlerPostgresRegistrationStorage:
+            class PostgresRegistrationStorageHandler:
                 '''PostgreSQL implementation of registration storage.'''
 
                 @property
@@ -101,12 +100,12 @@ class ProtocolRegistrationStorageHandler(Protocol):
                     ...
 
             # Usage
-            handler = HandlerPostgresRegistrationStorage(pool, config)
+            handler = PostgresRegistrationStorageHandler(pool, config)
             result = await handler.store_registration(record)  # correlation_id optional
             result = await handler.store_registration(record, correlation_id)  # or explicit
 
     Attributes:
-        handler_type: Identifier for the storage backend ("postgresql", "mongodb").
+        handler_type: Identifier for the storage backend (e.g., "postgresql").
 
     Note:
         Method bodies in this Protocol use ``...`` (Ellipsis) rather than
@@ -120,10 +119,9 @@ class ProtocolRegistrationStorageHandler(Protocol):
 
         Used for handler routing and observability. Common values:
         - "postgresql": PostgreSQL relational database
-        - "mongodb": MongoDB document database
 
         Returns:
-            str: Handler type identifier (e.g., "postgresql", "mongodb")
+            str: Handler type identifier (e.g., "postgresql")
         """
         ...
 
@@ -180,7 +178,7 @@ class ProtocolRegistrationStorageHandler(Protocol):
     async def update_registration(
         self,
         node_id: UUID,
-        updates: dict[str, object],
+        updates: ModelRegistrationUpdate,
         correlation_id: UUID | None = None,
     ) -> ModelUpsertResult:
         """Update specific fields of a registration record.
@@ -190,9 +188,10 @@ class ProtocolRegistrationStorageHandler(Protocol):
 
         Args:
             node_id: UUID of the registration record to update.
-            updates: Dict of field names to new values. Dict type is used
-                here as updates are inherently dynamic (different fields
-                may be updated in different calls).
+            updates: ModelRegistrationUpdate containing fields to update.
+                Only non-None fields will be applied. The model provides
+                type-safe partial updates for endpoints, metadata,
+                capabilities, and node_version fields.
             correlation_id: Optional correlation ID for distributed tracing.
                 If not provided, implementations should generate one.
 
@@ -203,6 +202,16 @@ class ProtocolRegistrationStorageHandler(Protocol):
             InfraConnectionError: If unable to connect to storage backend.
             InfraTimeoutError: If operation times out.
             InfraUnavailableError: If circuit breaker is open.
+
+        Example:
+            >>> from omnibase_infra.nodes.node_registration_storage_effect.models import (
+            ...     ModelRegistrationUpdate,
+            ... )
+            >>> updates = ModelRegistrationUpdate(
+            ...     endpoints={"health": "http://new-host:8080/health"},
+            ...     metadata={"env": "production"},
+            ... )
+            >>> result = await handler.update_registration(node_id, updates)
         """
         ...
 
