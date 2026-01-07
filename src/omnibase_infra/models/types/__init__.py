@@ -23,7 +23,7 @@ from omnibase_core.types import JsonPrimitive
 # Use this when you need dict operations like .get(), indexing, or `in` checks.
 JsonDict = dict[str, object]
 
-# Backwards compatibility alias - use Any due to JsonType recursion issues
+# Convenience alias - use Any due to JsonType recursion issues (not backwards compatibility)
 JsonValue = Any
 
 __all__ = [

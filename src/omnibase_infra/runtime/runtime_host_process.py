@@ -71,6 +71,7 @@ from omnibase_infra.runtime.wiring import wire_default_handlers
 from omnibase_infra.utils.util_env_parsing import parse_env_float
 
 if TYPE_CHECKING:
+    from omnibase_core.container import ModelONEXContainer
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
     from omnibase_infra.event_bus.models import ModelEventMessage
@@ -155,7 +156,7 @@ class RuntimeHostProcess:
         health = await process.health_check()
         await process.stop()
 
-        # Legacy initialization (backwards compatible, no container)
+        # Direct initialization (without container)
         process = RuntimeHostProcess()  # Uses singleton registries
         ```
 
@@ -168,6 +169,7 @@ class RuntimeHostProcess:
 
     def __init__(
         self,
+        container: ModelONEXContainer | None = None,
         event_bus: InMemoryEventBus | KafkaEventBus | None = None,
         input_topic: str = DEFAULT_INPUT_TOPIC,
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
@@ -177,6 +179,28 @@ class RuntimeHostProcess:
         """Initialize the runtime host process.
 
         Args:
+            container: Optional ONEX dependency injection container. When provided,
+                the runtime host can resolve dependencies from the container if they
+                are not explicitly provided. This follows the ONEX container-based
+                DI pattern for better testability and explicit dependency management.
+
+                Container Resolution (during async start()):
+                    - If handler_registry is None and container is provided, resolves
+                      ProtocolBindingRegistry from container.service_registry
+                    - Event bus must be provided explicitly or defaults to InMemoryEventBus
+                      (required immediately during __init__)
+
+                Usage:
+                    ```python
+                    from omnibase_core.container import ModelONEXContainer
+                    from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+
+                    container = ModelONEXContainer()
+                    await wire_infrastructure_services(container)
+                    process = RuntimeHostProcess(container=container)
+                    await process.start()
+                    ```
+
             event_bus: Optional event bus instance (InMemoryEventBus or KafkaEventBus).
                        If None, creates InMemoryEventBus.
             input_topic: Topic to subscribe to for incoming envelopes.
@@ -205,7 +229,8 @@ class RuntimeHostProcess:
 
                 Resolution Order:
                     1. If handler_registry is provided, uses this pre-resolved registry
-                    2. If None, falls back to singleton via get_handler_registry()
+                    2. If container is provided, resolves from container.service_registry
+                    3. If None, falls back to singleton via get_handler_registry()
 
                 Container Integration:
                     When using container-based DI (recommended), resolve the registry from
@@ -221,6 +246,8 @@ class RuntimeHostProcess:
                     This follows ONEX container-based DI patterns for better testability
                     and explicit dependency management.
         """
+        # Store container reference for dependency resolution
+        self._container: ModelONEXContainer | None = container
         # Handler registry (container-based DI or singleton fallback)
         self._handler_registry: ProtocolBindingRegistry | None = handler_registry
 
@@ -379,8 +406,19 @@ class RuntimeHostProcess:
                 "group_id": self._group_id,
                 "health_check_timeout_seconds": self._health_check_timeout_seconds,
                 "drain_timeout_seconds": self._drain_timeout_seconds,
+                "has_container": self._container is not None,
+                "has_handler_registry": self._handler_registry is not None,
             },
         )
+
+    @property
+    def container(self) -> ModelONEXContainer | None:
+        """Return the optional ONEX dependency injection container.
+
+        Returns:
+            The container if provided during initialization, None otherwise.
+        """
+        return self._container
 
     @property
     def event_bus(self) -> InMemoryEventBus | KafkaEventBus:
@@ -749,12 +787,12 @@ class RuntimeHostProcess:
         Note: Handlers already in self._handlers (e.g., injected by tests via
         register_handler() or patch.object()) are preserved and not overwritten.
         """
-        # Get handler registry (pre-resolved or singleton)
-        handler_registry = self._get_handler_registry()
+        # Get handler registry (pre-resolved, container, or singleton)
+        handler_registry = await self._get_handler_registry()
         registered_types = handler_registry.list_protocols()
 
         logger.debug(
-            "Populating handlers from singleton registry",
+            "Populating handlers from registry",
             extra={
                 "registered_types": registered_types,
                 "existing_handlers": list(self._handlers.keys()),
@@ -834,20 +872,67 @@ class RuntimeHostProcess:
             },
         )
 
-    def _get_handler_registry(self) -> ProtocolBindingRegistry:
-        """Get handler registry (pre-resolved or singleton).
+    async def _get_handler_registry(self) -> ProtocolBindingRegistry:
+        """Get handler registry (pre-resolved, container, or singleton).
+
+        Resolution order:
+            1. If handler_registry was provided to __init__, uses it (cached)
+            2. If container was provided and has ProtocolBindingRegistry, resolves from container
+            3. Falls back to singleton via get_handler_registry()
+
+        Caching Behavior:
+            The resolved registry is cached after the first successful resolution.
+            Subsequent calls return the cached instance without re-resolving from
+            the container or re-fetching the singleton. This ensures consistent
+            registry usage throughout the runtime's lifecycle and avoids redundant
+            resolution operations.
 
         Returns:
-            ProtocolBindingRegistry instance (pre-resolved from container or singleton).
+            ProtocolBindingRegistry instance.
         """
         if self._handler_registry is not None:
-            # Use pre-resolved registry from container
+            # Use pre-resolved registry from constructor
             return self._handler_registry
-        else:
-            # Backwards compatibility: fall back to singleton pattern
-            from omnibase_infra.runtime.handler_registry import get_handler_registry
 
-            return get_handler_registry()
+        # Try to resolve from container if provided
+        if self._container is not None and self._container.service_registry is not None:
+            try:
+                resolved_registry: ProtocolBindingRegistry = (
+                    await self._container.service_registry.resolve_service(
+                        ProtocolBindingRegistry
+                    )
+                )
+                # Cache the resolved registry for subsequent calls
+                self._handler_registry = resolved_registry
+                logger.debug(
+                    "Handler registry resolved from container",
+                    extra={"registry_type": type(resolved_registry).__name__},
+                )
+                return resolved_registry
+            except (
+                RuntimeError,
+                ValueError,
+                KeyError,
+                AttributeError,
+                LookupError,
+            ) as e:
+                # Container resolution failed, fall through to singleton
+                logger.debug(
+                    "Container registry resolution failed, falling back to singleton",
+                    extra={"error": str(e)},
+                )
+
+        # Graceful degradation: fall back to singleton pattern when container unavailable
+        from omnibase_infra.runtime.handler_registry import get_handler_registry
+
+        singleton_registry = get_handler_registry()
+        # Cache for consistency with container resolution path
+        self._handler_registry = singleton_registry
+        logger.debug(
+            "Handler registry resolved from singleton",
+            extra={"registry_type": type(singleton_registry).__name__},
+        )
+        return singleton_registry
 
     async def _on_message(self, message: ModelEventMessage) -> None:
         """Handle incoming message from event bus subscription.
@@ -931,7 +1016,7 @@ class RuntimeHostProcess:
         # Step 1: Validate envelope BEFORE dispatch
         # This validates operation, prefix, payload requirements, and normalizes correlation_id
         try:
-            validate_envelope(envelope, self._get_handler_registry())
+            validate_envelope(envelope, await self._get_handler_registry())
         except EnvelopeValidationError as e:
             # Validation failed - missing operation or payload
             error_response = self._create_error_response(

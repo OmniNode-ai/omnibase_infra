@@ -88,52 +88,6 @@ class ModelBackendResult(BaseModel):
         False
         >>> result.error
         'Connection refused to database host'
-
-    Migration Notes:
-        Changed: [OMN-1001] Union Reduction Phase 1
-
-        Previous Pattern (DEPRECATED):
-            Backend results were returned as ``dict[str, bool | str]`` with
-            keys "success" and "error". This pattern had several issues:
-
-            - No type safety: ``result["success"]`` could raise KeyError
-            - Union types required runtime type checking
-            - IDE autocompletion and type hints were limited
-            - No validation of field values or constraints
-
-            Example of old pattern::
-
-                # Old pattern - dict-based (DO NOT USE)
-                result: dict[str, bool | str] = {"success": True, "error": ""}
-                if result.get("success", False):
-                    process_success()
-                error_msg = result.get("error")
-
-        New Pattern (CURRENT):
-            This Pydantic model provides strong typing, type-safe attribute
-            access, built-in validation, and immutability guarantees.
-
-            Example of new pattern::
-
-                # New pattern - Pydantic model (USE THIS)
-                result = ModelBackendResult(success=True, duration_ms=45.2)
-                if result.success:
-                    process_success()
-                error_msg = result.error  # Type-safe, None if not set
-
-        Migration Guide:
-            Replace dict access patterns with attribute access:
-
-            - ``result.get("success", False)`` -> ``result.success``
-            - ``result.get("error")`` -> ``result.error``
-            - ``result["success"]`` -> ``result.success``
-            - ``"success" in result`` -> always available as attribute
-            - ``result.get("error_code")`` -> ``result.error_code``
-
-        Breaking Change:
-            This is a breaking change. Code using the old dict-based pattern
-            will fail with AttributeError when accessing dict methods on the
-            model instance. Update all call sites to use attribute access.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

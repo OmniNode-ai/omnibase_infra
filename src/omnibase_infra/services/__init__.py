@@ -12,9 +12,6 @@ Exports:
     ModelTimeoutQueryResult: Result model for timeout queries
     ServiceTimeoutEmitter: Emitter for timeout events with markers
     ServiceTimeoutScanner: Scanner for querying overdue registration entities
-
-Related Tickets:
-    - OMN-932 (C2): Durable Timeout Handling
 """
 
 from omnibase_infra.services.service_timeout_emitter import (
