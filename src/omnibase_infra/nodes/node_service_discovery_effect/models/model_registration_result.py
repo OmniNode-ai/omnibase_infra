@@ -28,6 +28,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .enum_service_discovery_operation import EnumServiceDiscoveryOperation
+
 
 class ModelRegistrationResult(BaseModel):
     """Result of service registration or deregistration operation.
@@ -42,6 +44,7 @@ class ModelRegistrationResult(BaseModel):
     Attributes:
         success: Whether the operation completed successfully.
         service_id: ID of the registered/deregistered service.
+        operation: Type of operation performed (register or deregister).
         error: Error message if operation failed (None on success).
         backend_type: Type of backend that processed the operation.
         correlation_id: Correlation ID for distributed tracing.
@@ -52,15 +55,17 @@ class ModelRegistrationResult(BaseModel):
         >>> result = ModelRegistrationResult(
         ...     success=True,
         ...     service_id=uuid4(),
+        ...     operation=EnumServiceDiscoveryOperation.REGISTER,
         ...     backend_type="consul",
         ... )
         >>> result.success
         True
 
-        >>> # Failed registration
+        >>> # Failed deregistration
         >>> result = ModelRegistrationResult(
         ...     success=False,
         ...     service_id=uuid4(),
+        ...     operation=EnumServiceDiscoveryOperation.DEREGISTER,
         ...     error="Connection timeout to Consul agent",
         ...     backend_type="consul",
         ... )
@@ -77,6 +82,10 @@ class ModelRegistrationResult(BaseModel):
     service_id: UUID | None = Field(
         default=None,
         description="ID of the registered/deregistered service",
+    )
+    operation: EnumServiceDiscoveryOperation | None = Field(
+        default=None,
+        description="Type of operation performed (register or deregister)",
     )
     error: str | None = Field(
         default=None,

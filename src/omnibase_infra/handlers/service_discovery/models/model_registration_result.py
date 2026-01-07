@@ -17,6 +17,10 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.nodes.node_service_discovery_effect.models.enum_service_discovery_operation import (
+    EnumServiceDiscoveryOperation,
+)
+
 
 class ModelRegistrationResult(BaseModel):
     """Result of a service registration operation.
@@ -30,6 +34,7 @@ class ModelRegistrationResult(BaseModel):
     Attributes:
         success: Whether the registration completed successfully.
         service_id: ID of the registered/deregistered service.
+        operation: Type of operation performed (register or deregister).
         error: Sanitized error message if registration failed.
         duration_ms: Time taken for the operation in milliseconds.
         backend_type: The backend that handled the registration.
@@ -45,6 +50,10 @@ class ModelRegistrationResult(BaseModel):
     service_id: UUID | None = Field(
         default=None,
         description="ID of the registered/deregistered service",
+    )
+    operation: EnumServiceDiscoveryOperation | None = Field(
+        default=None,
+        description="Type of operation performed (register or deregister)",
     )
     error: str | None = Field(
         default=None,

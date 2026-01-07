@@ -43,9 +43,9 @@ import logging
 import warnings
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Literal
 from uuid import UUID
 
+from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.models.registration.model_node_capabilities import (
@@ -86,9 +86,10 @@ class ModelPostgresIntentPayload(BaseModel):
         timestamp: Event timestamp as ISO string.
 
     Example:
+        >>> from omnibase_core.enums import EnumNodeKind
         >>> payload = ModelPostgresIntentPayload(
         ...     node_id=uuid4(),
-        ...     node_type="effect",
+        ...     node_type=EnumNodeKind.EFFECT,
         ...     endpoints={"health": "/health", "api": "/api/v1"},
         ...     correlation_id=uuid4(),
         ...     timestamp="2025-01-01T00:00:00Z",
@@ -106,11 +107,9 @@ class ModelPostgresIntentPayload(BaseModel):
     )
 
     node_id: UUID = Field(..., description="Unique node identifier")
-    # Design Note: node_type uses Literal validation matching ModelNodeIntrospectionEvent
-    # to ensure only valid ONEX node types can be persisted to PostgreSQL.
-    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = Field(
-        ..., description="ONEX node type"
-    )
+    # Design Note: node_type uses EnumNodeKind for type-safe ONEX node type validation.
+    # This ensures only valid ONEX node types can be persisted to PostgreSQL.
+    node_type: EnumNodeKind = Field(..., description="ONEX node type")
     node_version: str = Field(default="1.0.0", description="Semantic version")
     capabilities: ModelNodeCapabilities = Field(
         default_factory=ModelNodeCapabilities,

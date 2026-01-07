@@ -8,7 +8,7 @@ effect node for registration storage operations.
 Core Principle:
     "I'm interested in what you do, not what you are"
 
-    Named by capability (registration.storage), not by vendor (PostgreSQL/MongoDB).
+    Named by capability (registration.storage), not by specific backend implementation.
     Supports pluggable backends through the handler protocol.
 
 Capabilities:

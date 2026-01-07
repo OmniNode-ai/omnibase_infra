@@ -8,7 +8,7 @@ dependencies for the NodeRegistrationStorageEffect node.
 Architecture:
     The registry follows ONEX container-based dependency injection:
     - Registers protocol implementations with ModelONEXContainer
-    - Supports pluggable handler backends (PostgreSQL, MongoDB)
+    - Supports pluggable handler backends (PostgreSQL, mock for testing)
     - Enables runtime handler selection based on configuration
 
     Registration is typically called during application bootstrap.
@@ -96,7 +96,7 @@ class RegistryInfraRegistrationStorage:
                 "module": "omnibase_infra.nodes.node_registration_storage_effect.protocols",
                 "description": "Protocol for registration storage backends",
                 "pluggable": True,
-                "implementations": ["postgresql", "mongodb"],
+                "implementations": ["postgresql", "mock"],
             }
 
     @staticmethod

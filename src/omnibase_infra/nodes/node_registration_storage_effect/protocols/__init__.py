@@ -13,8 +13,8 @@ Protocol Compliance:
     The protocol is @runtime_checkable for isinstance() support.
 
 Implementations:
-    - HandlerPostgresRegistrationStorage: PostgreSQL backend
-    - HandlerMongoRegistrationStorage: MongoDB backend
+    - PostgresRegistrationStorageHandler: PostgreSQL backend
+    - MockRegistrationStorageHandler: Mock backend for testing
 """
 
 from .protocol_registration_storage_handler import ProtocolRegistrationStorageHandler

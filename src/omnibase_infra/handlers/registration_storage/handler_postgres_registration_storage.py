@@ -42,7 +42,9 @@ from omnibase_infra.handlers.registration_storage.models import (
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
+    ModelDeleteResult,
     ModelRegistrationUpdate,
+    ModelStorageHealthCheckDetails,
     ModelStorageHealthCheckResult,
     ModelStorageQuery,
 )
@@ -679,7 +681,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
         self,
         node_id: UUID,
         correlation_id: UUID | None = None,
-    ) -> bool:
+    ) -> ModelDeleteResult:
         """Delete a registration record from PostgreSQL.
 
         Args:
@@ -687,7 +689,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            True if record was deleted, False if not found.
+            ModelDeleteResult with deletion outcome.
 
         Raises:
             InfraConnectionError: If connection to PostgreSQL fails.
@@ -730,7 +732,14 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
                 },
             )
 
-            return deleted
+            return ModelDeleteResult(
+                success=True,
+                node_id=node_id,
+                deleted=deleted,
+                duration_ms=duration_ms,
+                backend_type=self.handler_type,
+                correlation_id=correlation_id,
+            )
 
         except TimeoutError as e:
             async with self._circuit_breaker_lock:
@@ -798,14 +807,11 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
                 backend_type=self.handler_type,
                 latency_ms=duration_ms,
                 reason="ok",
-                details={
-                    "host": self._host,
-                    "port": self._port,
-                    "database": self._database,
-                    "pool_size": self._pool_size,
-                    "circuit_breaker_open": self._circuit_breaker_open,
-                    "correlation_id": str(correlation_id),
-                },
+                details=ModelStorageHealthCheckDetails(
+                    pool_size=self._pool_size,
+                    database_name=self._database,
+                ),
+                correlation_id=correlation_id,
             )
 
         except Exception as e:
@@ -816,13 +822,11 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
                 latency_ms=duration_ms,
                 reason=f"Health check failed: {type(e).__name__}",
                 error_type=type(e).__name__,
-                details={
-                    "host": self._host,
-                    "port": self._port,
-                    "database": self._database,
-                    "circuit_breaker_open": self._circuit_breaker_open,
-                    "correlation_id": str(correlation_id),
-                },
+                details=ModelStorageHealthCheckDetails(
+                    pool_size=self._pool_size,
+                    database_name=self._database,
+                ),
+                correlation_id=correlation_id,
             )
 
     async def shutdown(self) -> None:

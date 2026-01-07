@@ -30,6 +30,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .model_health_check_config import ModelHealthCheckConfig
+
 
 class ModelServiceRegistration(BaseModel):
     """Input model for service registration operations.
@@ -54,7 +56,7 @@ class ModelServiceRegistration(BaseModel):
             Used in discovery queries to find specific service subsets.
         metadata: Additional key-value metadata for the service.
             Backend-specific attributes can be passed here.
-        health_check: Optional health check configuration.
+        health_check: Optional health check configuration model.
             Defines how the backend should verify service health.
         correlation_id: Correlation ID for distributed tracing.
 
@@ -65,8 +67,13 @@ class ModelServiceRegistration(BaseModel):
         ...     service_name="user-service",
         ...     address="10.0.0.5",
         ...     port=8080,
-        ...     tags=["api", "v2", "production"],
+        ...     tags=("api", "v2", "production"),
         ...     metadata={"version": "2.1.0", "region": "us-east-1"},
+        ...     health_check=ModelHealthCheckConfig(
+        ...         endpoint="/health",
+        ...         interval="10s",
+        ...         timeout="5s",
+        ...     ),
         ... )
         >>> registration.service_name
         'user-service'
@@ -101,7 +108,7 @@ class ModelServiceRegistration(BaseModel):
         default_factory=dict,
         description="Additional key-value metadata for the service",
     )
-    health_check: dict[str, str] | None = Field(
+    health_check: ModelHealthCheckConfig | None = Field(
         default=None,
         description="Health check configuration (interval, timeout, endpoint)",
     )

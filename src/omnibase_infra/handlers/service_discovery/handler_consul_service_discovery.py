@@ -24,7 +24,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
 
 import consul
@@ -33,7 +33,6 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
-    InfraUnavailableError,
     ModelInfraErrorContext,
 )
 from omnibase_infra.handlers.service_discovery.models import (
@@ -108,7 +107,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         _threshold_raw = config.get("threshold", DEFAULT_CIRCUIT_BREAKER_THRESHOLD)
         threshold = (
             int(_threshold_raw)
-            if isinstance(_threshold_raw, (int, float, str))
+            if isinstance(_threshold_raw, int | float | str)
             else DEFAULT_CIRCUIT_BREAKER_THRESHOLD
         )
         _reset_timeout_raw = config.get(
@@ -116,7 +115,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         )
         reset_timeout = (
             float(_reset_timeout_raw)
-            if isinstance(_reset_timeout_raw, (int, float, str))
+            if isinstance(_reset_timeout_raw, int | float | str)
             else DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT
         )
         _service_name_raw = config.get("service_name", "consul.discovery")
@@ -141,6 +140,9 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         self._timeout_seconds = timeout_seconds
 
         # Initialize Consul client
+        # Note: We use consul.Consul type since that's what we create internally.
+        # External clients are expected to duck-type as consul.Consul.
+        self._consul_client: consul.Consul | None
         if consul_client is not None:
             # Use provided client (duck-typed ProtocolConsulClient)
             self._consul_client = consul_client
@@ -219,15 +221,15 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
                 }
 
             # Execute registration in thread pool
-            # Cast to Any for duck-typed consul client access
-            client: Any = self._consul_client
+            # Client is typed as consul.Consul (duck-typed for injected clients)
+            client = self._consul_client
             loop = asyncio.get_running_loop()
             # Convert UUID to string for Consul API compatibility
             service_id_str = str(service_info.service_id)
             await asyncio.wait_for(
                 loop.run_in_executor(
                     self._executor,
-                    lambda: client.agent.service.register(
+                    lambda: client.agent.service.register(  # type: ignore[union-attr]
                         name=service_info.service_name,
                         service_id=service_id_str,
                         address=service_info.address,
@@ -347,13 +349,13 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             )
 
         try:
-            # Cast to Any for duck-typed consul client access
-            client: Any = self._consul_client
+            # Client is typed as consul.Consul (duck-typed for injected clients)
+            client = self._consul_client
             loop = asyncio.get_running_loop()
             await asyncio.wait_for(
                 loop.run_in_executor(
                     self._executor,
-                    lambda: client.agent.service.deregister(service_id_str),
+                    lambda: client.agent.service.deregister(service_id_str),  # type: ignore[union-attr]
                 ),
                 timeout=self._timeout_seconds,
             )
@@ -438,14 +440,14 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
 
         try:
             # Query Consul catalog
-            # Cast to Any for duck-typed consul client access
-            client: Any = self._consul_client
+            # Client is typed as consul.Consul (duck-typed for injected clients)
+            client = self._consul_client
             loop = asyncio.get_running_loop()
 
             def _query_services() -> tuple[int, list[dict[str, object]]]:
                 # Use health endpoint for service discovery (includes health status)
                 tag = tags[0] if tags else None
-                result: tuple[int, list[dict[str, object]]] = client.health.service(
+                result: tuple[int, list[dict[str, object]]] = client.health.service(  # type: ignore[union-attr]
                     service_name,
                     tag=tag,
                     passing=True,  # Only healthy services
@@ -471,7 +473,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
                 svc_name = svc_data.get("Service", "")
                 address = svc_data.get("Address", "") or node_data.get("Address", "")
                 port_raw = svc_data.get("Port", 0)
-                port = int(port_raw) if isinstance(port_raw, (int, float, str)) else 0
+                port = int(port_raw) if isinstance(port_raw, int | float | str) else 0
                 svc_tags = cast(list[str], svc_data.get("Tags", []))
                 svc_meta = cast(dict[str, str], svc_data.get("Meta", {}))
 
@@ -570,13 +572,13 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         start_time = time.monotonic()
 
         try:
-            # Cast to Any for duck-typed consul client access
-            client: Any = self._consul_client
+            # Client is typed as consul.Consul (duck-typed for injected clients)
+            client = self._consul_client
             loop = asyncio.get_running_loop()
             status = await asyncio.wait_for(
                 loop.run_in_executor(
                     self._executor,
-                    lambda: client.status.leader(),
+                    lambda: client.status.leader(),  # type: ignore[union-attr]
                 ),
                 timeout=5.0,  # Short timeout for health check
             )
@@ -608,10 +610,20 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             }
 
     async def shutdown(self) -> None:
-        """Shutdown the handler and release resources."""
+        """Shutdown the handler and release resources.
+
+        Cleans up:
+        - Thread pool executor (always)
+        - Consul client (only if handler owns it)
+        """
         if self._executor is not None:
             self._executor.shutdown(wait=True)
             self._executor = None
+
+        # Clean up owned Consul client
+        if self._owns_client:
+            self._consul_client = None
+            self._owns_client = False
 
         logger.info("ConsulServiceDiscoveryHandler shutdown complete")
 

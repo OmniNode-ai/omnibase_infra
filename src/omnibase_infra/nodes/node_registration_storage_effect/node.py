@@ -3,7 +3,7 @@
 """Node Registration Storage Effect - Capability-oriented storage node.
 
 This effect node provides registration storage capabilities with pluggable backends.
-Named by capability ("registration.storage"), not by vendor (PostgreSQL/MongoDB).
+Named by capability ("registration.storage"), not by vendor (e.g., PostgreSQL).
 
 Core Principle:
     "I'm interested in what you do, not what you are"
@@ -27,7 +27,7 @@ Capabilities:
 Pluggable Backends:
     The node supports multiple storage backends through the handler protocol:
     - PostgreSQL (default): For relational storage requirements
-    - MongoDB: For document-oriented storage requirements
+    - Mock: For testing and development
 
     To configure a backend:
     ```python
@@ -75,7 +75,7 @@ class NodeRegistrationStorageEffect(NodeEffect):
     Capability: registration.storage
 
     Provides a capability-oriented interface for registration storage operations.
-    Supports pluggable handlers for different storage backends (PostgreSQL, MongoDB).
+    Supports pluggable handlers for different storage backends (PostgreSQL, mock).
 
     This node is declarative - all behavior is defined in contract.yaml and
     implemented through the handler protocol. No custom storage logic exists

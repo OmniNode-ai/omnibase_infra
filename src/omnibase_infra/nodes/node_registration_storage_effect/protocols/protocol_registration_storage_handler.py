@@ -28,7 +28,9 @@ Related:
     - ModelRegistrationUpdate: Update parameters for partial updates
     - ModelStorageQuery: Query parameters for retrieval
     - ModelStorageResult: Query result container
+    - ModelDeleteResult: Delete operation result
     - ModelStorageHealthCheckResult: Health check result for handlers
+    - ModelStorageHealthCheckDetails: Backend-specific health check diagnostics
     - ModelUpsertResult: Insert/update result
 """
 
@@ -41,6 +43,7 @@ from uuid import UUID
 
 if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_storage_effect.models import (
+        ModelDeleteResult,
         ModelRegistrationRecord,
         ModelRegistrationUpdate,
         ModelStorageHealthCheckResult,
@@ -219,11 +222,11 @@ class ProtocolRegistrationStorageHandler(Protocol):
         self,
         node_id: UUID,
         correlation_id: UUID | None = None,
-    ) -> bool:
+    ) -> ModelDeleteResult:
         """Delete a registration record by node ID.
 
-        Removes the registration record if it exists. Returns True if
-        a record was deleted, False if no record was found.
+        Removes the registration record if it exists. The result indicates
+        whether the operation succeeded and whether a record was deleted.
 
         Args:
             node_id: UUID of the registration record to delete.
@@ -231,12 +234,20 @@ class ProtocolRegistrationStorageHandler(Protocol):
                 If not provided, implementations should generate one.
 
         Returns:
-            bool: True if record was deleted, False if not found.
+            ModelDeleteResult: Result indicating success/failure and whether
+                a record was actually deleted (deleted=False if not found).
 
         Raises:
             InfraConnectionError: If unable to connect to storage backend.
             InfraTimeoutError: If operation times out.
             InfraUnavailableError: If circuit breaker is open.
+
+        Example:
+            >>> result = await handler.delete_registration(node_id)
+            >>> if result.was_deleted():
+            ...     print("Record deleted successfully")
+            >>> elif result.success and not result.deleted:
+            ...     print("Record not found")
         """
         ...
 
@@ -256,21 +267,28 @@ class ProtocolRegistrationStorageHandler(Protocol):
         Returns:
             ModelStorageHealthCheckResult: Health status including:
                 - healthy: bool indicating overall health
-                - handler_type: str identifying the backend
+                - backend_type: str identifying the backend
                 - latency_ms: float connection latency
                 - reason: str explaining the health status
                 - error_type: str | None exception type if failed
-                - details: dict with backend-specific info
+                - details: ModelStorageHealthCheckDetails with typed diagnostics
+                - correlation_id: UUID | None for tracing
 
         Example:
+            >>> from omnibase_infra.nodes.node_registration_storage_effect.models import (
+            ...     ModelStorageHealthCheckDetails,
+            ... )
             >>> health = await handler.health_check()
             >>> health
             ModelStorageHealthCheckResult(
                 healthy=True,
-                handler_type="postgresql",
+                backend_type="postgresql",
                 latency_ms=2.5,
                 reason="ok",
-                details={"pool_size": 10, "active_connections": 3},
+                details=ModelStorageHealthCheckDetails(
+                    pool_size=10,
+                    active_connections=3,
+                ),
             )
         """
         ...

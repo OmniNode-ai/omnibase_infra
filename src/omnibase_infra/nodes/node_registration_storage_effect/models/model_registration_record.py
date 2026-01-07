@@ -3,7 +3,7 @@
 """Registration Record Model for Storage Operations.
 
 This module provides ModelRegistrationRecord, representing a complete node
-registration record for storage in backend systems (PostgreSQL, MongoDB).
+registration record for storage in backend systems (e.g., PostgreSQL).
 
 Architecture:
     ModelRegistrationRecord captures all information about a registered node:

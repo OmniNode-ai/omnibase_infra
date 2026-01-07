@@ -29,6 +29,10 @@ from omnibase_infra.handlers.registration_storage.models import (
     ModelStorageResult,
     ModelUpsertResult,
 )
+from omnibase_infra.nodes.node_registration_storage_effect.models import (
+    ModelDeleteResult,
+    ModelStorageHealthCheckResult,
+)
 
 
 @runtime_checkable
@@ -143,7 +147,7 @@ class ProtocolRegistrationStorageHandler(Protocol):
         self,
         node_id: UUID,
         correlation_id: UUID | None = None,
-    ) -> bool:
+    ) -> ModelDeleteResult:
         """Delete a registration record from storage.
 
         Args:
@@ -151,7 +155,7 @@ class ProtocolRegistrationStorageHandler(Protocol):
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            True if record was deleted, False if not found.
+            ModelDeleteResult with deletion outcome.
 
         Raises:
             InfraConnectionError: If connection to backend fails.
@@ -163,14 +167,14 @@ class ProtocolRegistrationStorageHandler(Protocol):
     async def health_check(
         self,
         correlation_id: UUID | None = None,
-    ) -> dict[str, object]:
+    ) -> ModelStorageHealthCheckResult:
         """Perform a health check on the handler.
 
         Args:
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            Dict with health status information.
+            ModelStorageHealthCheckResult with health status information.
         """
         ...
 

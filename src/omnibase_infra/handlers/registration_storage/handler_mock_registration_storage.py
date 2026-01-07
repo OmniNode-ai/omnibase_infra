@@ -25,6 +25,11 @@ from omnibase_infra.handlers.registration_storage.models import (
     ModelStorageResult,
     ModelUpsertResult,
 )
+from omnibase_infra.nodes.node_registration_storage_effect.models import (
+    ModelDeleteResult,
+    ModelStorageHealthCheckDetails,
+    ModelStorageHealthCheckResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +268,7 @@ class MockRegistrationStorageHandler:
         self,
         node_id: UUID,
         correlation_id: UUID | None = None,
-    ) -> bool:
+    ) -> ModelDeleteResult:
         """Delete a registration record from the mock store.
 
         Args:
@@ -271,9 +276,10 @@ class MockRegistrationStorageHandler:
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            True if record was deleted, False if not found.
+            ModelDeleteResult with deletion outcome.
         """
         correlation_id = correlation_id or uuid4()
+        start_time = time.monotonic()
 
         async with self._lock:
             if node_id in self._records:
@@ -281,6 +287,8 @@ class MockRegistrationStorageHandler:
                 deleted = True
             else:
                 deleted = False
+
+        duration_ms = (time.monotonic() - start_time) * 1000
 
         logger.debug(
             "Mock registration deletion completed",
@@ -291,31 +299,45 @@ class MockRegistrationStorageHandler:
             },
         )
 
-        return deleted
+        return ModelDeleteResult(
+            success=True,
+            node_id=node_id,
+            deleted=deleted,
+            duration_ms=duration_ms,
+            backend_type=self.handler_type,
+            correlation_id=correlation_id,
+        )
 
     async def health_check(
         self,
         correlation_id: UUID | None = None,
-    ) -> dict[str, object]:
+    ) -> ModelStorageHealthCheckResult:
         """Perform a health check on the mock handler.
 
         Args:
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            Dict with health status information.
+            ModelStorageHealthCheckResult with health status information.
         """
         correlation_id = correlation_id or uuid4()
+        start_time = time.monotonic()
 
         async with self._lock:
             record_count = len(self._records)
 
-        return {
-            "healthy": True,
-            "backend_type": self.handler_type,
-            "record_count": record_count,
-            "correlation_id": str(correlation_id),
-        }
+        latency_ms = (time.monotonic() - start_time) * 1000
+
+        return ModelStorageHealthCheckResult(
+            healthy=True,
+            backend_type=self.handler_type,
+            latency_ms=latency_ms,
+            reason="ok",
+            details=ModelStorageHealthCheckDetails(
+                server_version="mock-1.0.0",
+            ),
+            correlation_id=correlation_id,
+        )
 
     async def clear(self) -> None:
         """Clear all records from the mock store.

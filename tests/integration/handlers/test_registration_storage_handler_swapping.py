@@ -50,6 +50,10 @@ from omnibase_infra.handlers.registration_storage.handler_mock_registration_stor
 from omnibase_infra.handlers.registration_storage.protocol_registration_storage_handler import (
     ProtocolRegistrationStorageHandler,
 )
+from omnibase_infra.nodes.node_registration_storage_effect.models import (
+    ModelDeleteResult,
+    ModelStorageHealthCheckResult,
+)
 from omnibase_infra.nodes.node_registration_storage_effect.models.model_registration_record import (
     ModelRegistrationRecord,
 )
@@ -205,20 +209,26 @@ class BaseHandlerSwappingTests:
         )
 
         # Delete the record
-        deleted = await handler.delete_registration(
+        delete_result = await handler.delete_registration(
             node_id=sample_registration_record.node_id,
             correlation_id=correlation_id,
         )
 
-        assert deleted, "Delete should return True for existing record"
+        assert isinstance(delete_result, ModelDeleteResult), (
+            "delete_registration must return ModelDeleteResult"
+        )
+        assert delete_result.was_deleted(), "Delete should indicate record was deleted"
 
-        # Verify record is gone - delete again should return False
-        deleted_again = await handler.delete_registration(
+        # Verify record is gone - delete again should return deleted=False
+        delete_result_again = await handler.delete_registration(
             node_id=sample_registration_record.node_id,
             correlation_id=correlation_id,
         )
 
-        assert not deleted_again, "Delete should return False for non-existent record"
+        assert delete_result_again.success, "Delete operation should succeed"
+        assert not delete_result_again.deleted, (
+            "Delete should indicate no record was deleted for non-existent record"
+        )
 
     async def test_health_check_returns_status(
         self,
@@ -229,9 +239,14 @@ class BaseHandlerSwappingTests:
 
         health_status = await handler.health_check(correlation_id=correlation_id)
 
-        assert isinstance(health_status, dict), "health_check must return dict"
-        assert "healthy" in health_status or "backend_type" in health_status, (
-            "health_check must include health status information"
+        assert isinstance(health_status, ModelStorageHealthCheckResult), (
+            "health_check must return ModelStorageHealthCheckResult"
+        )
+        assert hasattr(health_status, "healthy"), (
+            "health_check must include healthy attribute"
+        )
+        assert hasattr(health_status, "backend_type"), (
+            "health_check must include backend_type attribute"
         )
 
 
@@ -487,12 +502,13 @@ class TestHandlerFactoryPattern:
         assert result1.success == result2.success
         assert result1.node_id == result2.node_id
 
-        # Health checks should both work
+        # Health checks should both work and return ModelStorageHealthCheckResult
         health1 = await handler1.health_check(correlation_id)
         health2 = await handler2.health_check(correlation_id)
 
-        assert isinstance(health1, dict)
-        assert isinstance(health2, dict)
+        assert isinstance(health1, ModelStorageHealthCheckResult)
+        assert isinstance(health2, ModelStorageHealthCheckResult)
+        assert health1.healthy == health2.healthy
 
 
 # =============================================================================
@@ -544,8 +560,10 @@ class TestRuntimeHandlerSwapping:
         assert result2.success
 
         # Both handlers should report healthy
-        assert (await current_handler.health_check())["healthy"]
-        assert (await new_handler.health_check())["healthy"]
+        current_health = await current_handler.health_check()
+        new_health = await new_handler.health_check()
+        assert current_health.healthy
+        assert new_health.healthy
 
     @pytest.mark.asyncio
     async def test_handler_interface_contract(self) -> None:
@@ -585,7 +603,11 @@ class TestRuntimeHandlerSwapping:
                 record.node_id, correlation_id
             )
 
-            return (store_result.success, query_result.success, delete_result)
+            return (
+                store_result.success,
+                query_result.success,
+                delete_result.was_deleted(),
+            )
 
         # Test with mock handler
         mock = MockRegistrationStorageHandler()

@@ -1,9 +1,15 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Service Information Model.
+"""Service Information Model for Service Discovery Handlers.
 
 This module provides the ModelServiceInfo class representing service metadata
-for service discovery operations.
+for service discovery handler operations.
+
+Note:
+    This model is aligned with the node-level ModelServiceInfo at
+    nodes/node_service_discovery_effect/models/model_service_info.py
+    with additional handler-level fields (health_check_url, registered_at,
+    correlation_id) for handler context and tracing.
 """
 
 from __future__ import annotations
@@ -19,22 +25,28 @@ from omnibase_infra.nodes.node_service_discovery_effect.models.enum_health_statu
 
 
 class ModelServiceInfo(BaseModel):
-    """Service information for discovery and registration.
+    """Service information for discovery and registration handlers.
 
     Represents a service instance with its metadata for service discovery
-    operations. Immutable once created.
+    handler operations. Immutable once created.
+
+    This model is schema-compatible with the node-level ModelServiceInfo,
+    with additional handler-level fields for tracing and context:
+    - health_check_url: URL for health check verification
+    - registered_at: Timestamp for registration tracking
+    - correlation_id: Correlation ID for distributed tracing
 
     Attributes:
         service_id: Unique identifier for the service instance.
         service_name: Human-readable name of the service.
         address: Network address (hostname or IP) of the service.
         port: Network port the service listens on.
-        tags: List of tags for filtering and categorization.
+        tags: Tags for filtering and categorization.
         health_status: Current health status of the service.
         metadata: Additional key-value metadata for the service.
-        health_check_url: Optional URL for health checks.
-        registered_at: Timestamp when the service was registered.
-        correlation_id: Correlation ID for tracing.
+        health_check_url: Optional URL for health checks (handler extension).
+        registered_at: Timestamp when the service was registered (handler extension).
+        correlation_id: Correlation ID for tracing (handler extension).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
