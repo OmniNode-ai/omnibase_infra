@@ -9,6 +9,7 @@ Available Models:
     - ModelRegistrationRecord: Complete registration record for storage
     - ModelStorageQuery: Query parameters with filtering and pagination
     - ModelStorageResult: Query results with records and metadata
+    - ModelStorageHealthCheckResult: Health check result for storage backends
     - ModelUpsertResult: Insert/update operation result
 
 All models are:
@@ -18,12 +19,16 @@ All models are:
 """
 
 from .model_registration_record import ModelRegistrationRecord
+from .model_storage_health_check_result import (
+    ModelStorageHealthCheckResult,
+)
 from .model_storage_query import ModelStorageQuery
 from .model_storage_result import ModelStorageResult
 from .model_upsert_result import ModelUpsertResult
 
 __all__ = [
     "ModelRegistrationRecord",
+    "ModelStorageHealthCheckResult",
     "ModelStorageQuery",
     "ModelStorageResult",
     "ModelUpsertResult",

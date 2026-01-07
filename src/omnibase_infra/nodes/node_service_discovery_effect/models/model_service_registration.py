@@ -26,13 +26,9 @@ Related:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
-
-if TYPE_CHECKING:
-    from .model_health_check_config import ModelHealthCheckConfig
 
 
 class ModelServiceRegistration(BaseModel):

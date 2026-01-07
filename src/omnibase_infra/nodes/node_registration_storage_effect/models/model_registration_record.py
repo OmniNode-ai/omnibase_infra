@@ -27,10 +27,11 @@ Related:
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
-from typing import Literal
 from uuid import UUID
 
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -47,7 +48,7 @@ class ModelRegistrationRecord(BaseModel):
 
     Attributes:
         node_id: Unique identifier for the registered node.
-        node_type: Type of ONEX node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
+        node_type: Type of ONEX node (EnumNodeKind).
         node_version: Semantic version string of the node.
         capabilities: List of capability names the node provides.
         endpoints: Dict mapping endpoint type to URL.
@@ -58,9 +59,10 @@ class ModelRegistrationRecord(BaseModel):
     Example:
         >>> from datetime import UTC, datetime
         >>> from uuid import uuid4
+        >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
         >>> record = ModelRegistrationRecord(
         ...     node_id=uuid4(),
-        ...     node_type="EFFECT",
+        ...     node_type=EnumNodeKind.EFFECT,
         ...     node_version="1.0.0",
         ...     capabilities=["registration.storage", "registration.storage.query"],
         ...     endpoints={"health": "http://localhost:8080/health"},
@@ -69,7 +71,7 @@ class ModelRegistrationRecord(BaseModel):
         ...     updated_at=datetime.now(UTC),
         ... )
         >>> record.node_type
-        'EFFECT'
+        <EnumNodeKind.EFFECT: 'effect'>
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -78,7 +80,7 @@ class ModelRegistrationRecord(BaseModel):
         ...,
         description="Unique identifier for the registered node",
     )
-    node_type: Literal["EFFECT", "COMPUTE", "REDUCER", "ORCHESTRATOR"] = Field(
+    node_type: EnumNodeKind = Field(
         ...,
         description="Type of ONEX node",
     )
@@ -143,8 +145,6 @@ class ModelRegistrationRecord(BaseModel):
         Raises:
             ValueError: If version doesn't match expected pattern.
         """
-        import re
-
         # Basic semver pattern (major.minor.patch with optional pre-release)
         pattern = r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?$"
         if not re.match(pattern, v):

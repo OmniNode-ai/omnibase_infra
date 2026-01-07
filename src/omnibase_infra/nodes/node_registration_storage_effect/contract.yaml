@@ -108,8 +108,6 @@ dependencies:
     implementations:
       - name: "postgresql"
         description: "PostgreSQL implementation for registration storage"
-      - name: "mongodb"
-        description: "MongoDB implementation for registration storage"
 # Handler routing (for pluggable backends)
 handler_routing:
   routing_strategy: "handler_type_match"
@@ -117,14 +115,9 @@ handler_routing:
   handlers:
     - handler_type: "postgresql"
       handler:
-        name: "HandlerPostgresRegistrationStorage"
-        module: "omnibase_infra.handlers.storage.handler_postgres_registration_storage"
+        name: "PostgresRegistrationStorageHandler"
+        module: "omnibase_infra.handlers.registration_storage.handler_postgres_registration_storage"
       description: "PostgreSQL storage handler"
-    - handler_type: "mongodb"
-      handler:
-        name: "HandlerMongoRegistrationStorage"
-        module: "omnibase_infra.handlers.storage.handler_mongo_registration_storage"
-      description: "MongoDB storage handler"
 # Error handling configuration
 error_handling:
   retry_policy:

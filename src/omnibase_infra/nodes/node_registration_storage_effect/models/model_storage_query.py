@@ -22,9 +22,9 @@ Related:
 
 from __future__ import annotations
 
-from typing import Literal
 from uuid import UUID
 
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -40,14 +40,15 @@ class ModelStorageQuery(BaseModel):
 
     Attributes:
         node_id: Filter by specific node ID (exact match).
-        node_type: Filter by node type (EFFECT, COMPUTE, etc.).
+        node_type: Filter by node type (EnumNodeKind).
         capability_filter: Filter by capability name (contains match).
         limit: Maximum number of records to return.
         offset: Number of records to skip for pagination.
 
     Example:
         >>> # Query all EFFECT nodes
-        >>> query = ModelStorageQuery(node_type="EFFECT", limit=100)
+        >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
+        >>> query = ModelStorageQuery(node_type=EnumNodeKind.EFFECT, limit=100)
 
         >>> # Query specific node
         >>> query = ModelStorageQuery(node_id=some_uuid)
@@ -66,7 +67,7 @@ class ModelStorageQuery(BaseModel):
         default=None,
         description="Filter by specific node ID (exact match)",
     )
-    node_type: Literal["EFFECT", "COMPUTE", "REDUCER", "ORCHESTRATOR"] | None = Field(
+    node_type: EnumNodeKind | None = Field(
         default=None,
         description="Filter by node type",
     )

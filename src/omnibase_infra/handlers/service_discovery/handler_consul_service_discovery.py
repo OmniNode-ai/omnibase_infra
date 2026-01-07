@@ -23,9 +23,9 @@ import asyncio
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
 
 import consul
 
@@ -463,19 +463,28 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
                 # Cast nested dicts for type safety
                 svc_data = cast(dict[str, object], svc.get("Service", {}))
                 node_data = cast(dict[str, object], svc.get("Node", {}))
-                svc_id = svc_data.get("ID", "")
+                svc_id_str = str(svc_data.get("ID", ""))
                 svc_name = svc_data.get("Service", "")
                 address = svc_data.get("Address", "") or node_data.get("Address", "")
-                port = svc_data.get("Port", 0)
+                port_raw = svc_data.get("Port", 0)
+                port = int(port_raw) if isinstance(port_raw, (int, float, str)) else 0
                 svc_tags = cast(list[str], svc_data.get("Tags", []))
                 svc_meta = cast(dict[str, str], svc_data.get("Meta", {}))
 
-                if svc_id and svc_name and address and port:
+                if svc_id_str and svc_name and address and port:
+                    # Convert Consul service ID string to UUID
+                    # Try to parse as UUID, otherwise generate deterministic UUID from string
+                    try:
+                        svc_id = UUID(svc_id_str)
+                    except ValueError:
+                        # Generate deterministic UUID from service ID string using uuid5
+                        svc_id = uuid5(NAMESPACE_DNS, svc_id_str)
+
                     service_infos.append(
                         ModelServiceInfo(
                             service_id=svc_id,
-                            service_name=svc_name,
-                            address=address,
+                            service_name=str(svc_name),
+                            address=str(address),
                             port=port,
                             tags=tuple(svc_tags or []),
                             metadata=svc_meta or {},

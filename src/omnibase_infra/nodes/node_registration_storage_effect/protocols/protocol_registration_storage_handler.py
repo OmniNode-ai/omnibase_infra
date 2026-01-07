@@ -28,6 +28,7 @@ Related:
     - ModelRegistrationRecord: Record type for storage operations
     - ModelStorageQuery: Query parameters for retrieval
     - ModelStorageResult: Query result container
+    - ModelStorageHealthCheckResult: Health check result for handlers
     - ModelUpsertResult: Insert/update result
 """
 
@@ -41,6 +42,7 @@ from uuid import UUID
 if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_storage_effect.models import (
         ModelRegistrationRecord,
+        ModelStorageHealthCheckResult,
         ModelStorageQuery,
         ModelStorageResult,
         ModelUpsertResult,
@@ -91,14 +93,17 @@ class ProtocolRegistrationStorageHandler(Protocol):
                 async def store_registration(
                     self,
                     record: ModelRegistrationRecord,
-                    correlation_id: UUID,
+                    correlation_id: UUID | None = None,
                 ) -> ModelUpsertResult:
                     # PostgreSQL-specific implementation
+                    # Generate correlation_id if not provided
+                    cid = correlation_id or uuid4()
                     ...
 
             # Usage
             handler = HandlerPostgresRegistrationStorage(pool, config)
-            result = await handler.store_registration(record, correlation_id)
+            result = await handler.store_registration(record)  # correlation_id optional
+            result = await handler.store_registration(record, correlation_id)  # or explicit
 
     Attributes:
         handler_type: Identifier for the storage backend ("postgresql", "mongodb").
@@ -125,7 +130,7 @@ class ProtocolRegistrationStorageHandler(Protocol):
     async def store_registration(
         self,
         record: ModelRegistrationRecord,
-        correlation_id: UUID,
+        correlation_id: UUID | None = None,
     ) -> ModelUpsertResult:
         """Store a registration record (idempotent upsert).
 
@@ -134,7 +139,8 @@ class ProtocolRegistrationStorageHandler(Protocol):
 
         Args:
             record: The registration record to store.
-            correlation_id: Correlation ID for distributed tracing.
+            correlation_id: Optional correlation ID for distributed tracing.
+                If not provided, implementations should generate one.
 
         Returns:
             ModelUpsertResult: Result indicating success/failure and operation type.
@@ -149,7 +155,7 @@ class ProtocolRegistrationStorageHandler(Protocol):
     async def query_registrations(
         self,
         query: ModelStorageQuery,
-        correlation_id: UUID,
+        correlation_id: UUID | None = None,
     ) -> ModelStorageResult:
         """Query registration records with optional filters.
 
@@ -158,7 +164,8 @@ class ProtocolRegistrationStorageHandler(Protocol):
 
         Args:
             query: Query parameters including filters and pagination.
-            correlation_id: Correlation ID for distributed tracing.
+            correlation_id: Optional correlation ID for distributed tracing.
+                If not provided, implementations should generate one.
 
         Returns:
             ModelStorageResult: Result containing matching records and total count.
@@ -174,7 +181,7 @@ class ProtocolRegistrationStorageHandler(Protocol):
         self,
         node_id: UUID,
         updates: dict[str, object],
-        correlation_id: UUID,
+        correlation_id: UUID | None = None,
     ) -> ModelUpsertResult:
         """Update specific fields of a registration record.
 
@@ -183,8 +190,11 @@ class ProtocolRegistrationStorageHandler(Protocol):
 
         Args:
             node_id: UUID of the registration record to update.
-            updates: Dict of field names to new values.
-            correlation_id: Correlation ID for distributed tracing.
+            updates: Dict of field names to new values. Dict type is used
+                here as updates are inherently dynamic (different fields
+                may be updated in different calls).
+            correlation_id: Optional correlation ID for distributed tracing.
+                If not provided, implementations should generate one.
 
         Returns:
             ModelUpsertResult: Result indicating success/failure.
@@ -199,7 +209,7 @@ class ProtocolRegistrationStorageHandler(Protocol):
     async def delete_registration(
         self,
         node_id: UUID,
-        correlation_id: UUID,
+        correlation_id: UUID | None = None,
     ) -> bool:
         """Delete a registration record by node ID.
 
@@ -208,7 +218,8 @@ class ProtocolRegistrationStorageHandler(Protocol):
 
         Args:
             node_id: UUID of the registration record to delete.
-            correlation_id: Correlation ID for distributed tracing.
+            correlation_id: Optional correlation ID for distributed tracing.
+                If not provided, implementations should generate one.
 
         Returns:
             bool: True if record was deleted, False if not found.
@@ -220,27 +231,37 @@ class ProtocolRegistrationStorageHandler(Protocol):
         """
         ...
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(
+        self,
+        correlation_id: UUID | None = None,
+    ) -> ModelStorageHealthCheckResult:
         """Check storage backend health and connectivity.
 
         Performs a lightweight connectivity check to verify the storage
         backend is reachable and responsive.
 
+        Args:
+            correlation_id: Optional correlation ID for distributed tracing.
+                If not provided, implementations should generate one.
+
         Returns:
-            dict[str, object]: Health status including:
+            ModelStorageHealthCheckResult: Health status including:
                 - healthy: bool indicating overall health
                 - handler_type: str identifying the backend
                 - latency_ms: float connection latency
+                - reason: str explaining the health status
+                - error_type: str | None exception type if failed
                 - details: dict with backend-specific info
 
         Example:
             >>> health = await handler.health_check()
             >>> health
-            {
-                "healthy": True,
-                "handler_type": "postgresql",
-                "latency_ms": 2.5,
-                "details": {"pool_size": 10, "active_connections": 3}
-            }
+            ModelStorageHealthCheckResult(
+                healthy=True,
+                handler_type="postgresql",
+                latency_ms=2.5,
+                reason="ok",
+                details={"pool_size": 10, "active_connections": 3},
+            )
         """
         ...

@@ -42,6 +42,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from omnibase_infra.errors import ProtocolConfigurationError
+
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
@@ -155,7 +157,7 @@ class RegistryInfraServiceDiscovery:
             Configured handler implementation.
 
         Raises:
-            RuntimeError: If no handler can be configured.
+            ProtocolConfigurationError: If no handler can be configured.
 
         Note:
             This is a placeholder implementation. Actual handler
@@ -167,7 +169,7 @@ class RegistryInfraServiceDiscovery:
         # 1. Read configuration (CONSUL_AGENT_URL, K8S_NAMESPACE, etc.)
         # 2. Instantiate appropriate handler (ConsulHandler, K8sHandler, etc.)
         # 3. Return the configured handler
-        raise RuntimeError(
+        raise ProtocolConfigurationError(
             "No service discovery handler configured. "
             "Use register_with_handler() to provide a handler, "
             "or implement handler auto-configuration."

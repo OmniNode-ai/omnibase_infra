@@ -25,6 +25,7 @@ class ModelRegistrationRecord(BaseModel):
         node_id: Unique identifier for the node.
         node_type: Type of ONEX node (EnumNodeKind).
         node_version: Semantic version of the node.
+        capabilities: List of capability names the node provides.
         endpoints: Dict of endpoint type to URL.
         metadata: Additional key-value metadata.
         created_at: Timestamp when the record was created.
@@ -46,6 +47,10 @@ class ModelRegistrationRecord(BaseModel):
         ...,
         description="Semantic version of the node",
         min_length=1,
+    )
+    capabilities: list[str] = Field(
+        default_factory=list,
+        description="List of capability names the node provides",
     )
     endpoints: dict[str, str] = Field(
         default_factory=dict,

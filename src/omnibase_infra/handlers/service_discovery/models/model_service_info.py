@@ -13,6 +13,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.nodes.node_service_discovery_effect.models.enum_health_status import (
+    EnumHealthStatus,
+)
+
 
 class ModelServiceInfo(BaseModel):
     """Service information for discovery and registration.
@@ -26,9 +30,11 @@ class ModelServiceInfo(BaseModel):
         address: Network address (hostname or IP) of the service.
         port: Network port the service listens on.
         tags: List of tags for filtering and categorization.
+        health_status: Current health status of the service.
         metadata: Additional key-value metadata for the service.
         health_check_url: Optional URL for health checks.
         registered_at: Timestamp when the service was registered.
+        correlation_id: Correlation ID for tracing.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -42,13 +48,12 @@ class ModelServiceInfo(BaseModel):
         description="Human-readable name of the service",
         min_length=1,
     )
-    address: str = Field(
-        ...,
+    address: str | None = Field(
+        default=None,
         description="Network address (hostname or IP) of the service",
-        min_length=1,
     )
-    port: int = Field(
-        ...,
+    port: int | None = Field(
+        default=None,
         description="Network port the service listens on",
         ge=1,
         le=65535,
@@ -56,6 +61,10 @@ class ModelServiceInfo(BaseModel):
     tags: tuple[str, ...] = Field(
         default=(),
         description="Tags for filtering and categorization",
+    )
+    health_status: EnumHealthStatus = Field(
+        default=EnumHealthStatus.UNKNOWN,
+        description="Current health status of the service",
     )
     metadata: dict[str, str] = Field(
         default_factory=dict,
