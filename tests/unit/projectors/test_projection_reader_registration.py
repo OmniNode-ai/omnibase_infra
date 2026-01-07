@@ -129,11 +129,10 @@ def reader(mock_pool: MagicMock) -> ProjectionReaderRegistration:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 class TestProjectionReaderBasics:
     """Test basic reader instantiation and configuration."""
 
-    async def test_reader_instantiation(self, mock_pool: MagicMock) -> None:
+    def test_reader_instantiation(self, mock_pool: MagicMock) -> None:
         """Test that reader initializes correctly with connection pool."""
         reader = ProjectionReaderRegistration(pool=mock_pool)
 
@@ -143,7 +142,7 @@ class TestProjectionReaderBasics:
         assert reader._circuit_breaker_failures == 0
         assert reader._circuit_breaker_open is False
 
-    async def test_reader_circuit_breaker_config(
+    def test_reader_circuit_breaker_config(
         self, reader: ProjectionReaderRegistration
     ) -> None:
         """Test that circuit breaker is configured correctly."""
@@ -152,7 +151,7 @@ class TestProjectionReaderBasics:
         assert reader.circuit_breaker_reset_timeout == 60.0
         assert reader.service_name == "projection_reader.registration"
 
-    async def test_row_to_projection_conversion(
+    def test_row_to_projection_conversion(
         self, reader: ProjectionReaderRegistration
     ) -> None:
         """Test internal row to projection conversion."""
@@ -168,7 +167,7 @@ class TestProjectionReaderBasics:
         assert projection.node_version == "1.0.0"
         assert isinstance(projection.capabilities, ModelNodeCapabilities)
 
-    async def test_row_to_projection_with_dict_capabilities(
+    def test_row_to_projection_with_dict_capabilities(
         self, reader: ProjectionReaderRegistration
     ) -> None:
         """Test row conversion with dict capabilities (already parsed)."""
@@ -1327,3 +1326,23 @@ class TestProjectionReaderCapabilityQueries:
 
         with pytest.raises(InfraUnavailableError):
             await reader.get_by_capability_tags_any(["postgres.storage"])
+
+    # ============================================================
+    # Empty tags list validation tests
+    # ============================================================
+
+    async def test_get_by_capability_tags_all_rejects_empty_list(
+        self,
+        reader: ProjectionReaderRegistration,
+    ) -> None:
+        """Empty tags list should raise ValueError for get_by_capability_tags_all."""
+        with pytest.raises(ValueError, match="tags list cannot be empty"):
+            await reader.get_by_capability_tags_all([])
+
+    async def test_get_by_capability_tags_any_rejects_empty_list(
+        self,
+        reader: ProjectionReaderRegistration,
+    ) -> None:
+        """Empty tags list should raise ValueError for get_by_capability_tags_any."""
+        with pytest.raises(ValueError, match="tags list cannot be empty"):
+            await reader.get_by_capability_tags_any([])

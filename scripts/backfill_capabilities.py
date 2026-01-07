@@ -344,6 +344,7 @@ async def get_connection() -> asyncpg.Connection:
         user=config["user"],
         database=config["database"],
         password=config["password"],
+        timeout=30.0,  # 30 second connection timeout
     )
 
 
@@ -382,9 +383,11 @@ def extract_capability_tags(capabilities: dict[str, object]) -> list[str]:
     config = capabilities.get("config", {})
     if isinstance(config, dict):
         if "capability_tags" in config and isinstance(config["capability_tags"], list):
-            tags.extend(config["capability_tags"])
+            tags.extend(str(tag) for tag in config["capability_tags"])
 
-    return sorted(set(tags))  # Deduplicate with deterministic order
+    # Sorted for deterministic output across runs (ensures idempotency in tests
+    # and consistent ordering regardless of dict iteration order)
+    return sorted(set(tags))
 
 
 def extract_contract_type(capabilities: dict[str, object], node_type: str) -> str:
@@ -587,13 +590,18 @@ def _parse_capabilities(
         capabilities_raw: Raw capabilities value from database (JSONB)
 
     Returns:
-        Parsed capabilities dictionary
+        Parsed capabilities dictionary (empty dict on parse failure)
     """
     if isinstance(capabilities_raw, str):
-        result = json.loads(capabilities_raw)
-        if isinstance(result, dict):
-            return result
-        return {}
+        try:
+            result = json.loads(capabilities_raw)
+            if isinstance(result, dict):
+                return result
+            logger.warning("Capabilities JSON is not a dict: %s", type(result).__name__)
+            return {}
+        except json.JSONDecodeError as e:
+            logger.warning("Failed to parse capabilities JSON: %s", e)
+            return {}
     elif isinstance(capabilities_raw, dict):
         return capabilities_raw
     else:
@@ -644,7 +652,8 @@ async def _process_batch_dry_run(
     for row in rows:
         entity_id: UUID = row["entity_id"]
         domain: str = row["domain"]
-        node_type: str = row["node_type"]
+        # Explicit str() coercion for safety - database may return unexpected types
+        node_type: str = str(row["node_type"]) if row["node_type"] else ""
         capabilities = _parse_capabilities(row["capabilities"])
 
         # Extract fields
@@ -708,7 +717,8 @@ async def _process_batch_update(
         for row in rows:
             entity_id = row["entity_id"]
             domain = row["domain"]
-            node_type = row["node_type"]
+            # Explicit str() coercion for safety - database may return unexpected types
+            node_type = str(row["node_type"]) if row["node_type"] else ""
             capabilities = _parse_capabilities(row["capabilities"])
 
             # Extract fields
@@ -747,6 +757,64 @@ async def _process_batch_update(
     return updated
 
 
+async def _fetch_batch_with_cursor(
+    conn: asyncpg.Connection,
+    batch_size: int,
+    cursor_entity_id: UUID | None,
+    cursor_domain: str | None,
+) -> list[asyncpg.Record]:
+    """Fetch a batch of records using cursor-based pagination.
+
+    Uses keyset pagination with (entity_id, domain) composite cursor to avoid
+    the LIMIT/OFFSET bug where records are skipped when the WHERE clause
+    result set changes between batches (e.g., when contract_type is updated
+    from NULL to non-NULL).
+
+    Args:
+        conn: Database connection
+        batch_size: Maximum number of records to fetch
+        cursor_entity_id: Last processed entity_id (None for first batch)
+        cursor_domain: Last processed domain (None for first batch)
+
+    Returns:
+        List of database records for this batch
+    """
+    if cursor_entity_id is None:
+        # First batch - no cursor, start from beginning
+        logger.debug("Fetching first batch (limit=%d)", batch_size)
+        return await conn.fetch(  # type: ignore[no-any-return]
+            """
+            SELECT entity_id, domain, node_type, capabilities
+            FROM registration_projections
+            WHERE contract_type IS NULL
+            ORDER BY entity_id, domain
+            LIMIT $1
+            """,
+            batch_size,
+        )
+    else:
+        # Subsequent batches - use cursor to continue from last position
+        logger.debug(
+            "Fetching batch with cursor (entity_id > %s, domain > %s, limit=%d)",
+            cursor_entity_id,
+            cursor_domain,
+            batch_size,
+        )
+        return await conn.fetch(  # type: ignore[no-any-return]
+            """
+            SELECT entity_id, domain, node_type, capabilities
+            FROM registration_projections
+            WHERE contract_type IS NULL
+              AND (entity_id, domain) > ($2, $3)
+            ORDER BY entity_id, domain
+            LIMIT $1
+            """,
+            batch_size,
+            cursor_entity_id,
+            cursor_domain,
+        )
+
+
 async def backfill(dry_run: bool = False, batch_size: int = 1000) -> int:
     """Backfill capability fields from existing capabilities JSONB.
 
@@ -761,6 +829,10 @@ async def backfill(dry_run: bool = False, batch_size: int = 1000) -> int:
         For large datasets, records are processed in configurable batches
         to avoid loading all rows into memory at once. Each batch is
         wrapped in its own transaction for atomicity.
+
+        Uses cursor-based (keyset) pagination instead of LIMIT/OFFSET to
+        ensure no records are skipped when records are updated between
+        batches. The cursor is the (entity_id, domain) composite key.
 
     Args:
         dry_run: If True, only print what would be done
@@ -789,34 +861,30 @@ async def backfill(dry_run: bool = False, batch_size: int = 1000) -> int:
         total_updated = 0
         total_unknown = 0
         batch_num = 0
-        offset = 0
 
-        # Process in batches using LIMIT/OFFSET
-        # We use ORDER BY to ensure consistent ordering across batches
-        while offset < total_rows:
+        # Cursor-based pagination state
+        # Track last processed (entity_id, domain) to avoid LIMIT/OFFSET bug
+        cursor_entity_id: UUID | None = None
+        cursor_domain: str | None = None
+
+        # Process in batches using cursor-based (keyset) pagination
+        # This avoids the LIMIT/OFFSET bug where records are skipped when
+        # the WHERE clause result set changes between batches
+        while True:
             batch_num += 1
             logger.debug(
-                "Fetching batch %d (offset=%d, limit=%d)",
+                "Fetching batch %d (cursor_entity_id=%s, cursor_domain=%s)",
                 batch_num,
-                offset,
-                batch_size,
+                cursor_entity_id,
+                cursor_domain,
             )
 
-            rows = await conn.fetch(
-                """
-                SELECT entity_id, domain, node_type, capabilities
-                FROM registration_projections
-                WHERE contract_type IS NULL
-                ORDER BY entity_id, domain
-                LIMIT $1 OFFSET $2
-                """,
-                batch_size,
-                offset,
+            rows = await _fetch_batch_with_cursor(
+                conn, batch_size, cursor_entity_id, cursor_domain
             )
 
             if not rows:
-                # No more rows to process (could happen if records were
-                # processed by another instance between count and fetch)
+                # No more rows to process
                 break
 
             if dry_run:
@@ -840,11 +908,20 @@ async def backfill(dry_run: bool = False, batch_size: int = 1000) -> int:
                 )
                 total_updated += updated
 
-            offset += batch_size
+            # Update cursor to last row in this batch for next iteration
+            last_row = rows[-1]
+            cursor_entity_id = last_row["entity_id"]
+            cursor_domain = last_row["domain"]
+            logger.debug(
+                "Updated cursor to (entity_id=%s, domain=%s)",
+                cursor_entity_id,
+                cursor_domain,
+            )
 
         # Final summary
         if dry_run:
             print(f"\nDry-run summary: Would update {total_updated} registrations")
+            print(f"  Initial count (from query): {total_rows}")
             print(f"  Total records analyzed: {total_updated}")
             print(f"  Batches processed: {batch_num}")
             if total_unknown > 0:

@@ -1112,6 +1112,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             List of matching registration projections
 
         Raises:
+            ValueError: If tags list is empty
             InfraConnectionError: If database connection fails
             InfraTimeoutError: If query times out
             RuntimeHostError: For other database errors
@@ -1121,6 +1122,12 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             ...     ["postgres.storage", "transactions"]
             ... )
         """
+        if not tags:
+            raise ValueError(
+                "tags list cannot be empty for get_by_capability_tags_all - "
+                "use get_by_state() to query all registrations"
+            )
+
         corr_id = correlation_id or uuid4()
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
@@ -1214,6 +1221,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             List of matching registration projections
 
         Raises:
+            ValueError: If tags list is empty
             InfraConnectionError: If database connection fails
             InfraTimeoutError: If query times out
             RuntimeHostError: For other database errors
@@ -1223,6 +1231,12 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             ...     ["postgres.storage", "mysql.storage", "sqlite.storage"]
             ... )
         """
+        if not tags:
+            raise ValueError(
+                "tags list cannot be empty for get_by_capability_tags_any - "
+                "use get_by_state() to query all registrations"
+            )
+
         corr_id = correlation_id or uuid4()
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
