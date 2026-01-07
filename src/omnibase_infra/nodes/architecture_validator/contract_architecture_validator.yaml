@@ -1,0 +1,192 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeArchitectureValidatorCompute
+#
+# This contract defines the interface for the Architecture Validator compute node,
+# which validates architecture compliance against forbidden patterns at startup
+# and during runtime.
+# Contract identifiers
+name: "architecture_validator"
+contract_name: "architecture_validator"
+node_name: "architecture_validator"
+# Version (semantic versioning)
+version:
+  major: 1
+  minor: 0
+  patch: 0
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "COMPUTE"
+# Description
+description: >
+  Compute node for architecture validation. Validates ONEX architecture compliance by checking nodes and handlers against forbidden patterns defined in architecture rules. This node performs pure transformations with no side effects, making it suitable for both startup validation and runtime checks.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelArchitectureValidationRequest"
+  module: "omnibase_infra.nodes.architecture_validator.models"
+  description: "Request containing nodes, handlers, and rules to validate."
+output_model:
+  name: "ModelArchitectureValidationResult"
+  module: "omnibase_infra.nodes.architecture_validator.models"
+  description: "Result containing validation status, violations, and statistics."
+# Runtime configuration
+runtime:
+  # Can be called directly at startup (pre-runtime)
+  supports_direct_call: true
+  # Can be invoked via orchestrator during runtime
+  supports_event_driven: true
+  # Pure transformation, no side effects
+  side_effects: false
+  # Validation should be fast
+  timeout_ms: 5000
+  # Deterministic output for same input
+  deterministic: true
+# Validation rules supported by this node
+# Note: OMN-1099 will define the full rule registry
+validation_rules:
+  supported_rules:
+    - rule_id: "NO_HANDLER_PUBLISHING"
+      description: "Handlers must not have direct event bus access"
+      severity: "CRITICAL"
+    - rule_id: "PURE_REDUCERS"
+      description: "Reducers must not perform side effects or I/O"
+      severity: "CRITICAL"
+    - rule_id: "NO_FSM_IN_ORCHESTRATORS"
+      description: "Orchestrators must not own FSM state"
+      severity: "HIGH"
+    - rule_id: "NO_WORKFLOW_IN_REDUCERS"
+      description: "Reducers must not coordinate workflows"
+      severity: "HIGH"
+    - rule_id: "NO_DIRECT_HANDLER_DISPATCH"
+      description: "Handlers must not dispatch to other handlers directly"
+      severity: "MEDIUM"
+    - rule_id: "NO_LOCAL_ONLY_PATHS"
+      description: "File paths must not use local-only absolute paths"
+      severity: "MEDIUM"
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "protocol_architecture_rule"
+    type: "protocol"
+    class_name: "ProtocolArchitectureRule"
+    module: "omnibase_infra.nodes.architecture_validator.protocols"
+    description: "Protocol for architecture rule implementations"
+# Capabilities provided by this node
+capabilities:
+  - name: "architecture_validation"
+    description: "Validate nodes and handlers against architecture rules"
+  - name: "rule_filtering"
+    description: "Validate against specific rules via rule_ids parameter"
+  - name: "fail_fast_mode"
+    description: "Stop validation on first violation for quick feedback"
+  - name: "violation_aggregation"
+    description: "Collect all violations with severity classification"
+# Model definitions (reference - actual models in models/ directory)
+definitions:
+  ModelArchitectureValidationRequest:
+    type: object
+    description: "Input model for architecture validation operations"
+    properties:
+      nodes:
+        type: array
+        items:
+          type: object
+        description: "Nodes to validate against architecture rules"
+      handlers:
+        type: array
+        items:
+          type: object
+        description: "Handlers to validate against architecture rules"
+      rule_ids:
+        type: array
+        items:
+          type: string
+        nullable: true
+        description: "Specific rule IDs to check. None means check all rules."
+      fail_fast:
+        type: boolean
+        default: false
+        description: "If true, stop on first violation found"
+      correlation_id:
+        type: string
+        nullable: true
+        description: "Request correlation ID for tracing"
+    required: []
+  ModelArchitectureValidationResult:
+    type: object
+    description: "Output model for architecture validation operations"
+    properties:
+      violations:
+        type: array
+        items:
+          $ref: "#/definitions/ModelArchitectureViolation"
+        description: "All violations found during validation"
+      rules_checked:
+        type: array
+        items:
+          type: string
+        description: "Rule IDs that were checked during validation"
+      nodes_checked:
+        type: integer
+        minimum: 0
+        description: "Number of nodes that were validated"
+      handlers_checked:
+        type: integer
+        minimum: 0
+        description: "Number of handlers that were validated"
+      correlation_id:
+        type: string
+        nullable: true
+        description: "Request correlation ID for tracing"
+    required:
+      - violations
+      - rules_checked
+      - nodes_checked
+      - handlers_checked
+  ModelArchitectureViolation:
+    type: object
+    description: "Details about a single architecture violation"
+    properties:
+      rule_id:
+        type: string
+        description: "ID of the violated rule (e.g., NO_HANDLER_PUBLISHING)"
+      severity:
+        type: string
+        enum: ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+        description: "Severity level of the violation"
+      message:
+        type: string
+        description: "Human-readable description of the violation"
+      location:
+        type: string
+        description: "Location where the violation was found (class/method name)"
+      suggestion:
+        type: string
+        nullable: true
+        description: "Optional suggestion for fixing the violation"
+    required:
+      - rule_id
+      - severity
+      - message
+      - location
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2025-01-07"
+  tags:
+    - compute
+    - validation
+    - architecture
+    - startup
+    - compliance
+    - onex

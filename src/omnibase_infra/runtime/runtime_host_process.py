@@ -71,6 +71,7 @@ from omnibase_infra.runtime.wiring import wire_default_handlers
 from omnibase_infra.utils.util_env_parsing import parse_env_float
 
 if TYPE_CHECKING:
+    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
     from omnibase_core.types import JsonType
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
@@ -79,6 +80,7 @@ if TYPE_CHECKING:
     from omnibase_infra.idempotency.protocol_idempotency_store import (
         ProtocolIdempotencyStore,
     )
+    from omnibase_infra.nodes.architecture_validator import ProtocolArchitectureRule
 
 from omnibase_infra.models.types import JsonDict
 
@@ -174,6 +176,8 @@ class RuntimeHostProcess:
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
         config: JsonType | None = None,
         handler_registry: ProtocolBindingRegistry | None = None,
+        container: ModelONEXContainer | None = None,
+        architecture_rules: tuple[ProtocolArchitectureRule, ...] | None = None,
     ) -> None:
         """Initialize the runtime host process.
 
@@ -221,9 +225,47 @@ class RuntimeHostProcess:
 
                     This follows ONEX container-based DI patterns for better testability
                     and explicit dependency management.
+
+            container: Optional ONEX container for dependency injection. Required for
+                architecture validation. If None and architecture validation is requested,
+                a minimal container will be created.
+
+            architecture_rules: Optional tuple of architecture rules to validate at startup.
+                Type: tuple[ProtocolArchitectureRule, ...] | None
+
+                Purpose:
+                    Architecture rules are validated BEFORE the runtime starts. Violations
+                    with ERROR severity will prevent startup. Violations with WARNING
+                    severity are logged but don't block startup.
+
+                    Rules implementing ProtocolArchitectureRule can be:
+                    - Custom rules specific to your application
+                    - Standard rules from OMN-1099 validators
+
+                Example:
+                    ```python
+                    from my_rules import NoHandlerPublishingRule, NoAnyTypesRule
+
+                    process = RuntimeHostProcess(
+                        container=container,
+                        architecture_rules=(
+                            NoHandlerPublishingRule(),
+                            NoAnyTypesRule(),
+                        ),
+                    )
+                    await process.start()  # Validates architecture first
+                    ```
         """
         # Handler registry (container-based DI or singleton fallback)
         self._handler_registry: ProtocolBindingRegistry | None = handler_registry
+
+        # Container for dependency injection (required for architecture validation)
+        self._container: ModelONEXContainer | None = container
+
+        # Architecture rules for startup validation
+        self._architecture_rules: tuple[ProtocolArchitectureRule, ...] = (
+            architecture_rules or ()
+        )
 
         # Create or use provided event bus
         self._event_bus: InMemoryEventBus | KafkaEventBus = (
@@ -515,13 +557,29 @@ class RuntimeHostProcess:
         """Start the runtime host.
 
         Performs the following steps:
-        1. Start event bus (if not already started)
-        2. Wire handlers via wiring module (registers handler classes to singleton)
-        3. Populate self._handlers from singleton registry (instantiate and initialize)
-        4. Subscribe to input topic
+        1. Validate architecture compliance (if rules configured) - OMN-1138
+        2. Start event bus (if not already started)
+        3. Wire handlers via wiring module (registers handler classes to singleton)
+        4. Populate self._handlers from singleton registry (instantiate and initialize)
+        5. Subscribe to input topic
+
+        Architecture Validation (OMN-1138):
+            If architecture_rules were provided at init, validation runs FIRST
+            before any other startup logic. This ensures:
+            - Violations are caught before resources are allocated
+            - Fast feedback for CI/CD pipelines
+            - Clean startup/failure without partial state
+
+            ERROR severity violations block startup by raising
+            ArchitectureViolationError. WARNING/INFO violations are logged
+            but don't block startup.
 
         This method is idempotent - calling start() on an already started
         process is safe and has no effect.
+
+        Raises:
+            ArchitectureViolationError: If architecture validation fails with
+                blocking violations (ERROR severity).
         """
         if self._is_running:
             logger.debug("RuntimeHostProcess already started, skipping")
@@ -536,14 +594,19 @@ class RuntimeHostProcess:
             },
         )
 
-        # Step 1: Start event bus
+        # Step 1: Validate architecture compliance FIRST (OMN-1138)
+        # This runs before event bus starts or handlers are wired to ensure
+        # clean failure without partial state if validation fails
+        await self._validate_architecture()
+
+        # Step 2: Start event bus
         await self._event_bus.start()
 
-        # Step 2: Wire handlers via wiring module
+        # Step 3: Wire handlers via wiring module
         # This registers default handler CLASSES with the singleton registry
         wire_handlers()
 
-        # Step 3: Populate self._handlers from singleton registry
+        # Step 4: Populate self._handlers from singleton registry
         # The wiring module registers handler classes, so we need to:
         # - Get each registered handler class from the singleton registry
         # - Instantiate the handler class
@@ -551,10 +614,10 @@ class RuntimeHostProcess:
         # - Store the handler instance in self._handlers for routing
         await self._populate_handlers_from_registry()
 
-        # Step 3.5: Initialize idempotency store if configured (OMN-945)
+        # Step 4.5: Initialize idempotency store if configured (OMN-945)
         await self._initialize_idempotency_store()
 
-        # Step 4: Subscribe to input topic
+        # Step 5: Subscribe to input topic
         self._subscription = await self._event_bus.subscribe(
             topic=self._input_topic,
             group_id=self._group_id,
@@ -1308,6 +1371,171 @@ class RuntimeHostProcess:
             Handler instance if registered, None otherwise.
         """
         return self._handlers.get(handler_type)
+
+    # =========================================================================
+    # Architecture Validation Methods (OMN-1138)
+    # =========================================================================
+
+    async def _validate_architecture(self) -> None:
+        """Validate architecture compliance before starting runtime.
+
+        This method is called at the beginning of start() to validate nodes
+        and handlers against registered architecture rules. If any violations
+        with ERROR severity are detected, startup is blocked.
+
+        Validation occurs BEFORE:
+        - Event bus starts
+        - Handlers are wired
+        - Subscription begins
+
+        Validation Behavior:
+            - ERROR severity violations: Block startup, raise ArchitectureViolationError
+            - WARNING severity violations: Log warning, continue startup
+            - INFO severity violations: Log info, continue startup
+
+        Raises:
+            ArchitectureViolationError: If blocking violations (ERROR severity)
+                are detected. Contains all blocking violations for inspection.
+
+        Example:
+            >>> # Validation is automatic in start()
+            >>> try:
+            ...     await runtime.start()
+            ... except ArchitectureViolationError as e:
+            ...     print(f"Startup blocked: {len(e.violations)} violations")
+            ...     for v in e.violations:
+            ...         print(v.format_for_logging())
+
+        Note:
+            Validation only runs if architecture_rules were provided at init.
+            If no rules are configured, this method returns immediately.
+
+        Related:
+            - OMN-1138: Architecture Validator for omnibase_infra
+            - OMN-1099: Validators implementing ProtocolArchitectureRule
+        """
+        # Skip validation if no rules configured
+        if not self._architecture_rules:
+            logger.debug("No architecture rules configured, skipping validation")
+            return
+
+        logger.info(
+            "Validating architecture compliance",
+            extra={
+                "rule_count": len(self._architecture_rules),
+                "rule_ids": tuple(r.rule_id for r in self._architecture_rules),
+            },
+        )
+
+        # Import architecture validator components
+        from omnibase_infra.errors import ArchitectureViolationError
+        from omnibase_infra.nodes.architecture_validator import (
+            ModelArchitectureValidationRequest,
+            NodeArchitectureValidatorCompute,
+        )
+
+        # Create or get container
+        container = self._get_or_create_container()
+
+        # Instantiate validator with rules
+        validator = NodeArchitectureValidatorCompute(
+            container=container,
+            rules=self._architecture_rules,
+        )
+
+        # Build validation request
+        # Note: At this point, handlers haven't been instantiated yet (that happens
+        # after validation in _populate_handlers_from_registry). We validate the
+        # handler CLASSES from the registry, not handler instances.
+        handler_registry = self._get_handler_registry()
+        handler_classes: list[type[ProtocolHandler]] = []
+        for handler_type in handler_registry.list_protocols():
+            try:
+                handler_cls = handler_registry.get(handler_type)
+                handler_classes.append(handler_cls)
+            except Exception:
+                # If a handler class can't be retrieved, skip it for validation
+                # (it will fail later during instantiation anyway)
+                pass
+
+        request = ModelArchitectureValidationRequest(
+            nodes=(),  # Nodes not yet available at this point
+            handlers=tuple(handler_classes),
+        )
+
+        # Execute validation
+        result = validator.compute(request)
+
+        # Separate blocking and non-blocking violations
+        blocking_violations = tuple(v for v in result.violations if v.blocks_startup())
+        warning_violations = tuple(
+            v for v in result.violations if not v.blocks_startup()
+        )
+
+        # Log warnings but don't block
+        for violation in warning_violations:
+            # Note: We can't use to_structured_dict() directly because 'message'
+            # is a reserved key in Python logging's extra parameter.
+            # We use format_for_logging() instead for the log message.
+            logger.warning(
+                "Architecture warning: %s",
+                violation.format_for_logging(),
+                extra={
+                    "rule_id": violation.rule_id,
+                    "severity": violation.severity.value,
+                    "target_type": violation.target_type,
+                    "target_name": violation.target_name,
+                },
+            )
+
+        # Block startup on ERROR violations
+        if blocking_violations:
+            logger.error(
+                "Architecture validation failed",
+                extra={
+                    "blocking_violation_count": len(blocking_violations),
+                    "warning_violation_count": len(warning_violations),
+                    "blocking_rule_ids": tuple(v.rule_id for v in blocking_violations),
+                },
+            )
+            raise ArchitectureViolationError(
+                message=f"Architecture validation failed with {len(blocking_violations)} blocking violations",
+                violations=blocking_violations,
+            )
+
+        logger.info(
+            "Architecture validation passed",
+            extra={
+                "rules_checked": result.rules_checked,
+                "handlers_checked": result.handlers_checked,
+                "warning_count": len(warning_violations),
+            },
+        )
+
+    def _get_or_create_container(self) -> ModelONEXContainer:
+        """Get the injected container or create a new one.
+
+        Returns:
+            ModelONEXContainer instance for architecture validation.
+
+        Note:
+            If no container was provided at init, a new container is created.
+            This container provides basic infrastructure for node execution
+            but may not have all services wired.
+        """
+        if self._container is not None:
+            return self._container
+
+        # Create container for validation
+        from omnibase_core.models.container.model_onex_container import (
+            ModelONEXContainer,
+        )
+
+        logger.debug(
+            "Creating container for architecture validation "
+            "(no container provided at init)"
+        )
+        return ModelONEXContainer()
 
     # =========================================================================
     # Idempotency Guard Methods (OMN-945)
