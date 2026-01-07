@@ -191,9 +191,10 @@ def run_imports(verbose: bool = False) -> bool:
 
     try:
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-        from omnibase_core.validation.circular_import_validator import (
-            CircularImportValidator,
-        )
+
+        # CircularImportValidator re-exported from omnibase_core.validation in 0.6.2+
+        # (moved from circular_import_validator to validator_circular_import submodule)
+        from omnibase_core.validation import CircularImportValidator
 
         validator = CircularImportValidator(source_path=src_path)
         result = validator.validate()

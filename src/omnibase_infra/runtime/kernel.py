@@ -511,8 +511,9 @@ async def bootstrap() -> int:
                 "skipping container wiring (correlation_id=%s)",
                 correlation_id,
             )
-            wire_summary: dict[str, list[str]] = {
-                "services": []
+            wire_summary: dict[str, list[str] | str] = {
+                "services": [],
+                "status": "degraded",
             }  # Empty summary for degraded mode
         else:
             try:
@@ -649,34 +650,48 @@ async def bootstrap() -> int:
                     HandlerNodeIntrospected,
                 )
 
-                logger.debug(
-                    "Resolving HandlerNodeIntrospected from container (correlation_id=%s)",
-                    correlation_id,
-                )
-                handler_introspected: HandlerNodeIntrospected = (
-                    await container.service_registry.resolve_service(
-                        HandlerNodeIntrospected
+                # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+                if container.service_registry is None:
+                    logger.warning(
+                        "DEGRADED_MODE: ServiceRegistry not available, skipping introspection dispatcher creation (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "degraded_mode": True,
+                            "degraded_reason": "service_registry_unavailable",
+                            "component": "introspection_dispatcher",
+                        },
                     )
-                )
-                logger.debug(
-                    "HandlerNodeIntrospected resolved successfully (correlation_id=%s)",
-                    correlation_id,
-                    extra={
-                        "handler_class": handler_introspected.__class__.__name__,
-                    },
-                )
+                    # Set introspection_dispatcher to None and continue without it
+                    introspection_dispatcher = None
+                else:
+                    logger.debug(
+                        "Resolving HandlerNodeIntrospected from container (correlation_id=%s)",
+                        correlation_id,
+                    )
+                    handler_introspected: HandlerNodeIntrospected = (
+                        await container.service_registry.resolve_service(
+                            HandlerNodeIntrospected
+                        )
+                    )
+                    logger.debug(
+                        "HandlerNodeIntrospected resolved successfully (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "handler_class": handler_introspected.__class__.__name__,
+                        },
+                    )
 
-                introspection_dispatcher = DispatcherNodeIntrospected(
-                    handler_introspected
-                )
-                logger.info(
-                    "Introspection dispatcher created and wired (correlation_id=%s)",
-                    correlation_id,
-                    extra={
-                        "dispatcher_class": introspection_dispatcher.__class__.__name__,
-                        "handler_class": handler_introspected.__class__.__name__,
-                    },
-                )
+                    introspection_dispatcher = DispatcherNodeIntrospected(
+                        handler_introspected
+                    )
+                    logger.info(
+                        "Introspection dispatcher created and wired (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "dispatcher_class": introspection_dispatcher.__class__.__name__,
+                            "handler_class": handler_introspected.__class__.__name__,
+                        },
+                    )
 
             except Exception as pool_error:
                 # Log warning but continue without registration support
@@ -711,13 +726,15 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
-        # 5. Resolve ProtocolBindingRegistry from container
-        # NOTE: Fallback to singleton is intentional degraded mode behavior.
+        # 5. Resolve ProtocolBindingRegistry from container or create new instance
+        # NOTE: Fallback to creating new instance is intentional degraded mode behavior.
         # The handler registry is optional for basic runtime operation - core event
         # processing continues even without explicit handler bindings. However,
         # ProtocolConfigurationError should NOT be masked as it indicates invalid
         # configuration that would cause undefined behavior.
         handler_registry: ProtocolBindingRegistry | None = None
+
+        # Check if service_registry is available (may be None in omnibase_core 0.6.x)
         if container.service_registry is not None:
             try:
                 handler_registry = await container.service_registry.resolve_service(
@@ -725,41 +742,52 @@ async def bootstrap() -> int:
                 )
             except ServiceResolutionError as e:
                 # Service not registered - expected in minimal configurations.
-                # Fall back to singleton pattern which provides default bindings.
+                # Create a new instance directly as fallback.
                 logger.warning(
-                    "ProtocolBindingRegistry not registered in container, "
-                    "falling back to singleton (correlation_id=%s): %s",
+                    "DEGRADED_MODE: ProtocolBindingRegistry not registered in container, "
+                    "creating new instance (correlation_id=%s): %s",
                     correlation_id,
                     e,
                     extra={
                         "error_type": type(e).__name__,
                         "correlation_id": correlation_id,
-                        "service_name": "ProtocolBindingRegistry",
-                        "fallback_mode": "singleton",
+                        "degraded_mode": True,
+                        "degraded_reason": "service_not_registered",
+                        "component": "handler_registry",
                     },
                 )
-                handler_registry = None
+                handler_registry = ProtocolBindingRegistry()
             except (RuntimeError, AttributeError) as e:
                 # Unexpected resolution failure - container internals issue.
                 # Log with more diagnostic context but still allow degraded operation.
                 logger.warning(
-                    "Unexpected error resolving ProtocolBindingRegistry from container, "
-                    "falling back to singleton (correlation_id=%s): %s",
+                    "DEGRADED_MODE: Unexpected error resolving ProtocolBindingRegistry, "
+                    "creating new instance (correlation_id=%s): %s",
                     correlation_id,
                     e,
                     extra={
                         "error_type": type(e).__name__,
                         "correlation_id": correlation_id,
-                        "service_name": "ProtocolBindingRegistry",
-                        "fallback_mode": "singleton",
-                        "container_has_registry": container.service_registry
-                        is not None,
+                        "degraded_mode": True,
+                        "degraded_reason": "resolution_error",
+                        "component": "handler_registry",
                     },
                 )
-                handler_registry = None
+                handler_registry = ProtocolBindingRegistry()
             # NOTE: ProtocolConfigurationError is NOT caught here - configuration
             # errors should propagate and stop startup to prevent undefined behavior.
-        # RuntimeHostProcess._get_handler_registry() handles None by falling back to singleton
+        else:
+            # ServiceRegistry not available, create a new ProtocolBindingRegistry directly
+            logger.warning(
+                "DEGRADED_MODE: ServiceRegistry not available, creating ProtocolBindingRegistry directly (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "degraded_mode": True,
+                    "degraded_reason": "service_registry_unavailable",
+                    "component": "handler_registry",
+                },
+            )
+            handler_registry = ProtocolBindingRegistry()
 
         # 6. Create runtime host process with config and pre-resolved registry
         # RuntimeHostProcess accepts config as dict; cast model_dump() result to

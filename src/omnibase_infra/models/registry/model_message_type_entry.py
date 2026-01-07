@@ -161,7 +161,7 @@ class ModelMessageTypeEntry(BaseModel):
         description="Timestamp when this entry was registered (UTC, must be explicitly provided).",
     )
 
-    metadata: JsonType = Field(
+    metadata: JsonType | None = Field(
         default=None,
         description="Optional additional metadata. Accepts any JSON-serializable value.",
     )

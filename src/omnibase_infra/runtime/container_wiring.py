@@ -56,12 +56,11 @@ from typing import TYPE_CHECKING
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
-
-# Default semantic version constant (1.0.0) using core ModelSemVer
-# Previously imported from local model_semver; now defined inline
-SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.registry_compute import RegistryCompute
+
+# Default semantic version for infrastructure components (from omnibase_core)
+SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 
 if TYPE_CHECKING:
     import asyncpg
@@ -195,7 +194,7 @@ def _analyze_type_error(error_str: str) -> tuple[str, str]:
 
 async def wire_infrastructure_services(
     container: ModelONEXContainer,
-) -> dict[str, list[str]]:
+) -> dict[str, list[str] | str]:
     """Register infrastructure services with the container.
 
     Registers PolicyRegistry, ProtocolBindingRegistry, and RegistryCompute as global
@@ -211,16 +210,18 @@ async def wire_infrastructure_services(
     Returns:
         Summary dict with:
             - services: List of registered service class names
+            - status: Always "success" (errors raise exceptions)
 
     Raises:
-        RuntimeError: If service registration fails
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
+        RuntimeError: If service registration fails.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
         >>> container = ModelONEXContainer()
         >>> summary = await wire_infrastructure_services(container)
         >>> print(summary)
-        {'services': ['PolicyRegistry', 'ProtocolBindingRegistry', 'RegistryCompute']}
+        {'services': ['PolicyRegistry', 'ProtocolBindingRegistry', 'RegistryCompute'], 'status': 'success'}
         >>> policy_reg = await container.service_registry.resolve_service(PolicyRegistry)
         >>> handler_reg = await container.service_registry.resolve_service(ProtocolBindingRegistry)
         >>> compute_reg = await container.service_registry.resolve_service(RegistryCompute)
@@ -232,7 +233,7 @@ async def wire_infrastructure_services(
         >>> hasattr(compute_reg, 'register_plugin') and callable(compute_reg.register_plugin)
         True
     """
-    # Validate service_registry is available before attempting registration
+    # Validate service_registry is available and has required methods
     _validate_service_registry(container, "wire_infrastructure_services")
 
     services_registered: list[str] = []
@@ -345,7 +346,7 @@ async def wire_infrastructure_services(
         },
     )
 
-    return {"services": services_registered}
+    return {"services": services_registered, "status": "success"}
 
 
 async def get_policy_registry_from_container(
@@ -759,7 +760,7 @@ async def wire_registration_handlers(
     liveness_interval_seconds: int | None = None,
     projector: ProjectorRegistration | None = None,
     consul_handler: ConsulHandler | None = None,
-) -> dict[str, list[str]]:
+) -> dict[str, list[str] | str]:
     """Register registration orchestrator handlers with the container.
 
     Registers ProjectionReaderRegistration and the three registration handlers:
@@ -787,9 +788,11 @@ async def wire_registration_handlers(
     Returns:
         Summary dict with:
             - services: List of registered service class names
+            - status: Always "success" (errors raise exceptions)
 
     Raises:
-        RuntimeError: If service registration fails
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
+        RuntimeError: If service registration fails.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
@@ -800,10 +803,15 @@ async def wire_registration_handlers(
         >>> await projector.initialize_schema()
         >>> summary = await wire_registration_handlers(container, pool, projector=projector)
         >>> print(summary)
-        {'services': ['ProjectionReaderRegistration', 'HandlerNodeIntrospected', ...]}
+        {'services': ['ProjectionReaderRegistration', 'HandlerNodeIntrospected', ...], 'status': 'success'}
         >>> # Resolve handlers from container
         >>> handler = await container.service_registry.resolve_service(HandlerNodeIntrospected)
     """
+    # Validate service_registry is available and has required methods.
+    # NOTE: Validation is done BEFORE imports for fail-fast behavior - no point loading
+    # heavy infrastructure modules if service_registry is unavailable.
+    _validate_service_registry(container, "wire_registration_handlers")
+
     # Deferred imports: These imports are placed inside the function to avoid circular
     # import issues and to delay loading registration infrastructure until this function
     # is actually called (which requires a PostgreSQL pool). This follows the pattern
@@ -820,9 +828,6 @@ async def wire_registration_handlers(
         ProjectionReaderRegistration,
         ProjectorRegistration,
     )
-
-    # Validate service_registry is available before attempting registration
-    _validate_service_registry(container, "wire_registration_handlers")
 
     # Resolve the actual liveness interval (from param, env var, or default)
     resolved_liveness_interval = get_liveness_interval_seconds(
@@ -963,7 +968,7 @@ async def wire_registration_handlers(
         },
     )
 
-    return {"services": services_registered}
+    return {"services": services_registered, "status": "success"}
 
 
 async def get_projection_reader_from_container(
@@ -1147,7 +1152,7 @@ async def get_handler_node_registration_acked_from_container(
 async def wire_registration_dispatchers(
     container: ModelONEXContainer,
     engine: MessageDispatchEngine,
-) -> dict[str, list[str]]:
+) -> dict[str, list[str] | str]:
     """Wire registration dispatchers into MessageDispatchEngine.
 
     Creates dispatcher adapters for the registration handlers and registers
@@ -1173,10 +1178,12 @@ async def wire_registration_dispatchers(
             - routes: List of registered route IDs (e.g.,
               ['route.registration.node-introspection', 'route.registration.runtime-tick',
                'route.registration.node-registration-acked'])
+            - status: Always "success" (errors raise exceptions)
 
         This diagnostic output can be logged or used to verify correct wiring.
 
     Raises:
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
         RuntimeError: If required handlers are not registered in the container,
             or if the engine is already frozen (cannot register new dispatchers).
 
@@ -1200,6 +1207,14 @@ async def wire_registration_dispatchers(
         {'dispatchers': [...], 'routes': [...]}
         >>> engine.freeze()  # Must freeze after wiring
     """
+    # Validate service_registry is available and has required methods.
+    # NOTE: Validation is done BEFORE imports for fail-fast behavior - no point loading
+    # heavy infrastructure modules if service_registry is unavailable.
+    _validate_service_registry(container, "wire_registration_dispatchers")
+
+    # Deferred imports: These imports are placed inside the function to avoid circular
+    # import issues and to delay loading dispatcher infrastructure until this function
+    # is actually called.
     from omnibase_infra.enums.enum_message_category import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
@@ -1212,9 +1227,6 @@ async def wire_registration_dispatchers(
         DispatcherNodeRegistrationAcked,
         DispatcherRuntimeTick,
     )
-
-    # Validate service_registry is available
-    _validate_service_registry(container, "wire_registration_dispatchers")
 
     dispatchers_registered: list[str] = []
     routes_registered: list[str] = []
@@ -1330,6 +1342,7 @@ async def wire_registration_dispatchers(
     return {
         "dispatchers": dispatchers_registered,
         "routes": routes_registered,
+        "status": "success",
     }
 
 

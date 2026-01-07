@@ -2796,8 +2796,8 @@ class TestDeterminismProperty:
 
             # For postgres intents, exclude timestamp fields from comparison
             if intent1.intent_type == "postgres.upsert_registration":
-                payload1 = dict(intent1.payload)
-                payload2 = dict(intent2.payload)
+                payload1 = dict(intent1.payload.model_dump())
+                payload2 = dict(intent2.payload.model_dump())
                 record1 = dict(payload1.get("record", {}))
                 record2 = dict(payload2.get("record", {}))
                 # Remove timestamps before comparison
@@ -2808,7 +2808,7 @@ class TestDeterminismProperty:
                 payload2["record"] = record2
                 assert payload1 == payload2
             else:
-                assert intent1.payload == intent2.payload
+                assert intent1.payload.model_dump() == intent2.payload.model_dump()
 
         # Items processed must match
         assert output1.items_processed == output2.items_processed
@@ -2952,8 +2952,8 @@ class TestDeterminismProperty:
 
             # For postgres intents, exclude timestamp fields from comparison
             if intent1.intent_type == "postgres.upsert_registration":
-                payload1 = dict(intent1.payload)
-                payload2 = dict(intent2.payload)
+                payload1 = dict(intent1.payload.model_dump())
+                payload2 = dict(intent2.payload.model_dump())
                 record1 = dict(payload1.get("record", {}))
                 record2 = dict(payload2.get("record", {}))
                 # Remove timestamps before comparison
@@ -2966,7 +2966,7 @@ class TestDeterminismProperty:
                     f"Payload mismatch for intent_type={intent1.intent_type}"
                 )
             else:
-                assert intent1.payload == intent2.payload, (
+                assert intent1.payload.model_dump() == intent2.payload.model_dump(), (
                     f"Payload mismatch for intent_type={intent1.intent_type}"
                 )
 
@@ -3017,8 +3017,8 @@ class TestDeterminismProperty:
 
                 # For postgres intents, exclude timestamp fields from comparison
                 if intent1.intent_type == "postgres.upsert_registration":
-                    payload1 = dict(intent1.payload)
-                    payload2 = dict(intent2.payload)
+                    payload1 = dict(intent1.payload.model_dump())
+                    payload2 = dict(intent2.payload.model_dump())
                     record1 = dict(payload1.get("record", {}))
                     record2 = dict(payload2.get("record", {}))
                     # Remove timestamps before comparison
@@ -3031,9 +3031,9 @@ class TestDeterminismProperty:
                         f"Intent {j} payload mismatch between reducer 1 and {i}"
                     )
                 else:
-                    assert intent1.payload == intent2.payload, (
-                        f"Intent {j} payload mismatch between reducer 1 and {i}"
-                    )
+                    assert (
+                        intent1.payload.model_dump() == intent2.payload.model_dump()
+                    ), f"Intent {j} payload mismatch between reducer 1 and {i}"
 
     @given(
         reset_attempts=st.integers(min_value=1, max_value=5),
@@ -4270,7 +4270,7 @@ class TestEventReplayDeterminism:
 
                 # For postgres intents, exclude timestamp fields
                 if intent.intent_type == "postgres.upsert_registration":
-                    payload_copy = dict(intent.payload)
+                    payload_copy = dict(intent.payload.model_dump())
                     if "record" in payload_copy:
                         record_copy = dict(payload_copy["record"])
                         record_copy.pop("registered_at", None)
@@ -4278,7 +4278,7 @@ class TestEventReplayDeterminism:
                         payload_copy["record"] = record_copy
                     fingerprint["payload"] = payload_copy
                 else:
-                    fingerprint["payload"] = dict(intent.payload)
+                    fingerprint["payload"] = dict(intent.payload.model_dump())
 
                 fingerprints.append(fingerprint)
             return fingerprints
@@ -5954,3 +5954,81 @@ class TestCommandFoldingProhibited:
                 f"Intent target scheme '{scheme}' not recognized. "
                 f"Expected one of: {valid_schemes}"
             )
+
+
+# -----------------------------------------------------------------------------
+# Confirmation Event Handling Tests (Phase 2 Placeholder)
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestReduceConfirmation:
+    """Tests for reduce_confirmation() method.
+
+    The reduce_confirmation() method is a Phase 2 placeholder that raises
+    NotImplementedError until OMN-996 is implemented. This test validates
+    the expected behavior of the placeholder.
+
+    Related:
+        - OMN-996: Implement Confirmation Event Handling
+        - ModelRegistrationConfirmation: Confirmation event model
+    """
+
+    def test_reduce_confirmation_raises_not_implemented_error(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test that reduce_confirmation raises NotImplementedError until implemented.
+
+        This test ensures:
+        1. The placeholder method exists and is callable
+        2. NotImplementedError is raised with appropriate message
+        3. The error message references OMN-996 for tracking
+
+        This prevents accidental regression when implementing the method
+        and ensures developers are directed to the tracking ticket.
+        """
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        # Create a valid confirmation event
+        confirmation = ModelRegistrationConfirmation(
+            event_type="consul.registered",
+            correlation_id=uuid4(),
+            node_id=uuid4(),
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        # Verify NotImplementedError is raised with OMN-996 reference
+        with pytest.raises(NotImplementedError, match="OMN-996"):
+            reducer.reduce_confirmation(initial_state, confirmation)
+
+    def test_reduce_confirmation_error_message_includes_ticket_url(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test that error message includes the Linear ticket URL.
+
+        This ensures developers can easily find the implementation
+        tracking ticket when encountering the NotImplementedError.
+        """
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type="postgres.registration_upserted",
+            correlation_id=uuid4(),
+            node_id=uuid4(),
+            success=False,
+            error_message="Connection refused",
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        with pytest.raises(NotImplementedError) as exc_info:
+            reducer.reduce_confirmation(initial_state, confirmation)
+
+        error_message = str(exc_info.value)
+        assert "linear.app/omninode/issue/OMN-996" in error_message, (
+            "Error message should include the Linear ticket URL for tracking"
+        )

@@ -68,13 +68,14 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
 # Import shared envelope helper from conftest
-from tests.integration.registration.e2e.conftest import wrap_event_in_envelope
+# Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
+from tests.integration.registration.e2e.conftest import (
+    wrap_event_in_envelope,
+)
 
 # =============================================================================
 # Topic Configuration
@@ -108,14 +109,19 @@ def _check_runtime_available() -> bool:
 RUNTIME_AVAILABLE = _check_runtime_available()
 
 
-# Skip all tests in this module if runtime is not available
+# Module-level markers
+# Note: conftest.py already applies pytest.mark.e2e and skipif(not ALL_INFRA_AVAILABLE)
+# to all tests in this directory. We only add runtime-specific markers here:
+# - pytest.mark.runtime for categorization
+# - skipif(not RUNTIME_AVAILABLE) for the unique runtime container check
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.runtime,
     pytest.mark.skipif(
         not RUNTIME_AVAILABLE,
         reason=(
-            f"Runtime container not available at {RUNTIME_HEALTH_URL}. "
+            "Runtime E2E tests require the runtime container to be running. "
+            f"Runtime: MISSING at {RUNTIME_HEALTH_URL}. "
             "Start with: docker compose -f docker/docker-compose.e2e.yml --profile runtime up -d"
         ),
     ),
