@@ -27,9 +27,12 @@ from uuid import uuid4
 
 import asyncpg
 import pytest
+from omnibase_core.enums import EnumNodeKind
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection.model_registration_projection import (
+    VALID_CONTRACT_TYPES,
     ModelRegistrationProjection,
 )
 from omnibase_infra.models.projection.model_sequence_info import ModelSequenceInfo
@@ -52,7 +55,7 @@ def create_test_projection_with_capabilities(
         entity_id=uuid4(),
         domain="registration",
         current_state=EnumRegistrationState.ACTIVE,
-        node_type="effect",
+        node_type=EnumNodeKind.EFFECT,
         node_version="1.0.0",
         capabilities=ModelNodeCapabilities(postgres=True, read=True),
         # New capability fields
@@ -287,15 +290,40 @@ class TestCapabilityFieldsExtraction:
 class TestCapabilityFieldsValidation:
     """Test validation of capability fields."""
 
-    def test_contract_type_must_be_valid_node_kind(self) -> None:
-        """Test that contract_type should match valid node kinds."""
-        valid_types = ["effect", "compute", "reducer", "orchestrator"]
-
-        for node_type in valid_types:
+    def test_contract_type_accepts_valid_node_kinds(self) -> None:
+        """Test that contract_type accepts valid node kind values."""
+        for node_type in VALID_CONTRACT_TYPES:
             projection = create_test_projection_with_capabilities(
                 contract_type=node_type
             )
             assert projection.contract_type == node_type
+
+    def test_contract_type_accepts_none(self) -> None:
+        """Test that contract_type accepts None."""
+        projection = create_test_projection_with_capabilities(contract_type=None)
+        assert projection.contract_type is None
+
+    def test_contract_type_rejects_invalid_values(self) -> None:
+        """Test that contract_type rejects invalid values."""
+        invalid_types = ["invalid", "runtime_host", "EFFECT", "Effect", "node", ""]
+
+        for invalid_type in invalid_types:
+            with pytest.raises(ValidationError) as exc_info:
+                create_test_projection_with_capabilities(contract_type=invalid_type)
+
+            # Verify the error message mentions the valid types
+            error_str = str(exc_info.value)
+            assert "contract_type" in error_str.lower()
+
+    def test_contract_type_error_message_includes_valid_values(self) -> None:
+        """Test that validation error message lists valid contract types."""
+        with pytest.raises(ValidationError) as exc_info:
+            create_test_projection_with_capabilities(contract_type="invalid_type")
+
+        error_str = str(exc_info.value)
+        # Error message should mention the valid types
+        for valid_type in VALID_CONTRACT_TYPES:
+            assert valid_type in error_str
 
     def test_intent_types_accepts_list_of_strings(self) -> None:
         """Test that intent_types accepts a list of strings."""

@@ -40,6 +40,17 @@
 --   2. TEST this migration on a staging environment first
 --   3. MONITOR the migration - adding columns and indexes may take time on large tables
 --
+-- CONCURRENT INDEX CREATION (for large production tables):
+-- -------------------------------------------------------------------------------------
+-- For large tables in production, consider using CREATE INDEX CONCURRENTLY:
+--   CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_registration_capability_tags
+--       ON registration_projections USING GIN (capability_tags);
+--
+-- IMPORTANT: CONCURRENTLY indexes cannot be created inside a transaction block.
+-- These must be run separately from the ALTER TABLE statements.
+-- Standard indexes (as shown in this migration) will lock the table briefly during creation.
+-- -------------------------------------------------------------------------------------
+--
 -- ROLLBACK:
 --   ALTER TABLE registration_projections
 --     DROP COLUMN IF EXISTS contract_type,
@@ -92,6 +103,27 @@ CREATE INDEX IF NOT EXISTS idx_registration_contract_type_state
     ON registration_projections (contract_type, current_state);
 
 -- =============================================================================
+-- CHECK CONSTRAINT FOR CONTRACT_TYPE
+-- =============================================================================
+-- Ensure contract_type values are consistent with node_type valid values
+-- Note: Using DO block to handle constraint already existing (idempotent)
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'valid_contract_type'
+        AND conrelid = 'registration_projections'::regclass
+    ) THEN
+        ALTER TABLE registration_projections
+            ADD CONSTRAINT valid_contract_type CHECK (
+                contract_type IS NULL
+                OR contract_type IN ('effect', 'compute', 'reducer', 'orchestrator')
+            );
+    END IF;
+END$$;
+
+-- =============================================================================
 -- VERIFICATION QUERY
 -- =============================================================================
 -- After running this migration, verify with:
@@ -103,4 +135,8 @@ CREATE INDEX IF NOT EXISTS idx_registration_contract_type_state
 --   SELECT indexname FROM pg_indexes
 --   WHERE tablename = 'registration_projections'
 --     AND indexname LIKE 'idx_registration_%';
+--
+--   SELECT conname FROM pg_constraint
+--   WHERE conrelid = 'registration_projections'::regclass
+--     AND conname = 'valid_contract_type';
 -- =============================================================================

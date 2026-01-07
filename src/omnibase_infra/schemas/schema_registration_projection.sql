@@ -100,7 +100,12 @@ CREATE TABLE IF NOT EXISTS registration_projections (
     -- Node types MUST match omnibase_core.enums.EnumNodeKind values (lowercase serialized form)
     -- Source of truth: omnibase_core/enums/enum_node_kind.py
     -- When EnumNodeKind changes, this constraint MUST be updated to match
-    CONSTRAINT valid_node_type CHECK (node_type IN ('effect', 'compute', 'reducer', 'orchestrator'))
+    CONSTRAINT valid_node_type CHECK (node_type IN ('effect', 'compute', 'reducer', 'orchestrator')),
+    -- Contract type validation (same valid values as node_type, but nullable)
+    CONSTRAINT valid_contract_type CHECK (
+        contract_type IS NULL
+        OR contract_type IN ('effect', 'compute', 'reducer', 'orchestrator')
+    )
 );
 
 -- =============================================================================

@@ -22,16 +22,21 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from omnibase_core.enums import EnumNodeKind
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection.model_sequence_info import ModelSequenceInfo
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
+
+# Valid contract types for nodes (excludes runtime_host which is not a contract type)
+ContractType = Literal["effect", "compute", "reducer", "orchestrator"]
+VALID_CONTRACT_TYPES: tuple[str, ...] = ("effect", "compute", "reducer", "orchestrator")
 
 
 class ModelRegistrationProjection(BaseModel):
@@ -63,7 +68,7 @@ class ModelRegistrationProjection(BaseModel):
         capabilities: Node capabilities snapshot at registration time
         ack_deadline: Deadline for node acknowledgment (nullable)
         liveness_deadline: Deadline for next heartbeat (nullable)
-        last_heartbeat_at: Timestamp of last received heartbeat (None if never received, for liveness reporting)
+        last_heartbeat_at: Timestamp of last received heartbeat (nullable)
         ack_timeout_emitted_at: Marker for ack timeout event deduplication (C2)
         liveness_timeout_emitted_at: Marker for liveness timeout deduplication (C2)
         last_applied_event_id: message_id of last applied event (idempotency)
@@ -137,10 +142,34 @@ class ModelRegistrationProjection(BaseModel):
 
     # Capability fields for fast discovery queries (OMN-1134)
     # These are denormalized from capabilities for GIN-indexed queries
-    contract_type: str | None = Field(
+    contract_type: ContractType | None = Field(
         default=None,
-        description="Contract type (effect, compute, reducer, orchestrator)",
+        description=(
+            "Contract type for the node. Valid values: 'effect', 'compute', "
+            "'reducer', 'orchestrator'. None indicates unspecified."
+        ),
     )
+
+    @field_validator("contract_type", mode="before")
+    @classmethod
+    def validate_contract_type(cls, v: str | None) -> str | None:
+        """Validate contract_type is a valid node contract type.
+
+        Args:
+            v: The contract_type value to validate
+
+        Returns:
+            The validated value (unchanged if valid)
+
+        Raises:
+            ValueError: If v is not None and not a valid contract type
+        """
+        if v is not None and v not in VALID_CONTRACT_TYPES:
+            raise ValueError(
+                f"contract_type must be one of {VALID_CONTRACT_TYPES}, got: {v!r}"
+            )
+        return v
+
     intent_types: list[str] = Field(
         default_factory=list,
         description="Intent types this node handles",
@@ -169,7 +198,7 @@ class ModelRegistrationProjection(BaseModel):
     )
     last_heartbeat_at: datetime | None = Field(
         default=None,
-        description="Timestamp of last received heartbeat (None if never received, for liveness reporting)",
+        description="Timestamp of last received heartbeat (nullable)",
     )
 
     # Timeout Emission Markers (for C2 deduplication)
@@ -365,4 +394,8 @@ class ModelRegistrationProjection(BaseModel):
         return self.current_state.is_active()
 
 
-__all__: list[str] = ["ModelRegistrationProjection"]
+__all__: list[str] = [
+    "ContractType",
+    "ModelRegistrationProjection",
+    "VALID_CONTRACT_TYPES",
+]
