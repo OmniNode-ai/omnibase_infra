@@ -169,9 +169,47 @@ _IntentUnion = ModelCommandIntent | ModelEventIntent  # Pydantic validation
 def process(intent: ProtocolRegistrationIntent): ...  # Function signature
 ```
 
+### JsonType Usage
+
+**`JsonType` is the canonical type alias for JSON-compatible values** (from `omnibase_core.types`).
+
+**Definition**: `JsonType = str | int | float | bool | None | list[JsonType] | dict[str, JsonType]`
+
+**Import Pattern**:
+```python
+# Preferred: Import from omnibase_core
+from omnibase_core.types import JsonType
+
+# Also available: Import from omnibase_infra (re-exports)
+from omnibase_infra.models.types import JsonType
+```
+
+**Related Type Aliases**:
+| Type | Purpose | Use Case |
+|------|---------|----------|
+| `JsonType` | Recursive JSON union | Generic JSON values, configs, payloads |
+| `JsonPrimitive` | Atomic JSON values | When only primitives needed (no containers) |
+| `JsonDict` | `dict[str, object]` | When `.get()` or key access is needed |
+
+**When to Use**:
+```python
+# For generic JSON data structures
+def process_config(config: JsonType) -> None: ...
+
+# For typed dict access with .get() method
+def parse_payload(data: JsonDict) -> str:
+    return str(data.get("key", "default"))
+
+# For return types with JSON serialization
+async def fetch_data() -> JsonType:
+    return {"status": "ok", "items": [1, 2, 3]}
+```
+
 ### Intent Model Architecture
 
 **Overview**: Reducers emit intents that orchestrators route to Effect layer nodes. The implementation uses typed payload models that extend `ModelIntentPayloadBase`.
+
+**Extension-Type Intent Pattern**: All infrastructure intents use `intent_type="extension"` at the outer `ModelIntent` level. The actual routing key is in `payload.intent_type` (e.g., `"consul.register"`, `"postgres.upsert_registration"`). This two-layer approach enables generic routing while preserving type-safe payloads.
 
 **Two-Layer Intent Structure**:
 
@@ -245,12 +283,24 @@ class ModelPayloadPostgresUpsertRegistration(ModelIntentPayloadBase):
 **Why `SerializeAsAny`**: When a field is typed as `BaseModel` but contains a subclass, Pydantic only serializes base fields without this type wrapper.
 
 **Accessing Payload Fields**:
+
+Intent payloads use **direct typed field access** - no `.data` dict wrapper:
 ```python
-# Direct typed field access (no .data dict needed)
+# Typed intent payloads - direct field access
 if isinstance(intent.payload, ModelPayloadConsulRegister):
     service_name = intent.payload.service_name
     tags = intent.payload.tags
+
+# Handler response payloads - use .data for inner payload
+result = await handler.handle(envelope)
+payload_data = result.result.payload.data  # Access handler-specific data
 ```
+
+**Key Distinction**:
+| Context | Access Pattern | Example |
+|---------|---------------|---------|
+| Intent Payloads | Direct fields | `intent.payload.service_name` |
+| Handler Responses | Via `.data` field | `result.result.payload.data.operation_type` |
 
 **Effect Layer Routing**:
 

@@ -449,17 +449,17 @@ class TestReducerPerformanceEdgeCases:
         reducer: RegistrationReducer,
     ) -> None:
         """reduce_reset() should be fast as it's a simple state transition."""
-        failed_state = ModelRegistrationState(
-            status="failed",
-            failure_reason="consul_failed",
-            node_id=uuid4(),
-        )
-
         elapsed_times: list[float] = []
 
         for _ in range(TIMING_ITERATIONS):
-            # Generate fresh reset_event_id per iteration to avoid idempotency
-            # early-exit bias (duplicate detection would skip full reset)
+            # Create fresh state and reset_event_id per iteration to ensure
+            # idempotent test behavior (no accumulated state between iterations,
+            # no duplicate detection early-exit bias)
+            failed_state = ModelRegistrationState(
+                status="failed",
+                failure_reason="consul_failed",
+                node_id=uuid4(),
+            )
             reset_event_id = uuid4()
 
             start = time.perf_counter()

@@ -365,7 +365,8 @@ class ChainPropagationValidator:
                         message_id=get_message_id(child_envelope),
                         parent_message_id=get_message_id(parent_envelope),
                         violation_message=(
-                            "Child message is missing correlation_id but parent has one. "
+                            f"Child message is missing correlation_id but parent has "
+                            f"correlation_id={parent_correlation}. "
                             "All messages in a workflow must share the same correlation_id."
                         ),
                         severity="error",
@@ -380,7 +381,8 @@ class ChainPropagationValidator:
                         message_id=get_message_id(child_envelope),
                         parent_message_id=get_message_id(parent_envelope),
                         violation_message=(
-                            "Child message has different correlation_id than parent. "
+                            f"Correlation ID mismatch: expected={parent_correlation}, "
+                            f"actual={child_correlation}. "
                             "All messages in a workflow must share the same correlation_id."
                         ),
                         severity="error",
@@ -430,7 +432,8 @@ class ChainPropagationValidator:
                     message_id=get_message_id(child_envelope),
                     parent_message_id=parent_message_id,
                     violation_message=(
-                        "Child message is missing causation_id. "
+                        f"Child message is missing causation_id. "
+                        f"Expected causation_id={parent_message_id} (parent's message_id). "
                         "Every message must reference its parent's message_id "
                         "to maintain causation chain integrity."
                     ),
@@ -446,7 +449,8 @@ class ChainPropagationValidator:
                     message_id=get_message_id(child_envelope),
                     parent_message_id=parent_message_id,
                     violation_message=(
-                        "Child message's causation_id does not match parent's message_id. "
+                        f"Causation ID mismatch: expected={parent_message_id}, "
+                        f"actual={child_causation_id}. "
                         "Every message must reference its direct parent's message_id."
                     ),
                     severity="error",
@@ -599,9 +603,9 @@ class ChainPropagationValidator:
                             message_id=message_id,
                             parent_message_id=None,
                             violation_message=(
-                                f"Message at index {i} has different correlation_id "
-                                f"than workflow's reference. All messages must share the same "
-                                "correlation_id for distributed tracing."
+                                f"Message at index {i} has correlation_id mismatch: "
+                                f"expected={reference_correlation_id}, actual={envelope_correlation_id}. "
+                                "All messages must share the same correlation_id for distributed tracing."
                             ),
                             severity="error",
                         )
@@ -621,9 +625,9 @@ class ChainPropagationValidator:
                             message_id=message_id,
                             parent_message_id=None,
                             violation_message=(
-                                f"Message at index {i} is missing causation_id. "
-                                "Every message (except root) must reference its parent's "
-                                "message_id to maintain causation chain."
+                                f"Message at index {i} (message_id={message_id}) is missing "
+                                "causation_id. Every message (except root) must reference its "
+                                "parent's message_id to maintain causation chain."
                             ),
                             severity="error",
                         )
@@ -638,8 +642,9 @@ class ChainPropagationValidator:
                             message_id=message_id,
                             parent_message_id=causation_id,
                             violation_message=(
-                                f"Message at index {i} has causation_id={causation_id} "
-                                "which references a message not in this workflow chain. "
+                                f"Message at index {i} (message_id={message_id}) has "
+                                f"causation_id={causation_id} which references a message "
+                                "not in this workflow chain. "
                                 "Causation chains must form an unbroken sequence."
                             ),
                             severity="error",
@@ -660,7 +665,8 @@ class ChainPropagationValidator:
                                 message_id=message_id,
                                 parent_message_id=causation_id,
                                 violation_message=(
-                                    f"Message at index {i} references parent at index {parent_idx} "
+                                    f"Message at index {i} (message_id={message_id}) references "
+                                    f"parent at index {parent_idx} (causation_id={causation_id}) "
                                     "but parents must appear before children in the causation chain. "
                                     "Check message ordering."
                                 ),

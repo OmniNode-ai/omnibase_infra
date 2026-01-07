@@ -129,22 +129,30 @@ __all__ = [
     "ProtocolPolicy",
 ]
 
-# Type aliases for backwards compatibility
-# These map legacy names to their Pydantic model replacements
+# Type aliases for cleaner protocol signatures
+# These provide semantic naming for policy evaluation types
 PolicyContext = ModelPolicyContext
-"""Type alias for backwards compatibility.
+"""Type alias providing semantic naming for policy context.
 
-Deprecated: Use ModelPolicyContext directly for new code.
-This alias maps to ModelPolicyContext Pydantic model which replaces
-the former JsonType definition for policy evaluation context.
+This alias provides a cleaner type name for protocol signatures:
+    def evaluate(self, context: PolicyContext) -> PolicyResult
+
+Uses ModelPolicyContext Pydantic model, which provides:
+    - Structured context with common fields (correlation_id, attempt, etc.)
+    - extra="allow" for policy-specific parameters
+    - Dict-like access via get() for compatibility
 """
 
 PolicyResult = ModelPolicyResult
-"""Type alias for backwards compatibility.
+"""Type alias providing semantic naming for policy results.
 
-Deprecated: Use ModelPolicyResult directly for new code.
-This alias maps to ModelPolicyResult Pydantic model which replaces
-the former JsonType definition for policy evaluation results.
+This alias provides a cleaner type name for protocol signatures:
+    def evaluate(self, context: PolicyContext) -> PolicyResult
+
+Uses ModelPolicyResult Pydantic model, which provides:
+    - Structured result with common fields (success, reason, etc.)
+    - extra="allow" for policy-specific return values
+    - Dict-like access via get() for compatibility
 """
 
 

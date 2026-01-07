@@ -1,19 +1,19 @@
 """Test cryptography 46.x compatibility.
 
 Verifies cryptography package upgrade (46.0.3) doesn't break existing
-functionality. Addresses CVE-2024-12797 security fix validation.
+functionality. This upgrade addresses security fixes from earlier versions:
+  - CVE-2024-26130 (PKCS12 NULL pointer dereference): Fixed in 42.0.4
+  - CVE-2024-12797 (OpenSSL RPK authentication bypass): Fixed in 44.0.1
 
 The cryptography package is a transitive dependency via omnibase_core 0.6.2.
 This codebase directly uses:
 - hashlib.sha256 for content-derived IDs (registration_reducer.py)
 
-See: pyproject.toml lines 57-61 for upgrade rationale.
+See: pyproject.toml cryptography comment for upgrade rationale.
 """
 
 import hashlib
 from uuid import UUID
-
-import pytest
 
 
 class TestCryptographyCompatibility:
@@ -23,11 +23,17 @@ class TestCryptographyCompatibility:
         """Verify cryptography package imports successfully."""
         import cryptography
 
-        # Verify version is 46.x as specified in pyproject.toml
+        # Verify version meets minimum requirement (46.0.0) as specified in pyproject.toml.
+        # Using tuple comparison for proper semantic version checking - this allows
+        # any patch/minor updates (46.0.x, 46.x.y) while ensuring minimum is met.
         version = cryptography.__version__
-        assert version.startswith("46."), (
-            f"Expected cryptography 46.x, got {version}. "
-            "Update pyproject.toml constraint if intentional."
+        version_parts = version.split(".")
+        version_tuple = tuple(int(p) for p in version_parts[:3])
+        minimum_version = (46, 0, 0)
+
+        assert version_tuple >= minimum_version, (
+            f"Expected cryptography >= {'.'.join(map(str, minimum_version))}, "
+            f"got {version}. Update pyproject.toml constraint if intentional."
         )
 
     def test_cryptography_hazmat_primitives_available(self) -> None:
@@ -162,9 +168,9 @@ class TestSecretsModuleAvailable:
         """
         import secrets
 
-        a = b"test-secret-value"
-        b_same = b"test-secret-value"
-        b_diff = b"different-value"
+        secret_value = b"test-secret-value"
+        same_secret = b"test-secret-value"
+        different_secret = b"different-value"
 
-        assert secrets.compare_digest(a, b_same) is True
-        assert secrets.compare_digest(a, b_diff) is False
+        assert secrets.compare_digest(secret_value, same_secret) is True
+        assert secrets.compare_digest(secret_value, different_secret) is False

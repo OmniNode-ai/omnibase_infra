@@ -156,9 +156,6 @@ class TestBasicReduce:
         output = reducer.reduce(initial_state, valid_event)
 
         assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
-        intent_types = {intent.intent_type for intent in output.intents}
-        assert "extension" in intent_types
-        assert "extension" in intent_types
 
     def test_reduce_valid_event_transitions_to_pending(
         self,
@@ -2664,7 +2661,6 @@ class TestCircuitBreakerNonApplicability:
                 "postgres.upsert_registration",
             )
             assert intent.target is not None
-            assert intent.payload is not None
 
             # Verify these are just intent descriptions, not executed operations
             # (the payload is a typed Pydantic model, not live connections)

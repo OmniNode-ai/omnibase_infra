@@ -31,15 +31,13 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-# Forward migration type aliases for renamed types in omnibase_core 0.6.2
-# Using TypeAlias for mypy compatibility
-from typing import Literal, TypeAlias, TypedDict
+# TypedDict for exemption pattern structure
+from typing import TypedDict
 
 # Third-party imports
 import yaml
 from omnibase_core.models.common import ModelValidationMetadata
 from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
-from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
     CircularImportValidator,
     ModelContractValidationResult,
@@ -51,15 +49,6 @@ from omnibase_core.validation import (
     validate_union_usage_file,
     validate_yaml_file,
 )
-
-# Type alias for circular import validation result
-# This may have been renamed in omnibase_core 0.6.x
-try:
-    from omnibase_core.validation import CircularImportValidationResult
-except ImportError:
-    from omnibase_core.validation import (
-        ModelCycleDetectionResult as CircularImportValidationResult,
-    )
 
 # Module-level initialization (AFTER all imports)
 logger = logging.getLogger(__name__)
@@ -690,7 +679,6 @@ def _create_filtered_result(
 
 def validate_infra_contract_deep(
     contract_path: str | Path,
-    contract_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
 ) -> ModelContractValidationResult:
     """
     Perform deep contract validation for ONEX compliance.
@@ -700,9 +688,6 @@ def validate_infra_contract_deep(
 
     Args:
         contract_path: Path to the contract YAML file.
-        contract_type: Type of contract to validate. Defaults to "effect".
-            Note: contract_type is preserved for API compatibility but the
-            underlying validate_yaml_file() does not use it.
 
     Returns:
         ModelContractValidationResult with validation status, score, and any errors.
@@ -716,10 +701,10 @@ def validate_infra_contract_deep(
         return result
 
     # If result is a different type, wrap it in ModelContractValidationResult
-    # This handles API variations between versions
+    # Default to passed=False for unknown result types to avoid silently masking failures
     return ModelContractValidationResult(
-        passed=getattr(result, "passed", True),
-        score=getattr(result, "score", 100.0),
+        passed=getattr(result, "passed", False),
+        score=getattr(result, "score", 0.0),
         errors=getattr(result, "errors", []),
         warnings=getattr(result, "warnings", []),
     )

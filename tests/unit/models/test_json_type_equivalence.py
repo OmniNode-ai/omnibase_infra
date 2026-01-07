@@ -10,8 +10,6 @@ represent the same recursive type alias for JSON-compatible values:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
 from omnibase_core.types import JsonType
 
@@ -301,3 +299,90 @@ class TestJsonTypeRealWorldExamples:
         }
         assert event["event_type"] == "user.created"
         assert event["payload"]["roles"] == ["admin", "editor"]
+
+
+class TestJsonTypeReExport:
+    """Verify JsonType is properly re-exported from omnibase_core.
+
+    The migration from JsonValue to JsonType was completed. JsonValue has been
+    removed (following the no backwards compatibility policy). This test class
+    verifies that:
+    1. JsonType from omnibase_core is properly re-exported via omnibase_infra
+    2. The type accepts all JSON-compatible values (same as old JsonValue)
+    """
+
+    def test_json_type_from_core_equals_infra_json_type(self) -> None:
+        """JsonType from omnibase_core should equal re-exported JsonType."""
+        from omnibase_core.types import JsonType as CoreJsonType
+
+        from omnibase_infra.models.types import JsonType as InfraJsonType
+
+        # Both should reference the same type
+        assert CoreJsonType is InfraJsonType
+
+    def test_infra_json_type_accepts_primitives(self) -> None:
+        """Re-exported JsonType should accept all primitive types.
+
+        This validates JsonType accepts the same primitives as old JsonValue:
+        str, int, float, bool, None
+        """
+        from omnibase_infra.models.types import (
+            JsonType,
+        )
+
+        # String
+        s: JsonType = "hello"
+        assert s == "hello"
+
+        # Integer
+        i: JsonType = 42
+        assert i == 42
+
+        # Float
+        f: JsonType = 3.14
+        assert f == 3.14
+
+        # Boolean
+        b: JsonType = True
+        assert b is True
+
+        # None
+        n: JsonType = None
+        assert n is None
+
+    def test_infra_json_type_accepts_containers(self) -> None:
+        """Re-exported JsonType should accept container types.
+
+        This validates JsonType accepts the same containers as old JsonValue:
+        list[JsonType], dict[str, JsonType]
+        """
+        from omnibase_infra.models.types import (
+            JsonType,
+        )
+
+        # List
+        lst: JsonType = [1, "two", 3.0, True, None]
+        assert lst == [1, "two", 3.0, True, None]
+
+        # Dict
+        dct: JsonType = {"key": "value", "number": 42}
+        assert dct == {"key": "value", "number": 42}
+
+    def test_infra_json_type_accepts_nested_structures(self) -> None:
+        """Re-exported JsonType should accept nested structures.
+
+        This validates JsonType accepts the same nested structures as old JsonValue.
+        """
+        from omnibase_infra.models.types import (
+            JsonType,
+        )
+
+        nested: JsonType = {
+            "level1": {
+                "level2": {
+                    "level3": ["deep", "value"],
+                },
+            },
+            "list_of_dicts": [{"a": 1}, {"b": 2}],
+        }
+        assert nested["level1"]["level2"]["level3"] == ["deep", "value"]
