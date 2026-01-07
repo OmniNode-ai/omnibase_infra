@@ -58,6 +58,8 @@ from typing import TYPE_CHECKING
 
 from omnibase_core.nodes import NodeCompute
 
+from omnibase_infra.errors import RuntimeHostError
+
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
@@ -71,7 +73,21 @@ from omnibase_infra.nodes.architecture_validator.protocols import (
     ProtocolArchitectureRule,
 )
 
-__all__ = ["NodeArchitectureValidatorCompute"]
+# Supported rule IDs from contract_architecture_validator.yaml
+# These are the only rules that this validator node is designed to handle.
+# Any rule not in this set indicates a misconfiguration or version mismatch.
+SUPPORTED_RULE_IDS: frozenset[str] = frozenset(
+    {
+        "NO_HANDLER_PUBLISHING",
+        "PURE_REDUCERS",
+        "NO_FSM_IN_ORCHESTRATORS",
+        "NO_WORKFLOW_IN_REDUCERS",
+        "NO_DIRECT_HANDLER_DISPATCH",
+        "NO_LOCAL_ONLY_PATHS",
+    }
+)
+
+__all__ = ["NodeArchitectureValidatorCompute", "SUPPORTED_RULE_IDS"]
 
 
 class NodeArchitectureValidatorCompute(
@@ -139,7 +155,50 @@ class NodeArchitectureValidatorCompute(
         .. versionadded:: 0.8.0
         """
         super().__init__(container)
+        self._validate_rules_against_contract(rules)
         self._rules = rules
+
+    def _validate_rules_against_contract(
+        self,
+        rules: tuple[ProtocolArchitectureRule, ...],
+    ) -> None:
+        """Validate that all provided rules are in the contract's supported_rules.
+
+        This validation ensures that only rules defined in the contract's
+        supported_rules list can be used with this validator. Using unsupported
+        rules would indicate a misconfiguration or version mismatch between
+        the validator and the rules being passed.
+
+        Args:
+            rules: Tuple of architecture rules to validate against the contract.
+
+        Raises:
+            RuntimeHostError: If any rule has a rule_id not in SUPPORTED_RULE_IDS.
+                The error message includes the unsupported rule_id and the list
+                of supported rules for debugging.
+
+        Example:
+            >>> # This is called automatically in __init__
+            >>> validator._validate_rules_against_contract((
+            ...     NoHandlerPublishingRule(),  # Valid: in supported_rules
+            ...     PureReducersRule(),         # Valid: in supported_rules
+            ... ))
+            >>> # No error raised
+
+            >>> # Invalid rule raises RuntimeHostError
+            >>> validator._validate_rules_against_contract((
+            ...     UnknownRule(),  # rule_id="UNKNOWN_RULE"
+            ... ))
+            RuntimeHostError: Rule 'UNKNOWN_RULE' is not in contract supported_rules...
+
+        .. versionadded:: 0.8.0
+        """
+        for rule in rules:
+            if rule.rule_id not in SUPPORTED_RULE_IDS:
+                raise RuntimeHostError(
+                    f"Rule '{rule.rule_id}' is not in contract supported_rules. "
+                    f"Supported rules: {sorted(SUPPORTED_RULE_IDS)}"
+                )
 
     def compute(
         self,

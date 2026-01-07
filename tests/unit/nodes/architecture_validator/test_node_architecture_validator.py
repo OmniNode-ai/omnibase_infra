@@ -33,7 +33,9 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.nodes.architecture_validator import (
+    SUPPORTED_RULE_IDS,
     EnumValidationSeverity,
     ModelArchitectureValidationRequest,
     ModelArchitectureValidationResult,
@@ -174,10 +176,11 @@ def passing_rule() -> MockRule:
 
     Returns:
         MockRule configured to return passed=True on all checks.
+        Uses NO_HANDLER_PUBLISHING as a valid supported rule_id.
     """
     return MockRule(
-        rule_id="ALWAYS_PASS",
-        name="Always Pass Rule",
+        rule_id="NO_HANDLER_PUBLISHING",
+        name="No Handler Publishing Rule",
         severity=EnumValidationSeverity.ERROR,
         should_pass=True,
     )
@@ -189,10 +192,11 @@ def failing_rule() -> MockRule:
 
     Returns:
         MockRule configured to return passed=False with ERROR severity.
+        Uses PURE_REDUCERS as a valid supported rule_id.
     """
     return MockRule(
-        rule_id="ALWAYS_FAIL",
-        name="Always Fail Rule",
+        rule_id="PURE_REDUCERS",
+        name="Pure Reducers Rule",
         severity=EnumValidationSeverity.ERROR,
         should_pass=False,
         message="This rule always fails",
@@ -205,10 +209,11 @@ def warning_rule() -> MockRule:
 
     Returns:
         MockRule configured to return passed=False with WARNING severity.
+        Uses NO_FSM_IN_ORCHESTRATORS as a valid supported rule_id.
     """
     return MockRule(
-        rule_id="WARNING_RULE",
-        name="Warning Rule",
+        rule_id="NO_FSM_IN_ORCHESTRATORS",
+        name="No FSM in Orchestrators Rule",
         severity=EnumValidationSeverity.WARNING,
         should_pass=False,
         message="This is a warning",
@@ -221,10 +226,11 @@ def info_rule() -> MockRule:
 
     Returns:
         MockRule configured to return passed=False with INFO severity.
+        Uses NO_WORKFLOW_IN_REDUCERS as a valid supported rule_id.
     """
     return MockRule(
-        rule_id="INFO_RULE",
-        name="Info Rule",
+        rule_id="NO_WORKFLOW_IN_REDUCERS",
+        name="No Workflow in Reducers Rule",
         severity=EnumValidationSeverity.INFO,
         should_pass=False,
         message="This is informational",
@@ -342,8 +348,8 @@ class TestNodeArchitectureValidatorCompute:
         with no violations.
         """
         another_passing_rule = MockRule(
-            rule_id="ALSO_PASS",
-            name="Also Pass Rule",
+            rule_id="PURE_REDUCERS",
+            name="Pure Reducers Rule",
             severity=EnumValidationSeverity.WARNING,
             should_pass=True,
         )
@@ -362,7 +368,7 @@ class TestNodeArchitectureValidatorCompute:
         assert result.violation_count == 0
         assert result.nodes_checked == 1
         assert result.handlers_checked == 1
-        assert set(result.rules_checked) == {"ALWAYS_PASS", "ALSO_PASS"}
+        assert set(result.rules_checked) == {"NO_HANDLER_PUBLISHING", "PURE_REDUCERS"}
 
     def test_single_violation_detected(
         self,
@@ -389,8 +395,8 @@ class TestNodeArchitectureValidatorCompute:
         assert result.valid is False
         assert result.violation_count == 1
         violation = result.violations[0]
-        assert violation.rule_id == "ALWAYS_FAIL"
-        assert violation.rule_name == "Always Fail Rule"
+        assert violation.rule_id == "PURE_REDUCERS"
+        assert violation.rule_name == "Pure Reducers Rule"
         assert violation.severity == EnumValidationSeverity.ERROR
         assert violation.message == "This rule always fails"
 
@@ -406,15 +412,15 @@ class TestNodeArchitectureValidatorCompute:
         all violations should be collected in the result.
         """
         fail_rule_1 = MockRule(
-            rule_id="FAIL_1",
-            name="Fail Rule 1",
+            rule_id="NO_HANDLER_PUBLISHING",
+            name="No Handler Publishing Rule",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
             message="First failure",
         )
         fail_rule_2 = MockRule(
-            rule_id="FAIL_2",
-            name="Fail Rule 2",
+            rule_id="PURE_REDUCERS",
+            name="Pure Reducers Rule",
             severity=EnumValidationSeverity.WARNING,
             should_pass=False,
             message="Second failure",
@@ -434,8 +440,8 @@ class TestNodeArchitectureValidatorCompute:
         # 2 rules x (1 node + 1 handler) = 4 violations
         assert result.violation_count == 4
         rule_ids = [v.rule_id for v in result.violations]
-        assert rule_ids.count("FAIL_1") == 2
-        assert rule_ids.count("FAIL_2") == 2
+        assert rule_ids.count("NO_HANDLER_PUBLISHING") == 2
+        assert rule_ids.count("PURE_REDUCERS") == 2
 
     def test_fail_fast_stops_on_first_violation(
         self,
@@ -450,15 +456,15 @@ class TestNodeArchitectureValidatorCompute:
         rules or targets.
         """
         fail_rule_1 = MockRule(
-            rule_id="FAIL_1",
-            name="Fail Rule 1",
+            rule_id="NO_HANDLER_PUBLISHING",
+            name="No Handler Publishing Rule",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
             message="First failure",
         )
         fail_rule_2 = MockRule(
-            rule_id="FAIL_2",
-            name="Fail Rule 2",
+            rule_id="PURE_REDUCERS",
+            name="Pure Reducers Rule",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
             message="Second failure",
@@ -478,7 +484,7 @@ class TestNodeArchitectureValidatorCompute:
         assert result.valid is False
         # Should stop after first violation
         assert result.violation_count == 1
-        assert result.violations[0].rule_id == "FAIL_1"
+        assert result.violations[0].rule_id == "NO_HANDLER_PUBLISHING"
         # Second rule should not be checked (first rule failed first)
         assert fail_rule_1.check_count == 1
         # fail_rule_2 may or may not be checked depending on order,
@@ -495,22 +501,22 @@ class TestNodeArchitectureValidatorCompute:
         IDs should be executed.
         """
         rule_a = MockRule(
-            rule_id="RULE_A",
-            name="Rule A",
+            rule_id="NO_HANDLER_PUBLISHING",
+            name="No Handler Publishing Rule",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
             message="Rule A failed",
         )
         rule_b = MockRule(
-            rule_id="RULE_B",
-            name="Rule B",
+            rule_id="PURE_REDUCERS",
+            name="Pure Reducers Rule",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
             message="Rule B failed",
         )
         rule_c = MockRule(
-            rule_id="RULE_C",
-            name="Rule C",
+            rule_id="NO_FSM_IN_ORCHESTRATORS",
+            name="No FSM in Orchestrators Rule",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
             message="Rule C failed",
@@ -522,14 +528,20 @@ class TestNodeArchitectureValidatorCompute:
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
-            rule_ids=("RULE_A", "RULE_C"),  # Only check A and C
+            rule_ids=(
+                "NO_HANDLER_PUBLISHING",
+                "NO_FSM_IN_ORCHESTRATORS",
+            ),  # Only check A and C
         )
 
         result = validator.compute(request)
 
         assert result.valid is False
         assert result.violation_count == 2
-        assert set(result.rules_checked) == {"RULE_A", "RULE_C"}
+        assert set(result.rules_checked) == {
+            "NO_HANDLER_PUBLISHING",
+            "NO_FSM_IN_ORCHESTRATORS",
+        }
         # Rule B should not be checked
         assert rule_a.check_count == 1
         assert rule_b.check_count == 0
@@ -604,20 +616,20 @@ class TestNodeArchitectureValidatorCompute:
         validation, regardless of whether they passed or failed.
         """
         rule_1 = MockRule(
-            rule_id="CHECK_1",
-            name="Check 1",
+            rule_id="NO_HANDLER_PUBLISHING",
+            name="No Handler Publishing Rule",
             severity=EnumValidationSeverity.ERROR,
             should_pass=True,
         )
         rule_2 = MockRule(
-            rule_id="CHECK_2",
-            name="Check 2",
+            rule_id="PURE_REDUCERS",
+            name="Pure Reducers Rule",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
         )
         rule_3 = MockRule(
-            rule_id="CHECK_3",
-            name="Check 3",
+            rule_id="NO_FSM_IN_ORCHESTRATORS",
+            name="No FSM in Orchestrators Rule",
             severity=EnumValidationSeverity.WARNING,
             should_pass=True,
         )
@@ -632,7 +644,11 @@ class TestNodeArchitectureValidatorCompute:
 
         result = validator.compute(request)
 
-        assert set(result.rules_checked) == {"CHECK_1", "CHECK_2", "CHECK_3"}
+        assert set(result.rules_checked) == {
+            "NO_HANDLER_PUBLISHING",
+            "PURE_REDUCERS",
+            "NO_FSM_IN_ORCHESTRATORS",
+        }
         assert result.rules_checked_count == 3
 
     def test_violation_details_captured(
@@ -646,8 +662,8 @@ class TestNodeArchitectureValidatorCompute:
         and target name (class name or string representation).
         """
         rule_with_details = MockRule(
-            rule_id="DETAILED_RULE",
-            name="Detailed Rule",
+            rule_id="NO_DIRECT_HANDLER_DISPATCH",
+            name="No Direct Handler Dispatch Rule",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
             message="Detailed failure",
@@ -901,15 +917,15 @@ class TestViolationSeverityBehavior:
     ) -> None:
         """Test result with mixed severity violations."""
         error_rule = MockRule(
-            rule_id="ERROR_RULE",
-            name="Error Rule",
+            rule_id="NO_HANDLER_PUBLISHING",
+            name="No Handler Publishing Rule",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
             message="Error violation",
         )
         warning_rule = MockRule(
-            rule_id="WARNING_RULE",
-            name="Warning Rule",
+            rule_id="PURE_REDUCERS",
+            name="Pure Reducers Rule",
             severity=EnumValidationSeverity.WARNING,
             should_pass=False,
             message="Warning violation",
@@ -1064,8 +1080,8 @@ class TestValidatorEdgeCases:
     ) -> None:
         """Test that rule description is used when check result has no message."""
         rule_no_message = MockRule(
-            rule_id="NO_MSG_RULE",
-            name="No Message Rule",
+            rule_id="NO_LOCAL_ONLY_PATHS",
+            name="No Local Only Paths Rule",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
             message=None,  # No message
@@ -1189,8 +1205,8 @@ class TestValidatorEdgeCases:
         log_str = violation.format_for_logging()
 
         assert "[ERROR]" in log_str
-        assert "ALWAYS_FAIL" in log_str
-        assert "Always Fail Rule" in log_str
+        assert "PURE_REDUCERS" in log_str
+        assert "Pure Reducers Rule" in log_str
         assert "This rule always fails" in log_str
 
     def test_violation_to_structured_dict(
@@ -1214,8 +1230,8 @@ class TestValidatorEdgeCases:
 
         structured = violation.to_structured_dict()
 
-        assert structured["rule_id"] == "ALWAYS_FAIL"
-        assert structured["rule_name"] == "Always Fail Rule"
+        assert structured["rule_id"] == "PURE_REDUCERS"
+        assert structured["rule_name"] == "Pure Reducers Rule"
         assert structured["severity"] == "error"
         assert structured["message"] == "This rule always fails"
 
@@ -1251,7 +1267,7 @@ class TestValidatorEdgeCases:
         )
         result_empty = validator.compute(request_empty)
 
-        assert result_none.rules_checked == ("ALWAYS_PASS",)
+        assert result_none.rules_checked == ("NO_HANDLER_PUBLISHING",)
         assert result_empty.rules_checked == ()
 
     def test_model_rule_check_result_helper_methods(self) -> None:
@@ -1327,3 +1343,381 @@ class TestImmutabilityAndThreadSafety:
 
         config = ModelRuleCheckResult.model_config
         assert config.get("frozen") is True
+
+
+# =============================================================================
+# =============================================================================
+# Tests for Rule ID Validation Against Contract
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestRuleIdValidation:
+    """Tests for rule_id validation against contract supported_rules.
+
+    The validator validates rule_ids against the contract's SUPPORTED_RULE_IDS
+    during construction (__init__). This ensures that only rules defined in
+    the contract can be used, preventing configuration errors and version
+    mismatches.
+
+    Validation Behavior:
+        - Valid/supported rule_ids: Accepted, validator constructed successfully
+        - Invalid/unsupported rule_ids: RuntimeHostError raised during __init__
+        - Error message: Includes the invalid rule_id and list of supported rules
+        - Mixed valid/invalid: Fails on first invalid rule_id encountered
+
+    Supported rule IDs (from contract_architecture_validator.yaml):
+        - NO_HANDLER_PUBLISHING
+        - PURE_REDUCERS
+        - NO_FSM_IN_ORCHESTRATORS
+        - NO_WORKFLOW_IN_REDUCERS
+        - NO_DIRECT_HANDLER_DISPATCH
+        - NO_LOCAL_ONLY_PATHS
+
+    Related:
+        - OMN-1138: Architecture Validator implementation
+        - contract_architecture_validator.yaml: Source of supported_rules
+
+    .. versionadded:: 0.8.0
+        Created as part of OMN-1138 rule_id validation coverage.
+    """
+
+    def test_supported_rule_id_passes_construction(
+        self,
+        mock_container: MagicMock,
+        sample_node: object,
+    ) -> None:
+        """Valid/supported rule IDs should be accepted during construction.
+
+        When all rule_ids are in the contract's supported_rules list,
+        the validator should be constructed successfully without error.
+        """
+        rule_a = MockRule(
+            rule_id="NO_HANDLER_PUBLISHING",
+            name="No Handler Publishing",
+            severity=EnumValidationSeverity.ERROR,
+            should_pass=True,
+        )
+        rule_b = MockRule(
+            rule_id="PURE_REDUCERS",
+            name="Pure Reducers",
+            severity=EnumValidationSeverity.ERROR,
+            should_pass=True,
+        )
+
+        # Should not raise any error
+        validator = NodeArchitectureValidatorCompute(
+            container=mock_container,
+            rules=(rule_a, rule_b),
+        )
+
+        request = ModelArchitectureValidationRequest(
+            nodes=(sample_node,),
+            handlers=(),
+        )
+
+        result = validator.compute(request)
+
+        assert result.valid is True
+        assert set(result.rules_checked) == {"NO_HANDLER_PUBLISHING", "PURE_REDUCERS"}
+        assert rule_a.check_count == 1
+        assert rule_b.check_count == 1
+
+    def test_all_supported_rule_ids_pass_construction(
+        self,
+        mock_container: MagicMock,
+    ) -> None:
+        """All supported rule_ids from the contract should be accepted.
+
+        Verifies that each rule_id defined in SUPPORTED_RULE_IDS can be
+        used to create a validator successfully.
+        """
+        # Test each supported rule_id individually
+        supported_ids = [
+            "NO_HANDLER_PUBLISHING",
+            "PURE_REDUCERS",
+            "NO_FSM_IN_ORCHESTRATORS",
+            "NO_WORKFLOW_IN_REDUCERS",
+            "NO_DIRECT_HANDLER_DISPATCH",
+            "NO_LOCAL_ONLY_PATHS",
+        ]
+
+        for rule_id in supported_ids:
+            rule = MockRule(
+                rule_id=rule_id,
+                name=f"Test Rule for {rule_id}",
+                severity=EnumValidationSeverity.ERROR,
+                should_pass=True,
+            )
+
+            # Should not raise any error
+            validator = NodeArchitectureValidatorCompute(
+                container=mock_container,
+                rules=(rule,),
+            )
+            assert validator is not None
+
+    def test_unsupported_rule_id_raises_error_during_construction(
+        self,
+        mock_container: MagicMock,
+    ) -> None:
+        """Unsupported rule IDs should raise RuntimeHostError during __init__.
+
+        When a rule with an unsupported rule_id is provided during construction,
+        the validator should raise RuntimeHostError immediately.
+
+        This ensures:
+        - Typos in rule_ids are caught early
+        - Configuration errors are visible at startup
+        - Version mismatches between validator and rules are detected
+        """
+        rule = MockRule(
+            rule_id="NONEXISTENT_RULE",
+            name="Nonexistent Rule",
+            severity=EnumValidationSeverity.ERROR,
+            should_pass=True,
+        )
+
+        with pytest.raises(RuntimeHostError):
+            NodeArchitectureValidatorCompute(
+                container=mock_container,
+                rules=(rule,),
+            )
+
+    def test_error_message_includes_invalid_rule_id(
+        self,
+        mock_container: MagicMock,
+    ) -> None:
+        """Error message should clearly identify the unsupported rule_id.
+
+        The error message should include the invalid rule_id so developers
+        can quickly identify and fix configuration issues.
+        """
+        invalid_rule_id = "TOTALLY_INVALID_RULE_ID"
+        rule = MockRule(
+            rule_id=invalid_rule_id,
+            name="Invalid Rule",
+            severity=EnumValidationSeverity.ERROR,
+            should_pass=True,
+        )
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            NodeArchitectureValidatorCompute(
+                container=mock_container,
+                rules=(rule,),
+            )
+
+        # Error message should contain the invalid rule_id
+        error_str = str(exc_info.value)
+        assert invalid_rule_id in error_str
+
+    def test_error_message_includes_supported_rule_ids(
+        self,
+        mock_container: MagicMock,
+    ) -> None:
+        """Error message should include list of supported rule_ids.
+
+        To help developers quickly fix configuration issues, the error
+        message should include the list of valid/supported rule_ids.
+        """
+        rule = MockRule(
+            rule_id="UNKNOWN_RULE",
+            name="Unknown Rule",
+            severity=EnumValidationSeverity.ERROR,
+            should_pass=True,
+        )
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            NodeArchitectureValidatorCompute(
+                container=mock_container,
+                rules=(rule,),
+            )
+
+        error_str = str(exc_info.value)
+
+        # Error should include at least one supported rule_id as suggestion
+        supported_mentioned = any(
+            supported in error_str
+            for supported in [
+                "NO_HANDLER_PUBLISHING",
+                "PURE_REDUCERS",
+                "NO_FSM_IN_ORCHESTRATORS",
+            ]
+        )
+        assert supported_mentioned, (
+            f"Error should list supported rule_ids. Got: {error_str}"
+        )
+
+    def test_mixed_valid_and_invalid_rule_ids_raises_error(
+        self,
+        mock_container: MagicMock,
+    ) -> None:
+        """Mix of valid and invalid rule_ids should fail on the invalid one.
+
+        When both valid and invalid rule_ids are provided, the validator
+        should raise an error for the invalid one during construction.
+        """
+        valid_rule = MockRule(
+            rule_id="NO_HANDLER_PUBLISHING",
+            name="Valid Rule",
+            severity=EnumValidationSeverity.ERROR,
+            should_pass=True,
+        )
+        invalid_rule = MockRule(
+            rule_id="INVALID_RULE",
+            name="Invalid Rule",
+            severity=EnumValidationSeverity.WARNING,
+            should_pass=True,
+        )
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            NodeArchitectureValidatorCompute(
+                container=mock_container,
+                rules=(valid_rule, invalid_rule),
+            )
+
+        # Error message should contain the invalid rule_id
+        assert "INVALID_RULE" in str(exc_info.value)
+
+    def test_empty_rules_passes_construction(
+        self,
+        mock_container: MagicMock,
+        sample_node: object,
+    ) -> None:
+        """Empty rules tuple should pass construction without error.
+
+        A validator with no rules is valid (though it won't check anything).
+        """
+        # Should not raise any error
+        validator = NodeArchitectureValidatorCompute(
+            container=mock_container,
+            rules=(),
+        )
+
+        request = ModelArchitectureValidationRequest(
+            nodes=(sample_node,),
+            handlers=(),
+        )
+
+        result = validator.compute(request)
+
+        assert result.valid is True
+        assert result.rules_checked == ()
+        assert result.nodes_checked == 1
+
+    def test_rule_ids_filter_works_with_supported_rules(
+        self,
+        mock_container: MagicMock,
+        sample_node: object,
+    ) -> None:
+        """The rule_ids filter in request should work with supported rules.
+
+        When rule_ids is specified in the request, only matching registered
+        rules should be executed.
+        """
+        rule_a = MockRule(
+            rule_id="NO_HANDLER_PUBLISHING",
+            name="No Handler Publishing",
+            severity=EnumValidationSeverity.ERROR,
+            should_pass=True,
+        )
+        rule_b = MockRule(
+            rule_id="PURE_REDUCERS",
+            name="Pure Reducers",
+            severity=EnumValidationSeverity.ERROR,
+            should_pass=True,
+        )
+
+        validator = NodeArchitectureValidatorCompute(
+            container=mock_container,
+            rules=(rule_a, rule_b),
+        )
+
+        # Only check one of the two registered rules
+        request = ModelArchitectureValidationRequest(
+            nodes=(sample_node,),
+            handlers=(),
+            rule_ids=("NO_HANDLER_PUBLISHING",),
+        )
+
+        result = validator.compute(request)
+
+        assert result.valid is True
+        assert result.rules_checked == ("NO_HANDLER_PUBLISHING",)
+        assert rule_a.check_count == 1
+        assert rule_b.check_count == 0  # Not in rule_ids filter
+
+    def test_none_rule_ids_checks_all_registered_rules(
+        self,
+        mock_container: MagicMock,
+        sample_node: object,
+    ) -> None:
+        """rule_ids=None should check all registered rules.
+
+        When rule_ids is None (default), all registered rules should be
+        checked.
+        """
+        rule_a = MockRule(
+            rule_id="NO_HANDLER_PUBLISHING",
+            name="No Handler Publishing",
+            severity=EnumValidationSeverity.ERROR,
+            should_pass=True,
+        )
+        rule_b = MockRule(
+            rule_id="PURE_REDUCERS",
+            name="Pure Reducers",
+            severity=EnumValidationSeverity.WARNING,
+            should_pass=True,
+        )
+
+        validator = NodeArchitectureValidatorCompute(
+            container=mock_container,
+            rules=(rule_a, rule_b),
+        )
+
+        request = ModelArchitectureValidationRequest(
+            nodes=(sample_node,),
+            handlers=(),
+            rule_ids=None,  # Check all rules
+        )
+
+        result = validator.compute(request)
+
+        assert result.valid is True
+        assert set(result.rules_checked) == {"NO_HANDLER_PUBLISHING", "PURE_REDUCERS"}
+        assert rule_a.check_count == 1
+        assert rule_b.check_count == 1
+
+    def test_empty_rule_ids_filter_checks_no_rules(
+        self,
+        mock_container: MagicMock,
+        sample_node: object,
+    ) -> None:
+        """rule_ids=() should check no rules (valid but unusual).
+
+        An empty tuple for rule_ids means "check no rules" which is valid
+        behavior, though unusual in practice.
+        """
+        rule_a = MockRule(
+            rule_id="NO_HANDLER_PUBLISHING",
+            name="No Handler Publishing",
+            severity=EnumValidationSeverity.ERROR,
+            should_pass=True,
+        )
+
+        validator = NodeArchitectureValidatorCompute(
+            container=mock_container,
+            rules=(rule_a,),
+        )
+
+        request = ModelArchitectureValidationRequest(
+            nodes=(sample_node,),
+            handlers=(),
+            rule_ids=(),  # Check no rules
+        )
+
+        result = validator.compute(request)
+
+        assert result.valid is True
+        assert result.rules_checked == ()
+        assert rule_a.check_count == 0

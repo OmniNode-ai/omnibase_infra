@@ -38,6 +38,7 @@ from omnibase_infra.nodes.architecture_validator.models import (
     ModelRuleCheckResult,
 )
 from omnibase_infra.nodes.architecture_validator.node_architecture_validator import (
+    SUPPORTED_RULE_IDS,
     NodeArchitectureValidatorCompute,
 )
 from omnibase_infra.nodes.architecture_validator.protocols import (
@@ -47,6 +48,8 @@ from omnibase_infra.nodes.architecture_validator.protocols import (
 __all__ = [
     # Node
     "NodeArchitectureValidatorCompute",
+    # Constants
+    "SUPPORTED_RULE_IDS",
     # Enums
     "EnumValidationSeverity",
     # Models
