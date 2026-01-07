@@ -184,23 +184,10 @@ def _check_consul_reachable() -> bool:
 CONSUL_AVAILABLE = _check_consul_reachable()
 
 
-def _check_service_registry_available() -> bool:
-    """Check if ServiceRegistry is available in ModelONEXContainer.
+# Import shared service registry availability check
+from tests.conftest import check_service_registry_available
 
-    omnibase_core 0.6.x has a circular import issue that causes
-    ServiceRegistry to not be available when the container is initialized.
-    Tests requiring ServiceRegistry should skip gracefully when this occurs.
-    """
-    try:
-        from omnibase_core.container import ModelONEXContainer
-
-        container = ModelONEXContainer()
-        return container.service_registry is not None
-    except Exception:
-        return False
-
-
-SERVICE_REGISTRY_AVAILABLE = _check_service_registry_available()
+SERVICE_REGISTRY_AVAILABLE = check_service_registry_available()
 
 # Combined availability check
 ALL_INFRA_AVAILABLE = (
@@ -423,11 +410,12 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
         The event bus is stopped and cleaned up after each test.
     """
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
     if not KAFKA_AVAILABLE:
         pytest.skip("Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)")
 
-    bus = KafkaEventBus(
+    config = ModelKafkaEventBusConfig(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         environment="e2e-test",
         group="registration-e2e",
@@ -436,6 +424,7 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
         circuit_breaker_threshold=5,
         circuit_breaker_reset_timeout=60.0,
     )
+    bus = KafkaEventBus(config=config)
 
     await bus.start()
 

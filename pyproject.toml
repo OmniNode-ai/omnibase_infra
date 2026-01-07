@@ -36,16 +36,19 @@ omnibase-spi = "^0.4.1"
 # ============================================================================
 # External Dependency Security Guidance
 # ============================================================================
-# For EXTERNAL dependencies (PyPI packages not under ONEX control):
-# - PyPI version pinning (^X.Y.Z) is acceptable for trusted packages when:
+# CURRENT STATE: All dependencies below are PyPI-sourced (no git dependencies).
+#
+# PyPI Dependencies (current - all deps below):
+# - Version pinning (^X.Y.Z) is acceptable for trusted packages when:
 #   1. Package is from established maintainers (PyPA, major OSS projects)
 #   2. poetry.lock captures exact resolved versions for reproducibility
-# - For Git-sourced external deps, prefer commit SHAs over tags because:
-#   - SHAs are immutable; tags can be force-pushed
-#   - SHAs provide audit trail and tamper-evidence
-# - Note: All dependencies below are PyPI-sourced; SHA guidance applies to future git deps
 # - To update: 1) Review changelog for security fixes, 2) Update version, 3) Run tests
 # - See docs/decisions/adr-cryptography-upgrade-46.md for upgrade rationale examples
+#
+# Git Dependencies (FUTURE guidance - not currently used):
+# - If git-sourced external deps are added in the future, prefer commit SHAs over tags:
+#   - SHAs are immutable; tags can be force-pushed
+#   - SHAs provide audit trail and tamper-evidence
 
 # Core dependencies
 pydantic = "^2.11.7"

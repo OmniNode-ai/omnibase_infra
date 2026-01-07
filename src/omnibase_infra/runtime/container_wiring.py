@@ -210,7 +210,7 @@ async def wire_infrastructure_services(
     Returns:
         Summary dict with:
             - services: List of registered service class names
-            - status: "success" on success
+            - status: Always "success" (errors raise exceptions)
 
     Raises:
         ServiceRegistryUnavailableError: If service_registry is missing or None.
@@ -788,7 +788,7 @@ async def wire_registration_handlers(
     Returns:
         Summary dict with:
             - services: List of registered service class names
-            - status: "success" on success
+            - status: Always "success" (errors raise exceptions)
 
     Raises:
         ServiceRegistryUnavailableError: If service_registry is missing or None.
@@ -1178,7 +1178,7 @@ async def wire_registration_dispatchers(
             - routes: List of registered route IDs (e.g.,
               ['route.registration.node-introspection', 'route.registration.runtime-tick',
                'route.registration.node-registration-acked'])
-            - status: "success" on success
+            - status: Always "success" (errors raise exceptions)
 
         This diagnostic output can be logged or used to verify correct wiring.
 
