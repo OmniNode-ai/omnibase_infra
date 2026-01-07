@@ -27,4 +27,14 @@ Usage:
 
 from __future__ import annotations
 
+import warnings
+
+warnings.warn(
+    "Importing from 'omnibase_infra.shared.utils' is deprecated. "
+    "Use 'omnibase_infra.utils' instead. "
+    "This module will be removed in a future version.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 __all__: list[str] = []
