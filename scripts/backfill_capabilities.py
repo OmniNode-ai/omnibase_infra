@@ -362,7 +362,7 @@ def extract_capability_tags(capabilities: dict[str, object]) -> list[str]:
         if "capability_tags" in config and isinstance(config["capability_tags"], list):
             tags.extend(config["capability_tags"])
 
-    return list(set(tags))  # Deduplicate
+    return sorted(set(tags))  # Deduplicate with deterministic order
 
 
 def extract_contract_type(capabilities: dict[str, object], node_type: str) -> str:

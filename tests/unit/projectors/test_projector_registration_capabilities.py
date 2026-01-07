@@ -138,7 +138,7 @@ class TestCapabilityFieldsModel:
             entity_id=uuid4(),
             domain="registration",
             current_state=EnumRegistrationState.ACTIVE,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             last_applied_event_id=uuid4(),
             registered_at=now,
             updated_at=now,
