@@ -907,6 +907,59 @@ pattern_exemptions:
     documentation:
       - docs/patterns/security_patterns.md
     ticket: OMN-1091
+  # ==========================================================================
+  # Architecture Validator AST Exemptions (OMN-1099)
+  # ==========================================================================
+  # Python ast.NodeVisitor convention uses visit_ClassDef, visit_Call, visit_Name, etc.
+  # These method names are REQUIRED by the ast module - they cannot be renamed.
+  # Reference: https://docs.python.org/3/library/ast.html#ast.NodeVisitor
+  #
+  # This is a GENERAL exemption for ALL visit_* methods in ANY Python file,
+  # as AST visitor patterns are used throughout the codebase for static analysis.
+  - file_pattern: '.*\.py'
+    violation_pattern: "Function name 'visit_\\w+' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_* methods (visit_ClassDef, visit_Call, visit_Name, etc.) are standard AST visitor method names that the ast module dispatches to. They cannot be renamed without breaking the visitor pattern.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+      - PEP 8 - Exception for stdlib compatibility
+    ticket: OMN-1099
+  # HandlerPublishingVisitor is a class that validates handler publishing constraints.
+  # The "Handler" name is appropriate because it IS validating handler behavior.
+  - file_pattern: 'validator_no_handler_publishing\.py'
+    class_pattern: "Class name 'HandlerPublishingVisitor'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      HandlerPublishingVisitor is an AST visitor class that validates handler publishing constraints. The "Handler" name is intentional and appropriate because it validates that handlers do NOT have direct event bus access. This is a validator class, not a handler implementation.
+
+    documentation:
+      - CLAUDE.md (Handler No-Publish Constraint)
+      - docs/patterns/security_patterns.md
+    ticket: OMN-1099
+  # ==========================================================================
+  # Architecture Validator Model Exemptions (OMN-1099)
+  # ==========================================================================
+  # ModelViolation uses semantic identifiers for validation rules, not UUIDs.
+  # rule_id is a human-readable identifier (e.g., "NO-HANDLER-PUBLISH-001").
+  # rule_name is a display name for the rule, not an entity reference.
+  - file_pattern: 'nodes/architecture_validator/models/model_violation\.py'
+    violation_pattern: "Field 'rule_id' should use UUID"
+    reason: >
+      rule_id is a human-readable semantic identifier for validation rules (e.g., "NO-HANDLER-PUBLISH-001", "NO-ANY-TYPE-002"). This follows the same pattern as policy_id, dispatcher_id, and other semantic identifiers. Not a UUID.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
+      - docs/patterns/error_handling_patterns.md
+    ticket: OMN-1099
+  - file_pattern: 'nodes/architecture_validator/models/model_violation\.py'
+    violation_pattern: "Field 'rule_name' might reference an entity"
+    reason: >
+      rule_name is the display name for a validation rule (e.g., "No Handler Publishing", "No Any Types"). It is the human-readable label shown in violation reports, not an entity reference requiring UUID + display_name pattern.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+    ticket: OMN-1099
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

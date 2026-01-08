@@ -288,7 +288,9 @@ class TestModelCapabilityFields:
     def test_capability_fields_is_frozen(self) -> None:
         """Test that ModelCapabilityFields is immutable."""
         fields = ModelCapabilityFields(contract_type="effect")
-        with pytest.raises(Exception):  # Pydantic raises ValidationError for frozen models
+        with pytest.raises(
+            Exception
+        ):  # Pydantic raises ValidationError for frozen models
             fields.contract_type = "compute"  # type: ignore[misc]
 
     def test_capability_fields_serializes_correctly(self) -> None:
