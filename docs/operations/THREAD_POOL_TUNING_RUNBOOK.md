@@ -14,7 +14,7 @@ The omnibase_infra project uses `ThreadPoolExecutor` from `concurrent.futures` t
 
 **Purpose**: Execute synchronous hvac (Vault client) operations without blocking the async event loop.
 
-**Configuration Model**: `ModelHandlerVaultConfig`
+**Configuration Model**: `ModelVaultHandlerConfig`
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
@@ -52,9 +52,9 @@ await adapter.initialize({
 
 ```python
 from pydantic import SecretStr
-from omnibase_infra.handlers.models.vault import ModelHandlerVaultConfig
+from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
-config = ModelHandlerVaultConfig(
+config = ModelVaultHandlerConfig(
     url="https://vault.example.com:8200",
     token=SecretStr("s.xxx"),
     max_concurrent_operations=20,
@@ -329,7 +329,7 @@ Thread pools work with the circuit breaker pattern for resilience:
 
 ```python
 # Coordinated configuration for resilience
-config = ModelHandlerVaultConfig(
+config = ModelVaultHandlerConfig(
     url="https://vault.example.com:8200",
     token=SecretStr("s.xxx"),
     # Thread pool
