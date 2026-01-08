@@ -117,7 +117,7 @@ class RegistryInfraRegistrationStorage:
             TypeError: If handler does not implement ProtocolRegistrationStorageHandler.
 
         Example:
-            >>> from omnibase_infra.handlers.storage import (
+            >>> from omnibase_infra.handlers.registration_storage import (
             ...     HandlerPostgresRegistrationStorage,
             ... )
             >>> handler = HandlerPostgresRegistrationStorage(pool, config)

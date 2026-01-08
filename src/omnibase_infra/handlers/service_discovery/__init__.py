@@ -11,7 +11,7 @@ Handlers:
 
 Models:
     - ModelServiceInfo: Service information model
-    - ModelRegistrationResult: Registration operation result
+    - ModelHandlerRegistrationResult: Handler-level registration operation result
     - ModelDiscoveryResult: Discovery operation result
 
 Protocols:
@@ -26,7 +26,7 @@ from omnibase_infra.handlers.service_discovery.handler_mock_service_discovery im
 )
 from omnibase_infra.handlers.service_discovery.models import (
     ModelDiscoveryResult,
-    ModelRegistrationResult,
+    ModelHandlerRegistrationResult,
     ModelServiceInfo,
 )
 from omnibase_infra.handlers.service_discovery.protocol_service_discovery_handler import (
@@ -37,7 +37,7 @@ __all__: list[str] = [
     "ConsulServiceDiscoveryHandler",
     "MockServiceDiscoveryHandler",
     "ModelDiscoveryResult",
-    "ModelRegistrationResult",
+    "ModelHandlerRegistrationResult",
     "ModelServiceInfo",
     "ProtocolServiceDiscoveryHandler",
 ]

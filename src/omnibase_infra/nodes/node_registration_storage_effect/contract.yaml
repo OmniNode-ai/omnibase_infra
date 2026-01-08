@@ -149,11 +149,13 @@ dependencies:
     type: "protocol"
     class_name: "ProtocolRegistrationStorageHandler"
     module: "omnibase_infra.nodes.node_registration_storage_effect.protocols"
-    description: "Protocol for registration storage backends (e.g., PostgreSQL)"
+    description: "Protocol for registration storage backends (e.g., PostgreSQL, mock)"
     pluggable: true
     implementations:
       - name: "postgresql"
         description: "PostgreSQL implementation for registration storage"
+      - name: "mock"
+        description: "Mock implementation for testing and development"
 # Handler routing (for pluggable backends)
 handler_routing:
   routing_strategy: "handler_type_match"
@@ -161,9 +163,14 @@ handler_routing:
   handlers:
     - handler_type: "postgresql"
       handler:
-        name: "PostgresRegistrationStorageHandler"
+        name: "HandlerPostgresRegistrationStorage"
         module: "omnibase_infra.handlers.registration_storage.handler_postgres_registration_storage"
       description: "PostgreSQL storage handler"
+    - handler_type: "mock"
+      handler:
+        name: "HandlerMockRegistrationStorage"
+        module: "omnibase_infra.handlers.registration_storage.handler_mock_registration_storage"
+      description: "Mock storage handler for testing"
 # Error handling configuration
 error_handling:
   retry_policy:

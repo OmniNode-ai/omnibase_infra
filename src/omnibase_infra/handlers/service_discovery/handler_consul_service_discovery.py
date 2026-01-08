@@ -37,7 +37,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.service_discovery.models import (
     ModelDiscoveryResult,
-    ModelRegistrationResult,
+    ModelHandlerRegistrationResult,
     ModelServiceInfo,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
@@ -196,7 +196,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         self,
         service_info: ModelServiceInfo,
         correlation_id: UUID | None = None,
-    ) -> ModelRegistrationResult:
+    ) -> ModelHandlerRegistrationResult:
         """Register a service with Consul.
 
         Args:
@@ -204,7 +204,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            ModelRegistrationResult with registration outcome.
+            ModelHandlerRegistrationResult with registration outcome.
 
         Raises:
             InfraConnectionError: If connection to Consul fails.
@@ -269,7 +269,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
                 },
             )
 
-            return ModelRegistrationResult(
+            return ModelHandlerRegistrationResult(
                 success=True,
                 service_id=service_info.service_id,
                 operation=EnumServiceDiscoveryOperation.REGISTER,

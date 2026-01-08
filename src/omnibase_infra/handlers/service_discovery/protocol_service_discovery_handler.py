@@ -24,7 +24,7 @@ from uuid import UUID
 
 from omnibase_infra.handlers.service_discovery.models import (
     ModelDiscoveryResult,
-    ModelRegistrationResult,
+    ModelHandlerRegistrationResult,
     ModelServiceInfo,
 )
 from omnibase_infra.nodes.node_service_discovery_effect.models import (
@@ -70,7 +70,7 @@ class ProtocolServiceDiscoveryHandler(Protocol):
         self,
         service_info: ModelServiceInfo,
         correlation_id: UUID | None = None,
-    ) -> ModelRegistrationResult:
+    ) -> ModelHandlerRegistrationResult:
         """Register a service with the discovery backend.
 
         Args:
@@ -78,7 +78,7 @@ class ProtocolServiceDiscoveryHandler(Protocol):
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            ModelRegistrationResult with success status, service ID,
+            ModelHandlerRegistrationResult with success status, service ID,
             and operation metadata.
 
         Raises:

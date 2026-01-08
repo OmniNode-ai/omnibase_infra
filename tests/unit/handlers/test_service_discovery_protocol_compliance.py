@@ -214,14 +214,18 @@ class TestMockServiceDiscoveryHandlerProtocolCompliance:
     def test_mock_handler_discover_services_signature(
         self, mock_handler: MockServiceDiscoveryHandler
     ) -> None:
-        """discover_services method has correct parameter signature."""
+        """discover_services method has correct parameter signature.
+
+        Note: Per CLAUDE.md, protocol methods should use Pydantic models instead
+        of primitives. The discover_services method uses ModelDiscoveryQuery.
+        """
         sig = inspect.signature(mock_handler.discover_services)
         params = list(sig.parameters.keys())
 
-        assert "service_name" in params, (
-            "discover_services must accept 'service_name' parameter"
+        # Protocol uses ModelDiscoveryQuery instead of primitive service_name/tags
+        assert "query" in params, (
+            "discover_services must accept 'query' parameter (ModelDiscoveryQuery)"
         )
-        assert "tags" in params, "discover_services must accept 'tags' parameter"
         assert "correlation_id" in params, (
             "discover_services must accept 'correlation_id' parameter"
         )
@@ -357,14 +361,18 @@ class TestConsulServiceDiscoveryHandlerProtocolCompliance:
     def test_consul_handler_discover_services_signature(
         self, consul_handler: ConsulServiceDiscoveryHandler
     ) -> None:
-        """discover_services method has correct parameter signature."""
+        """discover_services method has correct parameter signature.
+
+        Note: Per CLAUDE.md, protocol methods should use Pydantic models instead
+        of primitives. The discover_services method uses ModelDiscoveryQuery.
+        """
         sig = inspect.signature(consul_handler.discover_services)
         params = list(sig.parameters.keys())
 
-        assert "service_name" in params, (
-            "discover_services must accept 'service_name' parameter"
+        # Protocol uses ModelDiscoveryQuery instead of primitive service_name/tags
+        assert "query" in params, (
+            "discover_services must accept 'query' parameter (ModelDiscoveryQuery)"
         )
-        assert "tags" in params, "discover_services must accept 'tags' parameter"
         assert "correlation_id" in params, (
             "discover_services must accept 'correlation_id' parameter"
         )

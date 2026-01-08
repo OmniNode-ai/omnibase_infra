@@ -20,7 +20,7 @@ from uuid import UUID, uuid4
 
 from omnibase_infra.handlers.service_discovery.models import (
     ModelDiscoveryResult,
-    ModelRegistrationResult,
+    ModelHandlerRegistrationResult,
     ModelServiceInfo,
 )
 from omnibase_infra.nodes.node_service_discovery_effect.models import (
@@ -74,7 +74,7 @@ class MockServiceDiscoveryHandler:
         self,
         service_info: ModelServiceInfo,
         correlation_id: UUID | None = None,
-    ) -> ModelRegistrationResult:
+    ) -> ModelHandlerRegistrationResult:
         """Register a service in the mock store.
 
         Args:
@@ -82,7 +82,7 @@ class MockServiceDiscoveryHandler:
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
-            ModelRegistrationResult with registration outcome.
+            ModelHandlerRegistrationResult with registration outcome.
         """
         correlation_id = correlation_id or uuid4()
         start_time = time.monotonic()
@@ -116,7 +116,7 @@ class MockServiceDiscoveryHandler:
             },
         )
 
-        return ModelRegistrationResult(
+        return ModelHandlerRegistrationResult(
             success=True,
             service_id=service_info.service_id,
             operation=EnumServiceDiscoveryOperation.REGISTER,

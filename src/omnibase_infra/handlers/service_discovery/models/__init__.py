@@ -9,7 +9,7 @@ from omnibase_infra.handlers.service_discovery.models.model_discovery_result imp
     ModelDiscoveryResult,
 )
 from omnibase_infra.handlers.service_discovery.models.model_registration_result import (
-    ModelRegistrationResult,
+    ModelHandlerRegistrationResult,
 )
 from omnibase_infra.handlers.service_discovery.models.model_service_info import (
     ModelServiceInfo,
@@ -17,6 +17,6 @@ from omnibase_infra.handlers.service_discovery.models.model_service_info import 
 
 __all__: list[str] = [
     "ModelDiscoveryResult",
-    "ModelRegistrationResult",
+    "ModelHandlerRegistrationResult",
     "ModelServiceInfo",
 ]
