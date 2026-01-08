@@ -48,6 +48,22 @@ from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSour
 # Rebuild ModelContractDiscoveryResult to resolve the forward reference
 # to ModelHandlerValidationError. This must happen after ModelHandlerValidationError
 # is imported to make the type available for Pydantic validation.
+#
+# Why this pattern is used:
+#   ModelContractDiscoveryResult has a field typed as list[ModelHandlerValidationError].
+#   ModelHandlerValidationError imports ModelHandlerIdentifier from models.handlers.
+#   If ModelContractDiscoveryResult directly imported ModelHandlerValidationError,
+#   it would cause a circular import because models.handlers.__init__.py imports
+#   ModelContractDiscoveryResult.
+#
+# The solution:
+#   1. ModelContractDiscoveryResult uses TYPE_CHECKING to defer the import
+#   2. With PEP 563 (from __future__ import annotations), the annotation becomes
+#      a string at runtime, avoiding the circular import
+#   3. model_rebuild() resolves the string annotation to the actual type after
+#      both classes are defined
+#
+# This is tested in: tests/integration/handlers/test_handler_contract_source.py
 ModelContractDiscoveryResult.model_rebuild()
 
 logger = logging.getLogger(__name__)

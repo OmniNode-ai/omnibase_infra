@@ -19,7 +19,12 @@ See Also:
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+# Type alias for valid ONEX handler kinds
+LiteralHandlerKind = Literal["compute", "effect", "reducer", "orchestrator"]
 
 
 class ModelHandlerDescriptor(BaseModel):
@@ -71,21 +76,24 @@ class ModelHandlerDescriptor(BaseModel):
     version: str = Field(
         ...,
         min_length=1,
-        description="Semantic version string",
+        pattern=r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$",
+        description="Semantic version string (e.g., '1.0.0', '1.0.0-beta.1', '2.1.0+build.123')",
     )
-    handler_kind: str = Field(
+    handler_kind: LiteralHandlerKind = Field(
         ...,
-        description="Handler kind (compute, effect, reducer, orchestrator)",
+        description="Handler architectural kind (compute, effect, reducer, orchestrator)",
     )
     input_model: str = Field(
         ...,
-        min_length=1,
-        description="Fully qualified input model class path",
+        min_length=3,
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+$",
+        description="Fully qualified input model class path (e.g., 'myapp.models.User')",
     )
     output_model: str = Field(
         ...,
-        min_length=1,
-        description="Fully qualified output model class path",
+        min_length=3,
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+$",
+        description="Fully qualified output model class path (e.g., 'myapp.models.Result')",
     )
     description: str | None = Field(
         default=None,
@@ -97,4 +105,4 @@ class ModelHandlerDescriptor(BaseModel):
     )
 
 
-__all__ = ["ModelHandlerDescriptor"]
+__all__ = ["LiteralHandlerKind", "ModelHandlerDescriptor"]
