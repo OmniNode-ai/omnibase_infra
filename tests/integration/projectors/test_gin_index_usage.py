@@ -520,7 +520,7 @@ class TestGinIndexExists:
             )
 
         assert row is not None, "Missing index: idx_registration_capability_tags"
-        assert "USING gin" in row["indexdef"].lower(), (
+        assert "using gin" in row["indexdef"].lower(), (
             f"Expected GIN index, got: {row['indexdef']}"
         )
 
@@ -540,7 +540,7 @@ class TestGinIndexExists:
             )
 
         assert row is not None, "Missing index: idx_registration_intent_types"
-        assert "USING gin" in row["indexdef"].lower(), (
+        assert "using gin" in row["indexdef"].lower(), (
             f"Expected GIN index, got: {row['indexdef']}"
         )
 
@@ -560,7 +560,7 @@ class TestGinIndexExists:
             )
 
         assert row is not None, "Missing index: idx_registration_protocols"
-        assert "USING gin" in row["indexdef"].lower(), (
+        assert "using gin" in row["indexdef"].lower(), (
             f"Expected GIN index, got: {row['indexdef']}"
         )
 

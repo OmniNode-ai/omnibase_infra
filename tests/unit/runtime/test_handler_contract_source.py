@@ -2026,14 +2026,25 @@ output_model: "test.models.Output"
         unreadable_contract.chmod(0o000)
 
         try:
+            from omnibase_core.models.errors.model_onex_error import ModelOnexError
+
             source = HandlerContractSource(
                 contract_paths=[unreadable_dir],
                 graceful_mode=False,  # Strict mode
             )
 
-            # Strict mode should raise on permission error
-            with pytest.raises((PermissionError, OSError)):
+            # Strict mode should raise ModelOnexError wrapping the permission error
+            with pytest.raises(ModelOnexError) as exc_info:
                 await source.discover_handlers()
+
+            # Verify error code for I/O errors (HANDLER_SOURCE_006)
+            error = exc_info.value
+            assert error.error_code == "HANDLER_SOURCE_006", (
+                f"Expected error code HANDLER_SOURCE_006, got {error.error_code}"
+            )
+            assert "permission denied" in str(error).lower(), (
+                f"Error message should mention permission denied: {error}"
+            )
         finally:
             # Restore permissions for cleanup
             unreadable_contract.chmod(stat.S_IRUSR | stat.S_IWUSR)

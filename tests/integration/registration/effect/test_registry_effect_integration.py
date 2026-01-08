@@ -285,7 +285,7 @@ class TestPostgresFailureFlow:
         # Assert - Error captured (sanitized to prevent secret exposure)
         # Raw error "Connection timeout" is sanitized to "timeout" safe prefix
         assert response.postgres_result.error is not None
-        assert "postgresql operation failed" in response.postgres_result.error.lower()
+        assert "postgres operation failed" in response.postgres_result.error.lower()
         assert "timeout" in response.postgres_result.error.lower()
         assert response.error_summary is not None
         assert "PostgreSQL" in response.error_summary
@@ -385,7 +385,7 @@ class TestBothFailFlow:
         assert response.consul_result.error is not None
         assert response.postgres_result.error is not None
         assert "consul operation failed" in response.consul_result.error.lower()
-        assert "postgresql operation failed" in response.postgres_result.error.lower()
+        assert "postgres operation failed" in response.postgres_result.error.lower()
 
         # Assert - Error summary contains both
         assert response.error_summary is not None
