@@ -584,7 +584,11 @@ class ExplainResult:
                 "EXPLAIN returned None - query may have failed or returned no plan"
             )
 
-        # Handle string input - parse JSON if asyncpg returned raw JSON string
+        # Defensive handling for string input:
+        # asyncpg typically returns JSON columns as already-parsed Python objects,
+        # but certain configurations (older asyncpg versions, custom type codecs,
+        # or connection poolers) may return raw JSON strings. This defensive check
+        # ensures compatibility across different asyncpg deployment scenarios.
         if isinstance(raw_plan, str):
             try:
                 raw_plan = json.loads(raw_plan)

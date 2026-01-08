@@ -110,6 +110,14 @@ SLA_TARGET_SECONDS = float(os.getenv("E2E_SLA_TARGET", "15.0"))
 # Exceeding this indicates a real performance problem, not just CI variance.
 SLA_HARD_LIMIT_SECONDS = float(os.getenv("E2E_SLA_HARD_LIMIT", "30.0"))
 
+# Validate SLA threshold relationship at module load time
+# This ensures configuration errors are caught early rather than during test execution
+assert SLA_HARD_LIMIT_SECONDS > SLA_TARGET_SECONDS, (
+    f"E2E_SLA_HARD_LIMIT ({SLA_HARD_LIMIT_SECONDS}s) must be greater than "
+    f"E2E_SLA_TARGET ({SLA_TARGET_SECONDS}s). The hard limit catches performance "
+    "regressions while the soft target warns about CI variance."
+)
+
 
 # =============================================================================
 # Runtime Availability Check
@@ -230,17 +238,17 @@ class TestRuntimeE2EFlow:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(RUNTIME_HEALTH_URL)
 
-            assert response.status_code == 200, (
-                f"Runtime health check failed: {response.status_code}"
-            )
+            assert (
+                response.status_code == 200
+            ), f"Runtime health check failed: {response.status_code}"
 
             # Verify health response structure if JSON is returned
             # Note: Some health endpoints return empty body with 200 status
             try:
                 health_data = response.json()
-                assert "status" in health_data, (
-                    "Health response should contain 'status' field"
-                )
+                assert (
+                    "status" in health_data
+                ), "Health response should contain 'status' field"
             except (ValueError, KeyError):
                 # Empty body or non-JSON response is acceptable if status was 200
                 pass
@@ -428,9 +436,9 @@ class TestRuntimeE2EFlow:
             # Wait for completion event
             try:
                 await asyncio.wait_for(completion_received.wait(), timeout=30.0)
-                assert len(received_completions) > 0, (
-                    "Expected completion event from runtime"
-                )
+                assert (
+                    len(received_completions) > 0
+                ), "Expected completion event from runtime"
 
                 # Verify completion event structure
                 completion = received_completions[0]
@@ -518,9 +526,9 @@ class TestRuntimeErrorHandling:
         # Verify runtime is still healthy
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(RUNTIME_HEALTH_URL)
-            assert response.status_code == 200, (
-                "Runtime became unhealthy after malformed message"
-            )
+            assert (
+                response.status_code == 200
+            ), "Runtime became unhealthy after malformed message"
 
     @pytest.mark.asyncio
     async def test_runtime_handles_missing_fields(
@@ -546,9 +554,9 @@ class TestRuntimeErrorHandling:
         # Verify runtime is still healthy
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(RUNTIME_HEALTH_URL)
-            assert response.status_code == 200, (
-                "Runtime became unhealthy after incomplete event"
-            )
+            assert (
+                response.status_code == 200
+            ), "Runtime became unhealthy after incomplete event"
 
 
 class TestRuntimePerformance:
