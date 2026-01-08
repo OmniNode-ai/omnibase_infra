@@ -81,8 +81,8 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
 
     Example:
         >>> result = parse_and_validate_dsn("postgresql://user:pass@localhost:5432/mydb")
-        >>> assert result["hostname"] == "localhost"
-        >>> assert result["database"] == "mydb"
+        >>> assert result.hostname == "localhost"
+        >>> assert result.database == "mydb"
 
     Security Note:
         Error messages never contain the actual DSN value. Sensitive information

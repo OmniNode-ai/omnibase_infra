@@ -14,6 +14,16 @@ from omnibase_infra.models.discovery.model_introspection_performance_metrics imp
 from omnibase_infra.types import TypedDictCapabilities
 
 
+def _empty_capabilities() -> TypedDictCapabilities:
+    """Factory function for creating an empty TypedDictCapabilities with all required fields."""
+    return {
+        "operations": [],
+        "protocols": [],
+        "has_fsm": False,
+        "method_signatures": {},
+    }
+
+
 class ModelNodeIntrospectionEvent(BaseModel):
     """Event model for node introspection and capability discovery.
 
@@ -51,6 +61,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
         ...         "operations": ["execute", "query", "batch_execute"],
         ...         "protocols": ["ProtocolDatabaseAdapter"],
         ...         "has_fsm": True,
+        ...         "method_signatures": {"execute": "(query: str) -> list[dict]"},
         ...     },
         ...     endpoints={
         ...         "health": "http://localhost:8080/health",
@@ -66,7 +77,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
         >>> event_with_metrics = ModelNodeIntrospectionEvent(
         ...     node_id=uuid4(),
         ...     node_type="EFFECT",
-        ...     capabilities={"operations": ["execute"], "protocols": [], "has_fsm": False},
+        ...     capabilities={"operations": ["execute"], "protocols": [], "has_fsm": False, "method_signatures": {}},
         ...     endpoints={"health": "/health"},
         ...     version="1.0.0",
         ...     reason="request",
@@ -87,7 +98,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
     # Capabilities discovered via reflection
     # Uses TypedDictCapabilities for type safety while maintaining Pydantic compatibility
     capabilities: TypedDictCapabilities = Field(
-        default_factory=dict,
+        default_factory=_empty_capabilities,
         description="Node capabilities discovered via reflection. "
         "Contains: operations (list[str]), protocols (list[str]), "
         "has_fsm (bool), method_signatures (dict[str, str])",
