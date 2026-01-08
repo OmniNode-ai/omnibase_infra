@@ -2003,6 +2003,8 @@ output_model: "test.models.Output"
         """
         import stat
 
+        from omnibase_core.models.errors.model_onex_error import ModelOnexError
+
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
         )
@@ -2031,9 +2033,20 @@ output_model: "test.models.Output"
                 graceful_mode=False,  # Strict mode
             )
 
-            # Strict mode should raise on permission error
-            with pytest.raises((PermissionError, OSError)):
+            # Strict mode should raise ModelOnexError with HANDLER_SOURCE_006 code
+            with pytest.raises(ModelOnexError) as exc_info:
                 await source.discover_handlers()
+
+            error = exc_info.value
+            assert error.error_code == "HANDLER_SOURCE_006", (
+                f"Expected error code HANDLER_SOURCE_006, got {error.error_code}"
+            )
+            # Verify error message mentions the file path
+            assert "permission denied" in str(
+                error
+            ).lower() or "Permission denied" in str(error), (
+                f"Error message should mention permission denied: {error}"
+            )
         finally:
             # Restore permissions for cleanup
             unreadable_contract.chmod(stat.S_IRUSR | stat.S_IWUSR)
