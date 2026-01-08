@@ -1,53 +1,103 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Node Registry Effect package - Alias module.
+"""Node Registry Effect package - Declarative effect node for dual-backend registration.
 
-This module provides an alias to the actual implementation in
-`omnibase_infra.nodes.effects.registry_effect`. The implementation follows
-a domain-organized pattern where multiple effect nodes are grouped under
-the `effects/` directory.
+This package provides NodeRegistryEffect, a declarative effect node that coordinates
+node registration against both Consul (service discovery) and PostgreSQL (persistence).
 
-Architecture Note:
-    The orchestrator's contract.yaml references `omnibase_infra.nodes.node_registry_effect`
-    as the effect node module. Rather than duplicating the implementation here, this module
-    re-exports from the canonical implementation location.
+Architecture (OMN-1103 Refactoring):
+    This package follows the ONEX declarative node pattern:
+    - node.py: Declarative node shell extending NodeEffect
+    - models/: Node-specific Pydantic models
+    - handlers/: Operation-specific handlers (PostgreSQL, Consul)
+    - registry/: Infrastructure registry for dependency injection
+    - contract.yaml: Operation routing and I/O definitions
 
-    Canonical Implementation: omnibase_infra.nodes.effects.registry_effect
-    This Alias Module: omnibase_infra.nodes.node_registry_effect
-
-    Both import paths work identically:
-        from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
-        from omnibase_infra.nodes.effects import NodeRegistryEffect
+    The node is 100% contract-driven with zero custom business logic in node.py.
+    All operation routing is defined in contract.yaml and handlers are resolved
+    via container dependency injection.
 
 Node Type: EFFECT
-Purpose: Execute infrastructure operations (Consul registration, PostgreSQL upsert)
-         based on intents from the registration orchestrator.
+Purpose: Execute infrastructure I/O operations (Consul registration, PostgreSQL upsert)
+         based on requests from the registration orchestrator.
 
 Implementation Details:
     - Dual-backend registration (Consul + PostgreSQL)
-    - Partial failure handling with targeted retries
-    - Idempotency store for retry safety
+    - Partial failure handling with per-backend results
+    - Idempotency tracking for retry safety
     - Error sanitization for security
 
+Handlers:
+    - HandlerConsulRegister: Consul service registration
+    - HandlerConsulDeregister: Consul service deregistration
+    - HandlerPostgresUpsert: PostgreSQL registration record upsert
+    - HandlerPostgresDeactivate: PostgreSQL registration deactivation
+    - HandlerPartialRetry: Targeted retry for partial failures
+
+Usage:
+    ```python
+    from omnibase_core.models.container import ModelONEXContainer
+    from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
+
+    # Create via container injection
+    container = ModelONEXContainer()
+    effect = NodeRegistryEffect(container)
+    ```
+
+Backwards Compatibility:
+    Models are re-exported from omnibase_infra.nodes.effects.models for
+    existing code that imports them from this package.
+
 Related:
-    - Contract: omnibase_infra/nodes/effects/contract.yaml
-    - Implementation: omnibase_infra/nodes/effects/registry_effect.py
-    - Orchestrator: omnibase_infra/nodes/node_registration_orchestrator/
+    - contract.yaml: Operation routing definition
+    - node.py: Declarative node implementation
+    - models/: Node-specific models
+    - handlers/: Operation handlers
+    - registry/: Infrastructure registry
+    - omnibase_infra.nodes.effects.registry_effect: Legacy implementation
 """
 
 from __future__ import annotations
 
-# Re-export from the canonical implementation location
-from omnibase_infra.nodes.effects import (
-    ModelBackendResult,
-    ModelRegistryRequest,
-    ModelRegistryResponse,
-    NodeRegistryEffect,
+# Export handlers
+from omnibase_infra.nodes.node_registry_effect.handlers import (
+    HandlerConsulDeregister,
+    HandlerConsulRegister,
+    HandlerPartialRetry,
+    HandlerPostgresDeactivate,
+    HandlerPostgresUpsert,
 )
 
-__all__ = [
+# Re-export models for backwards compatibility
+from omnibase_infra.nodes.node_registry_effect.models import (
+    ModelBackendResult,
+    ModelEffectIdempotencyConfig,
+    ModelRegistryRequest,
+    ModelRegistryResponse,
+)
+
+# Export the declarative node
+from omnibase_infra.nodes.node_registry_effect.node import NodeRegistryEffect
+
+# Export registry
+from omnibase_infra.nodes.node_registry_effect.registry import (
+    RegistryInfraRegistryEffect,
+)
+
+__all__: list[str] = [
+    # Node
+    "NodeRegistryEffect",
+    # Registry
+    "RegistryInfraRegistryEffect",
+    # Handlers
+    "HandlerConsulDeregister",
+    "HandlerConsulRegister",
+    "HandlerPartialRetry",
+    "HandlerPostgresDeactivate",
+    "HandlerPostgresUpsert",
+    # Models (backwards compatibility)
     "ModelBackendResult",
+    "ModelEffectIdempotencyConfig",
     "ModelRegistryRequest",
     "ModelRegistryResponse",
-    "NodeRegistryEffect",
 ]

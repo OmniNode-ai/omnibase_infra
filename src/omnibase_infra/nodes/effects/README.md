@@ -2,7 +2,11 @@
 
 ## Overview
 
-`NodeRegistryEffect` is an ONEX Effect node responsible for dual-backend node registration. It executes I/O operations against both Consul (service discovery) and PostgreSQL (registration persistence), with support for partial failure handling and targeted retries.
+`NodeRegistryEffect` is an ONEX Effect node responsible for dual-backend node registration. It executes I/O operations against both Consul (service discovery) and PostgreSQL (registration persistence), with support for partial failure handling.
+
+> **Important**: Effect nodes are **single-shot operations** - they do NOT implement retries.
+> Retry logic is the exclusive responsibility of the orchestrator layer.
+> See [Retry Strategy: Orchestrator-Owned Retries](../../../docs/patterns/retry_backoff_compensation_strategy.md#architectural-responsibility-orchestrator-owned-retries) for details.
 
 ### Architecture
 
@@ -30,7 +34,11 @@ The Effect node:
 - Checks idempotency store for already-completed backends
 - Executes I/O operations against external backends
 - Returns structured responses with per-backend results
-- Supports partial failure handling and targeted retries
+- Supports partial failure handling and targeted retries (via idempotency tracking)
+
+> **Note**: "Targeted retries" refers to the idempotency store tracking which backends have completed,
+> allowing the orchestrator to retry only failed backends. The effect itself is single-shot - the
+> orchestrator initiates each retry attempt.
 
 ## Memory Characteristics
 
