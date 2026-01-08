@@ -51,6 +51,9 @@ from omnibase_core.errors import OnexError
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.validation import ModelContractValidationResult
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
 # Stub validator interface version - indicates minimal/stub validation was performed
 _STUB_INTERFACE_VERSION = ModelSemVer(major=0, minor=0, patch=1)
 
@@ -158,7 +161,8 @@ class StubContractValidator:
         - ModelContractBase: Contract model for proper validation
 
     Raises:
-        RuntimeError: If instantiated in a production environment (ONEX_ENV=production).
+        ProtocolConfigurationError: If instantiated in a production environment
+            (ONEX_ENV=production). Stub validators cannot be used in production.
     """
 
     # TODO(OMN-1104): Remove this stub after migrating to omnibase_core.validation API
@@ -171,10 +175,10 @@ class StubContractValidator:
         """Initialize the stub contract validator.
 
         Raises:
-            RuntimeError: If ONEX_ENV environment variable is set to "production".
-                StubContractValidator cannot be used in production environments
-                as it performs only minimal validation and may allow invalid
-                contracts to pass.
+            ProtocolConfigurationError: If ONEX_ENV environment variable is set
+                to "production". StubContractValidator cannot be used in production
+                environments as it performs only minimal validation and may allow
+                invalid contracts to pass.
 
         Warns:
             DeprecationWarning: Always emitted to indicate this is a temporary
@@ -183,11 +187,18 @@ class StubContractValidator:
         # SECURITY: Hard block for production environments
         onex_env = os.getenv("ONEX_ENV", "development").lower()
         if onex_env == "production":
-            raise RuntimeError(
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="initialize_stub_validator",
+            )
+            raise ProtocolConfigurationError(
                 "StubContractValidator cannot be used in production. "
                 "ONEX_ENV is set to 'production'. "
                 "Configure a real contract validator using omnibase_core.validation API. "
-                "See OMN-1104 for migration guidance."
+                "See OMN-1104 for migration guidance.",
+                context=context,
+                onex_env=onex_env,
+                migration_ticket="OMN-1104",
             )
 
         # Emit deprecation warning on instantiation

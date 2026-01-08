@@ -876,11 +876,11 @@ class RegistrationReducer:
             health_check=health_check,
         )
 
-        # NOTE: ModelIntent.payload expects dict[str, Any], so convert the model
+        # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
             intent_type="consul.register",
             target=f"consul://service/{service_name}",
-            payload=consul_payload.model_dump(),
+            payload=consul_payload,
         )
 
     def _build_postgres_intent(
@@ -925,11 +925,11 @@ class RegistrationReducer:
             record=record,
         )
 
-        # NOTE: ModelIntent.payload expects dict[str, Any], so convert the model
+        # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
             intent_type="postgres.upsert_registration",
             target=f"postgres://node_registrations/{event.node_id}",
-            payload=postgres_payload.model_dump(),
+            payload=postgres_payload,
         )
 
     # =========================================================================
