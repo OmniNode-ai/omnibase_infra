@@ -23,13 +23,13 @@ See Also:
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
-def _parse_version(v: ModelSemVer | str | dict) -> ModelSemVer:  # type: ignore[type-arg]
+def _parse_version(v: ModelSemVer | str | dict[str, Any]) -> ModelSemVer:
     """Parse version input to ModelSemVer.
 
     Accepts ModelSemVer instance, string (e.g., "1.0.0"), or dict

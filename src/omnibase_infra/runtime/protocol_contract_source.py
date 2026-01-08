@@ -54,9 +54,6 @@ class ProtocolContractSource(Protocol):
         Scans configured sources for handler contracts and returns
         discovered handlers along with any validation errors encountered.
 
-        Args:
-            None - This method takes no arguments.
-
         Returns:
             ModelContractDiscoveryResult: Container with:
                 - descriptors: List of successfully discovered handlers

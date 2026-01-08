@@ -1210,6 +1210,128 @@ output_model: "test.models.Output"
         assert len(result.validation_errors) == 0
         assert result.descriptors[0].handler_id == "test.handler.lowercase"
 
+    @pytest.mark.asyncio
+    async def test_exact_filename_matching_rejects_all_variations(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify exact 'handler_contract.yaml' filename matching (case and extension).
+
+        This test comprehensively verifies that ONLY files named exactly
+        'handler_contract.yaml' are discovered. All variations must be rejected:
+
+        SHOULD be discovered:
+            - handler_contract.yaml (exact match)
+
+        SHOULD NOT be discovered:
+            - Handler_Contract.yaml (mixed case in name)
+            - HANDLER_CONTRACT.YAML (all caps name and extension)
+            - handler_contract.yml (wrong extension - .yml instead of .yaml)
+            - handler_contract.YAML (caps extension only)
+            - HANDLER_contract.yaml (partial caps in name)
+            - handler_CONTRACT.yaml (partial caps in name)
+
+        Each variation is placed in a separate subdirectory to avoid filesystem
+        case-sensitivity issues (macOS/Windows HFS+/NTFS may be case-insensitive
+        and silently overwrite files with different case).
+
+        Why this matters:
+            Cross-platform consistency requires deterministic behavior. If we
+            allowed case variations, the same codebase could behave differently
+            on case-sensitive (Linux ext4) vs case-insensitive (macOS HFS+)
+            filesystems, causing hard-to-debug deployment issues.
+        """
+        from omnibase_infra.runtime.handler_contract_source import (
+            HandlerContractSource,
+        )
+
+        valid_yaml_template = """
+handler_id: "test.handler.{variant}"
+name: "{variant} Handler"
+version: "1.0.0"
+descriptor:
+  handler_kind: "compute"
+input_model: "test.models.Input"
+output_model: "test.models.Output"
+"""
+
+        # ===== VALID: exact match =====
+        valid_dir = tmp_path / "valid_exact_match"
+        valid_dir.mkdir()
+        (valid_dir / "handler_contract.yaml").write_text(
+            valid_yaml_template.format(variant="valid")
+        )
+
+        # ===== INVALID: case variations - each in separate directory =====
+
+        # Mixed case in name (Handler_Contract)
+        mixed_case_dir = tmp_path / "invalid_mixed_case"
+        mixed_case_dir.mkdir()
+        (mixed_case_dir / "Handler_Contract.yaml").write_text(
+            valid_yaml_template.format(variant="mixed_case")
+        )
+
+        # All caps name AND extension (HANDLER_CONTRACT.YAML)
+        all_caps_dir = tmp_path / "invalid_all_caps"
+        all_caps_dir.mkdir()
+        (all_caps_dir / "HANDLER_CONTRACT.YAML").write_text(
+            valid_yaml_template.format(variant="all_caps")
+        )
+
+        # Wrong extension .yml instead of .yaml
+        wrong_ext_yml_dir = tmp_path / "invalid_wrong_ext_yml"
+        wrong_ext_yml_dir.mkdir()
+        (wrong_ext_yml_dir / "handler_contract.yml").write_text(
+            valid_yaml_template.format(variant="wrong_ext_yml")
+        )
+
+        # Caps extension only (handler_contract.YAML)
+        caps_ext_dir = tmp_path / "invalid_caps_extension"
+        caps_ext_dir.mkdir()
+        (caps_ext_dir / "handler_contract.YAML").write_text(
+            valid_yaml_template.format(variant="caps_extension")
+        )
+
+        # Partial caps in name - first part (HANDLER_contract.yaml)
+        partial_caps_first_dir = tmp_path / "invalid_partial_caps_first"
+        partial_caps_first_dir.mkdir()
+        (partial_caps_first_dir / "HANDLER_contract.yaml").write_text(
+            valid_yaml_template.format(variant="partial_caps_first")
+        )
+
+        # Partial caps in name - second part (handler_CONTRACT.yaml)
+        partial_caps_second_dir = tmp_path / "invalid_partial_caps_second"
+        partial_caps_second_dir.mkdir()
+        (partial_caps_second_dir / "handler_CONTRACT.yaml").write_text(
+            valid_yaml_template.format(variant="partial_caps_second")
+        )
+
+        # Discover handlers
+        source = HandlerContractSource(contract_paths=[tmp_path])
+        result = await source.discover_handlers()
+
+        # Verify ONLY the exact match was discovered
+        assert len(result.descriptors) == 1, (
+            f"Expected exactly 1 descriptor (handler_contract.yaml only), "
+            f"got {len(result.descriptors)}. "
+            f"Discovered handler IDs: {[d.handler_id for d in result.descriptors]}"
+        )
+        assert len(result.validation_errors) == 0, (
+            f"Expected 0 validation errors, got {len(result.validation_errors)}"
+        )
+
+        # Verify the discovered descriptor is from the valid file
+        discovered_handler = result.descriptors[0]
+        assert discovered_handler.handler_id == "test.handler.valid", (
+            f"Expected handler_id 'test.handler.valid', "
+            f"got '{discovered_handler.handler_id}'"
+        )
+
+        # Additional verification: check contract_path points to correct file
+        assert "valid_exact_match" in discovered_handler.contract_path, (
+            f"Expected contract_path to contain 'valid_exact_match', "
+            f"got '{discovered_handler.contract_path}'"
+        )
+
 
 class TestHandlerContractSourceSymlinkHandling:
     """Tests for symlink handling in contract discovery.
@@ -1353,6 +1475,356 @@ output_model: "test.models.Output"
         )
         assert len(result.validation_errors) == 0
         assert result.descriptors[0].handler_id == "test.handler.dedup"
+
+
+# =============================================================================
+# Multi-Segment Module Path Tests
+# =============================================================================
+
+
+HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS = """
+handler_id: "{handler_id}"
+name: "{name}"
+version: "1.0.0"
+descriptor:
+  handler_kind: "compute"
+input_model: "{input_model}"
+output_model: "{output_model}"
+"""
+
+
+class TestHandlerContractSourceMultiSegmentPaths:
+    """Tests for multi-segment module path handling in HandlerContractSource.
+
+    These tests verify that HandlerContractSource correctly discovers and parses
+    handler contracts that use multi-segment module paths for input_model and
+    output_model fields.
+
+    Multi-segment paths include:
+    - Deep nesting (3+ segments): omnibase_infra.models.handlers.ModelInput
+    - Very deep nesting (6+ segments): a.b.c.d.e.f.ModelDeep
+    - Underscores in segment names: module_with_underscore.sub_module.ModelName
+    - Mixed patterns: omnibase_core.models.primitives.model_semver.ModelSemVer
+
+    This is critical for real-world usage where models are organized in nested
+    package structures following Python conventions.
+    """
+
+    @pytest.mark.asyncio
+    async def test_discovers_contracts_with_three_segment_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify contracts with 3-segment module paths are correctly discovered.
+
+        Tests paths like: omnibase_infra.models.ModelHandler
+        """
+        from omnibase_infra.runtime.handler_contract_source import (
+            HandlerContractSource,
+        )
+
+        contract_dir = tmp_path / "three_segment"
+        contract_dir.mkdir()
+        (contract_dir / "handler_contract.yaml").write_text(
+            HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS.format(
+                handler_id="test.three_segment.handler",
+                name="Three Segment Path Handler",
+                input_model="omnibase_infra.models.ModelInput",
+                output_model="omnibase_infra.models.ModelOutput",
+            )
+        )
+
+        source = HandlerContractSource(contract_paths=[tmp_path])
+        result = await source.discover_handlers()
+
+        assert len(result.descriptors) == 1
+        assert len(result.validation_errors) == 0
+        descriptor = result.descriptors[0]
+        assert descriptor.input_model == "omnibase_infra.models.ModelInput"
+        assert descriptor.output_model == "omnibase_infra.models.ModelOutput"
+
+    @pytest.mark.asyncio
+    async def test_discovers_contracts_with_four_segment_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify contracts with 4-segment module paths are correctly discovered.
+
+        Tests paths like: omnibase_infra.models.handlers.ModelHandler
+        """
+        from omnibase_infra.runtime.handler_contract_source import (
+            HandlerContractSource,
+        )
+
+        contract_dir = tmp_path / "four_segment"
+        contract_dir.mkdir()
+        (contract_dir / "handler_contract.yaml").write_text(
+            HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS.format(
+                handler_id="test.four_segment.handler",
+                name="Four Segment Path Handler",
+                input_model="omnibase_infra.models.handlers.ModelInput",
+                output_model="omnibase_infra.models.handlers.ModelOutput",
+            )
+        )
+
+        source = HandlerContractSource(contract_paths=[tmp_path])
+        result = await source.discover_handlers()
+
+        assert len(result.descriptors) == 1
+        assert len(result.validation_errors) == 0
+        descriptor = result.descriptors[0]
+        assert descriptor.input_model == "omnibase_infra.models.handlers.ModelInput"
+        assert descriptor.output_model == "omnibase_infra.models.handlers.ModelOutput"
+
+    @pytest.mark.asyncio
+    async def test_discovers_contracts_with_deeply_nested_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify contracts with 6+ segment module paths are correctly discovered.
+
+        Tests very deep nesting like: a.b.c.d.e.f.ModelDeep
+        This ensures no artificial limit on path depth.
+        """
+        from omnibase_infra.runtime.handler_contract_source import (
+            HandlerContractSource,
+        )
+
+        contract_dir = tmp_path / "deep_nested"
+        contract_dir.mkdir()
+        (contract_dir / "handler_contract.yaml").write_text(
+            HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS.format(
+                handler_id="test.deep_nested.handler",
+                name="Deeply Nested Path Handler",
+                input_model="level1.level2.level3.level4.level5.level6.ModelDeepInput",
+                output_model="a.b.c.d.e.f.g.h.ModelVeryDeepOutput",
+            )
+        )
+
+        source = HandlerContractSource(contract_paths=[tmp_path])
+        result = await source.discover_handlers()
+
+        assert len(result.descriptors) == 1
+        assert len(result.validation_errors) == 0
+        descriptor = result.descriptors[0]
+        assert descriptor.input_model == (
+            "level1.level2.level3.level4.level5.level6.ModelDeepInput"
+        )
+        assert descriptor.output_model == "a.b.c.d.e.f.g.h.ModelVeryDeepOutput"
+
+    @pytest.mark.asyncio
+    async def test_discovers_contracts_with_underscore_segments(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify contracts with underscores in module path segments.
+
+        Tests paths like: module_with_underscore.sub_module_name.ModelName
+        Python package names commonly use underscores.
+        """
+        from omnibase_infra.runtime.handler_contract_source import (
+            HandlerContractSource,
+        )
+
+        contract_dir = tmp_path / "underscore_segments"
+        contract_dir.mkdir()
+        (contract_dir / "handler_contract.yaml").write_text(
+            HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS.format(
+                handler_id="test.underscore_segments.handler",
+                name="Underscore Segments Handler",
+                input_model="omnibase_infra.models_v2.handler_models.ModelInputV2",
+                output_model="package_name.sub_package_name.module_name.ModelOutput",
+            )
+        )
+
+        source = HandlerContractSource(contract_paths=[tmp_path])
+        result = await source.discover_handlers()
+
+        assert len(result.descriptors) == 1
+        assert len(result.validation_errors) == 0
+        descriptor = result.descriptors[0]
+        assert descriptor.input_model == (
+            "omnibase_infra.models_v2.handler_models.ModelInputV2"
+        )
+        assert descriptor.output_model == (
+            "package_name.sub_package_name.module_name.ModelOutput"
+        )
+
+    @pytest.mark.asyncio
+    async def test_discovers_contracts_with_mixed_path_patterns(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify contracts with mixed path patterns are discovered correctly.
+
+        Tests realistic paths from the omnibase ecosystem:
+        - omnibase_core.models.primitives.model_semver.ModelSemVer
+        - omnibase_infra.nodes.adapters.kafka.models.ModelKafkaMessage
+        """
+        from omnibase_infra.runtime.handler_contract_source import (
+            HandlerContractSource,
+        )
+
+        contract_dir = tmp_path / "mixed_patterns"
+        contract_dir.mkdir()
+        (contract_dir / "handler_contract.yaml").write_text(
+            HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS.format(
+                handler_id="test.mixed_patterns.handler",
+                name="Mixed Patterns Handler",
+                input_model="omnibase_core.models.primitives.model_semver.ModelSemVer",
+                output_model=(
+                    "omnibase_infra.nodes.adapters.kafka.models.ModelKafkaMessage"
+                ),
+            )
+        )
+
+        source = HandlerContractSource(contract_paths=[tmp_path])
+        result = await source.discover_handlers()
+
+        assert len(result.descriptors) == 1
+        assert len(result.validation_errors) == 0
+        descriptor = result.descriptors[0]
+        assert descriptor.input_model == (
+            "omnibase_core.models.primitives.model_semver.ModelSemVer"
+        )
+        assert descriptor.output_model == (
+            "omnibase_infra.nodes.adapters.kafka.models.ModelKafkaMessage"
+        )
+
+    @pytest.mark.asyncio
+    async def test_multiple_contracts_with_different_path_depths(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify multiple contracts with varying path depths are all discovered.
+
+        Creates contracts with 2, 3, 4, and 6 segment paths to ensure
+        all depths work together.
+        """
+        from omnibase_infra.runtime.handler_contract_source import (
+            HandlerContractSource,
+        )
+
+        # 2 segments (simple)
+        dir_2seg = tmp_path / "two_segment"
+        dir_2seg.mkdir()
+        (dir_2seg / "handler_contract.yaml").write_text(
+            HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS.format(
+                handler_id="test.two_segment",
+                name="Two Segment",
+                input_model="models.Input",
+                output_model="models.Output",
+            )
+        )
+
+        # 3 segments
+        dir_3seg = tmp_path / "three_segment"
+        dir_3seg.mkdir()
+        (dir_3seg / "handler_contract.yaml").write_text(
+            HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS.format(
+                handler_id="test.three_segment",
+                name="Three Segment",
+                input_model="pkg.models.Input",
+                output_model="pkg.models.Output",
+            )
+        )
+
+        # 4 segments
+        dir_4seg = tmp_path / "four_segment"
+        dir_4seg.mkdir()
+        (dir_4seg / "handler_contract.yaml").write_text(
+            HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS.format(
+                handler_id="test.four_segment",
+                name="Four Segment",
+                input_model="org.pkg.models.Input",
+                output_model="org.pkg.models.Output",
+            )
+        )
+
+        # 6 segments (deep)
+        dir_6seg = tmp_path / "six_segment"
+        dir_6seg.mkdir()
+        (dir_6seg / "handler_contract.yaml").write_text(
+            HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS.format(
+                handler_id="test.six_segment",
+                name="Six Segment",
+                input_model="a.b.c.d.e.Input",
+                output_model="a.b.c.d.e.Output",
+            )
+        )
+
+        source = HandlerContractSource(contract_paths=[tmp_path])
+        result = await source.discover_handlers()
+
+        assert len(result.descriptors) == 4
+        assert len(result.validation_errors) == 0
+
+        # Verify all handler IDs are present
+        discovered_ids = {d.handler_id for d in result.descriptors}
+        expected_ids = {
+            "test.two_segment",
+            "test.three_segment",
+            "test.four_segment",
+            "test.six_segment",
+        }
+        assert discovered_ids == expected_ids
+
+    @pytest.mark.asyncio
+    async def test_preserves_path_case_sensitivity(self, tmp_path: Path) -> None:
+        """Verify that module path case is preserved exactly as specified.
+
+        Module paths should maintain their exact casing since Python
+        module names are case-sensitive.
+        """
+        from omnibase_infra.runtime.handler_contract_source import (
+            HandlerContractSource,
+        )
+
+        contract_dir = tmp_path / "case_sensitive"
+        contract_dir.mkdir()
+        (contract_dir / "handler_contract.yaml").write_text(
+            HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS.format(
+                handler_id="test.case_sensitive.handler",
+                name="Case Sensitive Handler",
+                input_model="OmniBase.Models.Handlers.ModelInput",
+                output_model="myPackage.SubModule.MODEL_OUTPUT",
+            )
+        )
+
+        source = HandlerContractSource(contract_paths=[tmp_path])
+        result = await source.discover_handlers()
+
+        assert len(result.descriptors) == 1
+        descriptor = result.descriptors[0]
+        # Case must be preserved exactly
+        assert descriptor.input_model == "OmniBase.Models.Handlers.ModelInput"
+        assert descriptor.output_model == "myPackage.SubModule.MODEL_OUTPUT"
+
+    @pytest.mark.asyncio
+    async def test_handles_numeric_like_segments(self, tmp_path: Path) -> None:
+        """Verify paths with numeric-like segments work correctly.
+
+        Tests segments like v2, models_v1, etc. which are valid Python identifiers.
+        """
+        from omnibase_infra.runtime.handler_contract_source import (
+            HandlerContractSource,
+        )
+
+        contract_dir = tmp_path / "numeric_segments"
+        contract_dir.mkdir()
+        (contract_dir / "handler_contract.yaml").write_text(
+            HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS.format(
+                handler_id="test.numeric_segments.handler",
+                name="Numeric Segments Handler",
+                input_model="omnibase_v2.models_v1.handlers_v3.ModelInputV4",
+                output_model="api.v2.responses.ModelResponseV1",
+            )
+        )
+
+        source = HandlerContractSource(contract_paths=[tmp_path])
+        result = await source.discover_handlers()
+
+        assert len(result.descriptors) == 1
+        assert len(result.validation_errors) == 0
+        descriptor = result.descriptors[0]
+        assert descriptor.input_model == (
+            "omnibase_v2.models_v1.handlers_v3.ModelInputV4"
+        )
+        assert descriptor.output_model == "api.v2.responses.ModelResponseV1"
 
 
 def _permissions_are_enforced() -> bool:
@@ -1536,3 +2008,311 @@ output_model: "test.models.Output"
         finally:
             # Restore permissions for cleanup
             unreadable_contract.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+
+# =============================================================================
+# File Size Limit Tests (DoS Protection)
+# =============================================================================
+
+
+class TestHandlerContractSourceFileSizeLimit:
+    """Tests for 10MB file size limit enforcement.
+
+    Verifies that HandlerContractSource rejects oversized contract files
+    to prevent denial-of-service attacks via memory exhaustion. The limit
+    is defined as MAX_CONTRACT_SIZE (10MB = 10 * 1024 * 1024 bytes).
+
+    Security Context:
+        Without this limit, an attacker could create a malicious handler_contract.yaml
+        with extremely large content, causing the discovery process to consume
+        excessive memory when reading the file.
+
+    These tests use mocking to simulate large file sizes without actually
+    creating 10MB+ files on disk.
+    """
+
+    @pytest.fixture
+    def valid_contract_content(self) -> str:
+        """Return minimal valid contract content for size limit tests."""
+        return """\
+handler_id: "test.handler.size_limit"
+name: "Size Limit Test Handler"
+version: "1.0.0"
+descriptor:
+  handler_kind: "compute"
+input_model: "test.models.Input"
+output_model: "test.models.Output"
+"""
+
+    @pytest.mark.asyncio
+    async def test_rejects_file_exceeding_10mb_limit_strict_mode(
+        self, tmp_path: Path, valid_contract_content: str
+    ) -> None:
+        """Verify files exceeding 10MB are rejected in strict mode.
+
+        Creates a small contract file but mocks Path.stat() to report
+        a file size exceeding MAX_CONTRACT_SIZE (10MB). Verifies that
+        discovery raises ModelOnexError with error code HANDLER_SOURCE_005.
+        """
+        from unittest.mock import patch
+
+        from omnibase_core.models.errors.model_onex_error import ModelOnexError
+
+        from omnibase_infra.runtime.handler_contract_source import (
+            MAX_CONTRACT_SIZE,
+            HandlerContractSource,
+        )
+
+        # Create a small valid contract file
+        contract_dir = tmp_path / "oversized_handler"
+        contract_dir.mkdir()
+        contract_file = contract_dir / "handler_contract.yaml"
+        contract_file.write_text(valid_contract_content)
+
+        # Verify MAX_CONTRACT_SIZE is 10MB
+        expected_max = 10 * 1024 * 1024
+        assert expected_max == MAX_CONTRACT_SIZE, (
+            f"MAX_CONTRACT_SIZE should be 10MB ({expected_max}), got {MAX_CONTRACT_SIZE}"
+        )
+
+        # Mock stat to return a file size just over the limit
+        oversized_bytes = MAX_CONTRACT_SIZE + 1
+
+        original_stat = Path.stat
+
+        def mock_stat(self: Path, **kwargs: object) -> object:
+            """Mock stat that returns oversized value for contract files."""
+            result = original_stat(self, **kwargs)
+            if self.name == "handler_contract.yaml":
+                # Return a mock-like object with overridden st_size
+                class MockStat:
+                    st_size = oversized_bytes
+                    st_mode = result.st_mode
+                    st_ino = result.st_ino
+                    st_dev = result.st_dev
+                    st_nlink = result.st_nlink
+                    st_uid = result.st_uid
+                    st_gid = result.st_gid
+                    st_atime = result.st_atime
+                    st_mtime = result.st_mtime
+                    st_ctime = result.st_ctime
+
+                return MockStat()
+            return result
+
+        source = HandlerContractSource(
+            contract_paths=[contract_dir],
+            graceful_mode=False,  # Strict mode
+        )
+
+        with patch.object(Path, "stat", mock_stat):
+            with pytest.raises(ModelOnexError) as exc_info:
+                await source.discover_handlers()
+
+        # Verify error details
+        error = exc_info.value
+        assert "size" in str(error).lower(), (
+            f"Error message should mention 'size': {error}"
+        )
+        assert "limit" in str(error).lower() or str(oversized_bytes) in str(error), (
+            f"Error message should mention limit or file size: {error}"
+        )
+        assert error.error_code == "HANDLER_SOURCE_005", (
+            f"Expected error code HANDLER_SOURCE_005, got {error.error_code}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_rejects_file_exceeding_10mb_limit_graceful_mode(
+        self, tmp_path: Path, valid_contract_content: str
+    ) -> None:
+        """Verify files exceeding 10MB produce errors in graceful mode.
+
+        In graceful mode, oversized files should produce a structured
+        validation error instead of raising an exception. Other valid
+        contracts should still be discovered.
+        """
+        from unittest.mock import patch
+
+        from omnibase_infra.runtime.handler_contract_source import (
+            MAX_CONTRACT_SIZE,
+            HandlerContractSource,
+        )
+
+        # Create two contract files - one to be marked as oversized, one valid
+        oversized_dir = tmp_path / "oversized_handler"
+        oversized_dir.mkdir()
+        oversized_file = oversized_dir / "handler_contract.yaml"
+        oversized_file.write_text(valid_contract_content)
+
+        valid_dir = tmp_path / "valid_handler"
+        valid_dir.mkdir()
+        valid_file = valid_dir / "handler_contract.yaml"
+        valid_file.write_text(
+            valid_contract_content.replace("size_limit", "valid_size")
+        )
+
+        oversized_bytes = MAX_CONTRACT_SIZE + 1
+        original_stat = Path.stat
+
+        def mock_stat_selective(self: Path, **kwargs: object) -> object:
+            """Mock stat that returns oversized value only for specific file."""
+            result = original_stat(self, **kwargs)
+            if self == oversized_file:
+
+                class MockStat:
+                    st_size = oversized_bytes
+                    st_mode = result.st_mode
+                    st_ino = result.st_ino
+                    st_dev = result.st_dev
+                    st_nlink = result.st_nlink
+                    st_uid = result.st_uid
+                    st_gid = result.st_gid
+                    st_atime = result.st_atime
+                    st_mtime = result.st_mtime
+                    st_ctime = result.st_ctime
+
+                return MockStat()
+            return result
+
+        source = HandlerContractSource(
+            contract_paths=[tmp_path],
+            graceful_mode=True,  # Graceful mode
+        )
+
+        with patch.object(Path, "stat", mock_stat_selective):
+            result = await source.discover_handlers()
+
+        # Valid contract should still be discovered
+        assert len(result.descriptors) == 1, (
+            f"Expected 1 valid descriptor, got {len(result.descriptors)}. "
+            "Oversized file should not prevent valid contract discovery."
+        )
+        assert result.descriptors[0].handler_id == "test.handler.valid_size"
+
+        # Oversized contract should produce validation error
+        assert len(result.validation_errors) == 1, (
+            f"Expected 1 validation error for oversized file, got {len(result.validation_errors)}"
+        )
+        error = result.validation_errors[0]
+        assert "size" in error.message.lower() or "limit" in error.message.lower(), (
+            f"Error message should mention size limit: {error.message}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_accepts_file_at_exactly_10mb_limit(
+        self, tmp_path: Path, valid_contract_content: str
+    ) -> None:
+        """Verify files at exactly 10MB are accepted (boundary test).
+
+        Files at exactly MAX_CONTRACT_SIZE should be accepted.
+        Only files strictly greater than the limit should be rejected.
+        """
+        from unittest.mock import patch
+
+        from omnibase_infra.runtime.handler_contract_source import (
+            MAX_CONTRACT_SIZE,
+            HandlerContractSource,
+        )
+
+        # Create a valid contract file
+        contract_dir = tmp_path / "boundary_handler"
+        contract_dir.mkdir()
+        contract_file = contract_dir / "handler_contract.yaml"
+        contract_file.write_text(valid_contract_content)
+
+        # Mock stat to return exactly MAX_CONTRACT_SIZE
+        exactly_max_bytes = MAX_CONTRACT_SIZE
+        original_stat = Path.stat
+
+        def mock_stat(self: Path, **kwargs: object) -> object:
+            """Mock stat that returns exactly MAX_CONTRACT_SIZE for contract files."""
+            result = original_stat(self, **kwargs)
+            if self.name == "handler_contract.yaml":
+
+                class MockStat:
+                    st_size = exactly_max_bytes
+                    st_mode = result.st_mode
+                    st_ino = result.st_ino
+                    st_dev = result.st_dev
+                    st_nlink = result.st_nlink
+                    st_uid = result.st_uid
+                    st_gid = result.st_gid
+                    st_atime = result.st_atime
+                    st_mtime = result.st_mtime
+                    st_ctime = result.st_ctime
+
+                return MockStat()
+            return result
+
+        source = HandlerContractSource(
+            contract_paths=[contract_dir],
+            graceful_mode=False,
+        )
+
+        with patch.object(Path, "stat", mock_stat):
+            result = await source.discover_handlers()
+
+        # File at exactly limit should be accepted
+        assert len(result.descriptors) == 1, (
+            f"Expected 1 descriptor (file at limit should be accepted), got {len(result.descriptors)}"
+        )
+        assert len(result.validation_errors) == 0
+        assert result.descriptors[0].handler_id == "test.handler.size_limit"
+
+    @pytest.mark.asyncio
+    async def test_accepts_file_under_10mb_limit(
+        self, tmp_path: Path, valid_contract_content: str
+    ) -> None:
+        """Verify files under 10MB are accepted normally.
+
+        Normal-sized files should be processed without any size-related errors.
+        """
+        from omnibase_infra.runtime.handler_contract_source import (
+            MAX_CONTRACT_SIZE,
+            HandlerContractSource,
+        )
+
+        # Create a valid contract file (actual small file, no mocking)
+        contract_dir = tmp_path / "normal_handler"
+        contract_dir.mkdir()
+        contract_file = contract_dir / "handler_contract.yaml"
+        contract_file.write_text(valid_contract_content)
+
+        # Verify actual file is under limit
+        actual_size = contract_file.stat().st_size
+        assert actual_size < MAX_CONTRACT_SIZE, (
+            f"Test contract should be under {MAX_CONTRACT_SIZE}, actual: {actual_size}"
+        )
+
+        source = HandlerContractSource(
+            contract_paths=[contract_dir],
+            graceful_mode=False,
+        )
+
+        result = await source.discover_handlers()
+
+        # Normal file should be accepted
+        assert len(result.descriptors) == 1
+        assert len(result.validation_errors) == 0
+        assert result.descriptors[0].handler_id == "test.handler.size_limit"
+
+    @pytest.mark.asyncio
+    async def test_max_contract_size_constant_is_exported(self) -> None:
+        """Verify MAX_CONTRACT_SIZE is exported from the module.
+
+        The constant should be accessible for documentation and configuration
+        purposes.
+        """
+        from omnibase_infra.runtime.handler_contract_source import MAX_CONTRACT_SIZE
+
+        # Verify it's 10MB
+        assert MAX_CONTRACT_SIZE == 10 * 1024 * 1024, (
+            f"MAX_CONTRACT_SIZE should be 10MB (10485760 bytes), got {MAX_CONTRACT_SIZE}"
+        )
+
+        # Verify it's in __all__
+        from omnibase_infra.runtime import handler_contract_source
+
+        assert "MAX_CONTRACT_SIZE" in handler_contract_source.__all__, (
+            "MAX_CONTRACT_SIZE should be in __all__ for public export"
+        )

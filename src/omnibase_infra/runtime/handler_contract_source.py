@@ -304,6 +304,29 @@ class HandlerContractSource:
                         },
                     )
                     validation_errors.append(error)
+                except ModelOnexError as e:
+                    # Handle file size limit errors in graceful mode
+                    if not self._graceful_mode:
+                        raise
+                    # Extract file size from error message for structured error
+                    # The error message format is:
+                    # "Contract file exceeds size limit: {size} bytes (max: {max} bytes)"
+                    error = self._create_size_limit_error(
+                        contract_file,
+                        contract_file.stat().st_size,
+                    )
+                    logger.warning(
+                        "Contract file size limit exceeded, continuing in graceful mode: %s",
+                        contract_file,
+                        extra={
+                            "contract_file": str(contract_file),
+                            "error_type": "size_limit_error",
+                            "error_code": e.error_code,
+                            "graceful_mode": self._graceful_mode,
+                            "paths_scanned": len(self._contract_paths),
+                        },
+                    )
+                    validation_errors.append(error)
 
         # Log discovery results
         self._log_discovery_results(len(descriptors), len(validation_errors))
@@ -455,6 +478,40 @@ class HandlerContractSource:
             file_path=str(contract_path),
         )
 
+    def _create_size_limit_error(
+        self,
+        contract_path: Path,
+        file_size: int,
+    ) -> ModelHandlerValidationError:
+        """Create a validation error for file size limit violations.
+
+        Args:
+            contract_path: Path to the oversized contract file.
+            file_size: The actual file size in bytes.
+
+        Returns:
+            ModelHandlerValidationError with size limit details.
+        """
+        handler_identity = ModelHandlerIdentifier.from_handler_id(
+            f"unknown@{contract_path.name}"
+        )
+
+        return ModelHandlerValidationError(
+            error_type=EnumHandlerErrorType.CONTRACT_VALIDATION_ERROR,
+            rule_id="CONTRACT-003",
+            handler_identity=handler_identity,
+            source_type=EnumHandlerSourceType.CONTRACT,
+            message=(
+                f"Contract file exceeds size limit: {file_size} bytes "
+                f"(max: {MAX_CONTRACT_SIZE} bytes)"
+            ),
+            remediation_hint=(
+                f"Reduce contract file size to under {MAX_CONTRACT_SIZE // (1024 * 1024)}MB. "
+                "Consider splitting into multiple contracts if needed."
+            ),
+            file_path=str(contract_path),
+        )
+
     def _log_discovery_results(
         self,
         discovered_count: int,
@@ -468,14 +525,13 @@ class HandlerContractSource:
         """
         logger.info(
             "Handler contract discovery completed: "
-            "unique_contracts=%d, validation_failure_count=%d, "
+            "discovered_contract_count=%d, validation_failure_count=%d, "
             "paths_scanned=%d, graceful_mode=%s",
             discovered_count,
             failure_count,
             len(self._contract_paths),
             self._graceful_mode,
             extra={
-                "unique_contracts": discovered_count,
                 "discovered_contract_count": discovered_count,
                 "validation_failure_count": failure_count,
                 "paths_scanned": len(self._contract_paths),
