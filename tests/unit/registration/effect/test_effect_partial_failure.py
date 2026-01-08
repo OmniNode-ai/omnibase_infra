@@ -218,7 +218,8 @@ class TestEffectPartialFailure:
         assert "Exception: Consul service unavailable" in (
             response.consul_result.error or ""
         )
-        assert response.consul_result.error_code == "CONSUL_CONNECTION_ERROR"
+        # Note: Generic Exception (not InfraConnectionError) maps to UNKNOWN_ERROR
+        assert response.consul_result.error_code == "CONSUL_UNKNOWN_ERROR"
         assert response.correlation_id == sample_registry_request.correlation_id
 
         # Verify appropriate error context
