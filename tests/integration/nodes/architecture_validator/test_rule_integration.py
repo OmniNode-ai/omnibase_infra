@@ -22,15 +22,12 @@ Related:
 
 from __future__ import annotations
 
-import shutil
-import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
 from omnibase_infra.nodes.architecture_validator.models.model_validation_request import (
     ModelArchitectureValidationRequest,
@@ -47,87 +44,6 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
         ModelFileValidationResult,
     )
-
-
-# =============================================================================
-# Fixtures
-# =============================================================================
-
-
-@pytest.fixture
-def container() -> ModelONEXContainer:
-    """Create ONEX container for tests."""
-    return ModelONEXContainer()
-
-
-@pytest.fixture
-def validator(container: ModelONEXContainer) -> NodeArchitectureValidator:
-    """Create NodeArchitectureValidator instance."""
-    return NodeArchitectureValidator(container)
-
-
-@pytest.fixture
-def all_rules() -> tuple[
-    RuleNoDirectDispatch, RuleNoHandlerPublishing, RuleNoOrchestratorFSM
-]:
-    """Create instances of all three rule classes."""
-    return (
-        RuleNoDirectDispatch(),
-        RuleNoHandlerPublishing(),
-        RuleNoOrchestratorFSM(),
-    )
-
-
-@pytest.fixture
-def project_temp_dir() -> Path:
-    """Create temporary directory within project for testing.
-
-    The NodeArchitectureValidator has security validation that rejects
-    absolute paths outside the working directory. This fixture creates
-    temp files within the project directory (but NOT in tests/ to avoid
-    exemptions).
-
-    Falls back to test file directory if pyproject.toml not found.
-
-    Yields:
-        Path to temporary directory within project.
-    """
-    current = Path(__file__).resolve()
-    project_root = current.parent
-    original_parent = project_root  # Save for fallback
-
-    while project_root != project_root.parent:
-        if (project_root / "pyproject.toml").exists():
-            break
-        project_root = project_root.parent
-
-    # Fallback if pyproject.toml not found (use test file's directory)
-    if not (project_root / "pyproject.toml").exists():
-        project_root = original_parent
-
-    temp_dir = project_root / f"_test_tmp_{uuid.uuid4().hex[:8]}"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    yield temp_dir
-    shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-@pytest.fixture
-def create_temp_file(project_temp_dir: Path) -> Callable[[str, str], Path]:
-    """Factory fixture for creating temporary Python files.
-
-    Args:
-        project_temp_dir: Temporary directory within project.
-
-    Returns:
-        A callable that takes (filename, content) and returns the Path.
-    """
-
-    def _create(filename: str, content: str) -> Path:
-        file_path = project_temp_dir / filename
-        file_path.write_text(content, encoding="utf-8")
-        return file_path
-
-    return _create
 
 
 # =============================================================================

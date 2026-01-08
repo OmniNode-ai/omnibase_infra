@@ -76,7 +76,7 @@ See Also
 - Runtime kernel: omnibase_infra.runtime.kernel
 """
 
-from omnibase_infra import (
+from . import (
     clients,
     enums,
     infrastructure,
