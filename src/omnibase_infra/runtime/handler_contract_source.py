@@ -83,7 +83,7 @@ HANDLER_CONTRACT_FILENAME = "handler_contract.yaml"
 class HandlerContractSource:
     """Handler source that discovers contracts from the filesystem.
 
-    This class implements ProtocolHandlerSource by recursively scanning
+    This class implements ProtocolContractSource by recursively scanning
     configured paths for handler_contract.yaml files, parsing them with
     YAML and validating against ModelHandlerContract from omnibase_core.
 
@@ -281,9 +281,16 @@ class HandlerContractSource:
             yaml.YAMLError: If YAML parsing fails.
             ValidationError: If contract validation fails.
         """
-        # NOTE: Direct file operations are used here intentionally until
-        # RegistryFileBased is implemented in omnibase_core. Once available,
-        # this should use the registry abstraction for consistent file loading.
+        # TODO(OMN-1097): Replace direct file I/O with FileRegistry abstraction
+        #
+        # Why direct file operations are used here:
+        #   RegistryFileBased (or FileRegistry) does not yet exist in omnibase_core.
+        #   This is a temporary implementation that will be replaced once the
+        #   registry abstraction is available, providing:
+        #   - Consistent file loading across the codebase
+        #   - Caching and performance optimizations
+        #   - Unified error handling for file operations
+        #
         # See: docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
         with contract_path.open("r", encoding="utf-8") as f:
             raw_data = yaml.safe_load(f)
