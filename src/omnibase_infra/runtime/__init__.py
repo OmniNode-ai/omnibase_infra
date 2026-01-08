@@ -35,7 +35,7 @@ Runtime Components
 Message Dispatch Engine
 -----------------------
 - **MessageDispatchEngine**: Runtime dispatch engine for message routing
-- **DispatcherRegistry**: Thread-safe registry for dispatchers with freeze pattern
+- **RegistryDispatcher**: Thread-safe registry for dispatchers with freeze pattern
 - **ProtocolMessageDispatcher**: Protocol for category-based message dispatchers
 
 Chain-Aware Dispatch (OMN-951)
@@ -58,8 +58,8 @@ from __future__ import annotations
 
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.runtime.registry_dispatcher import (
-    DispatcherRegistry,
     ProtocolMessageDispatcher,
+    RegistryDispatcher,
 )
 from omnibase_infra.runtime.envelope_validator import (
     PAYLOAD_REQUIRED_OPERATIONS,
@@ -170,7 +170,6 @@ __all__: list[str] = [
     "ChainAwareDispatcher",
     # Context enforcement
     "DispatchContextEnforcer",
-    "DispatcherRegistry",
     "EventBusBindingRegistry",
     # Message dispatch engine
     "MessageDispatchEngine",
@@ -189,6 +188,8 @@ __all__: list[str] = [
     "ProtocolMessageTypeRegistry",
     # Policy protocol and registry
     "ProtocolPolicy",
+    # Dispatcher registry
+    "RegistryDispatcher",
     # Runtime scheduler (OMN-953)
     "ProtocolRuntimeScheduler",
     # Error class

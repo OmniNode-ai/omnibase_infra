@@ -466,10 +466,10 @@ pattern_exemptions:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
     ticket: OMN-990
   # ==========================================================================
-  # DispatcherRegistry Exemptions (OMN-934)
+  # RegistryDispatcher Exemptions (OMN-934)
   # ==========================================================================
   - file_pattern: 'registry_dispatcher\.py'
-    class_pattern: "Class 'DispatcherRegistry'"
+    class_pattern: "Class 'RegistryDispatcher'"
     violation_pattern: 'has \d+ methods'
     reason: >
       Domain registry pattern requires CRUD + query operations: registration (register, unregister), lookup (get_by_id, get_by_type, get_all), metrics (get_metrics). This is an established domain registry pattern.
@@ -664,7 +664,7 @@ pattern_exemptions:
   # RegistryCompute Exemptions (OMN-811)
   # ==========================================================================
   # Central registry pattern for compute plugins follows same patterns as
-  # PolicyRegistry, MessageTypeRegistry, and DispatcherRegistry.
+  # PolicyRegistry, MessageTypeRegistry, and RegistryDispatcher.
   - file_pattern: 'registry_compute\.py'
     class_pattern: "Class 'RegistryCompute'"
     violation_pattern: 'has \d+ methods'

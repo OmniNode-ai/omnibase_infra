@@ -17,13 +17,13 @@ Design Pattern:
 
 Intent Typing:
     The intents field accepts any model inheriting from ModelRegistryIntent.
-    Intent types self-register via the @IntentRegistry.register() decorator,
+    Intent types self-register via the @RegistryIntent.register() decorator,
     enabling dynamic type resolution during deserialization without explicit unions.
 
     This registry-based approach:
     - Eliminates duplicate union definitions across modules
     - Allows future intent types to be added by simply implementing ModelRegistryIntent
-      and registering with @IntentRegistry.register("kind")
+      and registering with @RegistryIntent.register("kind")
     - Uses the `kind` field as a discriminator for type resolution
     - Follows ONEX duck typing principles while maintaining type safety
 
@@ -71,8 +71,8 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_st
     ModelReducerState,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_intent import (
-    IntentRegistry,
     ModelRegistryIntent,
+    RegistryIntent,
 )
 
 
@@ -156,7 +156,7 @@ class ModelReducerExecutionResult(BaseModel):
         description=(
             "Tuple of registration intents to be executed by the effect node. "
             "All intents must inherit from ModelRegistryIntent and be registered "
-            "with IntentRegistry."
+            "with RegistryIntent."
         ),
     )
     # Note: When serializing this model, use model_dump(serialize_as_any=True)
@@ -167,7 +167,7 @@ class ModelReducerExecutionResult(BaseModel):
     @field_validator("intents", mode="before")
     @classmethod
     def validate_intents(cls, v: object) -> tuple[ModelRegistryIntent, ...]:
-        """Resolve intent types dynamically from IntentRegistry.
+        """Resolve intent types dynamically from RegistryIntent.
 
         When deserializing from JSON/dict, uses the 'kind' field to look up
         the correct concrete intent class from the registry.
@@ -198,7 +198,7 @@ class ModelReducerExecutionResult(BaseModel):
                 if kind is None:
                     raise ValueError("Intent dict missing required 'kind' field")
                 try:
-                    intent_cls = IntentRegistry.get_type(kind)
+                    intent_cls = RegistryIntent.get_type(kind)
                 except KeyError as e:
                     raise ValueError(str(e)) from e
                 result.append(intent_cls.model_validate(item))
@@ -304,7 +304,7 @@ class ModelReducerExecutionResult(BaseModel):
             state: The updated reducer state.
             intents: Sequence of registration intents to execute. Each intent
                 must inherit from ModelRegistryIntent and be registered with
-                IntentRegistry (e.g., ModelConsulRegistrationIntent,
+                RegistryIntent (e.g., ModelConsulRegistrationIntent,
                 ModelPostgresUpsertIntent). Will be converted to an immutable tuple.
 
         Returns:
