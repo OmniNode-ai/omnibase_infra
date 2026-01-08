@@ -321,7 +321,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             domain,
             projection.current_state.value,  # Convert enum to string
             projection.node_type,
-            projection.node_version,
+            str(projection.node_version),  # Convert ModelSemVer to string
             projection.capabilities.model_dump_json(),  # JSONB as JSON string
             projection.ack_deadline,
             projection.liveness_deadline,
