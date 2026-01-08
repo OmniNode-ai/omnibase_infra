@@ -26,11 +26,14 @@ from typing import TypedDict
 __all__ = ["TypedDictCapabilities"]
 
 
-class TypedDictCapabilities(TypedDict, total=False):
+class TypedDictCapabilities(TypedDict):
     """Type-safe structure for node capabilities discovered via reflection.
 
     This TypedDict provides explicit typing for capability fields, eliminating
     the need for permissive `dict[str, object]` or `Any` types.
+
+    All fields are required (total=True by default). The MixinNodeIntrospection
+    mixin always constructs complete capability dicts with all fields populated.
 
     Attributes:
         operations: List of public method names that may be operations.

@@ -8,18 +8,18 @@ mirroring the structure of functools._CacheInfo for compatibility with LRU
 cache implementations.
 
 Example:
-    >>> from omnibase_infra.types import CacheInfo
-    >>> info = CacheInfo(hits=100, misses=10, maxsize=128, currsize=50)
+    >>> from omnibase_infra.types import TypeCacheInfo
+    >>> info = TypeCacheInfo(hits=100, misses=10, maxsize=128, currsize=50)
     >>> print(f"Hit rate: {info.hits / (info.hits + info.misses):.2%}")
     Hit rate: 90.91%
 """
 
 from typing import NamedTuple
 
-__all__ = ["CacheInfo"]
+__all__ = ["TypeCacheInfo"]
 
 
-class CacheInfo(NamedTuple):
+class TypeCacheInfo(NamedTuple):
     """Cache statistics for topic parsing operations.
 
     This mirrors functools._CacheInfo structure for type safety when
@@ -32,7 +32,7 @@ class CacheInfo(NamedTuple):
         currsize: Current number of entries in the cache.
 
     Example:
-        >>> info = CacheInfo(hits=50, misses=5, maxsize=128, currsize=30)
+        >>> info = TypeCacheInfo(hits=50, misses=5, maxsize=128, currsize=30)
         >>> info.hits
         50
         >>> info.maxsize

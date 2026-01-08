@@ -27,10 +27,33 @@ Limitations:
 
 from __future__ import annotations
 
+from typing import Literal
 from urllib.parse import parse_qs, unquote, urlparse
 from uuid import uuid4
 
 from omnibase_infra.types import ModelParsedDSN
+
+
+def _assert_postgres_scheme(scheme: str) -> Literal["postgresql", "postgres"]:
+    """Type-safe scheme assertion for PostgreSQL DSN schemes.
+
+    This helper enables proper type narrowing for the Literal type,
+    avoiding the need for type: ignore comments.
+
+    Args:
+        scheme: The scheme string to validate
+
+    Returns:
+        The scheme cast to the appropriate Literal type
+
+    Note:
+        This function should only be called AFTER validating
+        that scheme is one of the valid values.
+    """
+    if scheme not in ("postgresql", "postgres"):
+        msg = f"Invalid scheme: {scheme}"
+        raise ValueError(msg)
+    return scheme  # type: ignore[return-value]
 
 
 def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
@@ -114,6 +137,21 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
             value="[REDACTED]",  # Never log DSN contents
         )
 
+    # Check for multi-host DSN format (not supported)
+    # Multi-host format: postgresql://host1:port1,host2:port2/db
+    # We check for comma after :// and before / (in the host portion)
+    scheme_end = dsn_str.index("://") + 3
+    path_start = dsn_str.find("/", scheme_end)
+    host_portion = dsn_str[scheme_end:path_start] if path_start != -1 else dsn_str[scheme_end:]
+    if "," in host_portion:
+        raise ProtocolConfigurationError(
+            "Multi-host DSNs are not supported. Use a single host or consider "
+            "psycopg2.conninfo_to_dict for multi-host parsing.",
+            context=context,
+            parameter="dsn",
+            value="[REDACTED]",
+        )
+
     # Parse DSN using urllib.parse
     try:
         parsed = urlparse(dsn_str)
@@ -188,7 +226,7 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
     # Note: urlparse does NOT decode URL-encoded passwords, so we use unquote()
     # Important: Check 'is not None' instead of truthiness to preserve empty strings
     return ModelParsedDSN(
-        scheme=parsed.scheme,  # type: ignore[arg-type] - scheme validated above
+        scheme=_assert_postgres_scheme(parsed.scheme),
         username=unquote(parsed.username) if parsed.username is not None else None,
         password=unquote(parsed.password) if parsed.password is not None else None,
         hostname=parsed.hostname,

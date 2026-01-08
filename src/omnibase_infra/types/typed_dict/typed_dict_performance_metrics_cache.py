@@ -36,23 +36,25 @@ Example:
     ```
 
 Note:
-    This TypedDict uses `total=False` because cached entries may have
-    partial data during incremental metric collection. All fields are
-    optional at the type level, though complete metrics should populate
-    all fields.
+    This TypedDict uses `total=True` (default) because the source Pydantic
+    model `ModelIntrospectionPerformanceMetrics` has defaults for all fields,
+    ensuring that `model_dump(mode="json")` always produces complete JSON
+    with all fields present. Type checkers will require all fields when
+    constructing dict literals, which matches the actual runtime behavior.
 """
 
 from typing import TypedDict
 
 
-class TypedDictPerformanceMetricsCache(TypedDict, total=False):
+class TypedDictPerformanceMetricsCache(TypedDict):
     """TypedDict for JSON-serialized ModelIntrospectionPerformanceMetrics.
 
     This type matches the output of ModelIntrospectionPerformanceMetrics.model_dump(mode="json"),
     enabling proper type checking for cached performance metrics.
 
-    The `total=False` allows for partial metrics during incremental collection,
-    though complete metrics from full introspection will have all fields populated.
+    All fields are required (total=True, the default) because the source Pydantic
+    model has defaults for all fields, ensuring model_dump() always produces
+    complete JSON output with all fields present.
 
     Attributes:
         get_capabilities_ms: Time taken by get_capabilities() in milliseconds.
