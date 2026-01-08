@@ -41,11 +41,11 @@ output_model:
   module: "omnibase_infra.nodes.node_registry_effect.models"
   description: "Output model containing backend status and registration outcome."
 # =============================================================================
-# OPERATION ROUTING (Declarative Handler Dispatch)
+# HANDLER ROUTING (Declarative Handler Dispatch)
 # =============================================================================
 # This section defines how operations are routed to backend-specific handlers.
-# The routing strategy determines handler selection based on operation type
-# and target backend.
+# The routing strategy determines handler selection based on payload type
+# (per ONEX handler routing standards).
 #
 # Design Rationale:
 #   - Parallel execution for independent backends (Consul + Postgres)
@@ -54,13 +54,13 @@ output_model:
 #
 # Execution Flow:
 #   1. Receive ModelRegistryRequest with operation type
-#   2. Route to all matching handlers based on operation
+#   2. Route to all matching handlers based on payload type
 #   3. Execute handlers in parallel (for dual-backend operations)
 #   4. Aggregate results with partial failure handling
 #   5. Return ModelRegistryResponse with combined status
 #
 # ┌─────────────────────────────────────────────────────────────────────────┐
-# │                    OPERATION ROUTING ARCHITECTURE                       │
+# │                    HANDLER ROUTING ARCHITECTURE                         │
 # ├─────────────────────────────────────────────────────────────────────────┤
 # │                                                                         │
 # │  ┌────────────────────┐                                                 │
@@ -70,7 +70,7 @@ output_model:
 # │            │                                                            │
 # │            ▼                                                            │
 # │  ┌─────────────────────┐                                                │
-# │  │  Operation Router   │  routing_strategy: "payload_type_match"       │
+# │  │  Handler Router     │  routing_strategy: "payload_type_match"       │
 # │  │  (Contract-Driven)  │  Matches payload type to handlers              │
 # │  └─────────┬───────────┘                                                │
 # │            │                                                            │
@@ -118,9 +118,9 @@ output_model:
 #   in error_handling. The orchestration layer dispatches once per handler
 #   and delegates retry behavior to the handlers themselves.
 # =============================================================================
-operation_routing:
+handler_routing:
   routing_strategy: "payload_type_match"
-  operations:
+  handlers:
     # Register Node - Consul Backend
     # Registers service with Consul for service discovery.
     # Uses health check endpoint for automated liveness monitoring.
