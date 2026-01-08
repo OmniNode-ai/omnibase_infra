@@ -328,7 +328,7 @@ class OrchestratorBad:
     def __init__(self, container):
         self._state = "pending"  # ARCH-003
 """
-        multi_violation_file.write_text(multi_violation_code)
+        multi_violation_file.write_text(multi_violation_code, encoding="utf-8")
 
         request = ModelArchitectureValidationRequest(
             paths=[str(multi_violation_file)],
@@ -349,7 +349,7 @@ class OrchestratorBad:
     ) -> None:
         """Validator should correctly report which rules were checked."""
         clean_file = project_temp_dir / "clean.py"
-        clean_file.write_text("x = 1\n")
+        clean_file.write_text("x = 1\n", encoding="utf-8")
 
         # Check all rules
         request_all = ModelArchitectureValidationRequest(paths=[str(clean_file)])
@@ -375,24 +375,30 @@ class OrchestratorBad:
         """Validator should aggregate violations across multiple files."""
         # File 1: ARCH-001 violation
         file1 = project_temp_dir / "service1.py"
-        file1.write_text("""
+        file1.write_text(
+            """
 class Service1:
     def process(self):
         handler = MyHandler()
         handler.handle(event)  # ARCH-001
-""")
+""",
+            encoding="utf-8",
+        )
 
         # File 2: ARCH-002 violation
         file2 = project_temp_dir / "service2.py"
-        file2.write_text("""
+        file2.write_text(
+            """
 class HandlerService2:
     def __init__(self, event_bus):
         self._bus = event_bus  # ARCH-002
-""")
+""",
+            encoding="utf-8",
+        )
 
         # File 3: Clean
         file3 = project_temp_dir / "service3.py"
-        file3.write_text("x = 1\n")
+        file3.write_text("x = 1\n", encoding="utf-8")
 
         request = ModelArchitectureValidationRequest(
             paths=[str(project_temp_dir)],
@@ -695,11 +701,14 @@ class TestFullPipelineIntegration:
         consistent pass/fail outcomes as the NodeArchitectureValidator.
         """
         violation_file = project_temp_dir / "pipeline_test.py"
-        violation_file.write_text("""
+        violation_file.write_text(
+            """
 class HandlerPipeline:
     def __init__(self, bus):
         self._bus = bus  # ARCH-002
-""")
+""",
+            encoding="utf-8",
+        )
 
         # Check with validator
         request = ModelArchitectureValidationRequest(
@@ -723,7 +732,7 @@ class HandlerPipeline:
     ) -> None:
         """Validation of empty directory should pass with zero files checked."""
         empty_dir = project_temp_dir / "empty"
-        empty_dir.mkdir()
+        empty_dir.mkdir(exist_ok=True)
 
         request = ModelArchitectureValidationRequest(paths=[str(empty_dir)])
         result = validator.compute(request)
@@ -748,11 +757,14 @@ class HandlerPipeline:
         # Create multiple files with different violations
         for i in range(5):
             file = project_temp_dir / f"violation_{i}.py"
-            file.write_text(f"""
+            file.write_text(
+                f"""
 class Handler{i}:
     def __init__(self, bus):
         self._bus = bus  # ARCH-002 violation
-""")
+""",
+                encoding="utf-8",
+            )
 
         request = ModelArchitectureValidationRequest(
             paths=[str(project_temp_dir)],
@@ -784,11 +796,14 @@ class Handler{i}:
         file_count = 3
         for i in range(file_count):
             file = project_temp_dir / f"violation_all_{i}.py"
-            file.write_text(f"""
+            file.write_text(
+                f"""
 class Handler{i}:
     def __init__(self, bus):
         self._bus = bus  # ARCH-002 violation
-""")
+""",
+                encoding="utf-8",
+            )
 
         request = ModelArchitectureValidationRequest(
             paths=[str(project_temp_dir)],
@@ -806,20 +821,18 @@ class Handler{i}:
         validator: NodeArchitectureValidator,
         project_temp_dir: Path,
     ) -> None:
-        """Document that correlation_id is not currently supported in the request model.
+        """Verify correlation_id is not currently supported in the request model.
 
-        The ModelArchitectureValidationRequest does not currently accept correlation_id.
-        ModelArchitectureValidationResult (a different model for OMN-1138) does support
-        correlation_id, but ModelFileValidationResult (used by this validator) does not.
+        Current state: The ModelArchitectureValidationRequest does not accept
+        correlation_id. ModelArchitectureValidationResult (a different model for
+        OMN-1138) does support correlation_id, but ModelFileValidationResult
+        (used by this validator) does not.
 
-        TODO(OMN-XXXX): Add correlation_id support for distributed tracing:
-            1. Add correlation_id field to ModelArchitectureValidationRequest
-            2. Add correlation_id field to ModelFileValidationResult
-            3. Propagate correlation_id through compute() method
-            4. Update this test to verify propagation
+        This test documents the current behavior and will need updating when
+        correlation_id support is added for distributed tracing.
         """
         clean_file = project_temp_dir / "correlation_test.py"
-        clean_file.write_text("x = 1\n")
+        clean_file.write_text("x = 1\n", encoding="utf-8")
 
         request = ModelArchitectureValidationRequest(
             paths=[str(clean_file)],
@@ -912,13 +925,3 @@ class Broken:
             result = rule.check(str(empty_file))
             assert result.passed is True
             assert result.rule_id == rule.rule_id
-
-
-__all__ = [
-    "TestMultiRuleValidation",
-    "TestResultAggregation",
-    "TestRuleStatelessness",
-    "TestThreadSafety",
-    "TestFullPipelineIntegration",
-    "TestEdgeCases",
-]

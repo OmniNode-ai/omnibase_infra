@@ -352,11 +352,11 @@ class RuleNoDirectDispatch:
     def severity(self) -> EnumValidationSeverity:
         """Return severity level for violations of this rule.
 
-        Note: Contract specifies CRITICAL severity, but implementation uses
-        WARNING as a pragmatic choice. AST-based pattern detection may produce
-        false positives for legitimate patterns like test mocks or debugging code.
-        Using WARNING allows non-blocking validation while still flagging potential
-        issues for review.
+        Note: Contract specifies WARNING severity for ARCH-001. This is appropriate
+        because AST-based pattern detection may produce false positives for
+        legitimate patterns like test mocks or debugging code. Using WARNING
+        allows non-blocking validation while still flagging potential issues
+        for review.
         """
         return EnumValidationSeverity.WARNING
 
