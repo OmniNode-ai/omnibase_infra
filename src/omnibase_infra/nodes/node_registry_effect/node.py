@@ -72,6 +72,7 @@ from omnibase_infra.nodes.node_registry_effect.models import (
     ModelRegistryRequest,
     ModelRegistryResponse,
 )
+from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -507,9 +508,15 @@ class NodeRegistryEffect(NodeEffect):
             postgres_raw = results[1]
 
             if isinstance(consul_raw, BaseException):
+                # Cast to Exception for type checker - BaseException from gather
+                exc = (
+                    consul_raw
+                    if isinstance(consul_raw, Exception)
+                    else Exception(str(consul_raw))
+                )
                 consul_result = ModelBackendResult(
                     success=False,
-                    error=str(consul_raw),
+                    error=sanitize_error_message(exc),
                     error_code="CONSUL_EXCEPTION",
                     duration_ms=0.0,
                     backend_id="consul",
@@ -519,9 +526,15 @@ class NodeRegistryEffect(NodeEffect):
                 consul_result = consul_raw
 
             if isinstance(postgres_raw, BaseException):
+                # Cast to Exception for type checker - BaseException from gather
+                exc = (
+                    postgres_raw
+                    if isinstance(postgres_raw, Exception)
+                    else Exception(str(postgres_raw))
+                )
                 postgres_result = ModelBackendResult(
                     success=False,
-                    error=str(postgres_raw),
+                    error=sanitize_error_message(exc),
                     error_code="POSTGRES_EXCEPTION",
                     duration_ms=0.0,
                     backend_id="postgres",
@@ -540,7 +553,7 @@ class NodeRegistryEffect(NodeEffect):
                 except Exception as e:
                     consul_result = ModelBackendResult(
                         success=False,
-                        error=str(e),
+                        error=sanitize_error_message(e),
                         error_code="CONSUL_EXCEPTION",
                         duration_ms=0.0,
                         backend_id="consul",
@@ -555,7 +568,7 @@ class NodeRegistryEffect(NodeEffect):
                 except Exception as e:
                     postgres_result = ModelBackendResult(
                         success=False,
-                        error=str(e),
+                        error=sanitize_error_message(e),
                         error_code="POSTGRES_EXCEPTION",
                         duration_ms=0.0,
                         backend_id="postgres",

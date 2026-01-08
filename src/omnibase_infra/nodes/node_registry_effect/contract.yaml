@@ -343,6 +343,22 @@ error_handling:
       operation: "retry_partial_failure"
       description: "Invalid target_backend specified for retry (must be 'consul' or 'postgres')"
       retriable: false
+    # Orchestration-level error codes (used by node.py dispatcher)
+    - code: "HANDLER_NOT_EXECUTED"
+      backend: "any"
+      operation: "all"
+      description: "Handler was not executed (default state before dispatch)"
+      retriable: true
+    - code: "CONSUL_EXCEPTION"
+      backend: "consul"
+      operation: "all"
+      description: "Unhandled exception during Consul operation dispatch"
+      retriable: false
+    - code: "POSTGRES_EXCEPTION"
+      backend: "postgres"
+      operation: "all"
+      description: "Unhandled exception during PostgreSQL operation dispatch"
+      retriable: false
 # IO operations (EFFECT node specific)
 # Note: Input fields reference ModelRegistryRequest, output fields reference ModelRegistryResponse
 io_operations:

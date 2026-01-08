@@ -21,6 +21,23 @@ Architecture:
     - Error sanitization for security
     - Structured result construction
 
+Shared Patterns:
+    All handlers share a common error handling pattern:
+    - TimeoutError/InfraTimeoutError: Returns *_TIMEOUT_ERROR code
+    - InfraAuthenticationError: Returns *_AUTH_ERROR code (non-retriable)
+    - InfraConnectionError: Returns *_CONNECTION_ERROR code (retriable)
+    - Exception: Returns *_UNKNOWN_ERROR code
+
+    Each handler sanitizes errors via sanitize_backend_error() or
+    sanitize_error_message() to prevent credential exposure.
+
+    NOTE: The exception handling blocks are intentionally duplicated across
+    handlers rather than extracted to a shared helper. This keeps each handler
+    self-contained and allows for handler-specific error codes (e.g.,
+    CONSUL_REGISTRATION_ERROR vs POSTGRES_UPSERT_ERROR). The ~50 lines of
+    duplication per handler was evaluated and deemed acceptable for clarity
+    over creating a parameterized helper that would reduce readability.
+
 Related:
     - NodeRegistryEffect: Parent effect node coordinating handlers
     - OMN-1103: Refactoring ticket for handler extraction

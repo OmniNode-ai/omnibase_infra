@@ -2,9 +2,18 @@
 
 This document clarifies the distinction between `utils/` and `shared/utils/` directories in `omnibase_infra`.
 
+## Quick Reference
+
+| Directory | Status | Import Path |
+|-----------|--------|-------------|
+| `utils/` | **CANONICAL** | `from omnibase_infra.utils import ...` |
+| `shared/utils/` | **DEPRECATED** | ~~`from omnibase_infra.shared.utils import ...`~~ |
+
+**Migration**: Update all imports from `shared.utils` to `utils`. See [Migration Guide](#migration-guide) below.
+
 ## Overview
 
-The infrastructure package maintains two separate utility directories to enforce clear ownership boundaries and prevent circular dependencies:
+The infrastructure package has a single canonical utility location (`utils/`), with `shared/utils/` retained only for backwards compatibility during migration:
 
 ```
 src/omnibase_infra/
@@ -62,9 +71,69 @@ from omnibase_infra.utils import (
 
 **Status**: **DEPRECATED** - Do not add new utilities here.
 
-This directory exists for backwards compatibility during migration. All utilities have been moved to `utils/` with re-exports maintained for existing imports.
+> **Warning**: Importing from `shared/utils/` emits a `DeprecationWarning` at runtime:
+> ```
+> DeprecationWarning: Importing from 'omnibase_infra.shared.utils' is deprecated.
+> Use 'omnibase_infra.utils' instead.
+> This module will be removed in a future version.
+> ```
+
+This directory exists for backwards compatibility during migration. It contains only a re-export module that emits deprecation warnings and directs users to the canonical `utils/` location.
 
 **Migration**: Update imports from `omnibase_infra.shared.utils` to `omnibase_infra.utils`.
+
+## Migration Guide
+
+### Step-by-Step Migration
+
+1. **Search for deprecated imports**:
+   ```bash
+   grep -r "from omnibase_infra.shared.utils" --include="*.py" .
+   ```
+
+2. **Update each import** following the mapping:
+
+   | Old Import (Deprecated) | New Import (Canonical) |
+   |------------------------|------------------------|
+   | `from omnibase_infra.shared.utils import sanitize_backend_error` | `from omnibase_infra.utils import sanitize_backend_error` |
+   | `from omnibase_infra.shared.utils import sanitize_error_message` | `from omnibase_infra.utils import sanitize_error_message` |
+   | `from omnibase_infra.shared.utils import sanitize_error_string` | `from omnibase_infra.utils import sanitize_error_string` |
+
+3. **Verify no deprecation warnings** by running tests:
+   ```bash
+   poetry run pytest -W error::DeprecationWarning
+   ```
+
+### Before/After Examples
+
+**Before** (deprecated):
+```python
+# DO NOT USE - emits DeprecationWarning
+from omnibase_infra.shared.utils import (
+    sanitize_backend_error,
+    sanitize_error_message,
+)
+
+error_msg = sanitize_error_message(raw_error)
+```
+
+**After** (canonical):
+```python
+# CORRECT - canonical import path
+from omnibase_infra.utils import (
+    sanitize_backend_error,
+    sanitize_error_message,
+)
+
+error_msg = sanitize_error_message(raw_error)
+```
+
+### Removal Timeline
+
+The `shared/utils/` directory will be removed in a future major version. Plan migrations before:
+- **Current**: Deprecation warnings emitted
+- **Next Minor**: No changes planned
+- **Next Major**: `shared/utils/` directory removed, breaking change
 
 ## Node-Specific Utilities
 

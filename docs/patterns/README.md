@@ -11,6 +11,7 @@ This directory contains detailed implementation guides and best practices for ON
 - **[Retry, Backoff, and Compensation Strategy](./retry_backoff_compensation_strategy.md)** - Formal retry policies, backoff formulas, compensation for partial failures
 - **[Circuit Breaker Implementation](./circuit_breaker_implementation.md)** - Complete production-ready circuit breaker with state machine
 - **[Dispatcher Resilience](./dispatcher_resilience.md)** - Dispatcher-owned resilience pattern for message dispatch engine
+- **[Operation Routing](./operation_routing.md)** - Contract-driven operation dispatch with parallel execution and partial failure handling
 
 ### Observability
 - **[Correlation ID Tracking](./correlation_id_tracking.md)** - Request tracing, envelope pattern, distributed logging
@@ -39,14 +40,20 @@ This directory contains detailed implementation guides and best practices for ON
 | Auth failed | [Error Recovery](./error_recovery_patterns.md#credential-refresh-pattern) | `InfraAuthenticationError` |
 | Secret not found | [Error Handling](./error_handling_patterns.md#vault-secret-retrieval-error) | `SecretResolutionError` |
 | Partial failure | [Retry/Compensation](./retry_backoff_compensation_strategy.md#compensation-strategy-for-partial-failures) | Saga, Outbox Pattern |
+| Operation dispatch | [Operation Routing](./operation_routing.md) | `NodeRegistryEffect` |
+| Multi-backend registration | [Operation Routing](./operation_routing.md#parallel-execution-detail) | `ModelRegistryResponse` |
 
 ### Common Tasks
 
 | Task | Pattern Document | Section |
 |------|-----------------|---------|
+| Understand retry ownership | [Retry/Compensation](./retry_backoff_compensation_strategy.md#architectural-responsibility-orchestrator-owned-retries) | Orchestrator-Owned Retries |
 | Add retry logic | [Retry/Compensation](./retry_backoff_compensation_strategy.md) | Retry Policy, Backoff Strategy |
 | Configure per-effect retries | [Retry/Compensation](./retry_backoff_compensation_strategy.md#per-effect-type-configuration) | Effect-Specific Config |
 | Handle partial failures | [Retry/Compensation](./retry_backoff_compensation_strategy.md#compensation-strategy-for-partial-failures) | Compensation Patterns |
+| Route operations to handlers | [Operation Routing](./operation_routing.md#handler-selection-logic) | Handler Selection |
+| Configure parallel execution | [Operation Routing](./operation_routing.md#configuration-reference) | Contract Configuration |
+| Retry failed backends | [Operation Routing](./operation_routing.md#targeted-retry-flow) | Targeted Retry |
 | Prevent cascading failures | [Circuit Breaker](./circuit_breaker_implementation.md) | Complete Implementation |
 | Implement resilient dispatchers | [Dispatcher Resilience](./dispatcher_resilience.md) | Dispatcher Implementation Pattern |
 | Track requests across services | [Correlation ID](./correlation_id_tracking.md) | Correlation ID Flow |
@@ -110,6 +117,12 @@ Dispatcher Resilience
     ├── Pattern for dispatcher-owned resilience
     ├── Depends on: Circuit Breaker, Error Handling
     └── References: MixinAsyncCircuitBreaker, MessageDispatchEngine
+
+Operation Routing
+    ├── Contract-driven operation dispatch to handlers
+    ├── Depends on: Error Handling, Error Sanitization, Circuit Breaker
+    ├── Features: Parallel execution, partial failure handling, targeted retry
+    └── References: NodeRegistryEffect, ModelRegistryRequest/Response
 
 Correlation ID Tracking
     ├── Request tracing infrastructure
