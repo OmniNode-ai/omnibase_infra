@@ -25,8 +25,6 @@ from omnibase_infra.errors import (
 )
 
 if TYPE_CHECKING:
-    # NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
-    # recursion issues with recursive type aliases.
     from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
 
