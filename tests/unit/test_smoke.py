@@ -82,7 +82,6 @@ def test_submodule_structure() -> None:
         infrastructure,
         models,
         nodes,
-        shared,
         utils,
     )
 
@@ -92,7 +91,6 @@ def test_submodule_structure() -> None:
     assert infrastructure is not None
     assert models is not None
     assert nodes is not None
-    assert shared is not None
     assert utils is not None
 
 

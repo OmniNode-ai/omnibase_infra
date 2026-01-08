@@ -6,9 +6,7 @@ This module provides ModelNodeCapabilities for strongly-typed node capabilities
 in the ONEX 2-way registration pattern.
 """
 
-# NOTE: Using `object` instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases. Per ONEX ADR, `Any` is not permitted
-# in function signatures - use `object` for generic payload types.
+from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -82,9 +80,9 @@ class ModelNodeCapabilities(BaseModel):
     # Generic feature flag (used in tests)
     feature: bool = Field(default=False, description="Generic feature flag")
 
-    # Configuration (nested) - uses object for JSON-serializable values.
+    # Configuration (nested) - uses JsonType for JSON-serializable values.
     # Supports primitives (str, int, float, bool, None), lists, and nested dicts.
-    config: dict[str, object] = Field(
+    config: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Nested configuration (JSON-serializable values)",
     )

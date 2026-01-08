@@ -47,10 +47,6 @@ Correlation ID vs Envelope ID:
 
 from uuid import UUID, uuid4
 
-# NOTE: Using `object` instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases. Per ONEX ADR, `Any` is not permitted
-# in function signatures - use `object` for generic payload types.
-
 
 class MixinEnvelopeExtraction:
     """Mixin providing envelope extraction utilities for handlers.

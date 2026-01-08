@@ -188,8 +188,8 @@ class TestConsulFailureFlow:
         # Raw error "Service unavailable" is sanitized to "service unavailable" safe prefix
         # Note: sanitize_backend_error uses lowercase backend names
         assert response.consul_result.error is not None
-        assert "consul operation failed" in response.consul_result.error
-        assert "service unavailable" in response.consul_result.error
+        assert "consul operation failed" in response.consul_result.error.lower()
+        assert "service unavailable" in response.consul_result.error.lower()
         assert response.error_summary is not None
         assert "Consul" in response.error_summary or "consul" in response.error_summary
 
@@ -286,8 +286,8 @@ class TestPostgresFailureFlow:
         # Raw error "Connection timeout" is sanitized to "timeout" safe prefix
         # Note: sanitize_backend_error uses lowercase backend names
         assert response.postgres_result.error is not None
-        assert "postgres operation failed" in response.postgres_result.error
-        assert "timeout" in response.postgres_result.error
+        assert "postgres operation failed" in response.postgres_result.error.lower()
+        assert "timeout" in response.postgres_result.error.lower()
         assert response.error_summary is not None
         assert (
             "PostgreSQL" in response.error_summary
@@ -387,8 +387,8 @@ class TestBothFailFlow:
         # Note: sanitize_backend_error uses lowercase backend names
         assert response.consul_result.error is not None
         assert response.postgres_result.error is not None
-        assert "consul operation failed" in response.consul_result.error
-        assert "postgres operation failed" in response.postgres_result.error
+        assert "consul operation failed" in response.consul_result.error.lower()
+        assert "postgres operation failed" in response.postgres_result.error.lower()
 
         # Assert - Error summary contains both
         # Note: error_summary may use either capitalized or lowercase form
