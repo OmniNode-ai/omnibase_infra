@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Handler-specific mixins for ConsulHandler, VaultHandler, and other handlers.
+"""Handler-specific mixins for HandlerConsul, HandlerVault, and other handlers.
 
 These mixins encapsulate specific functionality domains to reduce class
 complexity and improve maintainability.

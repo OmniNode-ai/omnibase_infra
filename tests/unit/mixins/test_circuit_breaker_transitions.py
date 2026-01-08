@@ -63,10 +63,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumCircuitState, EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins.mixin_async_circuit_breaker import (
-    CircuitState,
     MixinAsyncCircuitBreaker,
 )
 
@@ -123,16 +122,16 @@ class CircuitBreakerTestService(MixinAsyncCircuitBreaker):
         async with self._circuit_breaker_lock:
             await self._reset_circuit_breaker()
 
-    def get_state(self) -> CircuitState:
+    def get_state(self) -> EnumCircuitState:
         """Get current circuit state for assertions.
 
         Returns:
-            CircuitState.OPEN if circuit is open, else CircuitState.CLOSED.
+            EnumCircuitState.OPEN if circuit is open, else EnumCircuitState.CLOSED.
             Note: HALF_OPEN is implicit and appears as CLOSED with reset failures.
         """
         if self._circuit_breaker_open:
-            return CircuitState.OPEN
-        return CircuitState.CLOSED
+            return EnumCircuitState.OPEN
+        return EnumCircuitState.CLOSED
 
     def get_failure_count(self) -> int:
         """Get current failure count for assertions."""
@@ -234,18 +233,18 @@ class TestTransitionClosedToOpen:
         - Circuit transitions to OPEN at exactly threshold failures
         """
         # Verify starting state
-        assert fast_service.get_state() == CircuitState.CLOSED
+        assert fast_service.get_state() == EnumCircuitState.CLOSED
         assert fast_service.get_failure_count() == 0
 
         # Record failures up to threshold - 1
         for i in range(fast_service.circuit_breaker_threshold - 1):
             await fast_service.record_failure()
-            assert fast_service.get_state() == CircuitState.CLOSED
+            assert fast_service.get_state() == EnumCircuitState.CLOSED
             assert fast_service.get_failure_count() == i + 1
 
         # One more failure should open the circuit
         await fast_service.record_failure()
-        assert fast_service.get_state() == CircuitState.OPEN
+        assert fast_service.get_state() == EnumCircuitState.OPEN
         assert (
             fast_service.get_failure_count() == fast_service.circuit_breaker_threshold
         )
@@ -257,12 +256,12 @@ class TestTransitionClosedToOpen:
 
         Edge case: threshold=1 means any single failure opens the circuit.
         """
-        assert single_failure_service.get_state() == CircuitState.CLOSED
+        assert single_failure_service.get_state() == EnumCircuitState.CLOSED
 
         # First failure should immediately open circuit
         await single_failure_service.record_failure()
 
-        assert single_failure_service.get_state() == CircuitState.OPEN
+        assert single_failure_service.get_state() == EnumCircuitState.OPEN
         assert single_failure_service.get_failure_count() == 1
 
     async def test_transition_sets_reset_timestamp(
@@ -273,7 +272,7 @@ class TestTransitionClosedToOpen:
         for _ in range(fast_service.circuit_breaker_threshold):
             await fast_service.record_failure()
 
-        assert fast_service.get_state() == CircuitState.OPEN
+        assert fast_service.get_state() == EnumCircuitState.OPEN
 
         # Verify reset timestamp is set to future time
         open_until = fast_service.get_open_until()
@@ -292,7 +291,7 @@ class TestTransitionClosedToOpen:
         for _ in range(fast_service.circuit_breaker_threshold):
             await fast_service.record_failure()
 
-        assert fast_service.get_state() == CircuitState.OPEN
+        assert fast_service.get_state() == EnumCircuitState.OPEN
 
         # Verify check_circuit raises InfraUnavailableError
         with pytest.raises(InfraUnavailableError) as exc_info:
@@ -332,7 +331,7 @@ class TestTransitionOpenToHalfOpen:
         for _ in range(fast_service.circuit_breaker_threshold):
             await fast_service.record_failure()
 
-        assert fast_service.get_state() == CircuitState.OPEN
+        assert fast_service.get_state() == EnumCircuitState.OPEN
 
         # Wait for reset timeout
         await asyncio.sleep(fast_service.circuit_breaker_reset_timeout + 0.05)
@@ -341,7 +340,7 @@ class TestTransitionOpenToHalfOpen:
         await fast_service.check_circuit()
 
         # Verify state: circuit is no longer open, failures reset
-        assert fast_service.get_state() == CircuitState.CLOSED  # Implicit HALF_OPEN
+        assert fast_service.get_state() == EnumCircuitState.CLOSED  # Implicit HALF_OPEN
         assert fast_service.get_failure_count() == 0
 
     async def test_transition_does_not_occur_before_timeout(
@@ -352,14 +351,14 @@ class TestTransitionOpenToHalfOpen:
         for _ in range(fast_service.circuit_breaker_threshold):
             await fast_service.record_failure()
 
-        assert fast_service.get_state() == CircuitState.OPEN
+        assert fast_service.get_state() == EnumCircuitState.OPEN
 
         # Immediately try to check (before timeout)
         with pytest.raises(InfraUnavailableError):
             await fast_service.check_circuit()
 
         # Circuit should still be open
-        assert fast_service.get_state() == CircuitState.OPEN
+        assert fast_service.get_state() == EnumCircuitState.OPEN
 
     async def test_transition_with_zero_timeout(self) -> None:
         """Test circuit with zero timeout transitions immediately.
@@ -371,13 +370,13 @@ class TestTransitionOpenToHalfOpen:
         # Open the circuit
         await service.record_failure()
         await service.record_failure()
-        assert service.get_state() == CircuitState.OPEN
+        assert service.get_state() == EnumCircuitState.OPEN
 
         # Immediate check should transition (timeout already elapsed)
         await service.check_circuit()
 
         # Should be in HALF_OPEN (implicit CLOSED with reset failures)
-        assert service.get_state() == CircuitState.CLOSED
+        assert service.get_state() == EnumCircuitState.CLOSED
         assert service.get_failure_count() == 0
 
     async def test_transition_allows_test_request(
@@ -395,7 +394,7 @@ class TestTransitionOpenToHalfOpen:
         result = await fast_service.execute_with_circuit_breaker(should_fail=False)
 
         assert result == "success"
-        assert fast_service.get_state() == CircuitState.CLOSED
+        assert fast_service.get_state() == EnumCircuitState.CLOSED
 
 
 # =============================================================================
@@ -423,7 +422,7 @@ class TestTransitionHalfOpenToClosed:
         for _ in range(fast_service.circuit_breaker_threshold):
             await fast_service.record_failure()
 
-        assert fast_service.get_state() == CircuitState.OPEN
+        assert fast_service.get_state() == EnumCircuitState.OPEN
 
         # Wait for HALF_OPEN
         await asyncio.sleep(fast_service.circuit_breaker_reset_timeout + 0.05)
@@ -433,7 +432,7 @@ class TestTransitionHalfOpenToClosed:
 
         # Verify transition to CLOSED
         assert result == "success"
-        assert fast_service.get_state() == CircuitState.CLOSED
+        assert fast_service.get_state() == EnumCircuitState.CLOSED
         assert fast_service.get_failure_count() == 0
 
     async def test_transition_allows_normal_operations(
@@ -447,14 +446,14 @@ class TestTransitionHalfOpenToClosed:
         await asyncio.sleep(fast_service.circuit_breaker_reset_timeout + 0.05)
         await fast_service.execute_with_circuit_breaker(should_fail=False)
 
-        assert fast_service.get_state() == CircuitState.CLOSED
+        assert fast_service.get_state() == EnumCircuitState.CLOSED
 
         # Verify multiple subsequent operations work
         for _ in range(5):
             result = await fast_service.execute_with_circuit_breaker(should_fail=False)
             assert result == "success"
 
-        assert fast_service.get_state() == CircuitState.CLOSED
+        assert fast_service.get_state() == EnumCircuitState.CLOSED
 
     async def test_transition_resets_failure_count(
         self, fast_service: CircuitBreakerTestService
@@ -506,7 +505,7 @@ class TestTransitionHalfOpenToOpen:
         """
         # Open the circuit
         await single_failure_service.record_failure()
-        assert single_failure_service.get_state() == CircuitState.OPEN
+        assert single_failure_service.get_state() == EnumCircuitState.OPEN
 
         # Wait for HALF_OPEN
         await asyncio.sleep(single_failure_service.circuit_breaker_reset_timeout + 0.05)
@@ -516,7 +515,7 @@ class TestTransitionHalfOpenToOpen:
             await single_failure_service.execute_with_circuit_breaker(should_fail=True)
 
         # Circuit should be OPEN again
-        assert single_failure_service.get_state() == CircuitState.OPEN
+        assert single_failure_service.get_state() == EnumCircuitState.OPEN
 
     async def test_transition_requires_threshold_failures(
         self, fast_service: CircuitBreakerTestService
@@ -542,12 +541,14 @@ class TestTransitionHalfOpenToOpen:
         # Record failures below threshold - should stay in HALF_OPEN (implicit CLOSED)
         for i in range(fast_service.circuit_breaker_threshold - 1):
             await fast_service.record_failure()
-            assert fast_service.get_state() == CircuitState.CLOSED  # Still HALF_OPEN
+            assert (
+                fast_service.get_state() == EnumCircuitState.CLOSED
+            )  # Still HALF_OPEN
             assert fast_service.get_failure_count() == i + 1
 
         # One more failure should reopen
         await fast_service.record_failure()
-        assert fast_service.get_state() == CircuitState.OPEN
+        assert fast_service.get_state() == EnumCircuitState.OPEN
 
     async def test_transition_blocks_subsequent_requests(
         self, single_failure_service: CircuitBreakerTestService
@@ -593,7 +594,7 @@ class TestClosedStateStability:
         # Success should reset the counter
         await fast_service.reset_circuit()
 
-        assert fast_service.get_state() == CircuitState.CLOSED
+        assert fast_service.get_state() == EnumCircuitState.CLOSED
         assert fast_service.get_failure_count() == 0
 
     async def test_intermittent_failures_dont_accumulate(
@@ -620,7 +621,7 @@ class TestClosedStateStability:
                 await fast_service.reset_circuit()
 
         # Circuit should still be closed
-        assert fast_service.get_state() == CircuitState.CLOSED
+        assert fast_service.get_state() == EnumCircuitState.CLOSED
         assert fast_service.get_failure_count() == 0
 
     async def test_reset_is_idempotent(
@@ -636,7 +637,7 @@ class TestClosedStateStability:
         await fast_service.reset_circuit()
         await fast_service.reset_circuit()
 
-        assert fast_service.get_state() == CircuitState.CLOSED
+        assert fast_service.get_state() == EnumCircuitState.CLOSED
         assert fast_service.get_failure_count() == 0
 
 
@@ -658,7 +659,7 @@ class TestOpenStateStability:
         for _ in range(fast_service.circuit_breaker_threshold):
             await fast_service.record_failure()
 
-        assert fast_service.get_state() == CircuitState.OPEN
+        assert fast_service.get_state() == EnumCircuitState.OPEN
 
         # All checks should be blocked
         for _ in range(5):
@@ -666,7 +667,7 @@ class TestOpenStateStability:
                 await fast_service.check_circuit()
 
         # Circuit should still be open
-        assert fast_service.get_state() == CircuitState.OPEN
+        assert fast_service.get_state() == EnumCircuitState.OPEN
 
     async def test_open_circuit_includes_retry_after(
         self, fast_service: CircuitBreakerTestService
@@ -704,7 +705,7 @@ class TestOpenStateStability:
         await fast_service.record_failure()
 
         # The open_until timestamp might update, but circuit stays open
-        assert fast_service.get_state() == CircuitState.OPEN
+        assert fast_service.get_state() == EnumCircuitState.OPEN
 
 
 # =============================================================================
@@ -722,13 +723,13 @@ class TestCompleteCycles:
     ) -> None:
         """Test complete CLOSED → OPEN → HALF_OPEN → CLOSED cycle."""
         # Phase 1: CLOSED
-        assert fast_service.get_state() == CircuitState.CLOSED
+        assert fast_service.get_state() == EnumCircuitState.CLOSED
 
         # Phase 2: CLOSED → OPEN
         for _ in range(fast_service.circuit_breaker_threshold):
             await fast_service.record_failure()
 
-        assert fast_service.get_state() == CircuitState.OPEN
+        assert fast_service.get_state() == EnumCircuitState.OPEN
 
         # Phase 3: OPEN → HALF_OPEN
         await asyncio.sleep(fast_service.circuit_breaker_reset_timeout + 0.05)
@@ -737,7 +738,7 @@ class TestCompleteCycles:
         result = await fast_service.execute_with_circuit_breaker(should_fail=False)
 
         assert result == "success"
-        assert fast_service.get_state() == CircuitState.CLOSED
+        assert fast_service.get_state() == EnumCircuitState.CLOSED
         assert fast_service.get_failure_count() == 0
 
     async def test_failed_recovery_cycle(
@@ -746,7 +747,7 @@ class TestCompleteCycles:
         """Test CLOSED → OPEN → HALF_OPEN → OPEN cycle (failed recovery)."""
         # Phase 1: CLOSED → OPEN
         await single_failure_service.record_failure()
-        assert single_failure_service.get_state() == CircuitState.OPEN
+        assert single_failure_service.get_state() == EnumCircuitState.OPEN
 
         # Phase 2: Wait for HALF_OPEN
         await asyncio.sleep(single_failure_service.circuit_breaker_reset_timeout + 0.05)
@@ -755,7 +756,7 @@ class TestCompleteCycles:
         with pytest.raises(RuntimeError):
             await single_failure_service.execute_with_circuit_breaker(should_fail=True)
 
-        assert single_failure_service.get_state() == CircuitState.OPEN
+        assert single_failure_service.get_state() == EnumCircuitState.OPEN
 
     async def test_multiple_recovery_cycles(
         self, fast_service: CircuitBreakerTestService
@@ -766,7 +767,7 @@ class TestCompleteCycles:
             for _ in range(fast_service.circuit_breaker_threshold):
                 await fast_service.record_failure()
 
-            assert fast_service.get_state() == CircuitState.OPEN, (
+            assert fast_service.get_state() == EnumCircuitState.OPEN, (
                 f"Cycle {cycle}: expected OPEN"
             )
 
@@ -776,7 +777,7 @@ class TestCompleteCycles:
             # Recover
             result = await fast_service.execute_with_circuit_breaker(should_fail=False)
             assert result == "success", f"Cycle {cycle}: recovery failed"
-            assert fast_service.get_state() == CircuitState.CLOSED, (
+            assert fast_service.get_state() == EnumCircuitState.CLOSED, (
                 f"Cycle {cycle}: expected CLOSED"
             )
 
@@ -798,7 +799,7 @@ class TestTimingPrecision:
 
         # Open circuit
         await service.record_failure()
-        assert service.get_state() == CircuitState.OPEN
+        assert service.get_state() == EnumCircuitState.OPEN
 
         # Check just before timeout - should still be blocked
         await asyncio.sleep(reset_timeout * 0.5)
@@ -810,7 +811,7 @@ class TestTimingPrecision:
 
         # Should now allow (HALF_OPEN)
         await service.check_circuit()
-        assert service.get_state() == CircuitState.CLOSED
+        assert service.get_state() == EnumCircuitState.CLOSED
 
     async def test_very_long_timeout_value(self) -> None:
         """Test circuit breaker with very long reset timeout."""

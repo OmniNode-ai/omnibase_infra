@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Consul Key-Value operations mixin.
 
-This mixin provides key-value store operations for ConsulHandler,
+This mixin provides key-value store operations for HandlerConsul,
 extracted to reduce class complexity and improve maintainability.
 
 Operations:
@@ -15,8 +15,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 from uuid import UUID
-
-from omnibase_core.types import JsonType
 
 T = TypeVar("T")
 
@@ -46,7 +44,7 @@ if TYPE_CHECKING:
 class ProtocolConsulKVDependencies(Protocol):
     """Protocol defining required dependencies for KV operations.
 
-    ConsulHandler must provide these attributes/methods for the mixin to work.
+    HandlerConsul must provide these attributes/methods for the mixin to work.
     """
 
     _client: consul_lib.Consul | None
@@ -74,7 +72,7 @@ class ProtocolConsulKVDependencies(Protocol):
 class MixinConsulKV:
     """Mixin providing Consul Key-Value store operations.
 
-    This mixin extracts KV operations from ConsulHandler to reduce
+    This mixin extracts KV operations from HandlerConsul to reduce
     class complexity while maintaining full functionality.
 
     Required Dependencies (from host class):
@@ -108,7 +106,7 @@ class MixinConsulKV:
 
     async def _kv_get(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, object],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
@@ -144,7 +142,7 @@ class MixinConsulKV:
             raise RuntimeError("Client not initialized")
 
         def get_func() -> tuple[
-            int, list[dict[str, JsonType]] | dict[str, JsonType] | None
+            int, list[dict[str, object]] | dict[str, object] | None
         ]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
@@ -152,7 +150,7 @@ class MixinConsulKV:
             return index, data
 
         # Type alias for KV get result
-        KVGetResult = tuple[int, list[dict[str, JsonType]] | dict[str, JsonType] | None]
+        KVGetResult = tuple[int, list[dict[str, object]] | dict[str, object] | None]
         result = await self._execute_with_retry(
             "consul.kv_get",
             get_func,
@@ -223,7 +221,7 @@ class MixinConsulKV:
 
     async def _kv_put(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, object],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:

@@ -1,0 +1,682 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeRegistryEffect
+#
+# This contract defines the interface for the Registry Effect node,
+# which handles dual-backend node registration against Consul and PostgreSQL.
+# The node uses declarative operation routing to dispatch operations to
+# backend-specific handlers.
+# Contract identifiers
+name: "node_registry_effect"
+contract_name: "node_registry_effect"
+node_name: "node_registry_effect"
+# Version (semantic versioning)
+version:
+  major: 1
+  minor: 1
+  patch: 0
+contract_version:
+  major: 1
+  minor: 1
+  patch: 0
+node_version:
+  major: 1
+  minor: 1
+  patch: 0
+# Node type
+node_type: "EFFECT"
+# Description
+description: >
+  Effect node for dual-backend node registration. Executes registration operations against both Consul (service discovery) and PostgreSQL (registration record persistence), with support for partial failure handling and targeted retries. Uses declarative operation routing to dispatch to backend-specific handlers.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelRegistryRequest"
+  module: "omnibase_infra.nodes.node_registry_effect.models"
+  description: "Input model containing operation type and registration parameters."
+output_model:
+  name: "ModelRegistryResponse"
+  module: "omnibase_infra.nodes.node_registry_effect.models"
+  description: "Output model containing backend status and registration outcome."
+# =============================================================================
+# HANDLER ROUTING (Declarative Handler Dispatch)
+# =============================================================================
+# This section defines how operations are routed to backend-specific handlers.
+# The routing strategy determines handler selection based on payload type
+# (per ONEX handler routing standards).
+#
+# Design Rationale:
+#   - Parallel execution for independent backends (Consul + Postgres)
+#   - Partial failure handling allows one backend to succeed even if other fails
+#   - Each handler is responsible for a single backend operation
+#
+# Execution Flow:
+#   1. Receive ModelRegistryRequest with operation type
+#   2. Route to all matching handlers based on payload type
+#   3. Execute handlers in parallel (for dual-backend operations)
+#   4. Aggregate results with partial failure handling
+#   5. Return ModelRegistryResponse with combined status
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │                    HANDLER ROUTING ARCHITECTURE                         │
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │                                                                         │
+# │  ┌────────────────────┐                                                 │
+# │  │ ModelRegistryRequest│                                                │
+# │  │   operation: "X"   │                                                 │
+# │  └─────────┬──────────┘                                                 │
+# │            │                                                            │
+# │            ▼                                                            │
+# │  ┌─────────────────────┐                                                │
+# │  │  Handler Router     │  routing_strategy: "payload_type_match"       │
+# │  │  (Contract-Driven)  │  Matches payload type to handlers              │
+# │  └─────────┬───────────┘                                                │
+# │            │                                                            │
+# │            │ operation == "register_node"                               │
+# │            │                                                            │
+# │     ┌──────┴──────┐     execution_mode: "parallel"                      │
+# │     │             │     (asyncio.gather)                                │
+# │     ▼             ▼                                                     │
+# │ ┌────────────┐ ┌────────────┐                                           │
+# │ │  Handler   │ │  Handler   │                                           │
+# │ │  Consul    │ │  Postgres  │                                           │
+# │ │  Register  │ │  Upsert    │                                           │
+# │ └─────┬──────┘ └─────┬──────┘                                           │
+# │       │              │                                                  │
+# │       ▼              ▼                                                  │
+# │ ┌──────────────────────────┐                                            │
+# │ │   Result Aggregator      │  aggregation_strategy: "all_or_partial"   │
+# │ │   partial_failure: true  │                                            │
+# │ └────────────┬─────────────┘                                            │
+# │              │                                                          │
+# │              ▼                                                          │
+# │  ┌─────────────────────────┐                                            │
+# │  │  ModelRegistryResponse  │  status: "success"/"partial"/"failed"     │
+# │  │  consul_result: Result  │  consul_result.success: bool               │
+# │  │  postgres_result: Result│  postgres_result.success: bool             │
+# │  └─────────────────────────┘                                            │
+# │                                                                         │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
+# Parallel Execution Behavior:
+#   When execution_mode is "parallel", handlers for the same operation execute
+#   concurrently using asyncio.gather(). For dual-backend operations like
+#   "register_node", both HandlerConsulRegister and HandlerPostgresUpsert run
+#   simultaneously, reducing total latency to max(consul_time, postgres_time)
+#   rather than consul_time + postgres_time.
+#
+#   Partial failure (partial_failure_handling: true) means if Consul succeeds
+#   but PostgreSQL fails (or vice versa), the operation returns status="partial"
+#   with the successful backend's result.success=true and the failed backend's
+#   result.success=false, allowing callers to retry the failed backend
+#   via the "retry_partial_failure" operation.
+#
+# Handler Responsibility:
+#   Each handler manages its own retry logic using the retry_policy defined
+#   in error_handling. The orchestration layer dispatches once per handler
+#   and delegates retry behavior to the handlers themselves.
+# =============================================================================
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    # Register Node - Consul Backend
+    # Registers service with Consul for service discovery.
+    # Uses health check endpoint for automated liveness monitoring.
+    - operation: "register_node"
+      handler:
+        name: "HandlerConsulRegister"
+        module: "omnibase_infra.nodes.node_registry_effect.handlers.handler_consul_register"
+      backend: "consul"
+      description: "Register node with Consul service discovery"
+      output_fields:
+        - consul_registered
+        - consul_service_id
+    # Register Node - PostgreSQL Backend
+    # Persists registration record to PostgreSQL for durability.
+    # Uses upsert semantics for idempotent re-registration.
+    - operation: "register_node"
+      handler:
+        name: "HandlerPostgresUpsert"
+        module: "omnibase_infra.nodes.node_registry_effect.handlers.handler_postgres_upsert"
+      backend: "postgres"
+      description: "Persist node registration to PostgreSQL"
+      output_fields:
+        - postgres_registered
+        - registration_id
+    # Deregister Node - Consul Backend
+    # Removes service from Consul to stop routing traffic.
+    - operation: "deregister_node"
+      handler:
+        name: "HandlerConsulDeregister"
+        module: "omnibase_infra.nodes.node_registry_effect.handlers.handler_consul_deregister"
+      backend: "consul"
+      description: "Deregister node from Consul service discovery"
+      output_fields:
+        - consul_deregistered
+    # Deregister Node - PostgreSQL Backend
+    # Marks registration record as inactive in PostgreSQL.
+    - operation: "deregister_node"
+      handler:
+        name: "HandlerPostgresDeactivate"
+        module: "omnibase_infra.nodes.node_registry_effect.handlers.handler_postgres_deactivate"
+      backend: "postgres"
+      description: "Mark node registration as inactive in PostgreSQL"
+      output_fields:
+        - postgres_deregistered
+    # Retry Partial Failure - Targeted Backend
+    # Retries a specific backend after partial failure.
+    # Uses idempotency key to ensure safe retry semantics.
+    - operation: "retry_partial_failure"
+      handler:
+        name: "HandlerPartialRetry"
+        module: "omnibase_infra.nodes.node_registry_effect.handlers.handler_partial_retry"
+      backend: "dynamic"
+      description: "Retry registration for specific backend after partial failure"
+      dynamic_backend_field: "target_backend"
+      output_fields:
+        - success
+        - backend_status
+  # Execution configuration
+  execution_mode: "parallel"
+  partial_failure_handling: true
+  aggregation_strategy: "all_or_partial"
+# =============================================================================
+# ERROR HANDLING (Circuit Breaker + Retry + Sanitization)
+# =============================================================================
+# Error handling configuration following ONEX infrastructure patterns.
+# Uses circuit breakers for backend protection and retry policies for
+# transient failure recovery.
+#
+# Error Flow:
+#   1. Operation fails -> Check if error is retriable
+#   2. Retry with exponential backoff if retriable
+#   3. After max retries, check circuit breaker state
+#   4. Open circuit if failure threshold exceeded
+#   5. Sanitize error before logging/returning
+# =============================================================================
+error_handling:
+  # Circuit breaker configuration
+  # Prevents cascading failures by stopping requests to failing backends.
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+    half_open_max_requests: 3
+    per_backend: true
+    backends:
+      - name: "consul"
+        failure_threshold: 5
+        reset_timeout_ms: 60000
+      - name: "postgres"
+        failure_threshold: 5
+        reset_timeout_ms: 60000
+  # Retry policy with exponential backoff
+  # Handles transient infrastructure failures.
+  #
+  # ==========================================================================
+  # IMPORTANT: Effect Layer vs Handler Layer Retry Behavior
+  # ==========================================================================
+  #
+  # Effect Layer (NodeRegistryEffect):
+  #   - Dispatches to handlers EXACTLY ONCE per operation
+  #   - Does NOT implement retry loops
+  #   - Returns immediately after handler execution
+  #   - Effective retry count at this layer: ZERO (0)
+  #
+  # Handler Layer (HandlerConsulRegister, HandlerPostgresUpsert, etc.):
+  #   - OWNS retry logic using this retry_policy configuration
+  #   - Implements exponential backoff for retriable errors
+  #   - Returns final ModelBackendResult after all retries exhausted
+  #   - Effective retry count: 0 to max_retries
+  #
+  # Caller Layer (Orchestrator or External):
+  #   - Can call "retry_partial_failure" operation after partial failures
+  #   - This is explicit retry, not automatic
+  #   - Retries only the failed backend, not both
+  #
+  # Why this separation?
+  #   - Clear separation of concerns (effect routes, handlers retry)
+  #   - Per-backend retry isolation (Consul retries don't affect Postgres)
+  #   - Consistent retry behavior across all handler implementations
+  #   - Callers have full control over partial failure retry strategy
+  #
+  # ==========================================================================
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+      - "InfraUnavailableError"
+  # Error sanitization
+  # Removes sensitive information from error messages before logging.
+  error_sanitization:
+    enabled: true
+    utility: "omnibase_infra.utils.util_error_sanitization"
+    sanitize_patterns:
+      - "password"
+      - "secret"
+      - "token"
+      - "api_key"
+      - "connection_string"
+  # Error type definitions
+  error_types:
+    - name: "InfraConnectionError"
+      description: "Failed to connect to backend service"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "InfraTimeoutError"
+      description: "Backend operation timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "InfraAuthenticationError"
+      description: "Authentication failed with backend"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "InfraUnavailableError"
+      description: "Backend service is unavailable (circuit open)"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+  # Error codes used in ModelBackendResult.error_code field
+  # These codes provide programmatic error categorization for handlers.
+  # Each code maps to a specific operation failure scenario.
+  #
+  # Error Code Classification:
+  #   - *_CONNECTION_ERROR: Retriable - network/connection issues
+  #   - *_TIMEOUT_ERROR: Retriable - operation exceeded timeout
+  #   - *_AUTH_ERROR: Non-retriable - authentication/authorization failed
+  #   - *_UNKNOWN_ERROR: Unknown - unclassified exceptions
+  #   - *_REGISTRATION_ERROR, *_DEREGISTRATION_ERROR, etc.: Operation-specific failures
+  error_codes:
+    # Consul backend error codes
+    - code: "CONSUL_REGISTRATION_ERROR"
+      backend: "consul"
+      operation: "register_node"
+      description: "Consul service registration failed (non-connection error)"
+      retriable: false
+    - code: "CONSUL_DEREGISTRATION_ERROR"
+      backend: "consul"
+      operation: "deregister_node"
+      description: "Consul service deregistration failed (non-connection error)"
+      retriable: false
+    - code: "CONSUL_CONNECTION_ERROR"
+      backend: "consul"
+      operation: "all"
+      description: "Connection to Consul server failed"
+      retriable: true
+    - code: "CONSUL_TIMEOUT_ERROR"
+      backend: "consul"
+      operation: "all"
+      description: "Consul operation exceeded timeout"
+      retriable: true
+    - code: "CONSUL_AUTH_ERROR"
+      backend: "consul"
+      operation: "all"
+      description: "Authentication with Consul server failed"
+      retriable: false
+    - code: "CONSUL_UNKNOWN_ERROR"
+      backend: "consul"
+      operation: "all"
+      description: "Unknown error during Consul operation"
+      retriable: false
+    # PostgreSQL backend error codes
+    - code: "POSTGRES_UPSERT_ERROR"
+      backend: "postgres"
+      operation: "register_node"
+      description: "PostgreSQL upsert operation failed (non-connection error)"
+      retriable: false
+    - code: "POSTGRES_DEACTIVATION_ERROR"
+      backend: "postgres"
+      operation: "deregister_node"
+      description: "PostgreSQL deactivation operation failed (non-connection error)"
+      retriable: false
+    - code: "POSTGRES_CONNECTION_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Connection to PostgreSQL server failed"
+      retriable: true
+    - code: "POSTGRES_TIMEOUT_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "PostgreSQL operation exceeded timeout"
+      retriable: true
+    - code: "POSTGRES_AUTH_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Authentication with PostgreSQL server failed"
+      retriable: false
+    - code: "POSTGRES_UNKNOWN_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Unknown error during PostgreSQL operation"
+      retriable: false
+    # Retry operation error codes
+    - code: "INVALID_TARGET_BACKEND"
+      backend: "dynamic"
+      operation: "retry_partial_failure"
+      description: "Invalid target_backend specified for retry (must be 'consul' or 'postgres')"
+      retriable: false
+    # Orchestration-level error codes (used by node.py dispatcher)
+    - code: "HANDLER_NOT_EXECUTED"
+      backend: "any"
+      operation: "all"
+      description: "Handler was not executed (default state before dispatch)"
+      retriable: true
+    - code: "CONSUL_EXCEPTION"
+      backend: "consul"
+      operation: "all"
+      description: "Unhandled exception during Consul operation dispatch"
+      retriable: false
+    - code: "POSTGRES_EXCEPTION"
+      backend: "postgres"
+      operation: "all"
+      description: "Unhandled exception during PostgreSQL operation dispatch"
+      retriable: false
+# IO operations (EFFECT node specific)
+# Note: Input fields reference ModelRegistryRequest, output fields reference ModelRegistryResponse
+io_operations:
+  - operation: "register_node"
+    description: "Register a node with both Consul and PostgreSQL backends"
+    input_fields:
+      - node_id
+      - node_type
+      - node_version
+      - correlation_id
+      - service_name
+      - endpoints
+      - tags
+      - metadata
+      - health_check_config
+      - timestamp
+    output_fields:
+      - status
+      - node_id
+      - correlation_id
+      - consul_result
+      - postgres_result
+      - processing_time_ms
+      - timestamp
+      - error_summary
+  - operation: "deregister_node"
+    description: "Deregister a node from both backends"
+    input_fields:
+      - node_id
+      - node_type
+      - node_version
+      - correlation_id
+      - timestamp
+    output_fields:
+      - status
+      - node_id
+      - correlation_id
+      - consul_result
+      - postgres_result
+      - processing_time_ms
+      - timestamp
+      - error_summary
+  - operation: "retry_partial_failure"
+    description: "Retry registration for a specific backend after partial failure"
+    input_fields:
+      - node_id
+      - target_backend
+      - idempotency_key
+    output_fields:
+      - status
+      - node_id
+      - correlation_id
+      - consul_result
+      - postgres_result
+      - processing_time_ms
+      - timestamp
+      - error_summary
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "protocol_consul_client"
+    type: "protocol"
+    class_name: "ProtocolConsulClient"
+    module: "omnibase_infra.nodes.effects.protocol_consul_client"
+    description: "Consul service discovery operations"
+  - name: "protocol_postgres_adapter"
+    type: "protocol"
+    class_name: "ProtocolPostgresAdapter"
+    module: "omnibase_infra.nodes.effects.protocol_postgres_adapter"
+    description: "PostgreSQL registration persistence"
+  - name: "protocol_effect_idempotency_store"
+    type: "protocol"
+    class_name: "ProtocolEffectIdempotencyStore"
+    module: "omnibase_infra.nodes.effects.protocol_effect_idempotency_store"
+    description: "Idempotency tracking for retry safety"
+  - name: "protocol_circuit_breaker_aware"
+    type: "protocol"
+    class_name: "ProtocolCircuitBreakerAware"
+    module: "omnibase_infra.mixins.protocol_circuit_breaker_aware"
+    description: "Circuit breaker awareness for backend protection"
+# Capabilities provided by this node
+capabilities:
+  - name: "dual_backend_registration"
+    description: "Register nodes with both Consul and PostgreSQL simultaneously"
+  - name: "partial_failure_handling"
+    description: "Handle and recover from partial registration failures"
+  - name: "targeted_retry"
+    description: "Retry specific backend operations independently"
+  - name: "idempotent_operations"
+    description: "Ensure operations are idempotent via idempotency store"
+  - name: "circuit_breaker_protection"
+    description: "Protect backends with circuit breaker pattern"
+  - name: "parallel_execution"
+    description: "Execute backend operations in parallel for reduced latency"
+# Model definitions
+# These definitions must exactly match the Pydantic models.
+#
+# Module Resolution:
+#   The input_model and output_model reference the node's local models package:
+#     - omnibase_infra.nodes.node_registry_effect.models
+#   This package re-exports shared effect models from:
+#     - omnibase_infra.nodes.effects.models.model_registry_request
+#     - omnibase_infra.nodes.effects.models.model_registry_response
+#     - omnibase_infra.nodes.effects.models.model_backend_result
+#
+# Sync Status:
+#   Last verified: 2026-01-08
+#   All definitions below match the Pydantic model fields, types, and defaults.
+definitions:
+  ModelRegistryRequest:
+    type: object
+    description: "Request model for dual-backend registration operations"
+    frozen: true
+    extra: "forbid"
+    properties:
+      node_id:
+        type: uuid
+        description: "Unique identifier for the node being registered"
+      node_type:
+        type: enum
+        enum_class: "EnumNodeKind"
+        module: "omnibase_core.enums.enum_node_kind"
+        description: "Type of ONEX node (effect, compute, reducer, orchestrator)"
+        enum:
+          - "effect"
+          - "compute"
+          - "reducer"
+          - "orchestrator"
+      node_version:
+        type: string
+        description: "Semantic version of the node"
+      correlation_id:
+        type: uuid
+        description: "Correlation ID for distributed tracing"
+        default_factory: "uuid4"
+      service_name:
+        type: string
+        nullable: true
+        default: null
+        description: "Name for service discovery registration"
+      endpoints:
+        type: object
+        key_type: string
+        value_type: string
+        description: "Dict of endpoint type to URL (e.g., {'health': 'http://...'})"
+        default_factory: "dict"
+      tags:
+        type: array
+        items:
+          type: string
+        description: "List of tags for service discovery"
+        default_factory: "list"
+      metadata:
+        type: object
+        key_type: string
+        value_type: string
+        description: "Additional metadata for the registration record"
+        default_factory: "dict"
+      health_check_config:
+        type: object
+        key_type: string
+        value_type: string
+        nullable: true
+        default: null
+        description: "Optional health check configuration for Consul"
+      timestamp:
+        type: datetime
+        description: "When this request was created (must be timezone-aware, explicitly provided)"
+        validation:
+          - name: "validate_timestamp_timezone_aware"
+            description: "Validates that timestamp has timezone info"
+    required:
+      - node_id
+      - node_type
+      - node_version
+      - timestamp
+  ModelBackendResult:
+    type: object
+    description: "Result of an individual backend operation (Consul or PostgreSQL)"
+    frozen: true
+    extra: "forbid"
+    # ==========================================================================
+    # Design Note: No 'retries' Field at Effect Layer
+    # ==========================================================================
+    # ModelBackendResult intentionally does NOT include a 'retries' field.
+    #
+    # Rationale:
+    #   1. Effect layer dispatches to handlers ONCE per operation
+    #   2. Handlers own their retry logic internally using retry_policy
+    #   3. Retry count is handler-internal state, not exposed in results
+    #   4. Callers use error_code to determine if retry is appropriate
+    #
+    # If you need to track retries for observability:
+    #   - Handlers should emit metrics/logs during retry loops
+    #   - Use correlation_id to correlate retry attempts
+    #   - Orchestrator layer can track retry_partial_failure calls
+    #
+    # See: error_handling.retry_policy for handler retry configuration
+    # See: operation_routing.operations["retry_partial_failure"] for caller retries
+    # ==========================================================================
+    properties:
+      success:
+        type: boolean
+        description: "Whether the backend operation completed successfully"
+      error:
+        type: string
+        nullable: true
+        default: null
+        description: "Sanitized error message if success is False"
+      error_code:
+        type: string
+        nullable: true
+        default: null
+        description: "Error code for programmatic handling (e.g., DATABASE_CONNECTION_ERROR)"
+      duration_ms:
+        type: float
+        description: "Time taken for the operation in milliseconds"
+        default: 0.0
+        ge: 0.0
+      backend_id:
+        type: string
+        nullable: true
+        default: null
+        description: "Optional identifier for the backend instance"
+      correlation_id:
+        type: uuid
+        nullable: true
+        default: null
+        description: "Correlation ID for tracing the operation"
+    required:
+      - success
+  ModelRegistryResponse:
+    type: object
+    description: "Response model for dual-backend registration operations with partial failure support"
+    frozen: true
+    extra: "forbid"
+    properties:
+      status:
+        type: string
+        description: "Overall status: success (both succeeded), partial (one succeeded), or failed (both failed)"
+        enum:
+          - "success"
+          - "partial"
+          - "failed"
+      node_id:
+        type: uuid
+        description: "UUID of the node that was registered"
+      correlation_id:
+        type: uuid
+        description: "Correlation ID for distributed tracing"
+      consul_result:
+        type: ref
+        ref: "ModelBackendResult"
+        description: "Result of the Consul registration operation"
+      postgres_result:
+        type: ref
+        ref: "ModelBackendResult"
+        description: "Result of the PostgreSQL upsert operation"
+      processing_time_ms:
+        type: float
+        description: "Total time for the dual-registration operation in milliseconds"
+        default: 0.0
+        ge: 0.0
+      timestamp:
+        type: datetime
+        description: "When this response was created (must be explicitly provided)"
+      error_summary:
+        type: string
+        nullable: true
+        default: null
+        description: "Aggregated error message for failed operations (e.g., 'Consul: error; PostgreSQL: error')"
+    required:
+      - status
+      - node_id
+      - correlation_id
+      - consul_result
+      - postgres_result
+      - timestamp
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  backends:
+    - name: "consul"
+      check_type: "http"
+      endpoint: "/v1/status/leader"
+    - name: "postgres"
+      check_type: "connection"
+      timeout_ms: 5000
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2025-01-01"
+  updated: "2026-01-08"
+  tags:
+    - effect
+    - registration
+    - consul
+    - postgresql
+    - dual-backend
+    - idempotency
+    - circuit-breaker
+    - parallel-execution

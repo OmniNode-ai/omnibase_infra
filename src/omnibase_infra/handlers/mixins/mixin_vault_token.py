@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Vault token mixin for VaultHandler.
+"""Vault token mixin for HandlerVault.
 
 Provides token management operations including renewal, TTL tracking,
 and automatic token refresh before expiration.
@@ -13,7 +13,7 @@ import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, TypeVar
+from typing import TypeVar
 from uuid import UUID, uuid4
 
 import hvac
@@ -26,9 +26,6 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
-
 T = TypeVar("T")
 
 # Handler ID for ModelHandlerOutput
@@ -38,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 class MixinVaultToken:
-    """Mixin providing token management for VaultHandler.
+    """Mixin providing token management for HandlerVault.
 
     Contains methods for:
     - Token renewal checking and auto-refresh
@@ -164,13 +161,13 @@ class MixinVaultToken:
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
-                "VaultHandler not initialized",
+                "HandlerVault not initialized",
                 context=ctx,
             )
 
     def _extract_ttl_from_renewal_response(
         self,
-        result: dict[str, JsonType],
+        result: dict[str, object],
         default_ttl: int,
         correlation_id: UUID,
     ) -> int:
@@ -249,7 +246,7 @@ class MixinVaultToken:
 
     async def renew_token(
         self, correlation_id: UUID | None = None
-    ) -> dict[str, JsonType]:
+    ) -> dict[str, object]:
         """Renew Vault authentication token.
 
         Token TTL Extraction Logic:
@@ -281,10 +278,10 @@ class MixinVaultToken:
         assert self._client is not None
         assert self._config is not None
 
-        def renew_func() -> dict[str, JsonType]:
+        def renew_func() -> dict[str, object]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, JsonType] = self._client.auth.token.renew_self()
+            result: dict[str, object] = self._client.auth.token.renew_self()
             return result
 
         # _execute_with_retry already raises properly typed errors:
@@ -324,7 +321,7 @@ class MixinVaultToken:
         self,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Execute token renewal operation from envelope.
 
         Args:

@@ -41,16 +41,24 @@ from omnibase_core.models.common.model_validation_metadata import (
     ModelValidationMetadata,
 )
 from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
-from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
     CircularImportValidator,
     ModelContractValidationResult,
-    ModelImportValidationResult,
+    ModelModuleImportResult,
     ModelValidationResult,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage_file,
+)
+
+# Backwards compatibility alias for renamed type
+type ModelImportValidationResult = ModelModuleImportResult
+
+# NOTE: ServiceContractValidator was removed in omnibase_core 0.6.2
+# Using a stub that implements ProtocolContractValidator
+from omnibase_infra.validation.stub_contract_validator import (
+    ServiceContractValidator,
 )
 
 # Module-level initialization (AFTER all imports)

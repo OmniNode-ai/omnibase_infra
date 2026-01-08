@@ -81,7 +81,7 @@ FORBIDDEN_ATTRS = {"_bus", "_event_bus", "_publisher", "event_bus", "publisher"}
 FORBIDDEN_METHODS = {"publish", "emit", "send_event"}
 
 
-class HandlerPublishingVisitor(ast.NodeVisitor):
+class PublishingConstraintVisitor(ast.NodeVisitor):
     """AST visitor to detect handler publishing patterns.
 
     This visitor traverses Python AST to find handler classes that
@@ -375,7 +375,7 @@ def validate_no_handler_publishing(file_path: str) -> ModelFileValidationResult:
         )
 
     # Analyze the AST
-    visitor = HandlerPublishingVisitor(file_path)
+    visitor = PublishingConstraintVisitor(file_path)
     visitor.visit(tree)
 
     return ModelFileValidationResult(

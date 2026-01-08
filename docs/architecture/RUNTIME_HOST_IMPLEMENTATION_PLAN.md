@@ -51,7 +51,7 @@ These invariants MUST be maintained throughout the implementation:
 │  └────────────────────────────────────────────────────────────┘ │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐ │
-│  │ FileRegistry | HealthEndpoint | MetricsCollector           │ │
+│  │ RegistryFileBased | HealthEndpoint | MetricsCollector       │ │
 │  └────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -60,7 +60,7 @@ These invariants MUST be maintained throughout the implementation:
 
 | Abstraction | Purpose | Location | Example |
 |-------------|---------|----------|---------|
-| `ProtocolHandler` | Per-request operations (db/http/vault/etc.) | SPI protocol, infra impl | `HttpHandler`, `DbHandler` |
+| `ProtocolHandler` | Per-request operations (db/http/vault/etc.) | SPI protocol, infra impl | `HttpHandler`, `HandlerDb` |
 | `ProtocolEventBus` | Message transport feeding envelopes into runtime | SPI protocol, infra impl | `KafkaEventBus` |
 
 **Key distinction**:
@@ -222,7 +222,7 @@ class ModelHandlerConfig(BaseModel):
     """Configuration for a protocol handler.
 
     TODO (post-MVP): Introduce per-handler config models (e.g. ModelHttpHandlerConfig,
-    ModelDbHandlerConfig) and validate `config` against them, instead of using
+    ModelHandlerDbConfig) and validate `config` against them, instead of using
     free-form `dict[str, Any]`.
     """
     handler_type: EnumHandlerType
@@ -596,9 +596,9 @@ class NodeRuntime:
         Args:
             contracts_dir: Directory containing node contract YAML files
         """
-        from omnibase_core.runtime.file_registry import FileRegistry
+        from omnibase_core.runtime.registry_file_based import RegistryFileBased
 
-        registry = FileRegistry(contracts_dir)
+        registry = RegistryFileBased(contracts_dir)
         contracts = registry.load_all()
 
         for contract in contracts:
@@ -745,9 +745,9 @@ class NodeRuntime:
         }
 ```
 
-### 1.7 FileRegistry Class
+### 1.7 RegistryFileBased Class
 
-**File**: `src/omnibase_core/runtime/file_registry.py` (NEW)
+**File**: `src/omnibase_core/runtime/registry_file_based.py` (NEW)
 
 ```python
 """File-based contract registry for Runtime Host."""
@@ -761,17 +761,17 @@ if TYPE_CHECKING:
     from omnibase_core.models.contracts.model_node_contract import ModelNodeContract
 
 
-class FileRegistry:
+class RegistryFileBased:
     """Registry that loads node contracts from filesystem.
 
-    FileRegistry scans a directory for YAML contract files and
+    RegistryFileBased scans a directory for YAML contract files and
     loads them into ModelNodeContract instances.
     """
 
     def __init__(self, contracts_dir: Path) -> None:
         self._contracts_dir = contracts_dir
         self._contracts: dict[str, "ModelNodeContract"] = {}
-        self._logger = logging.getLogger("file_registry")
+        self._logger = logging.getLogger("registry_file_based")
 
     def load_all(self) -> list["ModelNodeContract"]:
         """Load all contracts from the directory.
@@ -1057,7 +1057,7 @@ if __name__ == "__main__":
 - [ ] `ProtocolHandler` abstract class with `EnumHandlerType` return type
 - [ ] `NodeInstance` class with envelope handling (pass-through documented)
 - [ ] `NodeRuntime` class - NO event loop, NO bus consumer
-- [ ] `FileRegistry` class for contract loading
+- [ ] `RegistryFileBased` class for contract loading
 - [ ] `LocalHandler` working with dev/test warnings
 - [ ] CLI entry point clearly marked as dev/test only
 - [ ] Unit tests for all new classes (>90% coverage)
@@ -1347,7 +1347,7 @@ from omnibase_core.models.runtime.model_onex_envelope import ModelOnexEnvelope
 from omnibase_core.protocols.protocol_handler import ProtocolHandler
 
 
-class DbHandler(ProtocolHandler):
+class HandlerDb(ProtocolHandler):
     """PostgreSQL database protocol handler.
 
     Executes database operations defined in OnexEnvelopes.
@@ -1656,7 +1656,7 @@ from omnibase_core.models.runtime.model_onex_envelope import ModelOnexEnvelope
 from omnibase_core.protocols.protocol_handler import ProtocolHandler
 
 
-class VaultHandler(ProtocolHandler):
+class HandlerVault(ProtocolHandler):
     """Vault secrets management protocol handler.
 
     Handles secret read/write operations via HashiCorp Vault.
@@ -1840,8 +1840,8 @@ from omnibase_core.enums.enum_handler_type import EnumHandlerType
 from omnibase_core.runtime.handlers.local_handler import LocalHandler
 
 from omnibase_infra.handlers.http_handler import HttpHandler
-from omnibase_infra.handlers.db_handler import DbHandler
-from omnibase_infra.handlers.handler_vault import VaultHandler
+from omnibase_infra.handlers.db_handler import HandlerDb
+from omnibase_infra.handlers.handler_vault import HandlerVault
 
 if TYPE_CHECKING:
     from omnibase_core.protocols.protocol_handler import ProtocolHandler
@@ -1852,9 +1852,9 @@ if TYPE_CHECKING:
 HANDLER_REGISTRY: dict[EnumHandlerType, type["ProtocolHandler"]] = {
     EnumHandlerType.LOCAL: LocalHandler,  # Dev/test only
     EnumHandlerType.HTTP: HttpHandler,
-    EnumHandlerType.DB: DbHandler,
-    EnumHandlerType.VAULT: VaultHandler,
-    # EnumHandlerType.CONSUL: ConsulHandler,  # TODO: implement
+    EnumHandlerType.DB: HandlerDb,
+    EnumHandlerType.VAULT: HandlerVault,
+    # EnumHandlerType.CONSUL: HandlerConsul,  # TODO: implement
     # EnumHandlerType.LLM: LlmHandler,  # TODO: implement
 }
 
@@ -2114,8 +2114,8 @@ shutdown_timeout_seconds: 30
 ### 3.9 Phase 3 Success Criteria
 
 - [ ] HttpHandler with `EnumHandlerType.HTTP` return type
-- [ ] DbHandler with `EnumHandlerType.DB` return type
-- [ ] VaultHandler with `EnumHandlerType.VAULT` return type
+- [ ] HandlerDb with `EnumHandlerType.DB` return type
+- [ ] HandlerVault with `EnumHandlerType.VAULT` return type
 - [ ] KafkaEventBus implements `ProtocolEventBus` (NOT ProtocolHandler)
 - [ ] `wiring.py` is single source of truth for handler registration
 - [ ] RuntimeHostProcess uses `wiring.py` (no duplicate handler map)
@@ -2134,8 +2134,8 @@ shutdown_timeout_seconds: 30
 
 1. **LocalHandler echo** (dev/test validation)
 2. **HttpHandler external call** (real HTTP request)
-3. **DbHandler query** (real database query)
-4. **VaultHandler secret** (real Vault operation)
+3. **HandlerDb query** (real database query)
+4. **HandlerVault secret** (real Vault operation)
 5. **Event bus → NodeRuntime → handler flow** (full integration)
 6. **Multi-node routing** (envelope routing to correct node)
 

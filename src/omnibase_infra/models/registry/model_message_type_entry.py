@@ -22,7 +22,6 @@ Related:
 
 from datetime import datetime
 
-from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -51,7 +50,6 @@ class ModelMessageTypeEntry(BaseModel):
         description: Human-readable description of the message type.
         enabled: Whether this entry is active. Disabled entries are skipped.
         registered_at: Timestamp when this entry was registered.
-        metadata: Optional additional metadata.
 
     Fan-Out Support:
         Multiple handler_ids can be registered for the same message type to enable
@@ -159,11 +157,6 @@ class ModelMessageTypeEntry(BaseModel):
     registered_at: datetime = Field(
         ...,
         description="Timestamp when this entry was registered (UTC, must be explicitly provided).",
-    )
-
-    metadata: JsonType | None = Field(
-        default=None,
-        description="Optional additional metadata. Accepts any JSON-serializable value.",
     )
 
     def supports_category(self, category: EnumMessageCategory) -> bool:

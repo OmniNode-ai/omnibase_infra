@@ -31,6 +31,7 @@ Usage:
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -40,8 +41,8 @@ import yaml
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
+# NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 # Topic name pattern: alphanumeric, underscores, hyphens, and periods
 # This matches Kafka/Redpanda topic naming conventions and ONEX naming
@@ -57,7 +58,7 @@ MAX_GRACE_PERIOD_SECONDS = 3600  # Max 1 hour to match ModelShutdownConfig
 
 
 def validate_runtime_config(
-    config: JsonType,
+    config: Mapping[str, object],
     contract_path: Path | None = None,
 ) -> list[str]:
     """Validate runtime configuration against contract schema.
@@ -213,7 +214,7 @@ def validate_runtime_config(
 def load_and_validate_config(
     config_path: Path,
     contract_path: Path | None = None,
-) -> JsonType:
+) -> dict[str, object]:
     """Load and validate runtime configuration from a YAML file.
 
     Loads a YAML configuration file and performs contract validation.

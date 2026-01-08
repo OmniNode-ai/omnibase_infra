@@ -13,6 +13,85 @@ This document specifies the formal retry, backoff, and compensation strategies f
 
 ---
 
+## Architectural Responsibility: Orchestrator-Owned Retries
+
+### Key Principle: Effects are Single-Shot Operations
+
+**Effect nodes do NOT implement retries.** Retry logic is the exclusive responsibility of the orchestrator layer.
+
+This is an ONEX architectural principle that ensures:
+1. **Separation of concerns**: Effects handle I/O, orchestrators handle workflow coordination
+2. **Testability**: Effects can be tested in isolation without retry complexity
+3. **Composability**: Different orchestrators can apply different retry strategies to the same effect
+4. **Observability**: Retry metrics and decisions are centralized in orchestrators
+
+### Layer Responsibilities
+
+| Layer | Retry Responsibility | Example |
+|-------|---------------------|---------|
+| **Effect Node** | **NONE** - Single-shot execution only | `NodeRegistryEffect` executes once, returns success/failure |
+| **Orchestrator Node** | **FULL** - Retry policies, backoff, circuit breakers | `NodeRegistrationOrchestrator` retries failed effect calls |
+| **Handler** | **NONE** - Delegates to effect | Handlers invoke effects, do not retry |
+
+### Implementation Implications
+
+**Effect Nodes**:
+- Execute a single operation attempt
+- Return structured result (`ModelBackendResult`) with success/failure status
+- Include timing information (`duration_ms`) for orchestrator decisions
+- Do NOT track retry counts or implement backoff
+- The `retries` field was intentionally removed from effect result models (see OMN-1103)
+
+**Orchestrator Nodes**:
+- Implement retry policies via `coordination_rules.max_retries` in contract
+- Configure per-error retry behavior via `error_handling.retry_policy`
+- Track retry state and apply exponential backoff
+- Make circuit breaker decisions based on accumulated failures
+
+### Configuration Location
+
+```yaml
+# In orchestrator contract.yaml (NOT effect contract.yaml)
+coordination_rules:
+  max_retries: 3  # Workflow step retry count
+
+error_handling:
+  retry_policy:
+    max_retries: 3  # Per-error retry count
+    initial_backoff_seconds: 1.0
+    max_backoff_seconds: 60.0
+    exponential_base: 2.0
+```
+
+### Why Effects Don't Retry
+
+1. **Single Responsibility**: Effects perform I/O - that's it
+2. **Strategy Flexibility**: Orchestrators can choose retry strategy based on context
+3. **Resource Efficiency**: Prevents nested retry loops (effect retries * orchestrator retries)
+4. **Failure Visibility**: Orchestrators see every failure, enabling smart decisions
+5. **Testing Simplicity**: Effects are deterministic - call once, get result
+
+### Example Flow
+
+```
+Orchestrator (owns retry logic)
+    │
+    ├─[Attempt 1]─> Effect.execute() -> FAILURE (timeout)
+    │               └─> Returns ModelBackendResult(success=False, error="timeout")
+    │
+    ├─[Backoff 1s]
+    │
+    ├─[Attempt 2]─> Effect.execute() -> FAILURE (connection refused)
+    │               └─> Returns ModelBackendResult(success=False, error="connection refused")
+    │
+    ├─[Backoff 2s]
+    │
+    └─[Attempt 3]─> Effect.execute() -> SUCCESS
+                    └─> Returns ModelBackendResult(success=True, duration_ms=45.2)
+```
+
+---
+
 ## Retry Policy
 
 ### Default Configuration

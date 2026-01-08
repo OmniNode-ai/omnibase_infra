@@ -27,15 +27,11 @@ Limitations:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, unquote, urlparse
 from uuid import uuid4
 
-if TYPE_CHECKING:
-    from typing import Any
 
-
-def parse_and_validate_dsn(dsn: object) -> dict[str, Any]:
+def parse_and_validate_dsn(dsn: object) -> dict[str, object]:
     """Parse and validate PostgreSQL DSN format using urllib.parse.
 
     This function provides comprehensive DSN validation that handles edge cases
