@@ -158,15 +158,26 @@
 -- BEGIN INDEX CREATION
 -- =============================================================================
 
--- Verify columns exist before creating indexes
+-- Verify all required columns exist before creating indexes
 DO $$
+DECLARE
+    missing_columns TEXT[] := ARRAY[]::TEXT[];
+    required_columns TEXT[] := ARRAY['capability_tags', 'intent_types', 'protocols', 'contract_type'];
+    col TEXT;
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'registration_projections'
-          AND column_name = 'capability_tags'
-    ) THEN
-        RAISE EXCEPTION 'Column capability_tags does not exist. Run 003_capability_fields.sql first.';
+    FOREACH col IN ARRAY required_columns
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'registration_projections'
+              AND column_name = col
+        ) THEN
+            missing_columns := array_append(missing_columns, col);
+        END IF;
+    END LOOP;
+
+    IF array_length(missing_columns, 1) > 0 THEN
+        RAISE EXCEPTION 'Missing columns: %. Run 003_capability_fields.sql first.', array_to_string(missing_columns, ', ');
     END IF;
 END$$;
 

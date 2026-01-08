@@ -8,7 +8,7 @@
 -- projections table to enable fast capability-based queries with GIN indexes.
 --
 -- NEW COLUMNS:
---   - contract_type: Node contract type (effect, compute, reducer, orchestrator)
+--   - contract_type: Node contract type (effect, compute, reducer, orchestrator, unknown)
 --   - intent_types: Array of intent types this node handles
 --   - protocols: Array of protocols this node implements
 --   - capability_tags: Array of capability tags for discovery
@@ -121,7 +121,9 @@ CREATE INDEX IF NOT EXISTS idx_registration_contract_type_state
 -- =============================================================================
 -- CHECK CONSTRAINT FOR CONTRACT_TYPE
 -- =============================================================================
--- Ensure contract_type values are consistent with node_type valid values
+-- Ensure contract_type values are consistent with node_type valid values.
+-- Note: 'unknown' is used by backfill scripts for records where the contract
+-- type cannot be determined from the capabilities JSONB (legacy registrations).
 -- Note: Using DO block to handle constraint already existing (idempotent)
 
 DO $$
@@ -134,7 +136,7 @@ BEGIN
         ALTER TABLE registration_projections
             ADD CONSTRAINT valid_contract_type CHECK (
                 contract_type IS NULL
-                OR contract_type IN ('effect', 'compute', 'reducer', 'orchestrator')
+                OR contract_type IN ('effect', 'compute', 'reducer', 'orchestrator', 'unknown')
             );
     END IF;
 END$$;
