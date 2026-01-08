@@ -59,4 +59,4 @@ class EnumCircuitState(str, Enum):
     HALF_OPEN = "half_open"
 
 
-__all__ = ["EnumCircuitState"]
+__all__: list[str] = ["EnumCircuitState"]

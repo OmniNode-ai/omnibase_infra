@@ -8,7 +8,7 @@ consistent validation patterns across models and services.
 Defense-in-Depth Note:
     The PATTERN_TABLE_NAME constant is intentionally used in BOTH:
     1. Pydantic model validation (ModelDlqTrackingConfig.storage_table field)
-    2. Runtime validation (DLQReplayTracker._validate_storage_table method)
+    2. Runtime validation (ServiceDlqTracking._validate_storage_table method)
 
     This defense-in-depth approach ensures SQL injection prevention even if:
     - Direct attribute assignment bypasses Pydantic validation

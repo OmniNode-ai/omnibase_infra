@@ -21,8 +21,7 @@ Models:
     - EnumReplayStatus: Status enum for replay operations
 
 Tracker:
-    - ServiceDlqTracking: PostgreSQL tracker for replay history (primary class name)
-    - DLQReplayTracker: Backwards-compatibility alias
+    - ServiceDlqTracking: PostgreSQL tracker for replay history
 
 Example - Recording Replay Attempts:
     >>> from omnibase_infra.dlq import (
@@ -76,18 +75,14 @@ from omnibase_infra.dlq.models import (
     ModelDlqReplayRecord,
     ModelDlqTrackingConfig,
 )
-from omnibase_infra.dlq.service_dlq_tracking import (
-    DLQReplayTracker,
-    ServiceDlqTracking,
-)
+from omnibase_infra.dlq.service_dlq_tracking import ServiceDlqTracking
 
 __all__: list[str] = [
     # Constants
     "PATTERN_TABLE_NAME",  # Regex pattern string for table name validation
     "REGEX_TABLE_NAME",  # Pre-compiled regex for runtime validation
     # Tracker
-    "ServiceDlqTracking",  # Primary class name (ONEX naming convention)
-    "DLQReplayTracker",  # Backwards-compatibility alias
+    "ServiceDlqTracking",
     # Models
     "EnumReplayStatus",
     "ModelDlqReplayRecord",
