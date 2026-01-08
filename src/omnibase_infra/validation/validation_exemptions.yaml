@@ -206,7 +206,7 @@ pattern_exemptions:
   # Infrastructure handlers require multiple methods for: connection lifecycle,
   # operation dispatching, health checks, and protocol-specific operations.
   - file_pattern: 'handler_consul\.py'
-    class_pattern: "Class 'ConsulHandler'"
+    class_pattern: "Class 'HandlerConsul'"
     violation_pattern: 'has \d+ methods'
     reason: >
       Infrastructure handler pattern requires multiple methods: connection lifecycle (connect, disconnect), operation dispatch (handle_operation, handle_kv_*, handle_service_*), properties (handler_type, handler_category), and health/describe methods. This is standard for infrastructure handlers.
@@ -261,23 +261,27 @@ pattern_exemptions:
   # Python ast.NodeVisitor convention uses visit_ClassDef, visit_Call, etc.
   # These follow PEP 8 exception for consistency with stdlib patterns.
   # Reference: https://docs.python.org/3/library/ast.html#ast.NodeVisitor
-  - file_pattern: 'topic_category_validator\.py'
-    violation_pattern: "Function name 'visit_ClassDef' should use snake_case"
+  #
+  # Affected files:
+  # - topic_category_validator.py
+  # - validator_no_handler_publishing.py
+  # - validator_no_direct_dispatch.py
+  # - validator_no_orchestrator_fsm.py
+  #
+  # Common AST visitor methods:
+  # - visit_ClassDef, visit_FunctionDef, visit_AsyncFunctionDef
+  # - visit_Assign, visit_AnnAssign, visit_Call
+  #
+  # Generic pattern for all AST visitor methods across all validator files
+  - file_pattern: '(topic_category_validator|validator_no_handler_publishing|validator_no_direct_dispatch|validator_no_orchestrator_fsm)\.py'
+    violation_pattern: "Function name 'visit_[A-Z][a-zA-Z]+' should use snake_case"
     reason: >
-      Python ast.NodeVisitor convention. visit_ClassDef is a standard AST visitor method name that the ast module dispatches to.
+      Python ast.NodeVisitor convention. Methods named visit_<NodeType> (e.g., visit_ClassDef, visit_FunctionDef, visit_Call) are standard AST visitor methods that the ast module dispatches to based on the node type being visited. These CANNOT be renamed as they are part of the visitor dispatch protocol.
 
     documentation:
       - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
       - PEP 8 - Exception for stdlib compatibility
-    ticket: null
-  - file_pattern: 'topic_category_validator\.py'
-    violation_pattern: "Function name 'visit_Call' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_Call is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-    ticket: null
+    ticket: OMN-1263
   # ==========================================================================
   # Architecture Validator AST Visitor Method Exemptions (OMN-1099)
   # ==========================================================================
@@ -1263,6 +1267,26 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Model Field Naming - computed display names)
     ticket: OMN-1138
+  # ==========================================================================
+  # Architecture Validator Model Exemptions (model_violation.py) [OMN-1263]
+  # ==========================================================================
+  # Architecture violation rule_id and rule_name are human-readable identifiers.
+  - file_pattern: 'model_violation\.py'
+    violation_pattern: "Field 'rule_id' should use UUID"
+    reason: >
+      rule_id is a human-readable semantic identifier (e.g., "ARCH-001", "ARCH-002") for architecture validation rules. Used for CI output and developer reference. Not a UUID.
+
+    documentation:
+      - CLAUDE.md (ONEX Architecture - Handler Validation)
+    ticket: OMN-1263
+  - file_pattern: 'model_violation\.py'
+    violation_pattern: "Field 'rule_name' might reference an entity"
+    reason: >
+      rule_name is a human-readable descriptive label (e.g., "No Any Types", "One Model Per File") for architecture rules. It does not reference a rule entity - it is just a descriptive string for human consumption.
+
+    documentation:
+      - CLAUDE.md (ONEX Architecture - Handler Validation)
+    ticket: OMN-1263
   # ==========================================================================
   # Architecture Validator OMN-1099 Exemptions (AST Visitor Pattern)
   # ==========================================================================

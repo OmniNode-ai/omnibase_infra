@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Vault secrets mixin for VaultHandler.
+"""Vault secrets mixin for HandlerVault.
 
 Provides CRUD operations for secrets in Vault KV v2 secrets engine.
 """
@@ -30,7 +30,7 @@ DEFAULT_MOUNT_POINT: str = "secret"
 
 
 class MixinVaultSecrets:
-    """Mixin providing secret operations for VaultHandler.
+    """Mixin providing secret operations for HandlerVault.
 
     Contains methods for:
     - Reading secrets from KV v2

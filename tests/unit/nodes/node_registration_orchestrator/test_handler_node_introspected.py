@@ -732,10 +732,10 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
 
 
 def create_mock_consul_handler() -> AsyncMock:
-    """Create a mock ConsulHandler."""
-    from omnibase_infra.handlers import ConsulHandler
+    """Create a mock HandlerConsul."""
+    from omnibase_infra.handlers import HandlerConsul
 
-    mock = AsyncMock(spec=ConsulHandler)
+    mock = AsyncMock(spec=HandlerConsul)
     mock.execute = AsyncMock(return_value=None)
     return mock
 
@@ -786,7 +786,7 @@ class TestHandlerNodeIntrospectedConsulRegistration:
         assert len(events) == 1
         assert isinstance(events[0], ModelNodeRegistrationInitiated)
 
-        # Should have called ConsulHandler.execute
+        # Should have called HandlerConsul.execute
         mock_consul.execute.assert_called_once()
 
         # Verify the call had correct structure

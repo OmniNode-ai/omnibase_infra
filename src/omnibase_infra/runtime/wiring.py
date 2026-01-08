@@ -120,10 +120,11 @@ from uuid import uuid4
 
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
-from omnibase_infra.handlers.handler_consul import ConsulHandler
-from omnibase_infra.handlers.handler_db import DbHandler
+from omnibase_infra.handlers.handler_consul import HandlerConsul
+from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.handlers.handler_http import HttpRestHandler
-from omnibase_infra.handlers.handler_vault import VaultHandler
+from omnibase_infra.handlers.handler_vault import HandlerVault
+from omnibase_infra.models.types import JsonDict
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     HANDLER_TYPE_CONSUL,
@@ -165,14 +166,14 @@ logger = logging.getLogger(__name__)
 # 2. Import the handler class at the top of this module
 # 3. Add entry below: HANDLER_TYPE_XXX: (XxxHandler, "Description"),
 #
-# NOTE: HttpRestHandler and DbHandler use legacy execute(envelope: dict) signature.
+# NOTE: HttpRestHandler and HandlerDb use legacy execute(envelope: dict) signature.
 # They will be migrated to ProtocolHandler.execute(request, operation_config) in future.
 # Type ignore comments suppress MyPy errors during MVP phase.
 _KNOWN_HANDLERS: dict[str, tuple[type[ProtocolHandler], str]] = {
-    HANDLER_TYPE_CONSUL: (ConsulHandler, "HashiCorp Consul service discovery handler"),  # type: ignore[dict-item]
-    HANDLER_TYPE_DATABASE: (DbHandler, "PostgreSQL database handler"),  # type: ignore[dict-item]
+    HANDLER_TYPE_CONSUL: (HandlerConsul, "HashiCorp Consul service discovery handler"),  # type: ignore[dict-item]
+    HANDLER_TYPE_DATABASE: (HandlerDb, "PostgreSQL database handler"),  # type: ignore[dict-item]
     HANDLER_TYPE_HTTP: (HttpRestHandler, "HTTP REST protocol handler"),  # type: ignore[dict-item]
-    HANDLER_TYPE_VAULT: (VaultHandler, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]
+    HANDLER_TYPE_VAULT: (HandlerVault, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]
 }
 
 # Known event bus kinds that can be wired via this module.
@@ -195,10 +196,10 @@ def wire_default_handlers() -> dict[str, list[str]]:
     way to initialize the handler ecosystem.
 
     Registered Handlers:
-        - CONSUL: ConsulHandler for HashiCorp Consul service discovery
-        - DB: DbHandler for PostgreSQL database operations
+        - CONSUL: HandlerConsul for HashiCorp Consul service discovery
+        - DB: HandlerDb for PostgreSQL database operations
         - HTTP: HttpRestHandler for HTTP/REST protocol operations
-        - VAULT: VaultHandler for HashiCorp Vault secret management
+        - VAULT: HandlerVault for HashiCorp Vault secret management
 
     Registered Event Buses:
         - INMEMORY: InMemoryEventBus for local/testing deployments

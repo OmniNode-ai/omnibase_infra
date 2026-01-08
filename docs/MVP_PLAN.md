@@ -85,8 +85,8 @@ Understanding which component lives where is critical. This diagram shows the de
 |  |  +----------------+  +----------------+  +------------------+   |  |
 |  |  | RuntimeHost    |  | Handlers       |  | EventBus         |   |  |
 |  |  | Process        |  | - HttpHandler  |  | - InMemoryBus    |   |  |
-|  |  |                |  | - DbHandler    |  | - KafkaBus (Beta)|   |  |
-|  |  | Owns event     |  | - VaultHandler |  |                  |   |  |
+|  |  |                |  | - HandlerDb    |  | - KafkaBus (Beta)|   |  |
+|  |  | Owns event     |  | - HandlerVault |  |                  |   |  |
 |  |  | loop + wiring  |  |   (Beta)       |  | Transport layer  |   |  |
 |  |  +----------------+  +----------------+  +------------------+   |  |
 |  +------------------------------------------------------------------+  |
@@ -129,7 +129,7 @@ DEPENDENCY RULE: infra -> spi -> core (never reverse)
 | `ProtocolHandler` | `omnibase_spi` | Abstract interface for handlers. |
 | `ProtocolEventBus` | `omnibase_spi` | Abstract interface for event buses. |
 | `BaseBaseRuntimeHostProcess` | `omnibase_infra` | Owns event loop. Wires handlers. Drives runtime. Base class for app-specific hosts. |
-| `HttpHandler`, `DbHandler` | `omnibase_infra` | Concrete handler implementations. |
+| `HttpHandler`, `HandlerDb` | `omnibase_infra` | Concrete handler implementations. |
 | `InMemoryEventBus` | `omnibase_infra` | Concrete event bus for MVP. |
 
 **The Golden Rule**:
@@ -304,7 +304,7 @@ class HttpHandler(ProtocolHandler):
 # FILE: omnibase_infra/handlers/db_handler.py
 # THIS MUST FAIL RUNTIME
 
-class DbHandler(ProtocolHandler):
+class HandlerDb(ProtocolHandler):
     async def execute(self, envelope):
         try:
             result = await self._pool.execute(query)

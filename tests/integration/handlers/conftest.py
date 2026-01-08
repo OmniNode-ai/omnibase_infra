@@ -15,18 +15,18 @@ infrastructure (e.g., GitHub Actions without VPN access to internal servers).
 
 Skip Conditions by Handler:
 
-    **PostgreSQL (DbHandler)**:
+    **PostgreSQL (HandlerDb)**:
         - Skips if POSTGRES_HOST not set
         - Skips if POSTGRES_PASSWORD not set
         - Tests use module-level ``pytestmark`` with ``pytest.mark.skipif``
 
-    **Vault (VaultHandler)**:
+    **Vault (HandlerVault)**:
         - Skips if VAULT_ADDR not set (environment variable)
         - Skips if VAULT_TOKEN not set
         - Skips if Vault server is unreachable (health check fails)
         - Two-phase skip: first checks env vars, then checks reachability
 
-    **Consul (ConsulHandler)**:
+    **Consul (HandlerConsul)**:
         - Skips if CONSUL_HOST not set
         - Skips if Consul server is unreachable (TCP connection fails)
         - Uses socket-based reachability check at module import time
@@ -39,15 +39,15 @@ Example CI/CD Behavior::
 
     # In CI without infrastructure access:
     $ pytest tests/integration/handlers/ -v
-    tests/.../test_db_handler_integration.py::TestDbHandlerConnection::test_db_describe SKIPPED
-    tests/.../test_vault_handler_integration.py::TestVaultHandlerConnection::test_vault_describe SKIPPED
-    tests/.../test_consul_handler_integration.py::TestConsulHandlerConnection::test_consul_describe SKIPPED
+    tests/.../test_db_handler_integration.py::TestHandlerDbConnection::test_db_describe SKIPPED
+    tests/.../test_vault_handler_integration.py::TestHandlerVaultConnection::test_vault_describe SKIPPED
+    tests/.../test_consul_handler_integration.py::TestHandlerConsulConnection::test_consul_describe SKIPPED
     tests/.../test_http_handler_integration.py::TestHttpRestHandlerIntegration::test_simple_get_request PASSED
 
     # With infrastructure access (using REMOTE_INFRA_HOST server):
     $ export POSTGRES_HOST=$REMOTE_INFRA_HOST POSTGRES_PASSWORD=xxx ...
     $ pytest tests/integration/handlers/ -v
-    tests/.../test_db_handler_integration.py::TestDbHandlerConnection::test_db_describe PASSED
+    tests/.../test_db_handler_integration.py::TestHandlerDbConnection::test_db_describe PASSED
 
 HTTP Handlers
 =============
@@ -110,7 +110,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from omnibase_core.types import JsonType
 
-    from omnibase_infra.handlers import ConsulHandler, DbHandler, VaultHandler
+    from omnibase_infra.handlers import HandlerConsul, HandlerDb, HandlerVault
 
 
 # =============================================================================
@@ -253,7 +253,7 @@ def small_response_config() -> dict[str, object]:
 
 @pytest.fixture
 def db_config() -> dict[str, JsonType]:
-    """Provide database configuration for DbHandler.
+    """Provide database configuration for HandlerDb.
 
     This fixture enables graceful skip behavior for CI/CD environments
     where database infrastructure may not be available.
@@ -263,7 +263,7 @@ def db_config() -> dict[str, JsonType]:
         - Combined with module-level pytestmark skipif for POSTGRES_HOST
 
     Returns:
-        Configuration dict with 'dsn' key for DbHandler.initialize().
+        Configuration dict with 'dsn' key for HandlerDb.initialize().
 
     Note:
         Tests using this fixture should also use @pytest.mark.skipif
@@ -302,10 +302,10 @@ def unique_table_name() -> str:
 @pytest.fixture
 async def initialized_db_handler(
     db_config: dict[str, JsonType],
-) -> AsyncGenerator[DbHandler, None]:
-    """Provide an initialized DbHandler instance with automatic cleanup.
+) -> AsyncGenerator[HandlerDb, None]:
+    """Provide an initialized HandlerDb instance with automatic cleanup.
 
-    Creates a DbHandler, initializes it with the test configuration,
+    Creates a HandlerDb, initializes it with the test configuration,
     yields it for the test, then ensures proper cleanup via shutdown().
 
     Cleanup Behavior:
@@ -315,7 +315,7 @@ async def initialized_db_handler(
         - Closes connection pool and releases all resources
 
     Yields:
-        Initialized DbHandler ready for database operations.
+        Initialized HandlerDb ready for database operations.
 
     Note:
         This fixture handles cleanup automatically. Tests should not
@@ -328,9 +328,9 @@ async def initialized_db_handler(
         ...     result = await initialized_db_handler.execute(envelope)
         ...     # No need to call shutdown - fixture handles it
     """
-    from omnibase_infra.handlers import DbHandler
+    from omnibase_infra.handlers import HandlerDb
 
-    handler = DbHandler()
+    handler = HandlerDb()
     await handler.initialize(db_config)
 
     yield handler
@@ -341,7 +341,7 @@ async def initialized_db_handler(
         await handler.shutdown()
     except Exception as e:
         logger.warning(
-            "Cleanup failed for DbHandler shutdown: %s",
+            "Cleanup failed for HandlerDb shutdown: %s",
             e,
             exc_info=True,
         )
@@ -349,7 +349,7 @@ async def initialized_db_handler(
 
 @pytest.fixture
 async def cleanup_table(
-    initialized_db_handler: DbHandler,
+    initialized_db_handler: HandlerDb,
 ) -> AsyncGenerator[list[str], None]:
     """Fixture to track and cleanup test tables with idempotent deletion.
 
@@ -511,7 +511,7 @@ def vault_config() -> dict[str, JsonType]:
     """Get Vault configuration from environment variables.
 
     Returns:
-        Configuration dict for VaultHandler.initialize()
+        Configuration dict for HandlerVault.initialize()
 
     Note:
         This fixture does not skip tests if Vault is unavailable.
@@ -537,10 +537,10 @@ def vault_config() -> dict[str, JsonType]:
 @pytest.fixture
 async def vault_handler(
     vault_config: dict[str, JsonType],
-) -> AsyncGenerator[VaultHandler, None]:
-    """Create and initialize VaultHandler for integration testing with automatic cleanup.
+) -> AsyncGenerator[HandlerVault, None]:
+    """Create and initialize HandlerVault for integration testing with automatic cleanup.
 
-    Yields an initialized VaultHandler instance and ensures proper cleanup.
+    Yields an initialized HandlerVault instance and ensures proper cleanup.
 
     Cleanup Behavior:
         - Calls handler.shutdown() after test completion
@@ -552,15 +552,15 @@ async def vault_handler(
         vault_config: Vault configuration fixture.
 
     Yields:
-        Initialized VaultHandler instance.
+        Initialized HandlerVault instance.
 
     Note:
         This fixture handles cleanup automatically. Tests should not
         call shutdown() manually unless testing shutdown behavior.
     """
-    from omnibase_infra.handlers import VaultHandler
+    from omnibase_infra.handlers import HandlerVault
 
-    handler = VaultHandler()
+    handler = HandlerVault()
     await handler.initialize(vault_config)
 
     yield handler
@@ -571,7 +571,7 @@ async def vault_handler(
         await handler.shutdown()
     except Exception as e:
         logger.warning(
-            "Cleanup failed for VaultHandler shutdown: %s",
+            "Cleanup failed for HandlerVault shutdown: %s",
             e,
             exc_info=True,
         )
@@ -650,10 +650,10 @@ def consul_available() -> bool:
 
 @pytest.fixture
 def consul_config() -> dict[str, JsonType]:
-    """Provide Consul configuration for ConsulHandler.
+    """Provide Consul configuration for HandlerConsul.
 
     Returns:
-        Configuration dict for ConsulHandler.initialize()
+        Configuration dict for HandlerConsul.initialize()
     """
     config: dict[str, JsonType] = {
         "host": CONSUL_HOST,
@@ -696,10 +696,10 @@ def unique_service_name() -> str:
 @pytest.fixture
 async def initialized_consul_handler(
     consul_config: dict[str, JsonType],
-) -> AsyncGenerator[ConsulHandler, None]:
-    """Provide an initialized ConsulHandler instance with automatic cleanup.
+) -> AsyncGenerator[HandlerConsul, None]:
+    """Provide an initialized HandlerConsul instance with automatic cleanup.
 
-    Creates a ConsulHandler, initializes it with the test configuration,
+    Creates a HandlerConsul, initializes it with the test configuration,
     yields it for the test, then ensures proper cleanup via shutdown().
 
     Cleanup Behavior:
@@ -718,11 +718,11 @@ async def initialized_consul_handler(
         consul_config: Consul configuration fixture.
 
     Yields:
-        Initialized ConsulHandler ready for Consul operations.
+        Initialized HandlerConsul ready for Consul operations.
     """
-    from omnibase_infra.handlers import ConsulHandler
+    from omnibase_infra.handlers import HandlerConsul
 
-    handler = ConsulHandler()
+    handler = HandlerConsul()
     await handler.initialize(consul_config)
 
     yield handler
@@ -733,7 +733,7 @@ async def initialized_consul_handler(
         await handler.shutdown()
     except Exception as e:
         logger.warning(
-            "Cleanup failed for ConsulHandler shutdown: %s",
+            "Cleanup failed for HandlerConsul shutdown: %s",
             e,
             exc_info=True,
         )

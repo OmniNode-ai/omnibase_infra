@@ -16,9 +16,9 @@ infrastructure services. The tests ensure that handlers correctly:
 
 | Handler | Test File | Description |
 |---------|-----------|-------------|
-| **DbHandler** | `test_db_handler_integration.py` | PostgreSQL operations (query, execute, DDL) |
-| **ConsulHandler** | `test_consul_handler_integration.py` | Service discovery, KV store operations |
-| **VaultHandler** | `test_vault_handler_integration.py` | Secret management (read/write/delete/list) |
+| **HandlerDb** | `test_db_handler_integration.py` | PostgreSQL operations (query, execute, DDL) |
+| **HandlerConsul** | `test_consul_handler_integration.py` | Service discovery, KV store operations |
+| **HandlerVault** | `test_vault_handler_integration.py` | Secret management (read/write/delete/list) |
 | **HttpRestHandler** | `test_http_handler_integration.py` | HTTP client operations (uses local mock server) |
 
 ## Prerequisites
@@ -34,9 +34,9 @@ The following services must be available for full test coverage:
 
 | Service | Environment Variable | Default Port | Required For |
 |---------|---------------------|--------------|--------------|
-| PostgreSQL | `POSTGRES_HOST` | 5432 | DbHandler tests |
-| Consul | `CONSUL_HOST` | 8500 | ConsulHandler tests |
-| Vault | `VAULT_ADDR` | 8200 | VaultHandler tests |
+| PostgreSQL | `POSTGRES_HOST` | 5432 | HandlerDb tests |
+| Consul | `CONSUL_HOST` | 8500 | HandlerConsul tests |
+| Vault | `VAULT_ADDR` | 8200 | HandlerVault tests |
 
 The default infrastructure server IP is defined in `tests/infrastructure_config.py`.
 You can override it by setting the `REMOTE_INFRA_HOST` environment variable.
@@ -61,7 +61,7 @@ cp .env.example .env
 REMOTE_INFRA_HOST=192.168.86.200  # or localhost for local development
 ```
 
-### PostgreSQL (DbHandler)
+### PostgreSQL (HandlerDb)
 
 ```bash
 # Required
@@ -74,7 +74,7 @@ POSTGRES_DATABASE=omninode_bridge
 POSTGRES_USER=postgres
 ```
 
-### Consul (ConsulHandler)
+### Consul (HandlerConsul)
 
 ```bash
 # Required
@@ -86,7 +86,7 @@ CONSUL_SCHEME=http
 CONSUL_TOKEN=  # Only if ACLs are enabled
 ```
 
-### Vault (VaultHandler)
+### Vault (HandlerVault)
 
 ```bash
 # Required
