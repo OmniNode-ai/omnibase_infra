@@ -602,6 +602,15 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-529
+  - file_pattern: 'service_dlq_tracking\.py'
+    class_pattern: "Class name 'ServiceDlqTracking'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention for service classes. Service files use service_<name>.py with Service<Name> class names.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-1270
   - file_pattern: 'service_health\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'

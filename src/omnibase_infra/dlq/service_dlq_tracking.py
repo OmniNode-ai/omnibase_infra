@@ -71,7 +71,7 @@ from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 logger = logging.getLogger(__name__)
 
 
-class DLQReplayTracker(MixinAsyncCircuitBreaker):
+class ServiceDlqTracking(MixinAsyncCircuitBreaker):
     """PostgreSQL-based service for tracking DLQ replay operations.
 
     This service provides persistent storage for DLQ replay history,
@@ -115,7 +115,7 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
         ...     dsn="postgresql://user:pass@localhost:5432/mydb",
         ...     storage_table="dlq_replay_history",
         ... )
-        >>> service = DLQReplayTracker(config)
+        >>> service = ServiceDlqTracking(config)
         >>> await service.initialize()
         >>> try:
         ...     record = ModelDlqReplayRecord(
@@ -250,7 +250,7 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
 
             self._initialized = True
             logger.info(
-                "DLQReplayTracker initialized",
+                "ServiceDlqTracking initialized",
                 extra={
                     "table_name": self._config.storage_table,
                     "pool_min_size": self._config.pool_min_size,
@@ -345,7 +345,7 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
             await self._pool.close()
             self._pool = None
         self._initialized = False
-        logger.info("DLQReplayTracker shutdown complete")
+        logger.info("ServiceDlqTracking shutdown complete")
 
     async def record_replay_attempt(self, record: ModelDlqReplayRecord) -> None:
         """Record a DLQ replay attempt.
@@ -597,9 +597,9 @@ class DLQReplayTracker(MixinAsyncCircuitBreaker):
 
 
 # ONEX Naming Convention Compliance:
-# The primary class name is DLQReplayTracker (descriptive domain name).
-# ServiceDlqTracking alias follows ONEX service naming convention (service_<name>.py → Service<Name>).
-# Both names are exported for flexibility in different contexts.
-ServiceDlqTracking = DLQReplayTracker
+# The primary class name is ServiceDlqTracking following ONEX service naming convention
+# (service_<name>.py → Service<Name>).
+# DLQReplayTracker is provided as a backwards-compatibility alias.
+DLQReplayTracker = ServiceDlqTracking
 
-__all__: list[str] = ["DLQReplayTracker", "ServiceDlqTracking"]
+__all__: list[str] = ["ServiceDlqTracking", "DLQReplayTracker"]

@@ -27,8 +27,8 @@ Note:
     event bus abstraction). Import it from there, not from this package.
 """
 
+from omnibase_infra.enums import EnumCircuitState, EnumRetryErrorCategory
 from omnibase_infra.mixins.mixin_async_circuit_breaker import (
-    CircuitState,
     MixinAsyncCircuitBreaker,
     ModelCircuitBreakerConfig,
 )
@@ -37,24 +37,21 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     MixinNodeIntrospection,
     PerformanceMetricsCacheDict,
 )
-from omnibase_infra.mixins.mixin_retry_execution import (
-    EnumRetryErrorCategory,
-    MixinRetryExecution,
-    RetryErrorClassification,
-)
+from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
 from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
     ProtocolCircuitBreakerAware,
 )
+from omnibase_infra.models import ModelRetryErrorClassification
 
 __all__: list[str] = [
-    "CircuitState",
+    "EnumCircuitState",
     "EnumRetryErrorCategory",
     "MixinAsyncCircuitBreaker",
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
     "MixinRetryExecution",
     "ModelCircuitBreakerConfig",
+    "ModelRetryErrorClassification",
     "PerformanceMetricsCacheDict",
     "ProtocolCircuitBreakerAware",
-    "RetryErrorClassification",
 ]

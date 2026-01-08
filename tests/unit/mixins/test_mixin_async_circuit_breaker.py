@@ -36,10 +36,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumCircuitState, EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins.mixin_async_circuit_breaker import (
-    CircuitState,
     MixinAsyncCircuitBreaker,
 )
 
@@ -91,11 +90,11 @@ class CircuitBreakerServiceStub(MixinAsyncCircuitBreaker):
         async with self._circuit_breaker_lock:
             await self._reset_circuit_breaker()
 
-    def get_state(self) -> CircuitState:
+    def get_state(self) -> EnumCircuitState:
         """Get current circuit state (for testing assertions)."""
         if self._circuit_breaker_open:
-            return CircuitState.OPEN
-        return CircuitState.CLOSED
+            return EnumCircuitState.OPEN
+        return EnumCircuitState.CLOSED
 
     def get_failure_count(self) -> int:
         """Get current failure count (for testing assertions)."""
@@ -159,7 +158,7 @@ class TestMixinAsyncCircuitBreakerBasics:
     async def test_circuit_starts_closed(self) -> None:
         """Test that circuit breaker starts in CLOSED state."""
         service = CircuitBreakerServiceStub()
-        assert service.get_state() == CircuitState.CLOSED
+        assert service.get_state() == EnumCircuitState.CLOSED
         assert service.get_failure_count() == 0
         assert not service._circuit_breaker_open
 
@@ -171,7 +170,7 @@ class TestMixinAsyncCircuitBreakerBasics:
         await service.check_circuit("test_operation")
 
         # Circuit should remain closed
-        assert service.get_state() == CircuitState.CLOSED
+        assert service.get_state() == EnumCircuitState.CLOSED
 
     async def test_record_failure_increments_counter(self) -> None:
         """Test that record_failure increments the failure counter."""
@@ -188,7 +187,7 @@ class TestMixinAsyncCircuitBreakerBasics:
         assert service.get_failure_count() == 3
 
         # Circuit should still be closed (below threshold)
-        assert service.get_state() == CircuitState.CLOSED
+        assert service.get_state() == EnumCircuitState.CLOSED
 
     async def test_record_failure_opens_circuit_at_threshold(self) -> None:
         """Test that circuit opens when failure threshold is reached."""
@@ -200,7 +199,7 @@ class TestMixinAsyncCircuitBreakerBasics:
         await service.record_failure("test_operation")
 
         # Circuit should now be open
-        assert service.get_state() == CircuitState.OPEN
+        assert service.get_state() == EnumCircuitState.OPEN
         assert service._circuit_breaker_open is True
 
     async def test_check_raises_when_open(self) -> None:
@@ -210,7 +209,7 @@ class TestMixinAsyncCircuitBreakerBasics:
         # Open the circuit
         await service.record_failure("test_operation")
         await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
+        assert service.get_state() == EnumCircuitState.OPEN
 
         # check_circuit should raise InfraUnavailableError
         with pytest.raises(InfraUnavailableError) as exc_info:
@@ -227,13 +226,13 @@ class TestMixinAsyncCircuitBreakerBasics:
         # Open the circuit
         await service.record_failure("test_operation")
         await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
+        assert service.get_state() == EnumCircuitState.OPEN
 
         # Reset the circuit
         await service.reset_circuit()
 
         # Circuit should now be closed
-        assert service.get_state() == CircuitState.CLOSED
+        assert service.get_state() == EnumCircuitState.CLOSED
         assert service.get_failure_count() == 0
         assert service._circuit_breaker_open is False
 
@@ -282,7 +281,7 @@ class TestMixinAsyncCircuitBreakerThreadSafety:
         assert all(result is None for result in check_results)
 
         # Circuit should be open (50 failures >= threshold)
-        assert service.get_state() == CircuitState.OPEN
+        assert service.get_state() == EnumCircuitState.OPEN
 
     async def test_no_race_condition_at_threshold(self) -> None:
         """Test that exactly threshold failures opens circuit (no race)."""
@@ -294,7 +293,7 @@ class TestMixinAsyncCircuitBreakerThreadSafety:
         await asyncio.gather(*tasks)
 
         # Circuit should be open
-        assert service.get_state() == CircuitState.OPEN
+        assert service.get_state() == EnumCircuitState.OPEN
         assert service.get_failure_count() == threshold
 
     async def test_lock_prevents_race_conditions(self) -> None:
@@ -321,7 +320,7 @@ class TestMixinAsyncCircuitBreakerThreadSafety:
         # Final state should be consistent (no corruption)
         # Either closed (reset) or open (failures)
         state = service.get_state()
-        assert state in (CircuitState.CLOSED, CircuitState.OPEN)
+        assert state in (EnumCircuitState.CLOSED, EnumCircuitState.OPEN)
 
 
 @pytest.mark.unit
@@ -471,7 +470,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
 
         # First failure should open circuit
         await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
+        assert service.get_state() == EnumCircuitState.OPEN
 
         # Check should raise immediately
         with pytest.raises(InfraUnavailableError):
@@ -484,7 +483,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
         # Open circuit
         await service.record_failure("test_operation")
         await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
+        assert service.get_state() == EnumCircuitState.OPEN
 
         # Immediate check should auto-reset (no wait needed)
         await service.check_circuit("test_operation")
@@ -515,11 +514,11 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
             # Open circuit
             await service.record_failure("test_operation")
             await service.record_failure("test_operation")
-            assert service.get_state() == CircuitState.OPEN
+            assert service.get_state() == EnumCircuitState.OPEN
 
             # Reset circuit
             await service.reset_circuit()
-            assert service.get_state() == CircuitState.CLOSED
+            assert service.get_state() == EnumCircuitState.CLOSED
             assert service.get_failure_count() == 0
 
     async def test_failure_after_manual_reset(self) -> None:
@@ -541,7 +540,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
 
         await service.record_failure("test_operation")
         await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
+        assert service.get_state() == EnumCircuitState.OPEN
 
     async def test_concurrent_operations_at_threshold_boundary(self) -> None:
         """Test concurrent operations near threshold boundary."""
@@ -552,11 +551,11 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
         for _ in range(threshold - 1):
             await service.record_failure("test_operation")
 
-        assert service.get_state() == CircuitState.CLOSED
+        assert service.get_state() == EnumCircuitState.CLOSED
 
         # One more failure should open circuit
         await service.record_failure("test_operation")
-        assert service.get_state() == CircuitState.OPEN
+        assert service.get_state() == EnumCircuitState.OPEN
 
     async def test_reset_idempotency(self) -> None:
         """Test that reset is idempotent (multiple resets don't break state)."""
@@ -572,7 +571,7 @@ class TestMixinAsyncCircuitBreakerEdgeCases:
         await service.reset_circuit()
 
         # State should be consistent
-        assert service.get_state() == CircuitState.CLOSED
+        assert service.get_state() == EnumCircuitState.CLOSED
         assert service.get_failure_count() == 0
 
     async def test_check_circuit_timing_precision(self) -> None:
@@ -627,11 +626,11 @@ class CircuitBreakerConfigServiceStub(MixinAsyncCircuitBreaker):
         async with self._circuit_breaker_lock:
             await self._record_circuit_failure(operation, correlation_id)
 
-    def get_state(self) -> CircuitState:
+    def get_state(self) -> EnumCircuitState:
         """Get current circuit state (for testing assertions)."""
         if self._circuit_breaker_open:
-            return CircuitState.OPEN
-        return CircuitState.CLOSED
+            return EnumCircuitState.OPEN
+        return EnumCircuitState.CLOSED
 
 
 @pytest.mark.unit
@@ -687,14 +686,14 @@ class TestMixinAsyncCircuitBreakerFromConfig:
         service = CircuitBreakerConfigServiceStub(config)
 
         # Circuit should start closed
-        assert service.get_state() == CircuitState.CLOSED
+        assert service.get_state() == EnumCircuitState.CLOSED
 
         # Record failures to open circuit
         await service.record_failure("test_operation")
         await service.record_failure("test_operation")
 
         # Circuit should now be open
-        assert service.get_state() == CircuitState.OPEN
+        assert service.get_state() == EnumCircuitState.OPEN
 
         # Check should raise with correct transport type in error context
         with pytest.raises(InfraUnavailableError) as exc_info:
