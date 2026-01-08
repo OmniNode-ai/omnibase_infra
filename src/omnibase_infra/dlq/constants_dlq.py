@@ -8,7 +8,7 @@ consistent validation patterns across models and services.
 Defense-in-Depth Note:
     The PATTERN_TABLE_NAME constant is intentionally used in BOTH:
     1. Pydantic model validation (ModelDlqTrackingConfig.storage_table field)
-    2. Runtime validation (DLQReplayTracker._validate_storage_table method)
+    2. Runtime validation (ServiceDlqTracking._validate_storage_table method)
 
     This defense-in-depth approach ensures SQL injection prevention even if:
     - Direct attribute assignment bypasses Pydantic validation
@@ -19,7 +19,7 @@ Defense-in-Depth Note:
 
 Related:
     - model_dlq_tracking_config.py - Pydantic field pattern validation
-    - service_dlq_tracking.py - Runtime defense-in-depth validation
+    - service_dlq_tracking.py - ServiceDlqTracking runtime defense-in-depth validation
     - OMN-1032 - PostgreSQL tracking integration ticket
 """
 
@@ -37,7 +37,7 @@ import re
 #
 # Used in:
 #   - ModelDlqTrackingConfig: Pydantic field pattern constraint
-#   - DLQReplayTracker: Runtime defense-in-depth validation
+#   - ServiceDlqTracking: Runtime defense-in-depth validation
 #
 # Pattern explanation:
 #   ^           - Start of string

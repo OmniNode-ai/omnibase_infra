@@ -17,7 +17,7 @@ Usage:
     ```python
     from omnibase_infra.mixins import MixinRetryExecution, MixinAsyncCircuitBreaker
 
-    class ConsulHandler(MixinAsyncCircuitBreaker, MixinRetryExecution):
+    class HandlerConsul(MixinAsyncCircuitBreaker, MixinRetryExecution):
         async def _my_operation(self, ...):
             result = await self._execute_with_retry(
                 operation="consul.kv_get",
@@ -29,7 +29,7 @@ Usage:
     ```
 
 Design Rationale:
-    This mixin extracts common retry patterns from ConsulHandler and VaultHandler
+    This mixin extracts common retry patterns from HandlerConsul and HandlerVault
     to reduce code duplication and cyclomatic complexity. The error classification
     methods are designed to be overridden by subclasses for handler-specific
     exception types (e.g., consul.ACLPermissionDenied, hvac.exceptions.Forbidden).
@@ -43,20 +43,22 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from enum import Enum
 from typing import TYPE_CHECKING, TypeVar, cast
 from uuid import UUID
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType, EnumRetryErrorCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
     InfraTimeoutError,
+    InfraUnavailableError,
     ModelInfraErrorContext,
 )
 from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
     ProtocolCircuitBreakerAware,
+)
+from omnibase_infra.models.model_retry_error_classification import (
+    ModelRetryErrorClassification,
 )
 
 if TYPE_CHECKING:
@@ -76,48 +78,6 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
-
-
-class EnumRetryErrorCategory(str, Enum):
-    """Classification of errors for retry decision making.
-
-    Error categories determine:
-    - Whether to retry the operation
-    - Whether to record circuit breaker failure
-    - Which error type to raise after retries exhausted
-    """
-
-    TIMEOUT = "timeout"
-    """Operation timed out - retry eligible, circuit breaker failure on exhaustion."""
-
-    AUTHENTICATION = "authentication"
-    """Authentication/permission error - no retry, immediate circuit breaker failure."""
-
-    CONNECTION = "connection"
-    """Connection/network error - retry eligible, circuit breaker failure on exhaustion."""
-
-    NOT_FOUND = "not_found"
-    """Resource not found - no retry, no circuit breaker failure (user error)."""
-
-    UNKNOWN = "unknown"
-    """Unknown/unexpected error - retry eligible, circuit breaker failure on exhaustion."""
-
-
-@dataclass(frozen=True)
-class RetryErrorClassification:
-    """Result of error classification for retry handling.
-
-    Attributes:
-        category: The error category for retry decision making.
-        should_retry: Whether the error is eligible for retry.
-        record_circuit_failure: Whether to record circuit breaker failure.
-        error_message: Sanitized error message for logging and retry state.
-    """
-
-    category: EnumRetryErrorCategory
-    should_retry: bool
-    record_circuit_failure: bool
-    error_message: str
 
 
 class MixinRetryExecution(ABC):
@@ -142,10 +102,10 @@ class MixinRetryExecution(ABC):
 
     Example:
         ```python
-        class ConsulHandler(MixinAsyncCircuitBreaker, MixinRetryExecution):
-            def _classify_error(self, error: Exception, operation: str) -> RetryErrorClassification:
+        class HandlerConsul(MixinAsyncCircuitBreaker, MixinRetryExecution):
+            def _classify_error(self, error: Exception, operation: str) -> ModelRetryErrorClassification:
                 if isinstance(error, consul.ACLPermissionDenied):
-                    return RetryErrorClassification(
+                    return ModelRetryErrorClassification(
                         category=EnumRetryErrorCategory.AUTHENTICATION,
                         should_retry=False,
                         record_circuit_failure=True,
@@ -162,7 +122,7 @@ class MixinRetryExecution(ABC):
     @abstractmethod
     def _classify_error(
         self, error: Exception, operation: str
-    ) -> RetryErrorClassification:
+    ) -> ModelRetryErrorClassification:
         """Classify an exception for retry handling.
 
         Subclasses must implement this to handle handler-specific exception types.
@@ -172,7 +132,7 @@ class MixinRetryExecution(ABC):
             operation: The operation name for context.
 
         Returns:
-            RetryErrorClassification with retry decision and error details.
+            ModelRetryErrorClassification with retry decision and error details.
         """
         ...
 
@@ -279,7 +239,7 @@ class MixinRetryExecution(ABC):
 
     async def _handle_retriable_error(
         self,
-        classification: RetryErrorClassification,
+        classification: ModelRetryErrorClassification,
         retry_state: ModelRetryState,
         max_delay_seconds: float,
         operation: str,
@@ -321,7 +281,7 @@ class MixinRetryExecution(ABC):
 
     def _create_final_error(
         self,
-        classification: RetryErrorClassification,
+        classification: ModelRetryErrorClassification,
         ctx: ModelInfraErrorContext,
         op_context: ModelOperationContext,
         original_error: Exception,
@@ -356,7 +316,7 @@ class MixinRetryExecution(ABC):
 
     async def _handle_non_retriable_error(
         self,
-        classification: RetryErrorClassification,
+        classification: ModelRetryErrorClassification,
         operation: str,
         correlation_id: UUID,
         original_error: Exception,
@@ -414,5 +374,5 @@ class MixinRetryExecution(ABC):
 __all__: list[str] = [
     "EnumRetryErrorCategory",
     "MixinRetryExecution",
-    "RetryErrorClassification",
+    "ModelRetryErrorClassification",
 ]

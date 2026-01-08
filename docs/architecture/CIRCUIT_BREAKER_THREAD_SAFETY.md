@@ -85,9 +85,9 @@ CLOSED  OPEN
 - `HALF_OPEN -> CLOSED`: First successful operation
 - `HALF_OPEN -> OPEN`: First failed operation
 
-### Lock Usage Pattern in VaultHandler
+### Lock Usage Pattern in HandlerVault
 
-The VaultHandler demonstrates the correct circuit breaker integration pattern:
+The HandlerVault demonstrates the correct circuit breaker integration pattern:
 
 #### 1. Circuit Breaker Check (Before Operation)
 ```python
@@ -185,7 +185,7 @@ Comprehensive unit tests verify mixin behavior:
 
 ### Integration Tests: `tests/unit/handlers/test_handler_vault.py`
 
-VaultHandler tests verify circuit breaker integration:
+HandlerVault tests verify circuit breaker integration:
 
 1. **Circuit Breaker Protection** - Verifies requests blocked when circuit open
 2. **Retry with Circuit Breaker** - Tests interaction between retry logic and circuit breaker
@@ -284,7 +284,7 @@ self._init_circuit_breaker(
 )
 ```
 
-### VaultHandler-Specific Configuration
+### HandlerVault-Specific Configuration
 
 ```python
 circuit_breaker_enabled=True                    # Enable/disable circuit breaker

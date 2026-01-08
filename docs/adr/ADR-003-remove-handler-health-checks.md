@@ -10,11 +10,11 @@ Accepted
 
 ## Context
 
-The handler implementations (VaultHandler, ConsulHandler, DbHandler, HttpRestHandler) each contained `health_check()` methods that returned information about their connection state and readiness. A code review (PR #91) identified inconsistency in the return types across handlers:
+The handler implementations (HandlerVault, HandlerConsul, HandlerDb, HttpRestHandler) each contained `health_check()` methods that returned information about their connection state and readiness. A code review (PR #91) identified inconsistency in the return types across handlers:
 
-- VaultHandler: `dict[str, JsonValue]`
-- ConsulHandler: `dict[str, JsonValue]`
-- DbHandler: `ModelDbHealthResponse` (typed Pydantic model)
+- HandlerVault: `dict[str, JsonValue]`
+- HandlerConsul: `dict[str, JsonValue]`
+- HandlerDb: `ModelDbHealthResponse` (typed Pydantic model)
 - HttpRestHandler: `dict[str, JsonValue]`
 
 The initial ticket (OMN-1027) proposed standardizing these return types. However, architectural analysis revealed a more fundamental question: **Why do handlers need health check methods at all?**
@@ -44,9 +44,9 @@ This differs fundamentally from HTTP-based microservices where health checks ser
 
 | Handler | Methods Removed | Models Removed | Operations Removed |
 |---------|-----------------|----------------|-------------------|
-| VaultHandler | `health_check()`, `_health_check_operation()` | `ModelVaultHealthCheckPayload` | `vault.health_check` |
-| ConsulHandler | `health_check()`, `_health_check_operation()` | `ModelConsulHealthCheckPayload` | `consul.health_check` |
-| DbHandler | `health_check()` | `ModelDbHealthResponse` | N/A |
+| HandlerVault | `health_check()`, `_health_check_operation()` | `ModelVaultHealthCheckPayload` | `vault.health_check` |
+| HandlerConsul | `health_check()`, `_health_check_operation()` | `ModelConsulHealthCheckPayload` | `consul.health_check` |
+| HandlerDb | `health_check()` | `ModelDbHealthResponse` | N/A |
 | HttpRestHandler | `health_check()` | `ModelHttpHealthCheckPayload` | N/A |
 
 ### What Was Preserved

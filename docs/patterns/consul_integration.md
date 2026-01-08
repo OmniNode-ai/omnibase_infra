@@ -53,9 +53,9 @@ config = ModelConsulHandlerConfig(
 ### Handler Initialization
 
 ```python
-from omnibase_infra.handlers import ConsulHandler
+from omnibase_infra.handlers import HandlerConsul
 
-handler = ConsulHandler()
+handler = HandlerConsul()
 await handler.initialize({
     "host": "consul.example.com",
     "port": 8500,
@@ -310,14 +310,14 @@ delay = min(delay, max_delay)
 ```python
 # Timeout errors - retryable
 if isinstance(error, (TimeoutError, consul.Timeout)):
-    return RetryErrorClassification(
+    return ModelRetryErrorClassification(
         category=EnumRetryErrorCategory.TIMEOUT,
         should_retry=True,
     )
 
 # Authentication errors - NOT retryable
 if isinstance(error, consul.ACLPermissionDenied):
-    return RetryErrorClassification(
+    return ModelRetryErrorClassification(
         category=EnumRetryErrorCategory.AUTHENTICATION,
         should_retry=False,
     )
