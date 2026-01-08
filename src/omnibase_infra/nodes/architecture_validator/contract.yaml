@@ -53,6 +53,24 @@ output_model:
   description: >
     Output containing validation results: overall pass/fail status, violations grouped by rule (ARCH-001, ARCH-002, ARCH-003), severity levels, and suggested fixes for each violation.
 
+# =============================================================================
+# SEVERITY RATIONALE
+# =============================================================================
+# The severity levels align with EnumValidationSeverity enum values:
+#   - ERROR: Blocks validation, serious architectural violation
+#   - WARNING: Non-blocking, flags potential issues for review
+#   - INFO: Informational only
+#
+# ARCH-001 uses WARNING because AST-based pattern detection may produce
+# false positives for legitimate patterns (test mocks, debugging code).
+# Non-blocking validation still flags issues while allowing review.
+#
+# ARCH-002 and ARCH-003 use ERROR because they represent serious
+# architectural violations that should block validation:
+#   - Handlers publishing events breaks the orchestrator ownership model
+#   - Orchestrators with FSM duplicates reducer responsibilities
+# =============================================================================
+
 # Validation rules with detection strategies
 validation_rules:
   - rule_id: "ARCH-001"
@@ -60,7 +78,10 @@ validation_rules:
     description: >
       Handlers MUST NOT be invoked directly bypassing the RuntimeHost. All event routing MUST go through the MessageDispatchEngine.
 
-    severity: "CRITICAL"
+    # WARNING severity: AST pattern matching may produce false positives for
+    # legitimate patterns like test mocks or debugging code. Using WARNING
+    # allows non-blocking validation while still flagging potential issues.
+    severity: "WARNING"
     detection_strategy:
       type: "ast_pattern"
       patterns:
@@ -77,7 +98,9 @@ validation_rules:
     description: >
       Handlers MUST NOT have direct event bus access. Only orchestrators may publish events. Handlers return events; orchestrators publish.
 
-    severity: "CRITICAL"
+    # ERROR severity: Serious architectural violation. Handlers with bus access
+    # breaks the orchestrator ownership model and event lifecycle management.
+    severity: "ERROR"
     detection_strategy:
       type: "signature_analysis"
       checks:
@@ -95,7 +118,9 @@ validation_rules:
     description: >
       Orchestrators MUST NOT duplicate reducer FSM transitions in workflow steps. Reducers own FSM; orchestrators coordinate workflow execution.
 
-    severity: "MAJOR"
+    # ERROR severity: Serious architectural violation. Orchestrators with FSM
+    # duplicates reducer responsibilities and violates separation of concerns.
+    severity: "ERROR"
     detection_strategy:
       type: "contract_analysis"
       checks:
@@ -146,7 +171,7 @@ definitions:
       strict_mode:
         type: boolean
         default: false
-        description: "If true, treat MAJOR as CRITICAL"
+        description: "If true, treat WARNING as ERROR (all violations block validation)"
       ignore_patterns:
         type: array
         items:
@@ -164,7 +189,7 @@ definitions:
     properties:
       passed:
         type: boolean
-        description: "True if no CRITICAL violations found"
+        description: "True if no ERROR-level violations found"
       total_violations:
         type: integer
         description: "Total number of violations found"
@@ -194,8 +219,8 @@ definitions:
         description: "Rule that was violated (ARCH-001, ARCH-002, ARCH-003)"
       severity:
         type: string
-        enum: ["CRITICAL", "MAJOR", "MINOR"]
-        description: "Violation severity"
+        enum: ["ERROR", "WARNING", "INFO"]
+        description: "Violation severity (ERROR blocks validation, WARNING non-blocking)"
       file_path:
         type: string
         description: "Path to file containing violation"

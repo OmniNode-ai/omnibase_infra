@@ -77,6 +77,8 @@ Configuration:
     options and severity mappings.
 """
 
+from __future__ import annotations
+
 from omnibase_infra.nodes.architecture_validator.validators.validator_no_direct_dispatch import (
     RuleNoDirectDispatch,
     validate_no_direct_dispatch,

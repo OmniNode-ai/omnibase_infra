@@ -87,15 +87,23 @@ def project_temp_dir() -> Path:
     temp files within the project directory (but NOT in tests/ to avoid
     exemptions).
 
+    Falls back to test file directory if pyproject.toml not found.
+
     Yields:
         Path to temporary directory within project.
     """
     current = Path(__file__).resolve()
     project_root = current.parent
+    original_parent = project_root  # Save for fallback
+
     while project_root != project_root.parent:
         if (project_root / "pyproject.toml").exists():
             break
         project_root = project_root.parent
+
+    # Fallback if pyproject.toml not found (use test file's directory)
+    if not (project_root / "pyproject.toml").exists():
+        project_root = original_parent
 
     temp_dir = project_root / f"_test_tmp_{uuid.uuid4().hex[:8]}"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -793,28 +801,41 @@ class Handler{i}:
         # Should have at least one violation per file
         assert len(result.violations) >= file_count
 
-    def test_correlation_id_propagation(
+    def test_correlation_id_not_yet_supported(
         self,
         validator: NodeArchitectureValidator,
         project_temp_dir: Path,
     ) -> None:
-        """Correlation ID should be preserved through validation.
+        """Document that correlation_id is not currently supported in the request model.
 
-        Note: ModelArchitectureValidationRequest accepts correlation_id
-        which is useful for distributed tracing.
+        The ModelArchitectureValidationRequest does not currently accept correlation_id.
+        ModelArchitectureValidationResult (a different model for OMN-1138) does support
+        correlation_id, but ModelFileValidationResult (used by this validator) does not.
+
+        TODO(OMN-XXXX): Add correlation_id support for distributed tracing:
+            1. Add correlation_id field to ModelArchitectureValidationRequest
+            2. Add correlation_id field to ModelFileValidationResult
+            3. Propagate correlation_id through compute() method
+            4. Update this test to verify propagation
         """
         clean_file = project_temp_dir / "correlation_test.py"
         clean_file.write_text("x = 1\n")
 
-        correlation_id = f"test-{uuid.uuid4().hex[:8]}"
         request = ModelArchitectureValidationRequest(
             paths=[str(clean_file)],
-            # Note: correlation_id may be in the request model
         )
+
+        # Verify the request model does NOT have correlation_id
+        assert "correlation_id" not in ModelArchitectureValidationRequest.model_fields
+
         result = validator.compute(request)
 
-        # Validation should complete regardless of correlation_id
+        # Verify the result model (ModelFileValidationResult) does NOT have correlation_id
+        assert "correlation_id" not in type(result).model_fields
+
+        # Validation should still work correctly
         assert result.valid is True
+        assert result.files_checked == 1
 
 
 # =============================================================================
