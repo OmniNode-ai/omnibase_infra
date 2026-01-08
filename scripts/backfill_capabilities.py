@@ -23,15 +23,17 @@ Idempotency Strategy:
         - protocols (GIN index for array containment queries)
         - contract_type + current_state (B-tree composite index)
 
-        However, these indexes are for QUERY PERFORMANCE, not for backfill
-        tracking. Empty arrays (capability_tags = '{}') are valid states for
-        nodes that simply don't have those capabilities - they do NOT indicate
-        "needs processing".
+        IMPORTANT: These GIN indexes exist for RUNTIME QUERY PERFORMANCE (e.g.,
+        finding all nodes with a specific capability tag). They are NOT used
+        for backfill pre-check logic. Empty arrays (capability_tags = '{}')
+        are valid states for nodes that simply don't have those capabilities -
+        they do NOT indicate "needs processing".
 
         The contract_type column is the correct idempotency marker because:
         - It is ALWAYS set to a non-NULL value after processing
         - Even records with no determinable type get 'unknown' as a marker
         - NULL contract_type unambiguously means "never processed"
+        - Unlike array fields, there is no valid "empty" state for contract_type
 
     Once processed:
         - contract_type is ALWAYS set to a non-NULL value:
@@ -380,6 +382,8 @@ def extract_capability_tags(capabilities: dict[str, object]) -> list[str]:
             tags.append(field)
 
     # Add any custom capability tags from config
+    # Note: str() coercion ensures all items are strings, matching the
+    # coercion pattern used in extract_protocols() and extract_intent_types()
     config = capabilities.get("config", {})
     if isinstance(config, dict):
         if "capability_tags" in config and isinstance(config["capability_tags"], list):
@@ -939,8 +943,13 @@ async def backfill(dry_run: bool = False, batch_size: int = 1000) -> int:
         # Final summary
         if dry_run:
             print(f"\nDry-run summary: Would update {total_updated} registrations")
-            print(f"  Initial count (from query): {total_rows}")
+            print(f"  Initial count (WHERE contract_type IS NULL): {total_rows}")
             print(f"  Total records analyzed: {total_updated}")
+            if total_updated != total_rows:
+                print(
+                    "  Note: Counts differ because initial count is a snapshot; "
+                    "records may have been processed concurrently"
+                )
             print(f"  Batches processed: {batch_num}")
             if total_unknown > 0:
                 print(
@@ -990,12 +999,20 @@ def main() -> int:
     if args.batch_size > 100000:
         print("WARNING: Large batch sizes (>100000) may cause memory issues")
 
-    if not os.getenv("POSTGRES_PASSWORD"):
+    password = os.getenv("POSTGRES_PASSWORD")
+    if password is None:
         print(
             f"ERROR [{ErrorCode.CFG_MISSING_PASSWORD}]: "
             "POSTGRES_PASSWORD environment variable is required"
         )
         print("  Action: Set POSTGRES_PASSWORD before running this script.")
+        return 1
+    if password == "":
+        print(
+            f"ERROR [{ErrorCode.CFG_MISSING_PASSWORD}]: "
+            "POSTGRES_PASSWORD environment variable is set but empty"
+        )
+        print("  Action: Set POSTGRES_PASSWORD to a non-empty value.")
         return 1
 
     try:

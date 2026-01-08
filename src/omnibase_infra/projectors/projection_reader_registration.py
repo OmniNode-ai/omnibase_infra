@@ -42,6 +42,16 @@ State Filtering on Capability Queries:
     criteria are returned regardless of their current FSM state. When state
     is provided, an additional WHERE clause filters on current_state.
 
+    Valid state values (EnumRegistrationState):
+        - PENDING_REGISTRATION: Initial state after registration initiated
+        - ACCEPTED: Registration accepted, awaiting acknowledgment
+        - AWAITING_ACK: Waiting for node to acknowledge registration
+        - ACK_RECEIVED: Node acknowledged registration
+        - ACTIVE: Fully registered and operational (most common filter for discovery)
+        - ACK_TIMED_OUT: Ack deadline passed (retriable)
+        - REJECTED: Registration rejected (terminal)
+        - LIVENESS_EXPIRED: Liveness check failed (terminal)
+
 Related Tickets:
     - OMN-944 (F1): Implement Registration Projection Schema
     - OMN-940 (F0): Define Projector Execution Model

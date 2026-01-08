@@ -122,8 +122,29 @@ CREATE INDEX IF NOT EXISTS idx_registration_contract_type_state
 -- CHECK CONSTRAINT FOR CONTRACT_TYPE
 -- =============================================================================
 -- Ensure contract_type values are consistent with node_type valid values.
--- Note: 'unknown' is used by backfill scripts for records where the contract
--- type cannot be determined from the capabilities JSONB (legacy registrations).
+--
+-- The 'unknown' Value Explained:
+-- -----------------------------
+-- The 'unknown' value serves a specific purpose in the migration idempotency model:
+--
+-- 1. WHY 'unknown' exists:
+--    Legacy registrations created before this migration lack explicit contract type
+--    information in their capabilities JSONB. When the backfill script processes
+--    these records, it cannot reliably determine the contract type (effect, compute,
+--    reducer, orchestrator) from the existing data.
+--
+-- 2. Idempotency marker:
+--    The migration uses contract_type IS NULL to identify unprocessed records:
+--    - NULL  = Record has not been processed by backfill script
+--    - value = Record has been processed (including 'unknown' for legacy records)
+--    This allows the backfill script to be safely re-run without reprocessing
+--    already-handled records.
+--
+-- 3. Backfill behavior:
+--    The backfill script (003b_backfill_capability_fields.py) sets 'unknown' only
+--    when it cannot determine the contract type. New registrations created after
+--    this migration will have the correct contract type set by the projector.
+--
 -- Note: Using DO block to handle constraint already existing (idempotent)
 
 DO $$
