@@ -242,7 +242,13 @@ class NodeRegistryEffect(NodeEffect):
 
                 self._consul_client = self._container.resolve(ProtocolConsulClient)
                 return self._consul_client
-            except Exception:
+            except (
+                Exception
+            ):  # CATCH-ALL: Container.resolve() may raise arbitrary exceptions
+                # from dependency injection frameworks (e.g., missing bindings, circular
+                # dependencies, instantiation errors). We catch all to fall through to the
+                # ProtocolConfigurationError with a helpful message if the adapter was not
+                # manually set and could not be resolved from the container.
                 pass
 
         raise ProtocolConfigurationError(
@@ -273,7 +279,13 @@ class NodeRegistryEffect(NodeEffect):
                     ProtocolPostgresAdapter
                 )
                 return self._postgres_adapter
-            except Exception:
+            except (
+                Exception
+            ):  # CATCH-ALL: Container.resolve() may raise arbitrary exceptions
+                # from dependency injection frameworks (e.g., missing bindings, circular
+                # dependencies, instantiation errors). We catch all to fall through to the
+                # ProtocolConfigurationError with a helpful message if the adapter was not
+                # manually set and could not be resolved from the container.
                 pass
 
         raise ProtocolConfigurationError(
@@ -366,9 +378,9 @@ class NodeRegistryEffect(NodeEffect):
                 - error_summary: Aggregated error messages if any failed
 
         Raises:
-            ProtocolConfigurationError: If backend adapters are not configured.
-            ValueError: If operation is invalid or target_backend is missing
-                for retry_partial_failure.
+            ProtocolConfigurationError: If backend adapters are not configured,
+                operation is invalid, or target_backend is missing for
+                retry_partial_failure.
 
         Example:
             >>> response = await effect.execute_operation(request, "register_node")
@@ -385,7 +397,10 @@ class NodeRegistryEffect(NodeEffect):
         # Get handler configurations from contract
         handler_configs = self._get_handlers_for_operation(operation)
         if not handler_configs:
-            raise ValueError(f"Unknown operation: {operation}")
+            raise ProtocolConfigurationError(
+                f"Unknown operation: {operation}",
+                operation=operation,
+            )
 
         # Check for parallel execution mode from contract
         routing = self._load_operation_routing()
@@ -413,8 +428,9 @@ class NodeRegistryEffect(NodeEffect):
         # Handle retry_partial_failure operation (single backend)
         if operation == "retry_partial_failure":
             if not target_backend:
-                raise ValueError(
-                    "target_backend is required for retry_partial_failure operation"
+                raise ProtocolConfigurationError(
+                    "target_backend is required for retry_partial_failure operation",
+                    operation=operation,
                 )
 
             # Create partial retry handler - must be HandlerPartialRetry
@@ -555,7 +571,11 @@ class NodeRegistryEffect(NodeEffect):
                     consul_result = await consul_handler_instance.handle(
                         request, correlation_id
                     )
-                except Exception as e:
+                except (
+                    Exception
+                ) as e:  # CATCH-ALL: Handler may raise unexpected exceptions
+                    # beyond typed infrastructure errors (e.g., serialization errors, protocol
+                    # mismatches). Required for graceful dual-backend partial failure handling.
                     consul_result = ModelBackendResult(
                         success=False,
                         error=sanitize_error_message(e),
@@ -570,7 +590,11 @@ class NodeRegistryEffect(NodeEffect):
                     postgres_result = await postgres_handler_instance.handle(
                         request, correlation_id
                     )
-                except Exception as e:
+                except (
+                    Exception
+                ) as e:  # CATCH-ALL: Handler may raise unexpected exceptions
+                    # beyond typed infrastructure errors (e.g., serialization errors, protocol
+                    # mismatches). Required for graceful dual-backend partial failure handling.
                     postgres_result = ModelBackendResult(
                         success=False,
                         error=sanitize_error_message(e),

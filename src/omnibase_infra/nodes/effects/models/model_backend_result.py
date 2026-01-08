@@ -65,6 +65,28 @@ class ModelBackendResult(BaseModel):
         duration_ms: Time taken for the operation in milliseconds.
         backend_id: Optional identifier for the backend instance.
 
+    Design Note - No ``retries`` Field:
+        This model intentionally does NOT include a ``retries`` field because:
+
+        1. **Effect layer dispatches once**: The effect node dispatches to handlers
+           exactly once per operation. It does not implement retry loops.
+        2. **Handlers own retry logic**: Handlers implement their own retry behavior
+           using the ``retry_policy`` configuration from the contract. Retry count
+           is internal handler state, not exposed in results.
+        3. **Caller-controlled retries**: Callers can use the ``retry_partial_failure``
+           operation for explicit retries after partial failures.
+
+        **Important**: At the effect layer, a ``retries`` field would always be 0.
+        Retry counts are only meaningful when aggregated by the orchestrator layer,
+        which tracks how many times ``retry_partial_failure`` was called.
+
+        For observability of retry attempts:
+        - Handlers should emit metrics/logs during internal retry loops
+        - Use ``correlation_id`` to correlate retry attempts across logs
+        - Orchestrator layer can track ``retry_partial_failure`` operation calls
+
+        See: ``contract.yaml`` error_handling.retry_policy for handler configuration.
+
     Example:
         >>> result = ModelBackendResult(
         ...     success=True,

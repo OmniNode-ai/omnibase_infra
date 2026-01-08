@@ -75,6 +75,11 @@ import time
 from datetime import UTC, datetime
 from uuid import UUID
 
+from omnibase_infra.errors import (
+    InfraAuthenticationError,
+    InfraConnectionError,
+    InfraTimeoutError,
+)
 from omnibase_infra.nodes.effects.models.model_backend_result import (
     ModelBackendResult,
 )
@@ -322,14 +327,53 @@ class NodeRegistryEffect:
                     correlation_id=request.correlation_id,
                 )
 
-        except Exception as e:
+        except (TimeoutError, InfraTimeoutError) as e:
+            # Timeout during registration - retriable error
             duration_ms = (time.perf_counter() - start_time) * 1000
-            # Sanitize error message to prevent credential exposure
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="CONSUL_TIMEOUT_ERROR",
+                duration_ms=duration_ms,
+                backend_id="consul",
+                correlation_id=request.correlation_id,
+            )
+
+        except InfraAuthenticationError as e:
+            # Authentication failure - non-retriable error
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="CONSUL_AUTH_ERROR",
+                duration_ms=duration_ms,
+                backend_id="consul",
+                correlation_id=request.correlation_id,
+            )
+
+        except InfraConnectionError as e:
+            # Connection failure - retriable error
+            duration_ms = (time.perf_counter() - start_time) * 1000
             sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
                 error_code="CONSUL_CONNECTION_ERROR",
+                duration_ms=duration_ms,
+                backend_id="consul",
+                correlation_id=request.correlation_id,
+            )
+
+        except Exception as e:
+            # Unknown exception - sanitize to prevent credential exposure
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="CONSUL_UNKNOWN_ERROR",
                 duration_ms=duration_ms,
                 backend_id="consul",
                 correlation_id=request.correlation_id,
@@ -380,14 +424,53 @@ class NodeRegistryEffect:
                     correlation_id=request.correlation_id,
                 )
 
-        except Exception as e:
+        except (TimeoutError, InfraTimeoutError) as e:
+            # Timeout during upsert - retriable error
             duration_ms = (time.perf_counter() - start_time) * 1000
-            # Sanitize error message to prevent credential exposure
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="POSTGRES_TIMEOUT_ERROR",
+                duration_ms=duration_ms,
+                backend_id="postgres",
+                correlation_id=request.correlation_id,
+            )
+
+        except InfraAuthenticationError as e:
+            # Authentication failure - non-retriable error
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="POSTGRES_AUTH_ERROR",
+                duration_ms=duration_ms,
+                backend_id="postgres",
+                correlation_id=request.correlation_id,
+            )
+
+        except InfraConnectionError as e:
+            # Connection failure - retriable error
+            duration_ms = (time.perf_counter() - start_time) * 1000
             sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
                 error_code="POSTGRES_CONNECTION_ERROR",
+                duration_ms=duration_ms,
+                backend_id="postgres",
+                correlation_id=request.correlation_id,
+            )
+
+        except Exception as e:
+            # Unknown exception - sanitize to prevent credential exposure
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="POSTGRES_UNKNOWN_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=request.correlation_id,

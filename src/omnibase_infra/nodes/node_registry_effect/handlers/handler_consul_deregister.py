@@ -191,8 +191,11 @@ class HandlerConsulDeregister:
                 correlation_id=correlation_id,
             )
 
-        except Exception as e:
-            # Unknown exception - sanitize to prevent credential exposure
+        except (
+            Exception
+        ) as e:  # CATCH-ALL: External service may raise unexpected exceptions
+            # beyond typed infrastructure errors (e.g., HTTP client errors, JSON decode errors,
+            # network stack errors). Required to sanitize errors and prevent credential exposure.
             duration_ms = (time.perf_counter() - start_time) * 1000
             sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(

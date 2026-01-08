@@ -513,6 +513,7 @@ definitions:
       service_name:
         type: string
         nullable: true
+        default: null
         description: "Name for service discovery registration"
       endpoints:
         type: object
@@ -537,6 +538,7 @@ definitions:
         key_type: string
         value_type: string
         nullable: true
+        default: null
         description: "Optional health check configuration for Consul"
       timestamp:
         type: datetime
@@ -580,10 +582,12 @@ definitions:
       error:
         type: string
         nullable: true
+        default: null
         description: "Sanitized error message if success is False"
       error_code:
         type: string
         nullable: true
+        default: null
         description: "Error code for programmatic handling (e.g., DATABASE_CONNECTION_ERROR)"
       duration_ms:
         type: float
@@ -593,10 +597,12 @@ definitions:
       backend_id:
         type: string
         nullable: true
+        default: null
         description: "Optional identifier for the backend instance"
       correlation_id:
         type: uuid
         nullable: true
+        default: null
         description: "Correlation ID for tracing the operation"
     required:
       - success
@@ -638,6 +644,7 @@ definitions:
       error_summary:
         type: string
         nullable: true
+        default: null
         description: "Aggregated error message for failed operations (e.g., 'Consul: error; PostgreSQL: error')"
     required:
       - status
@@ -663,7 +670,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2025-01-01"
-  updated: "2026-01-07"
+  updated: "2026-01-08"
   tags:
     - effect
     - registration
