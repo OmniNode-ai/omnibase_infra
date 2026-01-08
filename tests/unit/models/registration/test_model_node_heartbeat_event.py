@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
@@ -40,7 +41,7 @@ class TestModelNodeHeartbeatEventBasicInstantiation:
         )
         assert event.node_id == test_node_id
         assert event.node_type == EnumNodeKind.EFFECT
-        assert event.node_version == "1.0.0"  # Default value
+        assert str(event.node_version) == "1.0.0"  # Default value
         assert event.uptime_seconds == 3600.0
         assert event.active_operations_count == 0  # Default value
         assert event.memory_usage_mb is None
@@ -65,7 +66,7 @@ class TestModelNodeHeartbeatEventBasicInstantiation:
         )
         assert event.node_id == test_node_id
         assert event.node_type == EnumNodeKind.COMPUTE
-        assert event.node_version == "2.1.0"
+        assert str(event.node_version) == "2.1.0"
         assert event.uptime_seconds == 7200.5
         assert event.active_operations_count == 10
         assert event.memory_usage_mb == 512.0
@@ -98,7 +99,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
             uptime_seconds=100.0,
             timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_version == "1.0.0"
+        assert str(event.node_version) == "1.0.0"
 
     def test_node_version_explicit_value(self) -> None:
         """Test that node_version can be set explicitly."""
@@ -110,7 +111,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
             uptime_seconds=100.0,
             timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_version == "2.3.4"
+        assert str(event.node_version) == "2.3.4"
 
     def test_node_version_with_prerelease(self) -> None:
         """Test that node_version accepts prerelease versions."""
@@ -122,7 +123,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
             uptime_seconds=100.0,
             timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_version == "1.0.0-alpha.1"
+        assert str(event.node_version) == "1.0.0-alpha.1"
 
     def test_node_version_with_build_metadata(self) -> None:
         """Test that node_version accepts build metadata."""
@@ -134,7 +135,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
             uptime_seconds=100.0,
             timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_version == "1.0.0+build.123"
+        assert str(event.node_version) == "1.0.0+build.123"
 
     def test_node_version_with_prerelease_and_build_metadata(self) -> None:
         """Test that node_version accepts combined prerelease and build metadata."""
@@ -146,7 +147,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
             uptime_seconds=100.0,
             timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_version == "1.0.0-alpha.1+build.123"
+        assert str(event.node_version) == "1.0.0-alpha.1+build.123"
 
     def test_node_version_serialization_roundtrip(self) -> None:
         """Test that node_version is preserved in JSON serialization."""
@@ -160,7 +161,7 @@ class TestModelNodeHeartbeatEventNodeVersion:
         )
         json_str = event.model_dump_json()
         restored = ModelNodeHeartbeatEvent.model_validate_json(json_str)
-        assert restored.node_version == "3.2.1"
+        assert str(restored.node_version) == "3.2.1"
 
     def test_node_version_in_model_dump(self) -> None:
         """Test that node_version appears in model_dump output."""
@@ -174,7 +175,10 @@ class TestModelNodeHeartbeatEventNodeVersion:
         )
         data = event.model_dump()
         assert "node_version" in data
-        assert data["node_version"] == "4.5.6"
+        # ModelSemVer serializes to dict with major/minor/patch fields
+        assert data["node_version"]["major"] == 4
+        assert data["node_version"]["minor"] == 5
+        assert data["node_version"]["patch"] == 6
 
 
 class TestModelNodeHeartbeatEventSemverValidation:
@@ -296,7 +300,7 @@ class TestModelNodeHeartbeatEventSemverValidation:
             uptime_seconds=100.0,
             timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_version == "1.0.0-alpha.beta.1.2.3"
+        assert str(event.node_version) == "1.0.0-alpha.beta.1.2.3"
 
     def test_valid_semver_complex_build_metadata(self) -> None:
         """Test that complex build metadata is valid."""
@@ -308,7 +312,7 @@ class TestModelNodeHeartbeatEventSemverValidation:
             uptime_seconds=100.0,
             timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_version == "1.0.0+20130313144700.sha.abc123"
+        assert str(event.node_version) == "1.0.0+20130313144700.sha.abc123"
 
 
 class TestModelNodeHeartbeatEventUptimeValidation:
@@ -983,7 +987,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
         event = ModelNodeHeartbeatEvent.model_validate(obj)
         assert event.node_id == test_node_id
         assert event.node_type == EnumNodeKind.COMPUTE
-        assert event.node_version == "1.0.0"
+        assert str(event.node_version) == "1.0.0"
         assert event.uptime_seconds == 1234.5
         assert event.active_operations_count == 5
 
@@ -1011,7 +1015,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
         event = ModelNodeHeartbeatEvent.model_validate(obj)
         assert event.node_id == test_node_id
         assert event.node_type == EnumNodeKind.ORCHESTRATOR
-        assert event.node_version == "2.1.0"
+        assert str(event.node_version) == "2.1.0"
         assert event.uptime_seconds == 86400.0
         assert event.active_operations_count == 42
         assert event.memory_usage_mb == 2048.5

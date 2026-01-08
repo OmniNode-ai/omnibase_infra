@@ -42,6 +42,7 @@ from uuid import uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.handlers.registration_storage.handler_mock_registration_storage import (
     MockRegistrationStorageHandler,
@@ -89,7 +90,7 @@ def sample_registration_record() -> ModelRegistrationRecord:
     return ModelRegistrationRecord(
         node_id=uuid4(),
         node_type=EnumNodeKind.EFFECT,
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         capabilities=["registration.storage", "registration.storage.query"],
         endpoints={"health": "http://localhost:8080/health"},
         metadata={"team": "platform", "environment": "test"},
@@ -108,7 +109,7 @@ def multiple_registration_records() -> list[ModelRegistrationRecord]:
             ModelRegistrationRecord(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT if i % 2 == 0 else EnumNodeKind.COMPUTE,
-                node_version=f"1.{i}.0",
+                node_version=ModelSemVer.parse(f"1.{i}.0"),
                 capabilities=[f"capability.{i}"],
                 endpoints={"health": f"http://localhost:808{i}/health"},
                 metadata={"index": str(i)},
@@ -381,7 +382,7 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
         updated_record = ModelRegistrationRecord(
             node_id=sample_registration_record.node_id,
             node_type=sample_registration_record.node_type,
-            node_version="2.0.0",  # Changed version
+            node_version=ModelSemVer.parse("2.0.0"),  # Changed version
             capabilities=["new.capability"],
             endpoints={"health": "http://localhost:9090/health"},
             metadata={"updated": "true"},
@@ -484,7 +485,7 @@ class TestHandlerFactoryPattern:
         record = ModelRegistrationRecord(
             node_id=uuid4(),
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             capabilities=["test.capability"],
             endpoints={},
             metadata={},
@@ -536,7 +537,7 @@ class TestRuntimeHandlerSwapping:
         record = ModelRegistrationRecord(
             node_id=uuid4(),
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             capabilities=["test.capability"],
             endpoints={},
             metadata={},
@@ -583,7 +584,7 @@ class TestRuntimeHandlerSwapping:
             record = ModelRegistrationRecord(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 capabilities=[],
                 endpoints={},
                 metadata={},

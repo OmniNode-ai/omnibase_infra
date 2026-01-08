@@ -44,6 +44,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.discovery import (
@@ -506,7 +507,7 @@ class TestSuite2RegistryDualRegistration:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
 
@@ -595,7 +596,7 @@ class TestSuite2RegistryDualRegistration:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
 
@@ -683,7 +684,7 @@ class TestSuite2RegistryDualRegistration:
                 registered_at=now,
                 updated_at=now,
                 node_type=EnumNodeKind.EFFECT,
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 last_applied_event_id=unique_node_id,
             )
 
@@ -759,7 +760,7 @@ class TestSuite2RegistryDualRegistration:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
 
@@ -843,7 +844,7 @@ class TestSuite2RegistryDualRegistration:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
 
@@ -1403,7 +1404,7 @@ class TestSuite4HeartbeatPublishing:
             domain="registration",
             current_state=EnumRegistrationState.ACTIVE,
             node_type=introspectable_test_node.node_type,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             capabilities={"test": True},
             ack_deadline=None,
             liveness_deadline=now,  # Will be updated by heartbeat
@@ -1607,7 +1608,7 @@ class TestSuite5RegistryRecovery:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
         await projector.persist(
@@ -1650,7 +1651,7 @@ class TestSuite5RegistryRecovery:
         assert recovered_projection.entity_id == unique_node_id
         assert recovered_projection.current_state == EnumRegistrationState.ACTIVE
         assert recovered_projection.node_type == EnumNodeKind.EFFECT
-        assert recovered_projection.node_version == "1.0.0"
+        assert str(recovered_projection.node_version) == "1.0.0"
 
     @pytest.mark.asyncio
     async def test_re_registration_after_recovery(
@@ -1699,7 +1700,7 @@ class TestSuite5RegistryRecovery:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
         await real_projector.persist(
@@ -1786,7 +1787,7 @@ class TestSuite5RegistryRecovery:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
         await real_projector.persist(
@@ -1806,7 +1807,7 @@ class TestSuite5RegistryRecovery:
             timeout_seconds=5.0,
         )
         assert first_result is not None
-        assert first_result.node_version == "1.0.0"
+        assert str(first_result.node_version) == "1.0.0"
 
         # Step 2: Update the same registration with new version (simulating UPSERT)
         updated_now = datetime.now(UTC)
@@ -1817,7 +1818,7 @@ class TestSuite5RegistryRecovery:
             registered_at=first_result.registered_at,  # Preserve original registration time
             updated_at=updated_now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="2.0.0",  # Updated version
+            node_version=ModelSemVer.parse("2.0.0"),  # Updated version
             last_applied_event_id=unique_node_id,
         )
         await real_projector.persist(
@@ -1841,7 +1842,7 @@ class TestSuite5RegistryRecovery:
         # Assertions
         assert final_result is not None, "Registration should exist"
         assert final_result.entity_id == unique_node_id, "Entity ID should be preserved"
-        assert final_result.node_version == "2.0.0", (
+        assert str(final_result.node_version) == "2.0.0", (
             f"Version should be updated to 2.0.0, got {final_result.node_version}"
         )
         assert final_result.current_state == EnumRegistrationState.ACTIVE, (
@@ -1923,7 +1924,7 @@ class TestSuite6MultipleNodes:
                 registered_at=now,
                 updated_at=now,
                 node_type=EnumNodeKind.EFFECT,
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 last_applied_event_id=node_ids[idx],
             )
             await real_projector.persist(
@@ -2164,7 +2165,7 @@ class TestSuite6MultipleNodes:
         ):
             pg_result = postgres_results[i]
             assert pg_result is not None
-            assert pg_result.node_version == f"1.{i}.0", (
+            assert str(pg_result.node_version) == f"1.{i}.0", (
                 f"PostgreSQL version mismatch for node {i}"
             )
 
@@ -2288,7 +2289,7 @@ class TestSuite7GracefulDegradation:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
 
@@ -2638,7 +2639,7 @@ class TestSuite8RegistrySelfRegistration:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.ORCHESTRATOR,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=registry_node_id,
         )
 
@@ -2699,7 +2700,7 @@ class TestSuite8RegistrySelfRegistration:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.ORCHESTRATOR,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=registry_node_id,
         )
 
@@ -2748,7 +2749,7 @@ class TestSuite8RegistrySelfRegistration:
         # Create introspection event for the registry itself
         registry_event = introspection_event_factory(
             node_type=EnumNodeKind.ORCHESTRATOR,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={
                 "health": "http://localhost:8085/health",
                 "api": "http://localhost:8085/api/v1/registry",

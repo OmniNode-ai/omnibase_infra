@@ -817,7 +817,7 @@ def introspection_event_factory(
             node_id=node_id or unique_node_id,
             node_type=node_type.value,
             node_version=node_version,
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             endpoints=endpoints or {"health": "http://localhost:8080/health"},
             metadata=ModelNodeMetadata(),
             correlation_id=correlation_id or unique_correlation_id,

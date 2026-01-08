@@ -6,7 +6,7 @@ Provides infrastructure-specific enumerations for transport types,
 protocol identification, policy classification, dispatch status,
 message categories, topic types, topic standards, chain validation,
 registration states, handler types, handler error types, handler source types,
-node archetypes, and other infrastructure concerns.
+node archetypes, introspection reasons, and other infrastructure concerns.
 
 Exports:
     EnumChainViolationType: Chain violation types for correlation/causation validation
@@ -16,6 +16,7 @@ Exports:
     EnumHandlerType: Handler architectural roles (INFRA_HANDLER, NODE_HANDLER)
     EnumHandlerTypeCategory: Behavioral classification (COMPUTE, EFFECT)
     EnumInfraTransportType: Infrastructure transport type enumeration
+    EnumIntrospectionReason: Introspection event reasons (STARTUP, SHUTDOWN, etc.)
     EnumMessageCategory: Message categories (EVENT, COMMAND, INTENT)
     EnumNodeArchetype: 4-node architecture (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
     EnumNodeOutputType: Node output types for execution shape validation
@@ -35,6 +36,7 @@ from omnibase_infra.enums.enum_handler_source_type import EnumHandlerSourceType
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
+from omnibase_infra.enums.enum_introspection_reason import EnumIntrospectionReason
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
@@ -53,6 +55,7 @@ __all__: list[str] = [
     "EnumHandlerType",
     "EnumHandlerTypeCategory",
     "EnumInfraTransportType",
+    "EnumIntrospectionReason",
     "EnumMessageCategory",
     "EnumNodeArchetype",
     "EnumNodeOutputType",

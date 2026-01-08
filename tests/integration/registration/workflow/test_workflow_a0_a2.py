@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
@@ -161,7 +162,7 @@ class TestA0PurityGate:
         request = ModelRegistryRequest(
             node_id=uuid4(),
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=uuid4(),
             service_name=f"onex-{EnumNodeKind.EFFECT.value}",
             endpoints={"health": "http://localhost:8080/health"},
@@ -231,6 +232,7 @@ class TestA0PurityGate:
         # Act - Phase 2: Effect executes registration (with I/O)
         # Note: event.node_type is a Literal["effect", "compute", "reducer", "orchestrator"]
         # string, not an EnumNodeKind. Convert to EnumNodeKind for ModelRegistryRequest.
+        # Note: event.node_version is already ModelSemVer, pass directly.
         request = ModelRegistryRequest(
             node_id=event.node_id,
             node_type=EnumNodeKind(event.node_type),
@@ -706,10 +708,25 @@ class TestWorkflowIntegration:
         # Note: introspection_data["node_type"] is already a string from JSON serialization
         # (e.g., "effect", "compute") which matches the Literal type expected by the model.
         # No conversion to EnumNodeKind is needed.
+        # Note: node_version from JSON can be a dict (serialized ModelSemVer) or string.
+        version_data = introspection_data.get("node_version", "1.0.0")
+        if isinstance(version_data, ModelSemVer):
+            version = version_data
+        elif isinstance(version_data, dict):
+            # Handle serialized ModelSemVer dict format
+            version = ModelSemVer(
+                major=version_data.get("major", 1),
+                minor=version_data.get("minor", 0),
+                patch=version_data.get("patch", 0),
+                prerelease=version_data.get("prerelease"),
+                build=version_data.get("build"),
+            )
+        else:
+            version = ModelSemVer.parse(str(version_data))
         introspection_event = ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type=introspection_data.get("node_type", "effect"),
-            node_version=introspection_data.get("node_version", "1.0.0"),
+            node_version=version,
             correlation_id=correlation_id,
             endpoints=introspection_data.get("endpoints", {}),
             timestamp=datetime.now(UTC),
@@ -729,6 +746,7 @@ class TestWorkflowIntegration:
         # Step 3: Effect executes registration (A0 - I/O separation)
         # Note: introspection_event.node_type is a Literal string (e.g., "effect"),
         # not an EnumNodeKind. Convert to EnumNodeKind for ModelRegistryRequest.
+        # Note: introspection_event.node_version is already ModelSemVer, pass directly.
         request = ModelRegistryRequest(
             node_id=node_id,
             node_type=EnumNodeKind(introspection_event.node_type),

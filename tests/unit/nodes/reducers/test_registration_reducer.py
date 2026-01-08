@@ -38,6 +38,7 @@ from uuid import UUID, uuid4
 import pytest
 from omnibase_core.enums import EnumReductionType, EnumStreamingMode
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
 from pydantic import ValidationError
@@ -108,11 +109,13 @@ def valid_event() -> ModelNodeIntrospectionEvent:
     """
     return ModelNodeIntrospectionEvent(
         node_id=uuid4(),
-        node_type="effect",
-        node_version="1.0.0",
+        node_type=EnumNodeKind.EFFECT,
+        node_version=ModelSemVer.parse("1.0.0"),
         correlation_id=uuid4(),
         endpoints={"health": "http://localhost:8080/health"},
-        capabilities=ModelNodeCapabilities(postgres=True, read=True, write=True),
+        declared_capabilities=ModelNodeCapabilities(
+            postgres=True, read=True, write=True
+        ),
         metadata=ModelNodeMetadata(environment="test"),
         timestamp=TEST_TIMESTAMP,
     )
@@ -127,11 +130,11 @@ def event_without_health_endpoint() -> ModelNodeIntrospectionEvent:
     """
     return ModelNodeIntrospectionEvent(
         node_id=uuid4(),
-        node_type="compute",
-        node_version="2.0.0",
+        node_type=EnumNodeKind.COMPUTE,
+        node_version=ModelSemVer.parse("2.0.0"),
         correlation_id=uuid4(),
         endpoints={},
-        capabilities=ModelNodeCapabilities(),
+        declared_capabilities=ModelNodeCapabilities(),
         metadata=ModelNodeMetadata(),
         timestamp=TEST_TIMESTAMP,
     )
@@ -250,10 +253,10 @@ class TestValidation:
         # Create a mock event with None node_id
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = None
-        mock_event.node_type = "effect"
-        mock_event.node_version = "1.0.0"
+        mock_event.node_type = EnumNodeKind.EFFECT
+        mock_event.node_version = ModelSemVer.parse("1.0.0")
         mock_event.endpoints = {}
-        mock_event.capabilities = {}
+        mock_event.declared_capabilities = ModelNodeCapabilities()
         mock_event.metadata = {}
         mock_event.correlation_id = uuid4()
 
@@ -272,7 +275,7 @@ class TestValidation:
 
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = None
-        mock_event.node_type = "effect"
+        mock_event.node_type = EnumNodeKind.EFFECT
         mock_event.correlation_id = uuid4()
 
         output = reducer.reduce(initial_state, mock_event)
@@ -289,7 +292,7 @@ class TestValidation:
 
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = None
-        mock_event.node_type = "effect"
+        mock_event.node_type = EnumNodeKind.EFFECT
         mock_event.correlation_id = uuid4()
 
         output = reducer.reduce(initial_state, mock_event)
@@ -981,7 +984,9 @@ class TestConsulIntentBuilding:
     ) -> None:
         """Test that service_id format is correct."""
         node_id = uuid4()
-        event = create_introspection_event(node_id=node_id, node_type="effect")
+        event = create_introspection_event(
+            node_id=node_id, node_type=EnumNodeKind.EFFECT
+        )
 
         output = reducer.reduce(initial_state, event)
 
@@ -1003,8 +1008,8 @@ class TestConsulIntentBuilding:
         """Test that tags include node_type and version."""
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="compute",
-            node_version="2.3.4",
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("2.3.4"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -1067,7 +1072,7 @@ class TestConsulIntentBuilding:
         initial_state: ModelRegistrationState,
     ) -> None:
         """Test that Consul intent target is correctly formatted."""
-        event = create_introspection_event(node_type="orchestrator")
+        event = create_introspection_event(node_type=EnumNodeKind.ORCHESTRATOR)
 
         output = reducer.reduce(initial_state, event)
 
@@ -1085,7 +1090,7 @@ class TestConsulIntentBuilding:
         initial_state: ModelRegistrationState,
     ) -> None:
         """Test that service_name follows onex-{node_type} format."""
-        event = create_introspection_event(node_type="reducer")
+        event = create_introspection_event(node_type=EnumNodeKind.REDUCER)
 
         output = reducer.reduce(initial_state, event)
 
@@ -1115,7 +1120,7 @@ class TestPostgresIntentBuilding:
         node_id = uuid4()
         event = create_introspection_event(
             node_id=node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             endpoints={
                 "health": "http://localhost:8080/health",
                 "api": "http://localhost:8080/api",
@@ -1140,7 +1145,7 @@ class TestPostgresIntentBuilding:
         record = postgres_intent.payload.record
         assert record.node_id == node_id
         assert record.node_type == "effect"
-        assert record.node_version == "1.0.0"
+        assert str(record.node_version) == "1.0.0"
         assert "health" in record.endpoints
         assert "api" in record.endpoints
 
@@ -1275,10 +1280,12 @@ class TestPostgresIntentBuilding:
         """Test that capabilities model is preserved in record."""
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
-            capabilities=ModelNodeCapabilities(postgres=True, database=True, read=True),
+            declared_capabilities=ModelNodeCapabilities(
+                postgres=True, database=True, read=True
+            ),
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
         )
@@ -1347,7 +1354,7 @@ class TestOutputModel:
 
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = None
-        mock_event.node_type = "effect"
+        mock_event.node_type = EnumNodeKind.EFFECT
         mock_event.correlation_id = uuid4()
 
         output = reducer.reduce(initial_state, mock_event)
@@ -1477,8 +1484,8 @@ class TestEdgeCases:
         """Test reduce works with empty endpoints dict."""
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -1497,10 +1504,10 @@ class TestEdgeCases:
         """Test reduce works with empty capabilities."""
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
         )
@@ -1526,10 +1533,10 @@ class TestEdgeCases:
 
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = node_id
-        mock_event.node_type = "effect"
-        mock_event.node_version = "1.0.0"
+        mock_event.node_type = EnumNodeKind.EFFECT
+        mock_event.node_version = ModelSemVer.parse("1.0.0")
         mock_event.endpoints = {"health": "http://localhost:8080/health"}
-        mock_event.capabilities = ModelNodeCapabilities()
+        mock_event.declared_capabilities = ModelNodeCapabilities()
         mock_event.metadata = ModelNodeMetadata()
         mock_event.correlation_id = None  # Force deterministic derivation
         mock_event.timestamp = TEST_TIMESTAMP
@@ -1550,8 +1557,8 @@ class TestEdgeCases:
 
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
             timestamp=TEST_TIMESTAMP,
@@ -1573,9 +1580,9 @@ class TestEdgeCases:
         """Test reduce with all optional fields populated."""
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="orchestrator",
-            node_version="3.2.1",
-            capabilities=ModelNodeCapabilities(
+            node_type=EnumNodeKind.ORCHESTRATOR,
+            node_version=ModelSemVer.parse("3.2.1"),
+            declared_capabilities=ModelNodeCapabilities(
                 postgres=True,
                 database=True,
                 processing=True,
@@ -1621,7 +1628,7 @@ class TestEdgeCases:
 
         record = postgres_intent.payload.record
         assert record.node_type == "orchestrator"
-        assert record.node_version == "3.2.1"
+        assert str(record.node_version) == "3.2.1"
         assert len(record.endpoints) == 3
 
 
@@ -2056,7 +2063,7 @@ class TestCompleteStateTransitions:
         # Create an invalid event (missing node_id)
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = None
-        mock_event.node_type = "effect"
+        mock_event.node_type = EnumNodeKind.EFFECT
         mock_event.correlation_id = uuid4()
 
         output = reducer.reduce(state, mock_event)
@@ -2764,7 +2771,7 @@ class TestDeterminismProperty:
         state = ModelRegistrationState()
         node_id = uuid4()
         correlation_id = uuid4()
-        node_version = f"{major}.{minor}.{patch}"
+        node_version = ModelSemVer(major=major, minor=minor, patch=patch)
 
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
@@ -2886,9 +2893,9 @@ class TestDeterminismProperty:
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = node_id
         mock_event.node_type = node_type
-        mock_event.node_version = "1.0.0"
+        mock_event.node_version = ModelSemVer.parse("1.0.0")
         mock_event.endpoints = {"health": "http://localhost:8080/health"}
-        mock_event.capabilities = ModelNodeCapabilities()
+        mock_event.declared_capabilities = ModelNodeCapabilities()
         mock_event.metadata = ModelNodeMetadata()
         mock_event.correlation_id = None  # Force deterministic derivation
         mock_event.timestamp = TEST_TIMESTAMP
@@ -2934,8 +2941,8 @@ class TestDeterminismProperty:
 
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints=endpoints,
             correlation_id=correlation_id,
             timestamp=TEST_TIMESTAMP,
@@ -2990,8 +2997,8 @@ class TestDeterminismProperty:
 
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type="compute",
-            node_version="2.0.0",
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("2.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
             timestamp=TEST_TIMESTAMP,
@@ -3106,7 +3113,7 @@ class TestDeterminismProperty:
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type=node_type,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
             timestamp=TEST_TIMESTAMP,
@@ -3158,8 +3165,8 @@ class TestEdgeCasesComprehensive:
         """
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -3217,8 +3224,8 @@ class TestEdgeCasesComprehensive:
 
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="orchestrator",
-            node_version="2.5.0",
+            node_type=EnumNodeKind.ORCHESTRATOR,
+            node_version=ModelSemVer.parse("2.5.0"),
             endpoints=many_endpoints,
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -3258,13 +3265,13 @@ class TestEdgeCasesComprehensive:
         Validates that the reducer handles unusually long version strings
         without truncation or error. SemVer with build metadata can be lengthy.
         """
-        long_version = (
+        long_version = ModelSemVer.parse(
             "1.2.3-alpha.4.5.6+build.metadata.with.many.segments.202512211234"
         )
 
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="compute",
+            node_type=EnumNodeKind.COMPUTE,
             node_version=long_version,
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
@@ -3366,20 +3373,20 @@ class TestEdgeCasesComprehensive:
         # Use mocks to set correlation_id=None to trigger deterministic ID derivation
         mock_event1 = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event1.node_id = node_id1
-        mock_event1.node_type = "effect"
-        mock_event1.node_version = "1.0.0"
+        mock_event1.node_type = EnumNodeKind.EFFECT
+        mock_event1.node_version = ModelSemVer.parse("1.0.0")
         mock_event1.endpoints = {"health": "http://localhost:8080/health"}
-        mock_event1.capabilities = ModelNodeCapabilities()
+        mock_event1.declared_capabilities = ModelNodeCapabilities()
         mock_event1.metadata = ModelNodeMetadata()
         mock_event1.correlation_id = None
         mock_event1.timestamp = TEST_TIMESTAMP
 
         mock_event2 = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event2.node_id = node_id2
-        mock_event2.node_type = "effect"
-        mock_event2.node_version = "1.0.0"
+        mock_event2.node_type = EnumNodeKind.EFFECT
+        mock_event2.node_version = ModelSemVer.parse("1.0.0")
         mock_event2.endpoints = {"health": "http://localhost:8080/health"}
-        mock_event2.capabilities = ModelNodeCapabilities()
+        mock_event2.declared_capabilities = ModelNodeCapabilities()
         mock_event2.metadata = ModelNodeMetadata()
         mock_event2.correlation_id = None
         mock_event2.timestamp = TEST_TIMESTAMP
@@ -3411,8 +3418,8 @@ class TestEdgeCasesComprehensive:
 
         event = ModelNodeIntrospectionEvent(
             node_id=nil_uuid,
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -3443,8 +3450,8 @@ class TestEdgeCasesComprehensive:
         """
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={
                 "health": "http://localhost:8080/health",
                 "api": "http://localhost:8080/api/v1/donnees",
@@ -4008,11 +4015,11 @@ class TestCommandFoldingPrevention:
         mock_command.execute = MagicMock()  # Commands might have execute()
 
         # Set required event fields so validation passes
-        mock_command.node_type = "effect"
-        mock_command.node_version = "1.0.0"
+        mock_command.node_type = EnumNodeKind.EFFECT
+        mock_command.node_version = ModelSemVer.parse("1.0.0")
         mock_command.correlation_id = uuid4()
         mock_command.endpoints = {"health": "http://localhost:8080/health"}
-        mock_command.capabilities = ModelNodeCapabilities()
+        mock_command.declared_capabilities = ModelNodeCapabilities()
         mock_command.metadata = ModelNodeMetadata()
 
         # When passed to reduce(), it processes as data
@@ -4164,17 +4171,22 @@ class TestEventReplayDeterminism:
         """
         # Create a sequence of unique events with different characteristics
         events: list[ModelNodeIntrospectionEvent] = []
-        node_types: list[str] = ["effect", "compute", "reducer", "orchestrator"]
+        node_types = [
+            EnumNodeKind.EFFECT,
+            EnumNodeKind.COMPUTE,
+            EnumNodeKind.REDUCER,
+            EnumNodeKind.ORCHESTRATOR,
+        ]
 
         for i in range(10):
             events.append(
                 ModelNodeIntrospectionEvent(
                     node_id=uuid4(),
                     node_type=node_types[i % len(node_types)],
-                    node_version=f"{i}.0.0",
+                    node_version=ModelSemVer(major=i, minor=0, patch=0),
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
-                    capabilities=ModelNodeCapabilities(
+                    declared_capabilities=ModelNodeCapabilities(
                         postgres=(i % 2 == 0),
                         read=True,
                         write=(i % 3 == 0),
@@ -4246,8 +4258,8 @@ class TestEventReplayDeterminism:
             events.append(
                 ModelNodeIntrospectionEvent(
                     node_id=uuid4(),
-                    node_type="effect",
-                    node_version="1.0.0",
+                    node_type=EnumNodeKind.EFFECT,
+                    node_version=ModelSemVer.parse("1.0.0"),
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
                     timestamp=TEST_TIMESTAMP,
@@ -4346,8 +4358,8 @@ class TestEventReplayDeterminism:
             events.append(
                 ModelNodeIntrospectionEvent(
                     node_id=uuid4(),
-                    node_type="effect",
-                    node_version=f"{i}.0.0",
+                    node_type=EnumNodeKind.EFFECT,
+                    node_version=ModelSemVer(major=i, minor=0, patch=0),
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
                     timestamp=TEST_TIMESTAMP,
@@ -4434,8 +4446,8 @@ class TestEventReplayDeterminism:
             events.append(
                 ModelNodeIntrospectionEvent(
                     node_id=uuid4(),
-                    node_type="compute",
-                    node_version=f"{i + 1}.0.0",
+                    node_type=EnumNodeKind.COMPUTE,
+                    node_version=ModelSemVer(major=i + 1, minor=0, patch=0),
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
                     timestamp=TEST_TIMESTAMP,
@@ -4483,10 +4495,10 @@ class TestEventReplayDeterminism:
             """Create a consistent mock event for ID derivation testing."""
             mock = MagicMock(spec=ModelNodeIntrospectionEvent)
             mock.node_id = node_id
-            mock.node_type = "effect"
-            mock.node_version = "1.0.0"
+            mock.node_type = EnumNodeKind.EFFECT
+            mock.node_version = ModelSemVer.parse("1.0.0")
             mock.endpoints = {"health": "http://localhost:8080/health"}
-            mock.capabilities = ModelNodeCapabilities()
+            mock.declared_capabilities = ModelNodeCapabilities()
             mock.metadata = ModelNodeMetadata()
             mock.correlation_id = None  # Forces deterministic derivation
             mock.timestamp = TEST_TIMESTAMP
@@ -4541,8 +4553,8 @@ class TestEventReplayDeterminism:
         node_id = uuid4()
         event1 = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -4569,8 +4581,8 @@ class TestEventReplayDeterminism:
         # Second introspection
         event2 = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type="compute",
-            node_version="2.0.0",
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("2.0.0"),
             endpoints={"health": "http://localhost:8081/health"},
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -4625,8 +4637,8 @@ class TestEventReplayDeterminism:
         # Event 1: First node registration
         event1 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -4636,8 +4648,8 @@ class TestEventReplayDeterminism:
         # Event 2: Second node registration (overwrites state)
         event2 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="compute",
-            node_version="2.0.0",
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("2.0.0"),
             endpoints={"health": "http://localhost:8081/health"},
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -4647,8 +4659,8 @@ class TestEventReplayDeterminism:
         # Event 3: Third node registration
         event3 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="reducer",
-            node_version="3.0.0",
+            node_type=EnumNodeKind.REDUCER,
+            node_version=ModelSemVer.parse("3.0.0"),
             endpoints={"health": "http://localhost:8082/health"},
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -4881,7 +4893,7 @@ class TestPropertyBasedStateInvariants:
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type=node_type,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -4956,7 +4968,7 @@ class TestPropertyBasedStateInvariants:
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type=node_type,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
             timestamp=TEST_TIMESTAMP,
@@ -5184,8 +5196,8 @@ class TestBoundaryConditions:
 
         event = ModelNodeIntrospectionEvent(
             node_id=max_uuid,
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=max_uuid,  # Also test max correlation_id
             timestamp=TEST_TIMESTAMP,
@@ -5237,8 +5249,8 @@ class TestBoundaryConditions:
 
         event = ModelNodeIntrospectionEvent(
             node_id=min_uuid,
-            node_type="compute",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=min_uuid,  # Also test min correlation_id
             timestamp=TEST_TIMESTAMP,
@@ -5263,27 +5275,21 @@ class TestBoundaryConditions:
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
     ) -> None:
-        """Test that empty string version is rejected by validation.
+        """Test that empty string version is rejected by ModelSemVer.parse().
 
-        ModelNodeIntrospectionEvent validates node_version as semantic version.
-        Empty strings are rejected at the Pydantic validation layer, which is
-        correct behavior - version should always be a valid semantic version.
+        ModelNodeIntrospectionEvent requires node_version as ModelSemVer.
+        Empty strings are rejected when attempting to parse them.
 
         This test documents the validation behavior as a boundary condition.
         """
-        with pytest.raises(ValidationError) as exc_info:
-            ModelNodeIntrospectionEvent(
-                node_id=uuid4(),
-                node_type="effect",
-                node_version="",  # Empty version string - should be rejected
-                endpoints={"health": "http://localhost:8080/health"},
-                correlation_id=uuid4(),
-                timestamp=TEST_TIMESTAMP,
-            )
+        from omnibase_core.errors import ModelOnexError
 
-        # Verify the validation error is about the version
+        # Empty string cannot be parsed as a valid semantic version
+        with pytest.raises(ModelOnexError) as exc_info:
+            ModelSemVer.parse("")
+
+        # Verify the error is about invalid semantic version format
         error_str = str(exc_info.value)
-        assert "node_version" in error_str
         assert "semantic version" in error_str.lower() or "Invalid" in error_str
 
     def test_minimal_valid_version(
@@ -5298,8 +5304,8 @@ class TestBoundaryConditions:
         """
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="0.0.0",  # Minimal valid version
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("0.0.0"),  # Minimal valid version
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -5347,8 +5353,8 @@ class TestBoundaryConditions:
 
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="orchestrator",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.ORCHESTRATOR,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={
                 "health": very_long_url,
                 "api": very_long_url,
@@ -5407,8 +5413,8 @@ class TestBoundaryConditions:
 
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             metadata=special_metadata,
             correlation_id=uuid4(),
@@ -5531,10 +5537,12 @@ class TestBoundaryConditions:
 
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="orchestrator",
-            node_version="10.20.30-alpha.100+build.metadata.long.string",
+            node_type=EnumNodeKind.ORCHESTRATOR,
+            node_version=ModelSemVer.parse(
+                "10.20.30-alpha.100+build.metadata.long.string"
+            ),
             endpoints=many_endpoints,
-            capabilities=full_capabilities,
+            declared_capabilities=full_capabilities,
             metadata=extensive_metadata,
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
@@ -5598,8 +5606,8 @@ class TestBoundaryConditions:
         ]:
             event = ModelNodeIntrospectionEvent(
                 node_id=test_uuid,
-                node_type="compute",
-                node_version="1.0.0",
+                node_type=EnumNodeKind.COMPUTE,
+                node_version=ModelSemVer.parse("1.0.0"),
                 endpoints={"health": "http://localhost:8080/health"},
                 correlation_id=uuid4(),
                 timestamp=TEST_TIMESTAMP,

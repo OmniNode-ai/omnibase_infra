@@ -10,7 +10,7 @@ Architecture:
     - endpoints: Optional new endpoints dict
     - metadata: Optional new metadata dict
     - capabilities: Optional new capabilities list
-    - node_version: Optional new version string
+    - node_version: Optional new semantic version (ModelSemVer)
 
     This model enables type-safe partial updates rather than untyped dict[str, object].
 
@@ -21,8 +21,7 @@ Related:
 
 from __future__ import annotations
 
-import re
-
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -40,7 +39,7 @@ class ModelRegistrationUpdate(BaseModel):
         endpoints: Optional new endpoints dict (replaces existing).
         metadata: Optional new metadata dict (replaces existing).
         capabilities: Optional new capabilities list (replaces existing).
-        node_version: Optional new version string.
+        node_version: Optional new semantic version (replaces existing).
 
     Example:
         >>> # Update only endpoints
@@ -69,35 +68,32 @@ class ModelRegistrationUpdate(BaseModel):
         default=None,
         description="Optional new capabilities list (replaces existing if set)",
     )
-    node_version: str | None = Field(
+    node_version: ModelSemVer | None = Field(
         default=None,
-        description="Optional new version string",
-        min_length=1,
+        description="Optional new semantic version",
     )
 
-    @field_validator("node_version")
+    @field_validator("node_version", mode="before")
     @classmethod
-    def validate_version_format(cls, v: str | None) -> str | None:
-        """Validate that node_version follows semantic versioning pattern.
+    def parse_node_version(cls, v: ModelSemVer | str | None) -> ModelSemVer | None:
+        """Parse node_version from string or ModelSemVer.
 
         Args:
-            v: The version string to validate (or None).
+            v: Either a ModelSemVer instance, a semver string, or None.
 
         Returns:
-            The validated version string or None.
+            Validated ModelSemVer instance or None.
 
         Raises:
-            ValueError: If version doesn't match expected pattern.
+            ValueError: If the string is not a valid semantic version.
         """
         if v is None:
             return None
-        # Basic semver pattern (major.minor.patch with optional pre-release)
-        pattern = r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?$"
-        if not re.match(pattern, v):
-            raise ValueError(
-                f"node_version must follow semantic versioning (e.g., '1.0.0'). "
-                f"Got: '{v}'"
-            )
+        if isinstance(v, str):
+            try:
+                return ModelSemVer.parse(v)
+            except Exception as e:
+                raise ValueError(f"node_version: {e!s}") from e
         return v
 
     @model_validator(mode="after")

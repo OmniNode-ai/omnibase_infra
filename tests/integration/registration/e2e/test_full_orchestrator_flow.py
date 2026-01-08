@@ -48,6 +48,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
@@ -308,10 +309,11 @@ class OrchestratorPipeline:
 
         # Build registry request
         # Note: node_type must be converted from Literal string to EnumNodeKind
+        # Note: node_version must be converted from ModelSemVer to string
         request = ModelRegistryRequest(
             node_id=event.node_id,
             node_type=EnumNodeKind(event.node_type),
-            node_version=event.node_version,
+            node_version=str(event.node_version),
             correlation_id=correlation_id,
             endpoints=dict(event.endpoints) if event.endpoints else {},
             metadata=metadata_dict,
@@ -370,7 +372,7 @@ class OrchestratorPipeline:
             entity_id=event.node_id,
             current_state=EnumRegistrationState.PENDING_REGISTRATION,
             node_type=EnumNodeKind(event.node_type),
-            node_version=event.node_version,
+            node_version=str(event.node_version),
             registered_at=now,
             updated_at=now,
             last_applied_event_id=correlation_id,  # Use correlation_id as event_id for test
@@ -591,11 +593,12 @@ class TestFullOrchestratorFlow:
         pipeline = ctx.pipeline
 
         # Create introspection event
+        # Note: node_version must be ModelSemVer for ModelNodeIntrospectionEvent
         event = ModelNodeIntrospectionEvent(
             node_id=unique_node_id,
             node_type="effect",
-            node_version="1.0.0",
-            capabilities=ModelNodeCapabilities(),
+            node_version=ModelSemVer.parse("1.0.0"),
+            declared_capabilities=ModelNodeCapabilities(),
             endpoints={"health": "http://localhost:8080/health"},
             metadata=ModelNodeMetadata(),
             correlation_id=unique_correlation_id,
@@ -658,11 +661,12 @@ class TestFullOrchestratorFlow:
         mock_postgres_adapter = ctx.mock_postgres_adapter
 
         # Create introspection event
+        # Note: node_version must be ModelSemVer for ModelNodeIntrospectionEvent
         event = ModelNodeIntrospectionEvent(
             node_id=unique_node_id,
             node_type="compute",
-            node_version="2.0.0",
-            capabilities=ModelNodeCapabilities(),
+            node_version=ModelSemVer.parse("2.0.0"),
+            declared_capabilities=ModelNodeCapabilities(),
             endpoints={
                 "health": "http://localhost:8081/health",
                 "api": "http://localhost:8081/api",
@@ -727,11 +731,12 @@ class TestFullOrchestratorFlow:
         node_types = ["effect", "compute", "reducer"]
 
         for node_id, node_type in zip(node_ids, node_types, strict=True):
+            # Note: node_version must be ModelSemVer for ModelNodeIntrospectionEvent
             event = ModelNodeIntrospectionEvent(
                 node_id=node_id,
                 node_type=node_type,
-                node_version="1.0.0",
-                capabilities=ModelNodeCapabilities(),
+                node_version=ModelSemVer.parse("1.0.0"),
+                declared_capabilities=ModelNodeCapabilities(),
                 endpoints={
                     "health": f"http://localhost:808{node_types.index(node_type)}/health"
                 },
@@ -809,11 +814,12 @@ class TestFullOrchestratorFlow:
         await asyncio.sleep(1.0)
 
         # Publish a valid message after the malformed one
+        # Note: node_version must be ModelSemVer for ModelNodeIntrospectionEvent
         valid_event = ModelNodeIntrospectionEvent(
             node_id=unique_node_id,
             node_type="effect",
-            node_version="1.0.0",
-            capabilities=ModelNodeCapabilities(),
+            node_version=ModelSemVer.parse("1.0.0"),
+            declared_capabilities=ModelNodeCapabilities(),
             endpoints={"health": "http://localhost:8080/health"},
             metadata=ModelNodeMetadata(),
             correlation_id=unique_correlation_id,
@@ -873,11 +879,12 @@ class TestFullPipelineWithRealInfrastructure:
         is persisted in PostgreSQL.
         """
         # Create introspection event
+        # Note: node_version must be ModelSemVer for ModelNodeIntrospectionEvent
         event = ModelNodeIntrospectionEvent(
             node_id=unique_node_id,
             node_type="effect",
-            node_version="1.0.0",
-            capabilities=ModelNodeCapabilities(),
+            node_version=ModelSemVer.parse("1.0.0"),
+            declared_capabilities=ModelNodeCapabilities(),
             endpoints={"health": "http://localhost:8080/health"},
             metadata=ModelNodeMetadata(),
             correlation_id=unique_correlation_id,
@@ -907,7 +914,7 @@ class TestFullPipelineWithRealInfrastructure:
                 entity_id=unique_node_id,
                 current_state=EnumRegistrationState.PENDING_REGISTRATION,
                 node_type=EnumNodeKind(event.node_type),
-                node_version=event.node_version,
+                node_version=str(event.node_version),
                 registered_at=now,
                 updated_at=now,
                 last_applied_event_id=unique_correlation_id,
@@ -944,11 +951,12 @@ class TestFullPipelineWithRealInfrastructure:
         Verifies the reducer emits the expected intent types.
         """
         # Create introspection event
+        # Note: node_version must be ModelSemVer for ModelNodeIntrospectionEvent
         event = ModelNodeIntrospectionEvent(
             node_id=unique_node_id,
             node_type="effect",
-            node_version="1.0.0",
-            capabilities=ModelNodeCapabilities(),
+            node_version=ModelSemVer.parse("1.0.0"),
+            declared_capabilities=ModelNodeCapabilities(),
             endpoints={"health": "http://localhost:8080/health"},
             metadata=ModelNodeMetadata(),
             correlation_id=unique_correlation_id,
@@ -996,7 +1004,7 @@ class TestFullPipelineWithRealInfrastructure:
         request = ModelRegistryRequest(
             node_id=unique_node_id,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=unique_correlation_id,
             endpoints={"health": "http://localhost:8080/health"},
             metadata={},

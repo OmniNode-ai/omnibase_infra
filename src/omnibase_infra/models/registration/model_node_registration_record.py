@@ -44,7 +44,8 @@ from uuid import UUID
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.intents import ModelRegistrationRecordBase
-from pydantic import Field
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+from pydantic import Field, field_validator
 
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
@@ -83,6 +84,7 @@ class ModelNodeRegistrationRecord(ModelRegistrationRecordBase):
         >>> from datetime import datetime, UTC
         >>> from uuid import uuid4
         >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
+        >>> from omnibase_core.models.primitives.model_semver import ModelSemVer
         >>> from omnibase_infra.models.registration import (
         ...     ModelNodeCapabilities,
         ...     ModelNodeMetadata,
@@ -91,7 +93,7 @@ class ModelNodeRegistrationRecord(ModelRegistrationRecordBase):
         >>> record = ModelNodeRegistrationRecord(
         ...     node_id=uuid4(),
         ...     node_type=EnumNodeKind.EFFECT,
-        ...     node_version="1.0.0",
+        ...     node_version=ModelSemVer(major=1, minor=0, patch=0),
         ...     capabilities=ModelNodeCapabilities(postgres=True),
         ...     endpoints={"health": "http://localhost:8080/health"},
         ...     metadata=ModelNodeMetadata(environment="production"),
@@ -106,9 +108,31 @@ class ModelNodeRegistrationRecord(ModelRegistrationRecordBase):
     # Identity
     node_id: UUID = Field(..., description="Unique node identifier")
     node_type: EnumNodeKind = Field(..., description="ONEX node type")
-    node_version: str = Field(
-        default="1.0.0", description="Semantic version of the node"
+    node_version: ModelSemVer = Field(
+        default_factory=lambda: ModelSemVer(major=1, minor=0, patch=0),
+        description="Semantic version of the node",
     )
+
+    @field_validator("node_version", mode="before")
+    @classmethod
+    def parse_node_version(cls, v: ModelSemVer | str) -> ModelSemVer:
+        """Parse node_version from string or ModelSemVer.
+
+        Args:
+            v: Either a ModelSemVer instance or a semver string.
+
+        Returns:
+            Validated ModelSemVer instance.
+
+        Raises:
+            ValueError: If the string is not a valid semantic version.
+        """
+        if isinstance(v, str):
+            try:
+                return ModelSemVer.parse(v)
+            except Exception as e:
+                raise ValueError(f"node_version: {e!s}") from e
+        return v
 
     # Capabilities and endpoints - strongly typed models
     capabilities: ModelNodeCapabilities = Field(

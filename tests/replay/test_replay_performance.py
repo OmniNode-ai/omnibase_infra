@@ -42,6 +42,7 @@ import time
 from uuid import uuid4
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.idempotency import InMemoryIdempotencyStore
 from omnibase_infra.models.registration import (
@@ -118,11 +119,11 @@ def generate_events(
             ModelNodeIntrospectionEvent(
                 node_id=id_generator.next_uuid(),
                 node_type=node_type,
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 correlation_id=id_generator.next_uuid(),
                 timestamp=clock.now(),
                 endpoints={},
-                capabilities=ModelNodeCapabilities(),
+                declared_capabilities=ModelNodeCapabilities(),
                 metadata=ModelNodeMetadata(),
             )
         )

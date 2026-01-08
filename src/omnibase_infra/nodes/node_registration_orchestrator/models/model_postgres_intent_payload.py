@@ -46,6 +46,7 @@ from types import MappingProxyType
 from uuid import UUID
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.models.registration.model_node_capabilities import (
@@ -110,7 +111,10 @@ class ModelPostgresIntentPayload(BaseModel):
     # Design Note: node_type uses EnumNodeKind for type-safe ONEX node type validation.
     # This ensures only valid ONEX node types can be persisted to PostgreSQL.
     node_type: EnumNodeKind = Field(..., description="ONEX node type")
-    node_version: str = Field(default="1.0.0", description="Semantic version")
+    node_version: ModelSemVer = Field(
+        default_factory=lambda: ModelSemVer(major=1, minor=0, patch=0),
+        description="Semantic version of the node",
+    )
     capabilities: ModelNodeCapabilities = Field(
         default_factory=ModelNodeCapabilities,
         description="Strongly-typed node capabilities",

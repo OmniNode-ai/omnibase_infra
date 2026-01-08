@@ -36,12 +36,14 @@ from omnibase_infra.models.discovery import (
     DEFAULT_INTROSPECTION_TOPIC,
     DEFAULT_REQUEST_INTROSPECTION_TOPIC,
     ModelIntrospectionConfig,
+)
+from omnibase_infra.models.registration import (
+    ModelNodeHeartbeatEvent,
     ModelNodeIntrospectionEvent,
 )
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
-from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 # Module-level markers
 pytestmark = [
@@ -93,7 +95,7 @@ class MockEventBus:
                 since all event envelopes are Pydantic models.
             topic: Event topic.
         """
-        if isinstance(envelope, (ModelNodeIntrospectionEvent, ModelNodeHeartbeatEvent)):
+        if isinstance(envelope, ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent):
             self.published_envelopes.append((envelope, topic))
 
     async def publish(
@@ -440,7 +442,8 @@ class TestEndToEndIntrospectionWorkflow:
         # node_type is stored as EnumNodeKind (a StrEnum that inherits from str).
         # Compare directly to the enum for type consistency with _introspection_node_type.
         assert envelope.node_type == EnumNodeKind.EFFECT
-        assert envelope.version == "1.5.0"
+        assert str(envelope.node_version) == "1.5.0"
+        # reason is now EnumIntrospectionReason but str comparison still works
         assert envelope.reason == "startup"
 
     async def test_introspection_data_reflects_node_capabilities(self) -> None:
@@ -472,23 +475,19 @@ class TestEndToEndIntrospectionWorkflow:
 
         assert data.node_id == node._introspection_node_id
         assert data.node_type == EnumNodeKind.EFFECT
-        assert data.version == "1.0.0"
+        assert str(data.node_version) == "1.0.0"
 
-        # Verify capabilities were discovered
-        assert "operations" in data.capabilities
-        operations = data.capabilities["operations"]
-        assert isinstance(operations, list)
+        # Verify capabilities were discovered (via discovered_capabilities)
+        operations = data.discovered_capabilities.operations
+        assert isinstance(operations, tuple)
         # The ContractDrivenEffectNode has execute_effect method
         assert "execute_effect" in operations
 
-        # Verify protocols were discovered
-        assert "protocols" in data.capabilities
-        protocols = data.capabilities["protocols"]
-        assert isinstance(protocols, list)
-        assert "MixinNodeIntrospection" in protocols
+        # Note: protocols field was removed from ModelDiscoveredCapabilities
+        # as it was redundant with declared_capabilities
 
         # Verify FSM state check
-        assert "has_fsm" in data.capabilities
+        assert data.discovered_capabilities.has_fsm is True
 
         # Verify endpoints were discovered
         assert "health" in data.endpoints
@@ -821,7 +820,7 @@ class TestContractIntegrationEdgeCases:
         # Publish with specific correlation ID
         test_correlation_id = uuid4()
         success = await node.publish_introspection(
-            reason="correlation-test",
+            reason="request",  # Use valid EnumIntrospectionReason value
             correlation_id=test_correlation_id,
         )
 
@@ -832,7 +831,8 @@ class TestContractIntegrationEdgeCases:
         envelope, _ = event_bus.published_envelopes[0]
         assert isinstance(envelope, ModelNodeIntrospectionEvent)
         assert envelope.correlation_id == test_correlation_id
-        assert envelope.reason == "correlation-test"
+        # reason is now EnumIntrospectionReason but str comparison still works
+        assert envelope.reason == "request"
 
 
 # =============================================================================

@@ -41,6 +41,7 @@ from uuid import uuid4
 
 import pytest
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -97,7 +98,7 @@ def sample_postgres_intent() -> ModelPostgresUpsertIntent:
         payload=ModelPostgresIntentPayload(
             node_id=uuid4(),
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=uuid4(),
             timestamp="2025-01-01T00:00:00Z",
         ),

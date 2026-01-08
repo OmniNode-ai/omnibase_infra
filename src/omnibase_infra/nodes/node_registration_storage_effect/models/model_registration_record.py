@@ -27,12 +27,12 @@ Related:
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -60,7 +60,7 @@ class ModelRegistrationRecord(BaseModel):
     Attributes:
         node_id: Unique identifier for the registered node.
         node_type: Type of ONEX node (EnumNodeKind).
-        node_version: Semantic version string of the node.
+        node_version: Semantic version of the node.
         capabilities: Tuple of capability names the node provides (immutable).
         endpoints: Dict mapping endpoint type to URL.
         metadata: Additional key-value metadata (no secrets).
@@ -72,10 +72,11 @@ class ModelRegistrationRecord(BaseModel):
         >>> from datetime import UTC, datetime
         >>> from uuid import uuid4
         >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
+        >>> from omnibase_core.models.primitives.model_semver import ModelSemVer
         >>> record = ModelRegistrationRecord(
         ...     node_id=uuid4(),
         ...     node_type=EnumNodeKind.EFFECT,
-        ...     node_version="1.0.0",
+        ...     node_version=ModelSemVer(major=1, minor=0, patch=0),
         ...     capabilities=("registration.storage", "registration.storage.query"),
         ...     endpoints={"health": "http://localhost:8080/health"},
         ...     metadata={"team": "platform"},
@@ -97,10 +98,9 @@ class ModelRegistrationRecord(BaseModel):
         ...,
         description="Type of ONEX node",
     )
-    node_version: str = Field(
+    node_version: ModelSemVer = Field(
         ...,
-        description="Semantic version string of the node (e.g., '1.0.0')",
-        min_length=1,
+        description="Semantic version of the node",
     )
     capabilities: tuple[str, ...] = Field(
         default_factory=tuple,
@@ -202,29 +202,6 @@ class ModelRegistrationRecord(BaseModel):
             raise ValueError(
                 "Timestamp must be timezone-aware. Use datetime.now(UTC) or "
                 "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
-            )
-        return v
-
-    @field_validator("node_version")
-    @classmethod
-    def validate_version_format(cls, v: str) -> str:
-        """Validate that node_version follows semantic versioning pattern.
-
-        Args:
-            v: The version string to validate.
-
-        Returns:
-            The validated version string.
-
-        Raises:
-            ValueError: If version doesn't match expected pattern.
-        """
-        # Basic semver pattern (major.minor.patch with optional pre-release)
-        pattern = r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?$"
-        if not re.match(pattern, v):
-            raise ValueError(
-                f"node_version must follow semantic versioning (e.g., '1.0.0'). "
-                f"Got: '{v}'"
             )
         return v
 

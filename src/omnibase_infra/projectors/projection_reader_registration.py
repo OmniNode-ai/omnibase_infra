@@ -29,6 +29,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 import asyncpg
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
@@ -126,12 +127,18 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             capabilities_data = json.loads(capabilities_data)
         capabilities = ModelNodeCapabilities.model_validate(capabilities_data)
 
+        # Parse node_version from string if needed.
+        # Database stores version as string, model expects ModelSemVer.
+        node_version_data = row["node_version"]
+        if isinstance(node_version_data, str):
+            node_version_data = ModelSemVer.parse(node_version_data)
+
         return ModelRegistrationProjection(
             entity_id=row["entity_id"],
             domain=row["domain"],
             current_state=EnumRegistrationState(row["current_state"]),
             node_type=row["node_type"],
-            node_version=row["node_version"],
+            node_version=node_version_data,
             capabilities=capabilities,
             ack_deadline=row["ack_deadline"],
             liveness_deadline=row["liveness_deadline"],

@@ -38,6 +38,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.idempotency import InMemoryIdempotencyStore
 from omnibase_infra.models.registration import (
@@ -279,18 +280,18 @@ def sample_introspection_event(
         >>> def test_process_event(sample_introspection_event):
         ...     event = sample_introspection_event
         ...     assert event.node_type == "effect"
-        ...     assert event.node_version == "1.0.0"
+        ...     assert str(event.node_version) == "1.0.0"
     """
     return ModelNodeIntrospectionEvent(
         node_id=sample_node_id,
         node_type="effect",
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         correlation_id=correlation_id,
         endpoints={
             "health": "http://localhost:8080/health",
             "api": "http://localhost:8080/api",
         },
-        capabilities=ModelNodeCapabilities(
+        declared_capabilities=ModelNodeCapabilities(
             postgres=True,
             read=True,
             write=True,
@@ -328,7 +329,7 @@ def sample_node_registration(
     return ModelNodeRegistration(
         node_id=sample_node_id,
         node_type="effect",
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         capabilities=ModelNodeCapabilities(
             postgres=True,
             read=True,

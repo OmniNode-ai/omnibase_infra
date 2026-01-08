@@ -40,6 +40,8 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 # Test timestamp constant for reproducible tests
 TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
@@ -137,7 +139,8 @@ class MockReducerImpl:
                     correlation_id=event.correlation_id,
                     payload=ModelPostgresIntentPayload(
                         node_id=event.node_id,
-                        node_type=event.node_type,
+                        # Convert Literal string to EnumNodeKind for strict model
+                        node_type=EnumNodeKind(event.node_type),
                         correlation_id=event.correlation_id,
                         timestamp=event.timestamp.isoformat(),
                     ),
@@ -256,8 +259,7 @@ def introspection_event(
     return ModelNodeIntrospectionEvent(
         node_id=node_id,
         node_type="effect",
-        node_version="1.0.0",
-        capabilities={},
+        node_version=ModelSemVer.parse("1.0.0"),
         endpoints={"health": "http://localhost:8080/health"},
         correlation_id=correlation_id,
         timestamp=TEST_TIMESTAMP,
@@ -538,7 +540,7 @@ class TestStateTransitions:
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type="compute",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
             timestamp=TEST_TIMESTAMP,
@@ -579,7 +581,7 @@ class TestStateTransitions:
             ModelNodeIntrospectionEvent(
                 node_id=nid,
                 node_type="effect",
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 endpoints={"health": "http://localhost:8080/health"},
                 correlation_id=correlation_id,
                 timestamp=TEST_TIMESTAMP,
@@ -651,7 +653,7 @@ class TestEventFlowCoordination:
             correlation_id=correlation_id,
             payload=ModelPostgresIntentPayload(
                 node_id=node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 correlation_id=correlation_id,
                 timestamp=datetime.now(UTC).isoformat(),
             ),
@@ -885,7 +887,7 @@ class TestErrorHandlingAndRecovery:
             correlation_id=correlation_id,
             payload=ModelPostgresIntentPayload(
                 node_id=node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 correlation_id=correlation_id,
                 timestamp=datetime.now(UTC).isoformat(),
             ),
@@ -1013,7 +1015,7 @@ class TestCorrelationTracking:
         event_1 = ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=corr_id_1,
             timestamp=TEST_TIMESTAMP,
@@ -1021,7 +1023,7 @@ class TestCorrelationTracking:
         event_2 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),  # Different node
             node_type="compute",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8081/health"},
             correlation_id=corr_id_2,
             timestamp=TEST_TIMESTAMP,
@@ -1118,7 +1120,7 @@ class TestConcurrencyAndThreadSafety:
             ModelNodeIntrospectionEvent(
                 node_id=uuid4(),
                 node_type="effect",
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 endpoints={"health": f"http://localhost:{8080 + i}/health"},
                 correlation_id=correlation_id,
                 timestamp=TEST_TIMESTAMP,
@@ -1180,7 +1182,7 @@ class TestConcurrencyAndThreadSafety:
             ModelNodeIntrospectionEvent(
                 node_id=uuid4(),
                 node_type="effect",
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 endpoints={"health": f"http://localhost:{8080 + i}/health"},
                 correlation_id=correlation_id,
                 timestamp=TEST_TIMESTAMP,

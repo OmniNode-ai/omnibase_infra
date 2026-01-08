@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
@@ -99,11 +100,11 @@ class TestSingleEventDeterminism:
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
             endpoints={"health": "http://localhost:8080/health"},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
         )
 
@@ -132,11 +133,11 @@ class TestSingleEventDeterminism:
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
             node_type="compute",
-            node_version="2.0.0",
+            node_version=ModelSemVer.parse("2.0.0"),
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
             endpoints={},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
         )
 
@@ -171,11 +172,11 @@ class TestSingleEventDeterminism:
             event = ModelNodeIntrospectionEvent(
                 node_id=fixed_node_id,
                 node_type=node_type,  # type: ignore[arg-type]
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 correlation_id=fixed_correlation_id,
                 timestamp=fixed_timestamp,
                 endpoints={"health": "http://localhost:8080/health"},
-                capabilities=ModelNodeCapabilities(),
+                declared_capabilities=ModelNodeCapabilities(),
                 metadata=ModelNodeMetadata(),
             )
 
@@ -328,11 +329,11 @@ class TestCrossInstanceDeterminism:
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
             endpoints={"health": "http://localhost:8080/health"},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
         )
 
@@ -407,11 +408,11 @@ class TestReplayAfterSerialization:
         original_event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
             endpoints={"health": "http://localhost:8080/health"},
-            capabilities=ModelNodeCapabilities(postgres=True, read=True),
+            declared_capabilities=ModelNodeCapabilities(postgres=True, read=True),
             metadata=ModelNodeMetadata(environment="test"),
         )
 

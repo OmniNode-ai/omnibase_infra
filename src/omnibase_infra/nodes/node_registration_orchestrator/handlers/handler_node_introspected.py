@@ -325,15 +325,15 @@ class HandlerNodeIntrospected:
             node_type = event.node_type
             node_version = event.node_version
 
-            # Use capabilities directly from the introspection event
-            # ModelNodeIntrospectionEvent.capabilities is already ModelNodeCapabilities
-            capabilities = event.capabilities
+            # Use declared_capabilities directly from the introspection event
+            # ModelNodeIntrospectionEvent.declared_capabilities is already ModelNodeCapabilities
+            capabilities = event.declared_capabilities
 
             await self._projector.persist_state_transition(
                 entity_id=node_id,
                 domain="registration",
                 new_state=EnumRegistrationState.PENDING_REGISTRATION,
-                node_type=node_type,
+                node_type=node_type.value,
                 node_version=node_version,
                 capabilities=capabilities,
                 event_id=registration_attempt_id,
@@ -364,7 +364,7 @@ class HandlerNodeIntrospected:
         # This happens AFTER PostgreSQL persistence (source of truth)
         await self._register_with_consul(
             node_id=node_id,
-            node_type=event.node_type,
+            node_type=event.node_type.value,
             endpoints=event.endpoints,
             correlation_id=correlation_id,
         )

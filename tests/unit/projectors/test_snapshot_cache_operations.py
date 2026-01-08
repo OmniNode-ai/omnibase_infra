@@ -39,6 +39,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import (
@@ -80,7 +81,7 @@ def create_test_projection(
         domain=domain,
         current_state=state,
         node_type="effect",
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         capabilities=ModelNodeCapabilities(postgres=True, read=True),
         ack_deadline=now,
         liveness_deadline=now,

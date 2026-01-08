@@ -695,7 +695,7 @@ class RegistrationReducer:
                 extra={
                     "processing_time_ms": processing_time_ms,
                     "threshold_ms": PERF_THRESHOLD_REDUCE_MS,
-                    "node_type": event.node_type,
+                    "node_type": event.node_type.value,
                     "intent_count": len(intents),
                     "correlation_id": str(correlation_id),
                 },
@@ -776,7 +776,7 @@ class RegistrationReducer:
             EnumNodeKind.REDUCER.value,
             EnumNodeKind.ORCHESTRATOR.value,
         }
-        if event.node_type not in valid_node_types:
+        if event.node_type.value not in valid_node_types:
             return ModelValidationResult.failure(
                 error_code="invalid_node_type",
                 field_name="node_type",
@@ -816,7 +816,7 @@ class RegistrationReducer:
         # Using ISO format for timestamp ensures string stability across serialization.
         # The pipe delimiter prevents ambiguity between field values.
         canonical_content = (
-            f"{event.node_id}|{event.node_type}|{event.timestamp.isoformat()}"
+            f"{event.node_id}|{event.node_type.value}|{event.timestamp.isoformat()}"
         )
 
         # Compute SHA-256 hash and convert to UUID format.
@@ -850,10 +850,10 @@ class RegistrationReducer:
         Returns:
             ModelIntent with intent_type="consul.register" and Consul payload.
         """
-        service_id = f"onex-{event.node_type}-{event.node_id}"
-        service_name = f"onex-{event.node_type}"
+        service_id = f"onex-{event.node_type.value}-{event.node_id}"
+        service_name = f"onex-{event.node_type.value}"
         tags = [
-            f"node_type:{event.node_type}",
+            f"node_type:{event.node_type.value}",
             f"node_version:{event.node_version}",
         ]
 
@@ -902,13 +902,13 @@ class RegistrationReducer:
         now = datetime.now(UTC)
 
         # Build the registration record using strongly-typed models
-        # event.capabilities and event.metadata are already typed as
+        # event.declared_capabilities and event.metadata are already typed as
         # ModelNodeCapabilities and ModelNodeMetadata respectively
         record = ModelNodeRegistrationRecord(
             node_id=event.node_id,
             node_type=event.node_type,
             node_version=event.node_version,
-            capabilities=event.capabilities,
+            capabilities=event.declared_capabilities,
             endpoints=dict(event.endpoints) if event.endpoints else {},
             metadata=event.metadata,
             health_endpoint=(

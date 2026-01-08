@@ -13,10 +13,9 @@ Protocols:
       (tightly coupled to MixinAsyncCircuitBreaker)
 
 Note:
-    TypedDicts and model types used by mixins (e.g., CapabilitiesTypedDict,
-    ModelIntrospectionPerformanceMetrics) should be imported from their
-    canonical locations in omnibase_infra.models.discovery, not from this
-    module.
+    TypedDicts and model types used by mixins (e.g., ModelIntrospectionPerformanceMetrics,
+    ModelDiscoveredCapabilities) should be imported from their canonical locations
+    in omnibase_infra.models.discovery, not from this module.
 
     Configuration models for mixins:
     - ModelCircuitBreakerConfig: from omnibase_infra.models.resilience

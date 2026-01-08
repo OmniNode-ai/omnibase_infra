@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
@@ -101,11 +102,11 @@ class TestSingleEventIdempotency:
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
             endpoints={"health": "http://localhost:8080/health"},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
         )
 
@@ -139,11 +140,11 @@ class TestSingleEventIdempotency:
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
             endpoints={},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
         )
 
@@ -173,11 +174,11 @@ class TestSingleEventIdempotency:
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
             endpoints={},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
         )
 
@@ -217,11 +218,11 @@ class TestMultiReplayIdempotency:
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
             node_type="compute",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
             endpoints={"health": "http://localhost:8080/health"},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
         )
 
@@ -443,11 +444,11 @@ class TestCrashRecoveryIdempotency:
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
             endpoints={"health": "http://localhost:8080/health"},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
         )
 
@@ -568,22 +569,22 @@ class TestEventIdDeduplication:
         event1 = ModelNodeIntrospectionEvent(
             node_id=UUID("22222222-2222-2222-2222-222222222222"),
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=correlation_id,
             timestamp=fixed_timestamp,
             endpoints={},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
         )
 
         event2 = ModelNodeIntrospectionEvent(
             node_id=UUID("33333333-3333-3333-3333-333333333333"),
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=correlation_id,  # Same correlation_id
             timestamp=fixed_timestamp,
             endpoints={},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
         )
 

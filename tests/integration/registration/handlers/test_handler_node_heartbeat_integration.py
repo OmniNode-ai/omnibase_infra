@@ -33,6 +33,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -129,7 +130,7 @@ def make_heartbeat_event(
     return ModelNodeHeartbeatEvent(
         node_id=node_id,
         node_type="effect",
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         uptime_seconds=3600.0,
         active_operations_count=5,
         timestamp=timestamp or datetime.now(UTC),

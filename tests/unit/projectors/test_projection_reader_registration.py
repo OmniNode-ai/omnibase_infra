@@ -153,7 +153,7 @@ class TestProjectionReaderBasics:
         assert projection.entity_id == mock_row["entity_id"]
         assert projection.current_state == EnumRegistrationState.ACTIVE
         assert projection.node_type == "effect"
-        assert projection.node_version == "1.0.0"
+        assert str(projection.node_version) == "1.0.0"
         assert isinstance(projection.capabilities, ModelNodeCapabilities)
 
     async def test_row_to_projection_with_dict_capabilities(

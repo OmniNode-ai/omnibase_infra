@@ -23,6 +23,7 @@ from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 
@@ -54,7 +55,7 @@ class ProtocolPostgresAdapter(Protocol):
         self,
         node_id: UUID,
         node_type: EnumNodeKind,
-        node_version: str,
+        node_version: ModelSemVer,
         endpoints: dict[str, str],
         metadata: dict[str, str],
     ) -> ModelBackendResult:

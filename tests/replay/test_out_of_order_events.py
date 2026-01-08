@@ -67,6 +67,8 @@ pytestmark = [
     pytest.mark.replay,
 ]
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+
 if TYPE_CHECKING:
     from omnibase_core.nodes import ModelReducerOutput
 
@@ -156,11 +158,11 @@ class TestTimestampOrdering:
                 ModelNodeIntrospectionEvent(
                     node_id=UUID(int=100 + i),
                     node_type="effect",
-                    node_version="1.0.0",
+                    node_version=ModelSemVer.parse("1.0.0"),
                     correlation_id=UUID(int=200 + i),
                     timestamp=fixed_timestamp,  # Same timestamp for all
                     endpoints={},
-                    capabilities=ModelNodeCapabilities(),
+                    declared_capabilities=ModelNodeCapabilities(),
                     metadata=ModelNodeMetadata(),
                 )
             )
@@ -390,11 +392,11 @@ class TestEventRedeliveryOrdering:
                 ModelNodeIntrospectionEvent(
                     node_id=UUID(int=100 + i),
                     node_type="effect",
-                    node_version="1.0.0",
+                    node_version=ModelSemVer.parse("1.0.0"),
                     correlation_id=UUID(int=200 + i),  # Different correlation_id
                     timestamp=fixed_timestamp,  # Same timestamp
                     endpoints={},
-                    capabilities=ModelNodeCapabilities(),
+                    declared_capabilities=ModelNodeCapabilities(),
                     metadata=ModelNodeMetadata(),
                 )
             )

@@ -28,6 +28,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import asyncpg
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
@@ -850,7 +851,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         domain: str,
         new_state: EnumRegistrationState,
         node_type: str,
-        node_version: str,
+        node_version: ModelSemVer,
         capabilities: ModelNodeCapabilities,
         event_id: UUID,
         now: datetime,
@@ -903,7 +904,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             ...     domain="registration",
             ...     new_state=EnumRegistrationState.PENDING_REGISTRATION,
             ...     node_type="effect",
-            ...     node_version="1.0.0",
+            ...     node_version=ModelSemVer(major=1, minor=0, patch=0),
             ...     capabilities=ModelNodeCapabilities(),
             ...     event_id=correlation_id,
             ...     now=datetime.now(UTC),

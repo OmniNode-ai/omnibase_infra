@@ -25,6 +25,7 @@ from datetime import datetime
 from uuid import UUID
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -126,8 +127,8 @@ class ModelRegistrationProjection(BaseModel):
         ...,
         description="ONEX node type",
     )
-    node_version: str = Field(
-        default="1.0.0",
+    node_version: ModelSemVer = Field(
+        default_factory=lambda: ModelSemVer(major=1, minor=0, patch=0),
         description="Semantic version of the registered node",
     )
     capabilities: ModelNodeCapabilities = Field(
