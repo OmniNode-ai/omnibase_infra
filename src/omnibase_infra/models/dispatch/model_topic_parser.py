@@ -120,25 +120,13 @@ Topic Taxonomy Reference:
 
 import re
 from functools import lru_cache
-from typing import NamedTuple
 
 from omnibase_core.enums.enum_topic_taxonomy import EnumTopicType
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
-
-
-class CacheInfo(NamedTuple):
-    """Cache statistics returned by get_topic_parse_cache_info().
-
-    This mirrors functools._CacheInfo structure for type safety.
-    """
-
-    hits: int
-    misses: int
-    maxsize: int | None
-    currsize: int
+from omnibase_infra.types import CacheInfo
 
 
 # Module-level LRU cache for topic parsing performance.

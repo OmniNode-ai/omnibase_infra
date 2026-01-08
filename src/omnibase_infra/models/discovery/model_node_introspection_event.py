@@ -3,7 +3,6 @@
 """Node introspection event model for capability discovery and reporting."""
 
 from datetime import datetime
-from typing import TypedDict
 from uuid import UUID
 
 from omnibase_core.enums import EnumNodeKind
@@ -12,51 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
     ModelIntrospectionPerformanceMetrics,
 )
-
-
-class CapabilitiesTypedDict(TypedDict, total=False):
-    """Type-safe structure for node capabilities discovered via reflection.
-
-    This TypedDict provides explicit typing for capability fields, eliminating
-    the need for permissive `dict[str, object]` or `Any` types.
-
-    Attributes:
-        operations: List of public method names that may be operations.
-            These are methods matching configured operation keywords
-            (e.g., execute, handle, process).
-        protocols: List of protocol/interface names implemented by the node.
-            Discovered from class hierarchy (e.g., ProtocolDatabaseAdapter).
-        has_fsm: Boolean indicating if node has FSM state management.
-            True if state attributes like _state or current_state are found.
-        method_signatures: Dict mapping public method names to their signature
-            strings (e.g., {"execute": "(query: str) -> list[dict]"}).
-
-    Example:
-        >>> capabilities: CapabilitiesTypedDict = {
-        ...     "operations": ["execute", "query", "batch_execute"],
-        ...     "protocols": ["ProtocolDatabaseAdapter", "MixinNodeIntrospection"],
-        ...     "has_fsm": True,
-        ...     "method_signatures": {
-        ...         "execute": "(query: str) -> list[dict]",
-        ...         "query": "(sql: str, params: dict) -> list[dict]",
-        ...     },
-        ... }
-    """
-
-    operations: list[str]
-    protocols: list[str]
-    has_fsm: bool
-    method_signatures: dict[str, str]
-
-
-def _empty_capabilities() -> CapabilitiesTypedDict:
-    """Factory function for creating an empty CapabilitiesTypedDict.
-
-    Returns:
-        An empty CapabilitiesTypedDict with default empty values.
-    """
-    # TypedDict with total=False allows empty dict
-    return {}
+from omnibase_infra.types import TypedDictCapabilities
 
 
 class ModelNodeIntrospectionEvent(BaseModel):
@@ -130,9 +85,9 @@ class ModelNodeIntrospectionEvent(BaseModel):
     node_type: EnumNodeKind = Field(..., description="Node type classification")
 
     # Capabilities discovered via reflection
-    # Uses CapabilitiesTypedDict for type safety while maintaining Pydantic compatibility
-    capabilities: CapabilitiesTypedDict = Field(
-        default_factory=_empty_capabilities,
+    # Uses TypedDictCapabilities for type safety while maintaining Pydantic compatibility
+    capabilities: TypedDictCapabilities = Field(
+        default_factory=lambda: {},
         description="Node capabilities discovered via reflection. "
         "Contains: operations (list[str]), protocols (list[str]), "
         "has_fsm (bool), method_signatures (dict[str, str])",
@@ -288,7 +243,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
 
 
 __all__ = [
-    "CapabilitiesTypedDict",
     "ModelIntrospectionPerformanceMetrics",
     "ModelNodeIntrospectionEvent",
+    "TypedDictCapabilities",
 ]

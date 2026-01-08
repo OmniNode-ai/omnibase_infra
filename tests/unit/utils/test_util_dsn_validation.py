@@ -28,73 +28,73 @@ class TestDsnValidation:
         dsn = "postgresql://user:password@localhost:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["scheme"] == "postgresql"
-        assert result["username"] == "user"
-        assert result["password"] == "password"
-        assert result["hostname"] == "localhost"
-        assert result["port"] == 5432
-        assert result["database"] == "mydb"
-        assert result["query"] == {}
+        assert result.scheme == "postgresql"
+        assert result.username == "user"
+        assert result.password == "password"
+        assert result.hostname == "localhost"
+        assert result.port == 5432
+        assert result.database == "mydb"
+        assert result.query == {}
 
     def test_valid_postgres_prefix(self) -> None:
         """Test 'postgres://' prefix (alternative to 'postgresql://')."""
         dsn = "postgres://user:password@localhost:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["scheme"] == "postgres"
-        assert result["hostname"] == "localhost"
+        assert result.scheme == "postgres"
+        assert result.hostname == "localhost"
 
     def test_valid_no_password(self) -> None:
         """Test DSN without password (trust auth or cert-based)."""
         dsn = "postgresql://user@localhost:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["username"] == "user"
-        assert result["password"] is None
-        assert result["hostname"] == "localhost"
+        assert result.username == "user"
+        assert result.password is None
+        assert result.hostname == "localhost"
 
     def test_valid_no_port(self) -> None:
         """Test DSN without port (defaults to 5432)."""
         dsn = "postgresql://user:password@localhost/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["hostname"] == "localhost"
-        assert result["port"] is None  # Will default to 5432 at connection time
-        assert result["database"] == "mydb"
+        assert result.hostname == "localhost"
+        assert result.port is None  # Will default to 5432 at connection time
+        assert result.database == "mydb"
 
     def test_valid_no_user_password(self) -> None:
         """Test DSN with only host/port/database (local trust)."""
         dsn = "postgresql://localhost:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["username"] is None
-        assert result["password"] is None
-        assert result["hostname"] == "localhost"
-        assert result["port"] == 5432
+        assert result.username is None
+        assert result.password is None
+        assert result.hostname == "localhost"
+        assert result.port == 5432
 
     def test_valid_ipv6_address(self) -> None:
         """Test DSN with IPv6 address in brackets."""
         dsn = "postgresql://user:pass@[::1]:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["hostname"] == "::1"
-        assert result["port"] == 5432
+        assert result.hostname == "::1"
+        assert result.port == 5432
 
     def test_valid_ipv6_full_address(self) -> None:
         """Test DSN with full IPv6 address."""
         dsn = "postgresql://user:pass@[2001:db8::1]:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["hostname"] == "2001:db8::1"
-        assert result["port"] == 5432
+        assert result.hostname == "2001:db8::1"
+        assert result.port == 5432
 
     def test_valid_ipv4_address(self) -> None:
         """Test DSN with IPv4 address."""
         dsn = "postgresql://user:pass@192.168.1.100:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["hostname"] == "192.168.1.100"
-        assert result["port"] == 5432
+        assert result.hostname == "192.168.1.100"
+        assert result.port == 5432
 
     def test_valid_url_encoded_password(self) -> None:
         """Test DSN with URL-encoded special characters in password."""
@@ -103,35 +103,35 @@ class TestDsnValidation:
         dsn = "postgresql://user:p%40ss%3Aw%2Frd%25special%21@localhost:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["username"] == "user"
+        assert result.username == "user"
         # urllib.parse.unquote decodes the password
-        assert result["password"] == "p@ss:w/rd%special!"
+        assert result.password == "p@ss:w/rd%special!"
 
     def test_valid_query_parameters(self) -> None:
         """Test DSN with query parameters (sslmode, connect_timeout, etc.)."""
         dsn = "postgresql://user:pass@localhost:5432/mydb?sslmode=require&connect_timeout=10"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["database"] == "mydb"
-        assert result["query"]["sslmode"] == "require"
-        assert result["query"]["connect_timeout"] == "10"
+        assert result.database == "mydb"
+        assert result.query["sslmode"] == "require"
+        assert result.query["connect_timeout"] == "10"
 
     def test_valid_minimal_dsn(self) -> None:
         """Test minimal valid DSN (scheme + database name)."""
         dsn = "postgresql:///mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["scheme"] == "postgresql"
-        assert result["hostname"] is None  # Defaults to Unix socket
-        assert result["database"] == "mydb"
+        assert result.scheme == "postgresql"
+        assert result.hostname is None  # Defaults to Unix socket
+        assert result.database == "mydb"
 
     def test_valid_unix_socket_path(self) -> None:
         """Test DSN with Unix socket path."""
         dsn = "postgresql:///mydb?host=/var/run/postgresql"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["database"] == "mydb"
-        assert result["query"]["host"] == "/var/run/postgresql"
+        assert result.database == "mydb"
+        assert result.query["host"] == "/var/run/postgresql"
 
     def test_invalid_missing_scheme(self) -> None:
         """Test DSN without scheme."""
@@ -262,7 +262,7 @@ class TestDsnValidation:
         result = parse_and_validate_dsn(dsn)
 
         # urllib.parse will parse full path as database
-        assert result["database"] == "my/db"
+        assert result.database == "my/db"
 
     def test_edge_case_empty_password(self) -> None:
         """Test DSN with empty password (user: format)."""
@@ -270,9 +270,9 @@ class TestDsnValidation:
 
         result = parse_and_validate_dsn(dsn)
 
-        assert result["username"] == "user"
+        assert result.username == "user"
         # Empty password is valid (different from no password)
-        assert result["password"] == ""
+        assert result.password == ""
 
     def test_edge_case_at_sign_in_password(self) -> None:
         """Test @ sign in password (must be URL-encoded)."""
@@ -282,7 +282,7 @@ class TestDsnValidation:
 
         result = parse_and_validate_dsn(dsn)
 
-        assert result["password"] == "p@ssword"
+        assert result.password == "p@ssword"
 
     def test_edge_case_colon_in_password(self) -> None:
         """Test colon in password (must be URL-encoded)."""
@@ -292,7 +292,7 @@ class TestDsnValidation:
 
         result = parse_and_validate_dsn(dsn)
 
-        assert result["password"] == "pass:word"
+        assert result.password == "pass:word"
 
 
 class TestDsnEdgeCasesIntegration:

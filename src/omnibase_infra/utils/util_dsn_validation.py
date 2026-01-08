@@ -30,8 +30,10 @@ from __future__ import annotations
 from urllib.parse import parse_qs, unquote, urlparse
 from uuid import uuid4
 
+from omnibase_infra.types import ModelParsedDSN
 
-def parse_and_validate_dsn(dsn: object) -> dict[str, object]:
+
+def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
     """Parse and validate PostgreSQL DSN format using urllib.parse.
 
     This function provides comprehensive DSN validation that handles edge cases
@@ -42,14 +44,14 @@ def parse_and_validate_dsn(dsn: object) -> dict[str, object]:
         dsn: PostgreSQL connection string (any type - validated)
 
     Returns:
-        Dictionary containing parsed components:
-            - scheme: "postgresql" or "postgres"
+        ModelParsedDSN with parsed components:
+            - scheme: "postgresql" or "postgres" (Literal type)
             - username: Username or None
             - password: Password (URL-decoded) or None
             - hostname: Hostname or IP address or None
             - port: Port number or None
             - database: Database name
-            - query: Dict of query parameters
+            - query: Dict of query parameters (str keys, str | list[str] values)
 
     Raises:
         ProtocolConfigurationError: If DSN format is invalid
@@ -185,15 +187,15 @@ def parse_and_validate_dsn(dsn: object) -> dict[str, object]:
     # Return parsed components
     # Note: urlparse does NOT decode URL-encoded passwords, so we use unquote()
     # Important: Check 'is not None' instead of truthiness to preserve empty strings
-    return {
-        "scheme": parsed.scheme,
-        "username": unquote(parsed.username) if parsed.username is not None else None,
-        "password": unquote(parsed.password) if parsed.password is not None else None,
-        "hostname": parsed.hostname,
-        "port": port,
-        "database": database,
-        "query": query_dict,
-    }
+    return ModelParsedDSN(
+        scheme=parsed.scheme,  # type: ignore[arg-type] - scheme validated above
+        username=unquote(parsed.username) if parsed.username is not None else None,
+        password=unquote(parsed.password) if parsed.password is not None else None,
+        hostname=parsed.hostname,
+        port=port,
+        database=database,
+        query=query_dict,
+    )
 
 
 def sanitize_dsn(dsn: str) -> str:
@@ -268,4 +270,4 @@ def sanitize_dsn(dsn: str) -> str:
         return "[INVALID_DSN]"
 
 
-__all__: list[str] = ["parse_and_validate_dsn", "sanitize_dsn"]
+__all__: list[str] = ["ModelParsedDSN", "parse_and_validate_dsn", "sanitize_dsn"]
