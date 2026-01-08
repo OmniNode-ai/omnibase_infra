@@ -142,7 +142,9 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
     # We check for comma after :// and before / (in the host portion)
     scheme_end = dsn_str.index("://") + 3
     path_start = dsn_str.find("/", scheme_end)
-    host_portion = dsn_str[scheme_end:path_start] if path_start != -1 else dsn_str[scheme_end:]
+    host_portion = (
+        dsn_str[scheme_end:path_start] if path_start != -1 else dsn_str[scheme_end:]
+    )
     if "," in host_portion:
         raise ProtocolConfigurationError(
             "Multi-host DSNs are not supported. Use a single host or consider "

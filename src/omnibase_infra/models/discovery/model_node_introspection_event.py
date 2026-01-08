@@ -87,7 +87,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
     # Capabilities discovered via reflection
     # Uses TypedDictCapabilities for type safety while maintaining Pydantic compatibility
     capabilities: TypedDictCapabilities = Field(
-        default_factory=lambda: {},
+        default_factory=dict,
         description="Node capabilities discovered via reflection. "
         "Contains: operations (list[str]), protocols (list[str]), "
         "has_fsm (bool), method_signatures (dict[str, str])",

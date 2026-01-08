@@ -128,7 +128,6 @@ from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
 from omnibase_infra.types import TypeCacheInfo
 
-
 # Module-level LRU cache for topic parsing performance.
 # Since ModelTopicParser is stateless and all class-level attributes are constants,
 # we can safely cache parse results at the module level. This provides significant
