@@ -267,11 +267,23 @@ def _validate_adapter_constraints(
         )
         errors.append(error)
 
-    # SECURITY-303: Adapter with non-EFFECT category
-    if (
-        handler_policy.handler_type_category is not None
-        and handler_policy.handler_type_category != EnumHandlerTypeCategory.EFFECT
-    ):
+    # SECURITY-303: Adapter with non-EFFECT category (or missing category)
+    # Adapters MUST explicitly set handler_type_category=EFFECT
+    if handler_policy.handler_type_category is None:
+        error = ModelHandlerValidationError.from_security_violation(
+            rule_id=EnumSecurityRuleId.ADAPTER_NON_EFFECT_CATEGORY,
+            message=(
+                "Adapter handler has no handler_type_category set "
+                "but adapters must explicitly specify EFFECT category"
+            ),
+            remediation_hint=(
+                "Set handler_type_category=EnumHandlerTypeCategory.EFFECT for adapter handlers, "
+                "or remove is_adapter=True if this is not an adapter"
+            ),
+            handler_identity=ModelHandlerIdentifier.from_handler_id("unknown"),
+        )
+        errors.append(error)
+    elif handler_policy.handler_type_category != EnumHandlerTypeCategory.EFFECT:
         error = ModelHandlerValidationError.from_security_violation(
             rule_id=EnumSecurityRuleId.ADAPTER_NON_EFFECT_CATEGORY,
             message=(

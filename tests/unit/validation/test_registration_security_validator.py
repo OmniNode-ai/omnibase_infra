@@ -389,6 +389,45 @@ class TestAdapterSecurityConstraints:
         ]
         assert len(adapter_errors) == 0
 
+    def test_adapter_with_none_handler_type_category_raises_error(self) -> None:
+        """Adapter with handler_type_category=None should fail registration.
+
+        Expected Error: SECURITY-303
+
+        Adapters MUST explicitly set handler_type_category=EFFECT.
+        Leaving it as None bypasses the validation and contradicts the
+        documented requirement that adapters must be EFFECT category.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=["api.example.com"],
+            data_classification=EnumDataClassification.INTERNAL,
+            is_adapter=True,
+            handler_type_category=None,  # Missing - should be EFFECT
+        )
+
+        env_policy = ModelEnvironmentPolicy(
+            environment=EnumEnvironment.PRODUCTION,
+            permitted_secret_scopes=frozenset(),
+            max_data_classification=EnumDataClassification.CONFIDENTIAL,
+            require_explicit_domain_allowlist=False,
+        )
+
+        # ACT
+        errors = validate_handler_registration(handler_policy, env_policy)
+
+        # ASSERT
+        assert len(errors) >= 1
+        category_errors = [
+            e
+            for e in errors
+            if e.rule_id == EnumSecurityRuleId.ADAPTER_NON_EFFECT_CATEGORY
+        ]
+        assert len(category_errors) == 1
+        # Verify error message mentions the missing category
+        assert "no handler_type_category" in category_errors[0].message.lower()
+
     def test_adapter_with_non_effect_category_raises_error(self) -> None:
         """Adapter with non-EFFECT handler category should fail registration.
 

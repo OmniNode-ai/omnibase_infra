@@ -16,10 +16,10 @@ See Also:
     - ModelHandlerSecurityPolicy: Handler-declared security requirements
 """
 
-from enum import StrEnum
+from enum import Enum
 
 
-class EnumEnvironment(StrEnum):
+class EnumEnvironment(str, Enum):
     """Deployment environment classification.
 
     Defines the deployment environments for security policy enforcement
