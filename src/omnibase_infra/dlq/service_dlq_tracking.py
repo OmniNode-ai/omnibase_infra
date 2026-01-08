@@ -599,7 +599,9 @@ class ServiceDlqTracking(MixinAsyncCircuitBreaker):
 # ONEX Naming Convention Compliance:
 # The primary class name is ServiceDlqTracking following ONEX service naming convention
 # (service_<name>.py → Service<Name>).
-# DLQReplayTracker is provided as a backwards-compatibility alias.
+#
+# DEPRECATED: DLQReplayTracker is a backwards-compatibility alias.
+# Use ServiceDlqTracking instead. Will be removed in v2.0.0 or 2026-Q2.
 DLQReplayTracker = ServiceDlqTracking
 
 __all__: list[str] = ["ServiceDlqTracking", "DLQReplayTracker"]

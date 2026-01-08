@@ -41,6 +41,13 @@ class ModelRetryErrorClassification(BaseModel):
         >>> classification.should_retry
         True
 
+        The model is immutable (frozen=True) - attempting to modify raises an error:
+
+        >>> classification.should_retry = False  # doctest: +SKIP
+        Traceback (most recent call last):
+            ...
+        pydantic_core._pydantic_core.ValidationError: ...
+
     Note:
         The error_message field should contain SANITIZED error descriptions only.
         Never include credentials, tokens, or other sensitive data in this field.
