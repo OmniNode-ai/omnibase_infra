@@ -99,7 +99,7 @@ runtime:
 | 3 | `ProtocolHandler` | Interface defined with `handler_type` returning enum | [ ] |
 | 4 | `ProtocolEventBus` | Interface defined with `publish_envelope`, `subscribe` | [ ] |
 | 5 | `NodeRuntime` | Routes envelope to correct handler by type | [ ] |
-| 6 | `FileRegistry` | Loads contracts from directory, fails on invalid | [ ] |
+| 6 | `RegistryFileBased` | Loads contracts from directory, fails on invalid | [ ] |
 | 7 | `HttpHandler` | Executes GET/POST, returns response envelope | [ ] |
 | 8 | `DbHandler` | Executes query/execute, returns response envelope | [ ] |
 | 9 | `InMemoryEventBus` | Publishes and consumes envelopes per topic | [ ] |
@@ -427,9 +427,9 @@ Create the core runtime that hosts multiple node instances. **MINIMAL for MVP - 
 
 ---
 
-### Issue 1.8: Implement FileRegistry class (SIMPLE) [MVP]
+### Issue 1.8: Implement RegistryFileBased class (SIMPLE) [MVP]
 
-**Title**: Create FileRegistry for contract loading
+**Title**: Create RegistryFileBased for contract loading
 **Type**: Feature
 **Priority**: High
 **Labels**: `architecture`, `runtime`, `core`
@@ -438,7 +438,7 @@ Create the core runtime that hosts multiple node instances. **MINIMAL for MVP - 
 **Description**:
 Create the file-based contract registry for loading node contracts from filesystem. **Simple for MVP - just load YAML to Pydantic, no skip rules.**
 
-**File**: `src/omnibase_core/runtime/file_registry.py` (NEW)
+**File**: `src/omnibase_core/runtime/registry_file_based.py` (NEW)
 
 **MVP Methods**: `load(path) -> Model`, `load_all(directory) -> list[Model]`
 
@@ -1475,7 +1475,7 @@ Phase 1 (Core Types - omnibase_core)
     +-- 1.5 ProtocolHandler [MVP]
     +-- 1.6 NodeInstance [MVP]
     +-- 1.7 NodeRuntime (minimal) [MVP]
-    +-- 1.8 FileRegistry (simple) [MVP]
+    +-- 1.8 RegistryFileBased (simple) [MVP]
     +-- 1.9 LocalHandler [MVP]
     +-- 1.10 Dev CLI (simple) [MVP]
     +-- 1.11 Minimal error taxonomy [MVP]

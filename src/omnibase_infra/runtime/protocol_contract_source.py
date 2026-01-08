@@ -41,15 +41,30 @@ class ProtocolContractSource(Protocol):
 
     @property
     def source_type(self) -> str:
-        """The type of handler source."""
+        """The type of handler source.
+
+        Returns:
+            str: Source type identifier (e.g., "CONTRACT", "DATABASE").
+        """
         ...
 
     async def discover_handlers(self) -> ModelContractDiscoveryResult:
         """Discover and return all handlers from this source.
 
+        Scans configured sources for handler contracts and returns
+        discovered handlers along with any validation errors encountered.
+
+        Args:
+            None - This method takes no arguments.
+
         Returns:
-            ModelContractDiscoveryResult containing discovered handler
-            descriptors and any validation errors encountered during discovery.
+            ModelContractDiscoveryResult: Container with:
+                - descriptors: List of successfully discovered handlers
+                - validation_errors: List of errors for failed discoveries
+
+        Raises:
+            ModelOnexError: In strict mode, if discovery encounters
+                validation or parsing errors.
         """
         ...
 

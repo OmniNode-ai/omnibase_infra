@@ -39,17 +39,29 @@ class ProtocolContractDescriptor(Protocol):
 
     @property
     def handler_id(self) -> str:
-        """Unique identifier for the handler."""
+        """Unique identifier for the handler.
+
+        Returns:
+            str: Globally unique handler identifier in format "name@version".
+        """
         ...
 
     @property
     def name(self) -> str:
-        """Human-readable name for the handler."""
+        """Human-readable name for the handler.
+
+        Returns:
+            str: Handler name without version suffix.
+        """
         ...
 
     @property
     def version(self) -> str:
-        """Semantic version of the handler."""
+        """Semantic version of the handler.
+
+        Returns:
+            str: Version string in semver format (e.g., "1.0.0").
+        """
         ...
 
 

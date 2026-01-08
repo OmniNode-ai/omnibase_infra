@@ -1222,7 +1222,8 @@ class TestHandlerContractSourceSymlinkHandling:
         """Verify symlinked handler_contract.yaml files are discovered.
 
         Creates a real contract file and a symlink to it, then verifies
-        discovery works when searching the symlink directory.
+        discovery works when searching the symlink directory. Both directories
+        are included in contract_paths to satisfy symlink protection.
         """
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
@@ -1250,15 +1251,61 @@ output_model: "test.models.Output"
         symlink_contract = symlink_dir / "handler_contract.yaml"
         symlink_contract.symlink_to(actual_contract)
 
-        # Search only in symlink directory
-        source = HandlerContractSource(contract_paths=[symlink_dir])
+        # Include both directories in contract_paths so symlink target is allowed
+        # This tests symlink following while respecting path security
+        source = HandlerContractSource(contract_paths=[symlink_dir, actual_dir])
         result = await source.discover_handlers()
 
+        # Should discover exactly 1 (deduplicated by resolved path)
         assert len(result.descriptors) == 1, (
             f"Expected 1 descriptor via symlink, got {len(result.descriptors)}"
         )
         assert len(result.validation_errors) == 0
         assert result.descriptors[0].handler_id == "test.handler.symlinked"
+
+    @pytest.mark.asyncio
+    async def test_blocks_symlinks_outside_allowed_paths(self, tmp_path: Path) -> None:
+        """Verify symlinks pointing outside allowed paths are blocked.
+
+        This tests the security feature that prevents symlink-based path
+        traversal attacks where a symlink inside a configured path points
+        to files outside allowed directories.
+        """
+        from omnibase_infra.runtime.handler_contract_source import (
+            HandlerContractSource,
+        )
+
+        # Create actual contract OUTSIDE the allowed path
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+
+        valid_yaml = """
+handler_id: "test.handler.outside"
+name: "Outside Handler"
+version: "1.0.0"
+descriptor:
+  handler_kind: "effect"
+input_model: "test.models.Input"
+output_model: "test.models.Output"
+"""
+        outside_contract = outside_dir / "handler_contract.yaml"
+        outside_contract.write_text(valid_yaml)
+
+        # Create symlink directory with symlink pointing outside
+        allowed_dir = tmp_path / "allowed"
+        allowed_dir.mkdir()
+        symlink_contract = allowed_dir / "handler_contract.yaml"
+        symlink_contract.symlink_to(outside_contract)
+
+        # Search only in allowed directory (symlink target is NOT allowed)
+        source = HandlerContractSource(contract_paths=[allowed_dir])
+        result = await source.discover_handlers()
+
+        # Should discover 0 - symlink pointing outside is blocked
+        assert len(result.descriptors) == 0, (
+            f"Expected 0 descriptors (symlink blocked), got {len(result.descriptors)}"
+        )
+        assert len(result.validation_errors) == 0
 
     @pytest.mark.asyncio
     async def test_deduplicates_symlinked_and_actual_contracts(

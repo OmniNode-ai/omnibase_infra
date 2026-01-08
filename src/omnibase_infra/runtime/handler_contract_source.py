@@ -199,6 +199,22 @@ class HandlerContractSource:
                 resolved_path = contract_file.resolve()
                 if resolved_path in discovered_paths:
                     continue
+
+                # Symlink protection: verify resolved path is within configured paths
+                # This prevents symlink-based path traversal attacks where a symlink
+                # inside a configured path points to files outside allowed directories
+                is_within_allowed = any(
+                    resolved_path.is_relative_to(base.resolve())
+                    for base in self._contract_paths
+                )
+                if not is_within_allowed:
+                    logger.warning(
+                        "Skipping contract file outside allowed paths: %s (resolved to %s)",
+                        contract_file,
+                        resolved_path,
+                    )
+                    continue
+
                 discovered_paths.add(resolved_path)
 
                 try:
@@ -265,6 +281,10 @@ class HandlerContractSource:
             yaml.YAMLError: If YAML parsing fails.
             ValidationError: If contract validation fails.
         """
+        # NOTE: Direct file operations are used here intentionally until
+        # RegistryFileBased is implemented in omnibase_core. Once available,
+        # this should use the registry abstraction for consistent file loading.
+        # See: docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
         with contract_path.open("r", encoding="utf-8") as f:
             raw_data = yaml.safe_load(f)
 
