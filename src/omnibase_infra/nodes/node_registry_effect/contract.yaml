@@ -70,8 +70,8 @@ output_model:
 # │            │                                                            │
 # │            ▼                                                            │
 # │  ┌─────────────────────┐                                                │
-# │  │  Operation Router   │  routing_strategy: "operation_match"          │
-# │  │  (Contract-Driven)  │  Matches operation field to handlers           │
+# │  │  Operation Router   │  routing_strategy: "payload_type_match"       │
+# │  │  (Contract-Driven)  │  Matches payload type to handlers              │
 # │  └─────────┬───────────┘                                                │
 # │            │                                                            │
 # │            │ operation == "register_node"                               │
@@ -119,7 +119,7 @@ output_model:
 #   and delegates retry behavior to the handlers themselves.
 # =============================================================================
 operation_routing:
-  routing_strategy: "operation_match"
+  routing_strategy: "payload_type_match"
   operations:
     # Register Node - Consul Backend
     # Registers service with Consul for service discovery.

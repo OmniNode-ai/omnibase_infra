@@ -291,7 +291,7 @@ class HandlerPartialRetry:
 
         except (
             Exception
-        ) as e:  # CATCH-ALL: External service may raise unexpected exceptions
+        ) as e:  # ONEX: catch-all - external service may raise unexpected exceptions
             # beyond typed infrastructure errors (e.g., HTTP client errors, JSON decode errors,
             # network stack errors). Required to sanitize errors and prevent credential exposure.
             duration_ms = (time.perf_counter() - start_time) * 1000
@@ -392,7 +392,7 @@ class HandlerPartialRetry:
 
         except (
             Exception
-        ) as e:  # CATCH-ALL: Database adapter may raise unexpected exceptions
+        ) as e:  # ONEX: catch-all - database adapter may raise unexpected exceptions
             # beyond typed infrastructure errors (e.g., driver errors, encoding errors,
             # connection pool errors). Required to sanitize errors and prevent credential exposure.
             duration_ms = (time.perf_counter() - start_time) * 1000
