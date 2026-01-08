@@ -1109,26 +1109,12 @@ pattern_exemptions:
       - CLAUDE.md (Model Field Naming - computed display names)
     ticket: OMN-1138
   # ==========================================================================
-  # Architecture Validator OMN-1099 Exemptions (Core Pattern Validators)
+  # Architecture Validator OMN-1099 Exemptions (AST Visitor Pattern)
   # ==========================================================================
   # OMN-1099 validators (no-direct-dispatch, no-handler-publishing, no-orchestrator-fsm)
   # use Python AST visitor pattern which requires visit_* method names per Python stdlib.
-  - file_pattern: 'model_violation\.py'
-    violation_pattern: "Field 'rule_id' should use UUID"
-    reason: >
-      rule_id is a semantic identifier for architecture rules (e.g., 'ARCH-001'). These are human-readable rule codes like error codes, not database entity UUIDs.
-
-    documentation:
-      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
-    ticket: OMN-1099
-  - file_pattern: 'model_violation\.py'
-    violation_pattern: "Field 'rule_name' might reference an entity"
-    reason: >
-      rule_name is a human-readable display name for the rule (e.g., 'No Handler Publishing'). It's a static description, not a reference to a named entity.
-
-    documentation:
-      - CLAUDE.md (Model Field Naming - display names vs entity references)
-    ticket: OMN-1099
+  # NOTE: model_violation.py exemptions for rule_id/rule_name are defined earlier
+  # in the "Architecture Violation Model Exemptions (OMN-1099)" section.
   - file_pattern: 'validator_no_handler_publishing\.py'
     violation_pattern: "Class name .* contains anti-pattern 'Handler'"
     reason: >

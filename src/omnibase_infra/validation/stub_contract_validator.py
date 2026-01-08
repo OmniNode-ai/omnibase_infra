@@ -46,7 +46,7 @@ import warnings
 from pathlib import Path
 
 import yaml
-from omnibase_core.enums import EnumNodeType
+from omnibase_core.enums import EnumCoreErrorCode, EnumNodeType
 from omnibase_core.errors import OnexError
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.validation import ModelContractValidationResult
@@ -408,30 +408,28 @@ class StubContractValidator:
                     "contract format. See logs for full traceback. "
                     f"(correlation_id={correlation_id})"
                 ),
-                error_code="STUB_VALIDATION_UNEXPECTED_ERROR",
-                context={
-                    # ONEX error context fields (per CLAUDE.md error patterns)
-                    "correlation_id": str(correlation_id),
-                    "operation": "validate_contract_file",
-                    # resource_type used instead of transport_type for filesystem I/O
-                    "resource_type": "filesystem",
-                    "target_path": str(contract_path),
-                    # Validation-specific context
-                    "contract_type": (
-                        contract_type.value if contract_type is not None else None
-                    ),
-                    "validator_class": "StubContractValidator",
-                    # Exception details (sanitized - no sensitive data in file paths)
-                    "exception_type": type(e).__name__,
-                    "exception_message": str(e),
-                    # Migration and security metadata
-                    "migration_ticket": "OMN-1104",
-                    "security_warning": (
-                        "STUB VALIDATOR: Performs MINIMAL validation only. "
-                        "Do NOT rely on this for production contract verification. "
-                        "Migrate to omnibase_core.validation API."
-                    ),
-                },
+                error_code=EnumCoreErrorCode.INTERNAL_ERROR,
+                correlation_id=correlation_id,
+                # ONEX error context fields as keyword arguments (per OnexError signature)
+                operation="validate_contract_file",
+                # resource_type used instead of transport_type for filesystem I/O
+                resource_type="filesystem",
+                target_path=str(contract_path),
+                # Validation-specific context
+                contract_type=(
+                    contract_type.value if contract_type is not None else None
+                ),
+                validator_class="StubContractValidator",
+                # Exception details (sanitized - no sensitive data in file paths)
+                exception_type=type(e).__name__,
+                exception_message=str(e),
+                # Migration and security metadata
+                migration_ticket="OMN-1104",
+                security_warning=(
+                    "STUB VALIDATOR: Performs MINIMAL validation only. "
+                    "Do NOT rely on this for production contract verification. "
+                    "Migrate to omnibase_core.validation API."
+                ),
             ) from e
 
 

@@ -238,6 +238,11 @@ PayloadType = dict[str, object]  # CORRECT
 
 ### When to Use `dict[str, object]` vs `dict[str, Any]`
 
+> **SCOPE BOUNDARY**: This section documents type choices within Pydantic model definitions ONLY.
+> - `dict[str, Any]` is permitted ONLY in Pydantic `Field()` definitions
+> - `dict[str, object]` MUST be used in function signatures, return types, and all non-Pydantic contexts
+> - This is NOT a general license to use `Any` - the CLAUDE.md "NEVER use Any" rule remains absolute outside Pydantic fields
+
 **IMPORTANT CLARIFICATION**: This section does NOT contradict the CLAUDE.md "NEVER use Any" guideline. The `Any` usage described here is ONLY permitted within Pydantic model `Field()` definitions as documented in the "Scope of Deviation" section above. All other contexts MUST use `object`.
 
 | Context | Type to Use | Reason |
@@ -324,7 +329,7 @@ This ADR defines **two distinct comment patterns** for different contexts.
 1. The narrow exception (Any in Pydantic fields)
 2. The standard practice (object everywhere else)
 
-This ADR matches the actual implementations in the 33 affected files - all `Any` usages are strictly within Pydantic model field definitions.
+**Implementation Status**: The 33 files listed in this ADR's "Affected Files" section are compliant - they use `Any` exclusively in Pydantic model field definitions. However, legacy violations (Any in function signatures, return types, or type aliases) may exist elsewhere in the codebase and are tracked under [OMN-1262](https://linear.app/omninode/issue/OMN-1262) for mandatory cleanup. New code introducing such violations will be rejected in PR review.
 
 #### Pattern 1: `Any` in Pydantic Models (JsonType Workaround)
 
