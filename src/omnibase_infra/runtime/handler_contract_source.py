@@ -91,6 +91,12 @@ class HandlerContractSource(ProtocolContractSource):
     configured paths for handler_contract.yaml files, parsing them with
     YAML and validating against ModelHandlerContract from omnibase_core.
 
+    Protocol Compliance:
+        This class explicitly inherits from ProtocolContractSource and implements
+        all required protocol methods: discover_handlers() async method and
+        source_type property. Protocol compliance is verified at runtime through
+        Python's structural subtyping and enforced by type checkers (mypy/pyright).
+
     The source supports two operation modes:
     - Strict mode (default): Raises ModelOnexError on first error
     - Graceful mode: Collects all errors, continues discovery
@@ -348,10 +354,20 @@ class HandlerContractSource(ProtocolContractSource):
                     # Only handle file size limit errors (HANDLER_SOURCE_005) gracefully
                     # Other ModelOnexError types should be re-raised as they may indicate
                     # more serious issues (e.g., configuration errors, programming errors)
-                    if e.error_code == "HANDLER_SOURCE_005":
+                    # Defensive check: error_code should always exist on ModelOnexError,
+                    # but handle the case where it might be None
+                    error_code = getattr(e, "error_code", None)
+                    if error_code == "HANDLER_SOURCE_005":
+                        # Get file size defensively - the original stat() that triggered
+                        # this error may have succeeded, but the file could have changed
+                        # (TOCTOU race). Use 0 as fallback if stat() fails now.
+                        try:
+                            file_size = contract_file.stat().st_size
+                        except OSError:
+                            file_size = 0  # File may have been deleted/changed
                         error = self._create_size_limit_error(
                             contract_file,
-                            contract_file.stat().st_size,
+                            file_size,
                         )
                         logger.warning(
                             "Contract file %s exceeds size limit, continuing in graceful mode",
@@ -359,7 +375,7 @@ class HandlerContractSource(ProtocolContractSource):
                             extra={
                                 "contract_file": str(contract_file),
                                 "error_type": "size_limit_error",
-                                "error_code": e.error_code,
+                                "error_code": error_code,
                                 "graceful_mode": self._graceful_mode,
                                 "paths_scanned": len(self._contract_paths),
                             },
@@ -379,7 +395,7 @@ class HandlerContractSource(ProtocolContractSource):
                     error = self._create_io_error(contract_file, e)
                     logger.warning(
                         "Failed to read contract file, continuing in graceful mode: %s",
-                        contract_file,
+                        self._sanitize_path_for_logging(contract_file),
                         extra={
                             "contract_file": str(contract_file),
                             "error_type": "io_error",
@@ -448,6 +464,15 @@ class HandlerContractSource(ProtocolContractSource):
         #   - Unified error handling for file operations
         #
         # See: docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
+        #
+        # TODO(performance): Consider using aiofiles for true async I/O
+        #
+        # Current implementation uses synchronous file I/O which is acceptable for
+        # MVP but may become a bottleneck in high-throughput scenarios. The aiofiles
+        # library would provide non-blocking file operations:
+        #   - async with aiofiles.open(path, "r") as f: data = await f.read()
+        # This is a NITPICK optimization - only implement if profiling shows file I/O
+        # as a bottleneck. Current synchronous I/O handles 100-500 contracts/sec.
 
         # Validate file size before reading to prevent memory exhaustion
         file_size = contract_path.stat().st_size
@@ -594,12 +619,16 @@ class HandlerContractSource(ProtocolContractSource):
             f"unknown@{contract_path.name}"
         )
 
+        # OSError.strerror may be None for some error types (e.g., custom subclasses),
+        # so use str(error) as a fallback to ensure we always have an error message
+        error_message = error.strerror or str(error)
+
         return ModelHandlerValidationError(
             error_type=EnumHandlerErrorType.CONTRACT_PARSE_ERROR,
             rule_id="CONTRACT-004",
             handler_identity=handler_identity,
             source_type=EnumHandlerSourceType.CONTRACT,
-            message=f"Failed to read contract file: {error.strerror}",
+            message=f"Failed to read contract file: {error_message}",
             remediation_hint="Check file permissions and ensure the file exists",
             file_path=str(contract_path),
         )

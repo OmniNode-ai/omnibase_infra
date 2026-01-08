@@ -108,7 +108,9 @@ runtime:
 | 12 | E2E Flow | Envelope in -> handler executes -> response out | [ ] |
 
 > **Note**: The checklist references core components. `omnibase_infra` provides `HandlerContractSource`
-> for handler contract discovery, while `omnibase_core` may provide `RegistryFileBased` for general contract loading.
+> for handler contract discovery from `handler_contract.yaml` files. `omnibase_core` will provide a general-purpose
+> contract registry (see Issue 1.8) for loading node contracts from filesystem. These are complementary components:
+> `HandlerContractSource` handles handler-specific discovery, while the core registry handles general contract loading.
 
 **MVP Smoke Test** (single command to verify):
 ```bash
@@ -430,22 +432,31 @@ Create the core runtime that hosts multiple node instances. **MINIMAL for MVP - 
 
 ---
 
-### Issue 1.8: Implement RegistryFileBased class (SIMPLE) [MVP]
+### Issue 1.8: Implement FileContractRegistry class (SIMPLE) [MVP]
 
-**Title**: Create RegistryFileBased for contract loading
+**Title**: Create FileContractRegistry for contract loading
 **Type**: Feature
 **Priority**: High
 **Labels**: `architecture`, `runtime`, `core`
 **Milestone**: v0.1.0 MVP
 
-> **Clarification**: This issue describes `RegistryFileBased` for `omnibase_core`, which handles general
-> contract loading. `omnibase_infra` provides `HandlerContractSource` for handler-specific contract
-> discovery from `handler_contract.yaml` files. These are complementary components with different scopes.
+> **Implementation Status**: This component is PLANNED for `omnibase_core` and does NOT yet exist.
+> This issue defines the specification for future implementation.
+
+> **Naming Convention**: Following ONEX naming standards (`Registry<Purpose>`), this class should be named
+> `FileContractRegistry` (file: `registry_file_contract.py`). The name describes its purpose: a registry
+> that loads contracts from files. Alternative names considered: `RegistryFileBased`, `FileRegistry`.
+
+> **Relationship with HandlerContractSource**: `omnibase_infra` currently provides `HandlerContractSource`
+> for handler-specific contract discovery from `handler_contract.yaml` files. Once `FileContractRegistry`
+> is implemented in `omnibase_core`, `HandlerContractSource` should be evaluated for potential migration
+> to use `FileContractRegistry` as its underlying file loading mechanism, while retaining handler-specific
+> discovery logic. These remain complementary components with different scopes.
 
 **Description**:
 Create the file-based contract registry for loading node contracts from filesystem. **Simple for MVP - just load YAML to Pydantic, no skip rules.**
 
-**File**: `src/omnibase_core/runtime/registry_file_based.py` (NEW)
+**File**: `src/omnibase_core/runtime/registry_file_contract.py` (NEW)
 
 **MVP Methods**: `load(path) -> Model`, `load_all(directory) -> list[Model]`
 
@@ -1482,7 +1493,7 @@ Phase 1 (Core Types - omnibase_core)
     +-- 1.5 ProtocolHandler [MVP]
     +-- 1.6 NodeInstance [MVP]
     +-- 1.7 NodeRuntime (minimal) [MVP]
-    +-- 1.8 RegistryFileBased (simple) [MVP]
+    +-- 1.8 FileContractRegistry (simple) [MVP]
     +-- 1.9 LocalHandler [MVP]
     +-- 1.10 Dev CLI (simple) [MVP]
     +-- 1.11 Minimal error taxonomy [MVP]

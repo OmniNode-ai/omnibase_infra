@@ -59,8 +59,11 @@ except ImportError:
 try:
     from omnibase_spi.protocols.handlers.types import ProtocolHandlerDescriptor
 except ImportError:
-    # Fallback: import from our local protocol definition
-    # This avoids duplicating the protocol definition and ensures consistency
+    # Fallback: import from our local protocol definition when omnibase_spi
+    # does not export ProtocolHandlerDescriptor. This is intentional for:
+    # 1. Backwards compatibility with older omnibase_spi versions
+    # 2. Running tests in isolation without full SPI installation
+    # The alias ensures the rest of the test file uses a consistent name.
     from omnibase_infra.runtime.protocol_contract_descriptor import (
         ProtocolContractDescriptor as ProtocolHandlerDescriptor,
     )
@@ -1847,6 +1850,47 @@ def _permissions_are_enforced() -> bool:
         return False
 
 
+def _create_mock_stat_result(real_stat_result: object, override_size: int) -> object:
+    """Create a mock stat result object with overridden st_size.
+
+    This factory reduces duplication in file size limit tests by creating
+    mock stat result objects that report a specific file size while preserving
+    all other stat attributes from the original file.
+
+    Args:
+        real_stat_result: The actual os.stat_result from Path.stat()
+        override_size: The file size (st_size) to report
+
+    Returns:
+        A mock object with st_size set to override_size and all other
+        attributes copied from real_stat_result.
+
+    Example:
+        >>> original_stat = Path.stat
+        >>> def mock_stat(self, **kwargs):
+        ...     result = original_stat(self, **kwargs)
+        ...     if self.name == "handler_contract.yaml":
+        ...         return _create_mock_stat_result(result, 10 * 1024 * 1024 + 1)
+        ...     return result
+    """
+
+    class MockStatResult:
+        """Mock stat result with configurable st_size."""
+
+        st_size = override_size
+        st_mode = real_stat_result.st_mode  # type: ignore[union-attr]
+        st_ino = real_stat_result.st_ino  # type: ignore[union-attr]
+        st_dev = real_stat_result.st_dev  # type: ignore[union-attr]
+        st_nlink = real_stat_result.st_nlink  # type: ignore[union-attr]
+        st_uid = real_stat_result.st_uid  # type: ignore[union-attr]
+        st_gid = real_stat_result.st_gid  # type: ignore[union-attr]
+        st_atime = real_stat_result.st_atime  # type: ignore[union-attr]
+        st_mtime = real_stat_result.st_mtime  # type: ignore[union-attr]
+        st_ctime = real_stat_result.st_ctime  # type: ignore[union-attr]
+
+    return MockStatResult()
+
+
 class TestHandlerContractSourcePermissionErrors:
     """Tests for permission error handling in contract discovery.
 
@@ -2062,27 +2106,13 @@ output_model: "test.models.Output"
 
         # Mock stat to return a file size just over the limit
         oversized_bytes = MAX_CONTRACT_SIZE + 1
-
         original_stat = Path.stat
 
         def mock_stat(self: Path, **kwargs: object) -> object:
             """Mock stat that returns oversized value for contract files."""
             result = original_stat(self, **kwargs)
             if self.name == "handler_contract.yaml":
-                # Return a mock-like object with overridden st_size
-                class MockStat:
-                    st_size = oversized_bytes
-                    st_mode = result.st_mode
-                    st_ino = result.st_ino
-                    st_dev = result.st_dev
-                    st_nlink = result.st_nlink
-                    st_uid = result.st_uid
-                    st_gid = result.st_gid
-                    st_atime = result.st_atime
-                    st_mtime = result.st_mtime
-                    st_ctime = result.st_ctime
-
-                return MockStat()
+                return _create_mock_stat_result(result, oversized_bytes)
             return result
 
         source = HandlerContractSource(
@@ -2143,20 +2173,7 @@ output_model: "test.models.Output"
             """Mock stat that returns oversized value only for specific file."""
             result = original_stat(self, **kwargs)
             if self == oversized_file:
-
-                class MockStat:
-                    st_size = oversized_bytes
-                    st_mode = result.st_mode
-                    st_ino = result.st_ino
-                    st_dev = result.st_dev
-                    st_nlink = result.st_nlink
-                    st_uid = result.st_uid
-                    st_gid = result.st_gid
-                    st_atime = result.st_atime
-                    st_mtime = result.st_mtime
-                    st_ctime = result.st_ctime
-
-                return MockStat()
+                return _create_mock_stat_result(result, oversized_bytes)
             return result
 
         source = HandlerContractSource(
@@ -2213,20 +2230,7 @@ output_model: "test.models.Output"
             """Mock stat that returns exactly MAX_CONTRACT_SIZE for contract files."""
             result = original_stat(self, **kwargs)
             if self.name == "handler_contract.yaml":
-
-                class MockStat:
-                    st_size = exactly_max_bytes
-                    st_mode = result.st_mode
-                    st_ino = result.st_ino
-                    st_dev = result.st_dev
-                    st_nlink = result.st_nlink
-                    st_uid = result.st_uid
-                    st_gid = result.st_gid
-                    st_atime = result.st_atime
-                    st_mtime = result.st_mtime
-                    st_ctime = result.st_ctime
-
-                return MockStat()
+                return _create_mock_stat_result(result, exactly_max_bytes)
             return result
 
         source = HandlerContractSource(
