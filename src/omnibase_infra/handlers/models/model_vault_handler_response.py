@@ -3,7 +3,7 @@
 """Vault Handler Response Model.
 
 This module provides the Pydantic model for Vault handler response envelopes
-used by the VaultHandler.
+used by the HandlerVault.
 
 This model provides type consistency with ModelDbQueryResponse and
 ModelConsulHandlerResponse, ensuring all handlers return strongly-typed

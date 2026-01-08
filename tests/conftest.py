@@ -631,9 +631,9 @@ async def cleanup_consul_test_services():
 
     # Import and create handler for cleanup
     try:
-        from omnibase_infra.handlers import ConsulHandler
+        from omnibase_infra.handlers import HandlerConsul
 
-        handler = ConsulHandler()
+        handler = HandlerConsul()
         await handler.initialize(
             {
                 "host": consul_host,
@@ -645,7 +645,7 @@ async def cleanup_consul_test_services():
 
         try:
             # Get all registered services
-            # NOTE: consul.list_services is not yet implemented in ConsulHandler.
+            # NOTE: consul.list_services is not yet implemented in HandlerConsul.
             # When implemented, it should return ModelHandlerOutput with services data.
             # For now, this will raise RuntimeHostError for unsupported operation,
             # which is caught by the outer exception handler.

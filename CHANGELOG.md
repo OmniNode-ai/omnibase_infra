@@ -186,7 +186,7 @@ This version represents the MVP (Minimum Viable Product) for ONEX Runtime Host I
 
 #### Core Components (MVP)
 - **BaseRuntimeHostProcess** (OMN-249): Infrastructure wrapper owning event bus and driving NodeRuntime
-- **DbHandler** (OMN-238): PostgreSQL database protocol handler
+- **HandlerDb** (OMN-238): PostgreSQL database protocol handler
 - **wiring.py** (OMN-240): Handler registration module ✅ (implemented as ProtocolBindingRegistry)
 
 #### Testing (MVP)
@@ -212,7 +212,7 @@ This version represents the MVP (Minimum Viable Product) for ONEX Runtime Host I
 ### Deferred to Beta (v0.2.0)
 
 - KafkaEventBus with backpressure
-- VaultHandler and ConsulAdapter
+- HandlerVault and ConsulAdapter
 - Retry logic and rate limiting
 - Full graceful shutdown with drain
 - Integration tests with real services

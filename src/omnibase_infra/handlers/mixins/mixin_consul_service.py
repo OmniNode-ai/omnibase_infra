@@ -3,7 +3,7 @@
 """Consul Service registration operations mixin.
 
 This mixin provides service registration and deregistration operations
-for ConsulHandler, extracted to reduce class complexity.
+for HandlerConsul, extracted to reduce class complexity.
 
 Operations:
     - consul.register: Register service with Consul agent
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 class ProtocolConsulServiceDependencies(Protocol):
     """Protocol defining required dependencies for service operations.
 
-    ConsulHandler must provide these attributes/methods for the mixin to work.
+    HandlerConsul must provide these attributes/methods for the mixin to work.
     """
 
     _client: consul_lib.Consul | None
@@ -72,7 +72,7 @@ class ProtocolConsulServiceDependencies(Protocol):
 class MixinConsulService:
     """Mixin providing Consul service registration operations.
 
-    This mixin extracts service operations from ConsulHandler to reduce
+    This mixin extracts service operations from HandlerConsul to reduce
     class complexity while maintaining full functionality.
 
     Required Dependencies (from host class):

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Consul Key-Value operations mixin.
 
-This mixin provides key-value store operations for ConsulHandler,
+This mixin provides key-value store operations for HandlerConsul,
 extracted to reduce class complexity and improve maintainability.
 
 Operations:
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 class ProtocolConsulKVDependencies(Protocol):
     """Protocol defining required dependencies for KV operations.
 
-    ConsulHandler must provide these attributes/methods for the mixin to work.
+    HandlerConsul must provide these attributes/methods for the mixin to work.
     """
 
     _client: consul_lib.Consul | None
@@ -72,7 +72,7 @@ class ProtocolConsulKVDependencies(Protocol):
 class MixinConsulKV:
     """Mixin providing Consul Key-Value store operations.
 
-    This mixin extracts KV operations from ConsulHandler to reduce
+    This mixin extracts KV operations from HandlerConsul to reduce
     class complexity while maintaining full functionality.
 
     Required Dependencies (from host class):

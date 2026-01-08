@@ -206,9 +206,9 @@ Integration tests automatically skip when infrastructure is unavailable:
 
 | Handler | Skip Conditions |
 |---------|----------------|
-| **DbHandler** | `POSTGRES_HOST` not set, or `POSTGRES_PASSWORD` not set |
-| **ConsulHandler** | `CONSUL_HOST` not set, or TCP connection fails |
-| **VaultHandler** | `VAULT_ADDR` not set, `VAULT_TOKEN` not set, or health endpoint unreachable |
+| **HandlerDb** | `POSTGRES_HOST` not set, or `POSTGRES_PASSWORD` not set |
+| **HandlerConsul** | `CONSUL_HOST` not set, or TCP connection fails |
+| **HandlerVault** | `VAULT_ADDR` not set, `VAULT_TOKEN` not set, or health endpoint unreachable |
 | **HttpRestHandler** | Never skips (uses pytest-httpserver for local mock testing) |
 
 Example CI/CD output when infrastructure is unavailable:

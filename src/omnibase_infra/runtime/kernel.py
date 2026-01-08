@@ -610,18 +610,18 @@ async def bootstrap() -> int:
                     correlation_id,
                 )
 
-                # 4.6.5. Initialize ConsulHandler if Consul is configured
+                # 4.6.5. Initialize HandlerConsul if Consul is configured
                 # CONSUL_HOST determines whether to enable Consul registration
                 consul_host = os.getenv("CONSUL_HOST")
                 if consul_host:
                     consul_port = int(os.getenv("CONSUL_PORT", "8500"))
                     try:
-                        # Deferred import: Only load ConsulHandler when Consul is configured.
+                        # Deferred import: Only load HandlerConsul when Consul is configured.
                         # This avoids loading the consul dependency (and its transitive deps)
                         # when Consul integration is disabled, reducing startup time.
-                        from omnibase_infra.handlers import ConsulHandler
+                        from omnibase_infra.handlers import HandlerConsul
 
-                        consul_handler = ConsulHandler()
+                        consul_handler = HandlerConsul()
                         await consul_handler.initialize(
                             {
                                 "host": consul_host,
@@ -629,7 +629,7 @@ async def bootstrap() -> int:
                             }
                         )
                         logger.info(
-                            "ConsulHandler initialized for dual registration (correlation_id=%s)",
+                            "HandlerConsul initialized for dual registration (correlation_id=%s)",
                             correlation_id,
                             extra={
                                 "consul_host": consul_host,
@@ -640,7 +640,7 @@ async def bootstrap() -> int:
                         # Log warning but continue without Consul (PostgreSQL is source of truth)
                         # Use sanitize_error_message to prevent credential leakage in logs
                         logger.warning(
-                            "Failed to initialize ConsulHandler, proceeding without Consul: %s (correlation_id=%s)",
+                            "Failed to initialize HandlerConsul, proceeding without Consul: %s (correlation_id=%s)",
                             sanitize_error_message(consul_error),
                             correlation_id,
                             extra={

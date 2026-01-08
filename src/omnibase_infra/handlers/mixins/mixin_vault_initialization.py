@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Vault initialization mixin for VaultHandler.
+"""Vault initialization mixin for HandlerVault.
 
 Provides initialization-related helper methods for parsing configuration,
 creating the hvac client, and setting up infrastructure components.
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 class MixinVaultInitialization:
-    """Mixin providing initialization helpers for VaultHandler.
+    """Mixin providing initialization helpers for HandlerVault.
 
     Contains methods for:
     - Configuration parsing and validation

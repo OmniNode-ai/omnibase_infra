@@ -97,7 +97,7 @@ class RetryContext(NamedTuple):
     operation_context: ModelOperationContext
 
 
-class ConsulHandler(
+class HandlerConsul(
     MixinAsyncCircuitBreaker,
     MixinRetryExecution,
     MixinEnvelopeExtraction,
@@ -166,7 +166,7 @@ class ConsulHandler(
 
     Error Context Design:
         Error contexts use static target_name="consul_handler" for consistency with
-        VaultHandler and other infrastructure handlers. This provides predictable
+        HandlerVault and other infrastructure handlers. This provides predictable
         error categorization and log filtering across all Consul operations.
 
         For multi-DC deployments, datacenter differentiation is achieved via:
@@ -184,7 +184,7 @@ class ConsulHandler(
     """
 
     def __init__(self) -> None:
-        """Initialize ConsulHandler in uninitialized state.
+        """Initialize HandlerConsul in uninitialized state.
 
         Note: Circuit breaker is initialized during initialize() call when
         configuration is available. The mixin's _init_circuit_breaker() method
@@ -399,7 +399,7 @@ class ConsulHandler(
         self._config = None
         self._circuit_breaker_initialized = False
         logger.info(
-            "ConsulHandler shutdown complete",
+            "HandlerConsul shutdown complete",
             extra={
                 "correlation_id": str(shutdown_correlation_id),
             },
@@ -414,7 +414,7 @@ class ConsulHandler(
         """Build standardized ModelConsulHandlerResponse wrapped in ModelHandlerOutput.
 
         This helper method ensures consistent response formatting across all
-        Consul operations, matching the pattern used by DbHandler.
+        Consul operations, matching the pattern used by HandlerDb.
 
         Args:
             typed_payload: Strongly-typed payload from the discriminated union.
@@ -468,7 +468,7 @@ class ConsulHandler(
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "ConsulHandler not initialized. Call initialize() first.",
+                "HandlerConsul not initialized. Call initialize() first.",
                 context=ctx,
             )
 
@@ -731,4 +731,4 @@ class ConsulHandler(
         }
 
 
-__all__: list[str] = ["ConsulHandler", "RetryContext"]
+__all__: list[str] = ["HandlerConsul", "RetryContext"]

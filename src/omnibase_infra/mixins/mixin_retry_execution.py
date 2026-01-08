@@ -17,7 +17,7 @@ Usage:
     ```python
     from omnibase_infra.mixins import MixinRetryExecution, MixinAsyncCircuitBreaker
 
-    class ConsulHandler(MixinAsyncCircuitBreaker, MixinRetryExecution):
+    class HandlerConsul(MixinAsyncCircuitBreaker, MixinRetryExecution):
         async def _my_operation(self, ...):
             result = await self._execute_with_retry(
                 operation="consul.kv_get",
@@ -29,7 +29,7 @@ Usage:
     ```
 
 Design Rationale:
-    This mixin extracts common retry patterns from ConsulHandler and VaultHandler
+    This mixin extracts common retry patterns from HandlerConsul and HandlerVault
     to reduce code duplication and cyclomatic complexity. The error classification
     methods are designed to be overridden by subclasses for handler-specific
     exception types (e.g., consul.ACLPermissionDenied, hvac.exceptions.Forbidden).
@@ -142,7 +142,7 @@ class MixinRetryExecution(ABC):
 
     Example:
         ```python
-        class ConsulHandler(MixinAsyncCircuitBreaker, MixinRetryExecution):
+        class HandlerConsul(MixinAsyncCircuitBreaker, MixinRetryExecution):
             def _classify_error(self, error: Exception, operation: str) -> RetryErrorClassification:
                 if isinstance(error, consul.ACLPermissionDenied):
                     return RetryErrorClassification(
