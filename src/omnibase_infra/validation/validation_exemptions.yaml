@@ -602,6 +602,15 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-529
+  - file_pattern: 'service_dlq_tracking\.py'
+    class_pattern: "Class name 'ServiceDlqTracking'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention for service classes. Service files use service_<name>.py with Service<Name> class names.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-1270
   - file_pattern: 'service_health\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
@@ -925,7 +934,7 @@ pattern_exemptions:
   # rule_id in ModelArchitectureViolation is a human-readable semantic identifier
   # (e.g., "ARCH-001", "ARCH-002"), NOT a UUID. This follows the same pattern as
   # policy_id, dispatcher_id, scheduler_id, and plugin_id.
-  - file_pattern: 'model_violation\.py'
+  - file_pattern: 'model_architecture_violation\.py'
     violation_pattern: "Field 'rule_id' should use UUID"
     reason: >
       rule_id is a human-readable semantic identifier (e.g., "ARCH-001", "ARCH-002") for architecture validation rules. This follows the same pattern as policy_id, dispatcher_id, scheduler_id, and plugin_id - all are semantic identifiers, not UUIDs.
@@ -934,7 +943,7 @@ pattern_exemptions:
       - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
       - docs/validation/validator_reference.md
     ticket: OMN-1099
-  - file_pattern: 'model_violation\.py'
+  - file_pattern: 'model_architecture_violation\.py'
     violation_pattern: "Field 'rule_name' might reference an entity"
     reason: >
       rule_name is a display name for the architecture rule (e.g., "No Any Types", "No Handler Publishing"). It is NOT an entity reference but a human-readable label paired with rule_id as the semantic identifier.
@@ -1137,7 +1146,7 @@ pattern_exemptions:
   # ==========================================================================
   # OMN-1099 validators (no-direct-dispatch, no-handler-publishing, no-orchestrator-fsm)
   # use Python AST visitor pattern which requires visit_* method names per Python stdlib.
-  # NOTE: model_violation.py exemptions for rule_id/rule_name are defined earlier
+  # NOTE: model_architecture_violation.py exemptions for rule_id/rule_name are defined earlier
   # in the "Architecture Violation Model Exemptions (OMN-1099)" section.
   - file_pattern: 'validator_no_handler_publishing\.py'
     violation_pattern: "Class name .* contains anti-pattern 'Handler'"
