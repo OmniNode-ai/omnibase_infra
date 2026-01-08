@@ -37,6 +37,9 @@ from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeve
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
 )
+from omnibase_infra.nodes.architecture_validator.models.model_rule_check_result import (
+    ModelRuleCheckResult,
+)
 from omnibase_infra.nodes.architecture_validator.models.model_validation_request import (
     ModelArchitectureValidationRequest,
 )
@@ -316,4 +319,80 @@ def validate_no_handler_publishing(file_path: str) -> ModelFileValidationResult:
     )
 
 
-__all__ = ["validate_no_handler_publishing"]
+class RuleNoHandlerPublishing:
+    """Protocol-compliant rule: Handlers must not publish events directly.
+
+    This class wraps the file-based validator to implement ProtocolArchitectureRule,
+    enabling use with NodeArchitectureValidatorCompute.
+
+    Thread Safety:
+        This rule is stateless and safe for concurrent use.
+    """
+
+    @property
+    def rule_id(self) -> str:
+        """Return the canonical rule ID matching contract.yaml."""
+        return "NO_HANDLER_PUBLISHING"
+
+    @property
+    def name(self) -> str:
+        """Return human-readable rule name."""
+        return RULE_NAME
+
+    @property
+    def description(self) -> str:
+        """Return detailed rule description."""
+        return (
+            "Handlers must not have direct event bus access. Only orchestrators "
+            "may publish events. Handlers should return events for orchestrators to publish."
+        )
+
+    @property
+    def severity(self) -> EnumValidationSeverity:
+        """Return severity level for violations of this rule."""
+        return EnumValidationSeverity.ERROR
+
+    def check(self, target: object) -> ModelRuleCheckResult:
+        """Check target against this rule.
+
+        Args:
+            target: Target to validate. If a string, treated as file path.
+                   Other types return passed=True (graceful handling).
+
+        Returns:
+            ModelRuleCheckResult indicating pass/fail with details.
+        """
+        # Graceful handling: non-string targets pass (not applicable)
+        if not isinstance(target, str):
+            return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
+
+        # Delegate to existing file-based validator
+        result = validate_no_handler_publishing(target)
+
+        if result.valid:
+            return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
+
+        # Convert first violation to ModelRuleCheckResult
+        if result.violations:
+            violation = result.violations[0]
+            return ModelRuleCheckResult(
+                passed=False,
+                rule_id=self.rule_id,
+                message=violation.message,
+                details={
+                    "target_name": violation.target_name,
+                    "target_type": violation.target_type,
+                    "location": violation.location,
+                    "suggestion": violation.suggestion,
+                    "total_violations": len(result.violations),
+                },
+            )
+
+        return ModelRuleCheckResult(
+            passed=False,
+            rule_id=self.rule_id,
+            message="Handler publishing violation detected",
+        )
+
+
+__all__ = ["validate_no_handler_publishing", "RuleNoHandlerPublishing"]

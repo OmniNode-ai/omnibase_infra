@@ -31,8 +31,13 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+
+if TYPE_CHECKING:
+    from omnibase_infra.nodes.architecture_validator.models import ModelRuleCheckResult
+
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
 )
@@ -262,4 +267,87 @@ def validate_no_direct_dispatch(file_path: str) -> ModelFileValidationResult:
     )
 
 
-__all__ = ["validate_no_direct_dispatch"]
+class RuleNoDirectDispatch:
+    """Protocol-compliant rule: No direct handler dispatch.
+
+    This class wraps the file-based validator to implement ProtocolArchitectureRule,
+    enabling use with NodeArchitectureValidatorCompute.
+
+    Thread Safety:
+        This rule is stateless and safe for concurrent use.
+    """
+
+    @property
+    def rule_id(self) -> str:
+        """Return the canonical rule ID matching contract.yaml."""
+        return "NO_DIRECT_HANDLER_DISPATCH"
+
+    @property
+    def name(self) -> str:
+        """Return human-readable rule name."""
+        return RULE_NAME
+
+    @property
+    def description(self) -> str:
+        """Return detailed rule description."""
+        return (
+            "Handlers must be dispatched through the runtime, not called directly. "
+            "Direct handler calls bypass runtime event tracking and circuit breaking."
+        )
+
+    @property
+    def severity(self) -> EnumValidationSeverity:
+        """Return severity level for violations of this rule.
+
+        Note: Contract specifies WARNING for this rule (non-blocking).
+        """
+        return EnumValidationSeverity.WARNING
+
+    def check(self, target: object) -> ModelRuleCheckResult:
+        """Check target against this rule.
+
+        Args:
+            target: Target to validate. If a string, treated as file path.
+                   Other types return passed=True (graceful handling).
+
+        Returns:
+            ModelRuleCheckResult indicating pass/fail with details.
+        """
+        from omnibase_infra.nodes.architecture_validator.models import (
+            ModelRuleCheckResult,
+        )
+
+        # Graceful handling: non-string targets pass (not applicable)
+        if not isinstance(target, str):
+            return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
+
+        # Delegate to existing file-based validator
+        result = validate_no_direct_dispatch(target)
+
+        if result.valid:
+            return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
+
+        # Convert first violation to ModelRuleCheckResult
+        if result.violations:
+            violation = result.violations[0]
+            return ModelRuleCheckResult(
+                passed=False,
+                rule_id=self.rule_id,
+                message=violation.message,
+                details={
+                    "target_name": violation.target_name,
+                    "target_type": violation.target_type,
+                    "location": violation.location,
+                    "suggestion": violation.suggestion,
+                    "total_violations": len(result.violations),
+                },
+            )
+
+        return ModelRuleCheckResult(
+            passed=False,
+            rule_id=self.rule_id,
+            message="Direct handler dispatch violation detected",
+        )
+
+
+__all__ = ["validate_no_direct_dispatch", "RuleNoDirectDispatch"]
