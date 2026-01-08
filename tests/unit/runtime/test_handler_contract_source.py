@@ -60,6 +60,7 @@ try:
     from omnibase_spi.protocols.handlers.types import ProtocolHandlerDescriptor
 except ImportError:
     # Fallback: define minimal protocol stub for testing
+    from omnibase_core.models.primitives.model_semver import ModelSemVer
 
     @runtime_checkable
     class ProtocolHandlerDescriptor(Protocol):
@@ -76,7 +77,7 @@ except ImportError:
             ...
 
         @property
-        def version(self) -> str:
+        def version(self) -> ModelSemVer:
             """Semantic version of the handler."""
             ...
 

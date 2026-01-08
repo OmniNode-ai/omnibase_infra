@@ -17,11 +17,17 @@ See Also:
 
 .. versionadded:: 0.6.2
     Created as part of OMN-1097 filesystem handler discovery.
+
+.. versionchanged:: 0.6.3
+    Changed version property return type from str to ModelSemVer for alignment
+    with ModelHandlerDescriptor implementation.
 """
 
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
+
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 
 @runtime_checkable
@@ -56,11 +62,16 @@ class ProtocolContractDescriptor(Protocol):
         ...
 
     @property
-    def version(self) -> str:
+    def version(self) -> ModelSemVer:
         """Semantic version of the handler.
 
         Returns:
-            str: Version string in semver format (e.g., "1.0.0").
+            ModelSemVer: Semantic version object with major, minor, patch components.
+                Use str(version) to get string representation (e.g., "1.0.0").
+
+        .. versionchanged:: 0.6.3
+            Changed return type from str to ModelSemVer for better type safety
+            and consistency with ModelHandlerDescriptor implementation.
         """
         ...
 

@@ -74,6 +74,9 @@ logger = logging.getLogger(__name__)
 # File pattern for handler contracts
 HANDLER_CONTRACT_FILENAME = "handler_contract.yaml"
 
+# Maximum contract file size (10MB) to prevent memory exhaustion
+MAX_CONTRACT_SIZE = 10 * 1024 * 1024
+
 
 # =============================================================================
 # HandlerContractSource Implementation
@@ -178,6 +181,15 @@ class HandlerContractSource:
         # Track discovered files to avoid duplicates when paths overlap
         discovered_paths: set[Path] = set()
 
+        logger.debug(
+            "Starting handler contract discovery",
+            extra={
+                "paths_scanned": len(self._contract_paths),
+                "graceful_mode": self._graceful_mode,
+                "contract_paths": [str(p) for p in self._contract_paths],
+            },
+        )
+
         for base_path in self._contract_paths:
             # Check if path exists (strict mode raises, graceful collects)
             if not base_path.exists():
@@ -188,11 +200,29 @@ class HandlerContractSource:
                         error_code="HANDLER_SOURCE_002",
                     )
                 # In graceful mode, log and continue
-                logger.warning(error_msg)
+                logger.warning(
+                    "Contract path does not exist, skipping: %s",
+                    base_path,
+                    extra={
+                        "path": str(base_path),
+                        "graceful_mode": self._graceful_mode,
+                        "paths_scanned": len(self._contract_paths),
+                    },
+                )
                 continue
 
             # Discover contract files
             contract_files = self._find_contract_files(base_path)
+            logger.debug(
+                "Scanned path for contracts: %s",
+                base_path,
+                extra={
+                    "base_path": str(base_path),
+                    "contracts_found": len(contract_files),
+                    "graceful_mode": self._graceful_mode,
+                    "paths_scanned": len(self._contract_paths),
+                },
+            )
 
             for contract_file in contract_files:
                 # Deduplicate using resolved path to handle overlapping search paths
@@ -212,6 +242,12 @@ class HandlerContractSource:
                         "Skipping contract file outside allowed paths: %s (resolved to %s)",
                         contract_file,
                         resolved_path,
+                        extra={
+                            "contract_file": str(contract_file),
+                            "resolved_path": str(resolved_path),
+                            "graceful_mode": self._graceful_mode,
+                            "reason": "symlink_outside_allowed_paths",
+                        },
                     )
                     continue
 
@@ -220,6 +256,17 @@ class HandlerContractSource:
                 try:
                     descriptor = self._parse_contract_file(contract_file)
                     descriptors.append(descriptor)
+                    logger.debug(
+                        "Successfully parsed contract: %s",
+                        contract_file,
+                        extra={
+                            "contract_file": str(contract_file),
+                            "handler_id": descriptor.handler_id,
+                            "handler_name": descriptor.name,
+                            "handler_version": descriptor.version,
+                            "graceful_mode": self._graceful_mode,
+                        },
+                    )
                 except yaml.YAMLError as e:
                     error = self._create_parse_error(contract_file, e)
                     if not self._graceful_mode:
@@ -227,6 +274,16 @@ class HandlerContractSource:
                             f"Failed to parse YAML contract at {contract_file}: {e}",
                             error_code="HANDLER_SOURCE_003",
                         ) from e
+                    logger.warning(
+                        "Failed to parse YAML contract, continuing in graceful mode: %s",
+                        contract_file,
+                        extra={
+                            "contract_file": str(contract_file),
+                            "error_type": "yaml_parse_error",
+                            "graceful_mode": self._graceful_mode,
+                            "paths_scanned": len(self._contract_paths),
+                        },
+                    )
                     validation_errors.append(error)
                 except ValidationError as e:
                     error = self._create_validation_error(contract_file, e)
@@ -235,6 +292,17 @@ class HandlerContractSource:
                             f"Contract validation failed at {contract_file}: {e}",
                             error_code="HANDLER_SOURCE_004",
                         ) from e
+                    logger.warning(
+                        "Contract validation failed, continuing in graceful mode: %s",
+                        contract_file,
+                        extra={
+                            "contract_file": str(contract_file),
+                            "error_type": "validation_error",
+                            "error_count": len(e.errors()),
+                            "graceful_mode": self._graceful_mode,
+                            "paths_scanned": len(self._contract_paths),
+                        },
+                    )
                     validation_errors.append(error)
 
         # Log discovery results
@@ -278,6 +346,7 @@ class HandlerContractSource:
             ModelHandlerDescriptor created from the contract.
 
         Raises:
+            ModelOnexError: If contract file exceeds MAX_CONTRACT_SIZE (10MB).
             yaml.YAMLError: If YAML parsing fails.
             ValidationError: If contract validation fails.
         """
@@ -292,6 +361,16 @@ class HandlerContractSource:
         #   - Unified error handling for file operations
         #
         # See: docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
+
+        # Validate file size before reading to prevent memory exhaustion
+        file_size = contract_path.stat().st_size
+        if file_size > MAX_CONTRACT_SIZE:
+            raise ModelOnexError(
+                f"Contract file exceeds size limit: {file_size} bytes "
+                f"(max: {MAX_CONTRACT_SIZE} bytes)",
+                error_code="HANDLER_SOURCE_005",
+            )
+
         with contract_path.open("r", encoding="utf-8") as f:
             raw_data = yaml.safe_load(f)
 
@@ -389,18 +468,26 @@ class HandlerContractSource:
         """
         logger.info(
             "Handler contract discovery completed: "
-            "discovered_contract_count=%d, validation_failure_count=%d",
+            "unique_contracts=%d, validation_failure_count=%d, "
+            "paths_scanned=%d, graceful_mode=%s",
             discovered_count,
             failure_count,
+            len(self._contract_paths),
+            self._graceful_mode,
             extra={
+                "unique_contracts": discovered_count,
                 "discovered_contract_count": discovered_count,
                 "validation_failure_count": failure_count,
+                "paths_scanned": len(self._contract_paths),
+                "graceful_mode": self._graceful_mode,
+                "contract_paths": [str(p) for p in self._contract_paths],
             },
         )
 
 
 __all__ = [
     "HandlerContractSource",
+    "MAX_CONTRACT_SIZE",
     "ModelContractDiscoveryResult",
     "ModelHandlerDescriptor",
 ]
