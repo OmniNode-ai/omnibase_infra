@@ -1999,7 +1999,7 @@ output_model: "test.models.Output"
         """Verify permission errors raise in strict mode.
 
         In strict mode (default), unreadable files should cause discovery to
-        fail with an appropriate error.
+        fail with ModelOnexError wrapping the underlying permission error.
         """
         import stat
 

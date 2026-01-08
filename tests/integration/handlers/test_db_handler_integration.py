@@ -3,9 +3,9 @@
 # ruff: noqa: S608
 # Note: S608 (SQL injection) is disabled for this test file. All table names
 # are UUID-generated locally by test fixtures, not from user input.
-"""Integration tests for DbHandler against remote PostgreSQL infrastructure.
+"""Integration tests for HandlerDb against remote PostgreSQL infrastructure.
 
-These tests validate DbHandler behavior against actual PostgreSQL infrastructure
+These tests validate HandlerDb behavior against actual PostgreSQL infrastructure
 running on the remote infrastructure server. They require proper database
 credentials and will be skipped gracefully if the database is not available.
 
@@ -38,7 +38,7 @@ Test Categories
 Single-Statement SQL Design
 ===========================
 
-DbHandler only supports **single SQL statements per call** due to asyncpg's
+HandlerDb only supports **single SQL statements per call** due to asyncpg's
 ``execute()`` and ``fetch()`` methods. Multi-statement SQL (statements
 separated by semicolons) will raise an error.
 
@@ -82,14 +82,14 @@ from tests.integration.handlers.conftest import POSTGRES_AVAILABLE
 if TYPE_CHECKING:
     from omnibase_core.types import JsonType
 
-    from omnibase_infra.handlers import DbHandler
+    from omnibase_infra.handlers import HandlerDb
 
 # =============================================================================
 # Test Configuration and Skip Conditions
 # =============================================================================
 
 # Handler default configuration values
-# These match the defaults in DbHandler and are tested to ensure consistency
+# These match the defaults in HandlerDb and are tested to ensure consistency
 DB_HANDLER_DEFAULT_POOL_SIZE = 5
 DB_HANDLER_VERSION = "0.1.0-mvp"
 
@@ -109,15 +109,15 @@ pytestmark = [
 # =============================================================================
 
 
-class TestDbHandlerConnection:
-    """Tests for DbHandler connection and lifecycle management."""
+class TestHandlerDbConnection:
+    """Tests for HandlerDb connection and lifecycle management."""
 
     @pytest.mark.asyncio
     async def test_db_describe(self, db_config: dict[str, JsonType]) -> None:
         """Verify describe() returns correct handler metadata."""
-        from omnibase_infra.handlers import DbHandler
+        from omnibase_infra.handlers import HandlerDb
 
-        handler = DbHandler()
+        handler = HandlerDb()
         await handler.initialize(db_config)
 
         try:
@@ -140,9 +140,9 @@ class TestDbHandlerConnection:
         a RuntimeHostError indicating it is not initialized.
         """
         from omnibase_infra.errors import RuntimeHostError
-        from omnibase_infra.handlers import DbHandler
+        from omnibase_infra.handlers import HandlerDb
 
-        handler = DbHandler()
+        handler = HandlerDb()
         await handler.initialize(db_config)
 
         # Verify initialized by executing a simple query
@@ -166,11 +166,11 @@ class TestDbHandlerConnection:
 # =============================================================================
 
 
-class TestDbHandlerQuery:
-    """Tests for DbHandler db.query operations (SELECT statements)."""
+class TestHandlerDbQuery:
+    """Tests for HandlerDb db.query operations (SELECT statements)."""
 
     @pytest.mark.asyncio
-    async def test_db_query_simple(self, initialized_db_handler: DbHandler) -> None:
+    async def test_db_query_simple(self, initialized_db_handler: HandlerDb) -> None:
         """Verify simple SELECT 1 query works.
 
         This is the most basic query test - if this fails, the database
@@ -193,7 +193,7 @@ class TestDbHandlerQuery:
 
     @pytest.mark.asyncio
     async def test_db_query_with_parameters(
-        self, initialized_db_handler: DbHandler
+        self, initialized_db_handler: HandlerDb
     ) -> None:
         """Verify parameterized query works correctly.
 
@@ -218,7 +218,7 @@ class TestDbHandlerQuery:
 
     @pytest.mark.asyncio
     async def test_db_query_multiple_rows(
-        self, initialized_db_handler: DbHandler
+        self, initialized_db_handler: HandlerDb
     ) -> None:
         """Verify query returning multiple rows works correctly."""
         envelope = {
@@ -244,7 +244,7 @@ class TestDbHandlerQuery:
 
     @pytest.mark.asyncio
     async def test_db_query_empty_result(
-        self, initialized_db_handler: DbHandler
+        self, initialized_db_handler: HandlerDb
     ) -> None:
         """Verify query returning no rows handles empty result correctly."""
         envelope = {
@@ -263,7 +263,7 @@ class TestDbHandlerQuery:
 
     @pytest.mark.asyncio
     async def test_db_query_with_null_values(
-        self, initialized_db_handler: DbHandler
+        self, initialized_db_handler: HandlerDb
     ) -> None:
         """Verify NULL values are handled correctly in query results."""
         envelope = {
@@ -288,13 +288,13 @@ class TestDbHandlerQuery:
 # =============================================================================
 
 
-class TestDbHandlerExecute:
-    """Tests for DbHandler db.execute operations (INSERT/UPDATE/DELETE/DDL)."""
+class TestHandlerDbExecute:
+    """Tests for HandlerDb db.execute operations (INSERT/UPDATE/DELETE/DDL)."""
 
     @pytest.mark.asyncio
     async def test_db_execute_create_and_drop_table(
         self,
-        initialized_db_handler: DbHandler,
+        initialized_db_handler: HandlerDb,
         unique_table_name: str,
     ) -> None:
         """Verify CREATE TABLE and DROP TABLE DDL operations work.
@@ -353,7 +353,7 @@ class TestDbHandlerExecute:
     @pytest.mark.asyncio
     async def test_db_execute_insert_and_query(
         self,
-        initialized_db_handler: DbHandler,
+        initialized_db_handler: HandlerDb,
         unique_table_name: str,
     ) -> None:
         """Verify INSERT followed by SELECT returns inserted data.
@@ -431,13 +431,13 @@ class TestDbHandlerExecute:
     @pytest.mark.asyncio
     async def test_db_execute_update(
         self,
-        initialized_db_handler: DbHandler,
+        initialized_db_handler: HandlerDb,
         unique_table_name: str,
     ) -> None:
         """Verify UPDATE operation modifies existing rows.
 
         Note: This test uses separate execute() calls for CREATE TABLE and INSERT
-        because DbHandler only supports single-statement SQL per call (asyncpg
+        because HandlerDb only supports single-statement SQL per call (asyncpg
         limitation). See module docstring "Single-Statement SQL Design" for details.
         """
         # Step 1: Create table (asyncpg requires single statement per execute call)
@@ -521,13 +521,13 @@ class TestDbHandlerExecute:
     @pytest.mark.asyncio
     async def test_db_execute_delete(
         self,
-        initialized_db_handler: DbHandler,
+        initialized_db_handler: HandlerDb,
         unique_table_name: str,
     ) -> None:
         """Verify DELETE operation removes rows.
 
         Note: This test uses separate execute() calls for CREATE TABLE and INSERT
-        because DbHandler only supports single-statement SQL per call (asyncpg
+        because HandlerDb only supports single-statement SQL per call (asyncpg
         limitation). See module docstring "Single-Statement SQL Design" for details.
         """
         # Step 1: Create table (asyncpg requires single statement per execute call)
@@ -606,12 +606,12 @@ class TestDbHandlerExecute:
 # =============================================================================
 
 
-class TestDbHandlerErrors:
-    """Tests for DbHandler error handling."""
+class TestHandlerDbErrors:
+    """Tests for HandlerDb error handling."""
 
     @pytest.mark.asyncio
     async def test_db_query_syntax_error(
-        self, initialized_db_handler: DbHandler
+        self, initialized_db_handler: HandlerDb
     ) -> None:
         """Verify SQL syntax error is properly reported."""
         from omnibase_infra.errors import RuntimeHostError
@@ -629,7 +629,7 @@ class TestDbHandlerErrors:
 
     @pytest.mark.asyncio
     async def test_db_query_table_not_found(
-        self, initialized_db_handler: DbHandler
+        self, initialized_db_handler: HandlerDb
     ) -> None:
         """Verify table not found error is properly reported."""
         from omnibase_infra.errors import RuntimeHostError
@@ -648,7 +648,7 @@ class TestDbHandlerErrors:
     @pytest.mark.asyncio
     async def test_db_query_column_not_found(
         self,
-        initialized_db_handler: DbHandler,
+        initialized_db_handler: HandlerDb,
         unique_table_name: str,
     ) -> None:
         """Verify column not found error is properly reported."""
@@ -692,9 +692,9 @@ class TestDbHandlerErrors:
     async def test_db_execute_not_initialized(self) -> None:
         """Verify execute fails when handler not initialized."""
         from omnibase_infra.errors import RuntimeHostError
-        from omnibase_infra.handlers import DbHandler
+        from omnibase_infra.handlers import HandlerDb
 
-        handler = DbHandler()  # Not initialized
+        handler = HandlerDb()  # Not initialized
 
         envelope = {
             "operation": "db.query",
@@ -709,7 +709,7 @@ class TestDbHandlerErrors:
 
     @pytest.mark.asyncio
     async def test_db_execute_missing_operation(
-        self, initialized_db_handler: DbHandler
+        self, initialized_db_handler: HandlerDb
     ) -> None:
         """Verify missing operation in envelope is properly reported."""
         from omnibase_infra.errors import RuntimeHostError
@@ -727,7 +727,7 @@ class TestDbHandlerErrors:
 
     @pytest.mark.asyncio
     async def test_db_execute_unsupported_operation(
-        self, initialized_db_handler: DbHandler
+        self, initialized_db_handler: HandlerDb
     ) -> None:
         """Verify unsupported operation is properly reported."""
         from omnibase_infra.errors import RuntimeHostError
@@ -745,7 +745,7 @@ class TestDbHandlerErrors:
 
     @pytest.mark.asyncio
     async def test_db_execute_missing_sql(
-        self, initialized_db_handler: DbHandler
+        self, initialized_db_handler: HandlerDb
     ) -> None:
         """Verify missing SQL in payload is properly reported."""
         from omnibase_infra.errors import RuntimeHostError
@@ -764,7 +764,7 @@ class TestDbHandlerErrors:
     @pytest.mark.asyncio
     async def test_db_execute_unique_constraint_violation(
         self,
-        initialized_db_handler: DbHandler,
+        initialized_db_handler: HandlerDb,
         unique_table_name: str,
     ) -> None:
         """Verify unique constraint violation is properly reported."""
@@ -825,12 +825,12 @@ class TestDbHandlerErrors:
 # =============================================================================
 
 
-class TestDbHandlerCorrelationId:
-    """Tests for correlation ID handling in DbHandler."""
+class TestHandlerDbCorrelationId:
+    """Tests for correlation ID handling in HandlerDb."""
 
     @pytest.mark.asyncio
     async def test_db_query_preserves_correlation_id(
-        self, initialized_db_handler: DbHandler
+        self, initialized_db_handler: HandlerDb
     ) -> None:
         """Verify correlation_id from envelope is preserved in response."""
         from uuid import UUID, uuid4
@@ -853,7 +853,7 @@ class TestDbHandlerCorrelationId:
 
     @pytest.mark.asyncio
     async def test_db_query_generates_correlation_id_if_missing(
-        self, initialized_db_handler: DbHandler
+        self, initialized_db_handler: HandlerDb
     ) -> None:
         """Verify correlation_id is generated when not provided."""
         from uuid import UUID

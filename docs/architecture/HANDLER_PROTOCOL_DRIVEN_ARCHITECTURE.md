@@ -68,9 +68,9 @@ The codebase has two distinct handler systems that require different treatment:
 
 **Current Handlers**:
 - `HttpRestHandler` - HTTP/REST API operations
-- `DbHandler` - PostgreSQL database operations
-- `ConsulHandler` - Service discovery
-- `VaultHandler` - Secret management
+- `HandlerDb` - PostgreSQL database operations
+- `HandlerConsul` - Service discovery
+- `HandlerVault` - Secret management
 
 ### Node Handlers
 

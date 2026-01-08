@@ -206,7 +206,7 @@ pattern_exemptions:
   # Infrastructure handlers require multiple methods for: connection lifecycle,
   # operation dispatching, health checks, and protocol-specific operations.
   - file_pattern: 'handler_consul\.py'
-    class_pattern: "Class 'ConsulHandler'"
+    class_pattern: "Class 'HandlerConsul'"
     violation_pattern: 'has \d+ methods'
     reason: >
       Infrastructure handler pattern requires multiple methods: connection lifecycle (connect, disconnect), operation dispatch (handle_operation, handle_kv_*, handle_service_*), properties (handler_type, handler_category), and health/describe methods. This is standard for infrastructure handlers.

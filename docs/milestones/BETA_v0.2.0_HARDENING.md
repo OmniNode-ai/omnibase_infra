@@ -261,7 +261,7 @@ Complete the error hierarchy with additional error types.
 
 ---
 
-### Issue 3.9: Implement VaultHandler [BETA]
+### Issue 3.9: Implement HandlerVault [BETA]
 
 **Title**: Create Vault secrets management protocol adapter
 **Type**: Feature
@@ -270,7 +270,7 @@ Complete the error hierarchy with additional error types.
 **Milestone**: v0.2.0 Beta
 
 **Description**:
-Implement `VaultHandler` for HashiCorp Vault operations using hvac.
+Implement `HandlerVault` for HashiCorp Vault operations using hvac.
 
 **File**: `src/omnibase_infra/handlers/handler_vault.py`
 
@@ -287,7 +287,7 @@ Implement `VaultHandler` for HashiCorp Vault operations using hvac.
 
 ---
 
-### Issue 3.10: Implement ConsulHandler [BETA]
+### Issue 3.10: Implement HandlerConsul [BETA]
 
 **Title**: Create Consul service discovery protocol handler
 **Type**: Feature
@@ -296,9 +296,9 @@ Implement `VaultHandler` for HashiCorp Vault operations using hvac.
 **Milestone**: v0.2.0 Beta
 
 **Description**:
-Implement `ConsulHandler` for Consul service discovery operations.
+Implement `HandlerConsul` for Consul service discovery operations.
 
-**File**: `src/omnibase_infra/handlers/consul_handler.py`
+**File**: `src/omnibase_infra/handlers/handler_consul.py`
 
 **Operations**: `register_service`, `deregister_service`, `get_service`, `list_services`, `health_check_service`
 
@@ -611,8 +611,8 @@ Integration tests using docker-compose with real PostgreSQL, Kafka, Vault.
 **File**: `tests/integration/test_runtime_host_integration.py`
 
 **Tests**:
-- DbHandler with real PostgreSQL
-- VaultHandler with real Vault
+- HandlerDb with real PostgreSQL
+- HandlerVault with real Vault
 - KafkaEventBus with real Kafka
 - Full envelope flow
 
@@ -794,8 +794,8 @@ Phase 1 (Core Types - Beta)
     v
 Phase 3 (Infra - Beta)
     |
-    +-- 3.9 VaultHandler [BETA]
-    +-- 3.10 ConsulHandler [BETA]
+    +-- 3.9 HandlerVault [BETA]
+    +-- 3.10 HandlerConsul [BETA]
     +-- 3.11 KafkaEventBus [BETA]
     +-- 3.12 SecretResolver [BETA]
     +-- 3.13 HandlerConfigResolver [BETA]

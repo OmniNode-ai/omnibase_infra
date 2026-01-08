@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Shared infrastructure utilities and helpers.
+"""ONEX Infrastructure Shared Module.
 
-This module contains shared utilities used across the omnibase_infra package.
+Provides shared utilities and components used across infrastructure services.
 """
 
 __all__: list[str] = []
