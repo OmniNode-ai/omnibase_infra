@@ -1059,6 +1059,7 @@ pattern_exemptions:
 
     documentation:
       - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
     ticket: OMN-1104
   - file_pattern: 'model_payload_consul_register\.py'
     violation_pattern: "Field 'service_name' might reference an entity"
@@ -1067,6 +1068,7 @@ pattern_exemptions:
 
     documentation:
       - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
     ticket: OMN-1104
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols

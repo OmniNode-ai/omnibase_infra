@@ -238,6 +238,8 @@ PayloadType = dict[str, object]  # CORRECT
 
 ### When to Use `dict[str, object]` vs `dict[str, Any]`
 
+**IMPORTANT CLARIFICATION**: This section does NOT contradict the CLAUDE.md "NEVER use Any" guideline. The `Any` usage described here is ONLY permitted within Pydantic model `Field()` definitions as documented in the "Scope of Deviation" section above. All other contexts MUST use `object`.
+
 | Context | Type to Use | Reason |
 |---------|-------------|--------|
 | Pydantic model field | `dict[str, Any]` | Required for JSON serialization with Pydantic 2.x |
@@ -316,7 +318,13 @@ def parse_structured_payload(raw: object) -> PayloadDict:
 
 ### Annotation Patterns
 
-This ADR defines **two distinct comment patterns** for different contexts:
+This ADR defines **two distinct comment patterns** for different contexts.
+
+**SCOPE REMINDER**: This ADR authorizes `Any` usage ONLY within Pydantic `BaseModel` class definitions, specifically for `Field()` type annotations. The patterns below document how to properly annotate both:
+1. The narrow exception (Any in Pydantic fields)
+2. The standard practice (object everywhere else)
+
+This ADR matches the actual implementations in the 33 affected files - all `Any` usages are strictly within Pydantic model field definitions.
 
 #### Pattern 1: `Any` in Pydantic Models (JsonType Workaround)
 
@@ -581,6 +589,24 @@ The following 33 files use `Any` as a workaround for `JsonType`:
 - `src/omnibase_infra/runtime/wiring.py`
 
 ## Migration Execution Plan
+
+### Files Requiring Migration When omnibase_core Fixes JsonType
+
+The following **33 files** contain `Any` usage that MUST be migrated to `JsonType` once the omnibase_core fix is available:
+
+**Migration Tracking Ticket**: [OMN-1262](https://linear.app/omninode/issue/OMN-1262)
+
+**Automated Migration Script** (future):
+```bash
+# When omnibase_core provides fixed JsonType, run:
+# 1. Update import statements
+find src/ -name "*.py" -exec sed -i 's/from typing import Any/from omnibase_core.types import JsonType/g' {} \;
+# 2. Replace type annotations (manual review required for each file)
+# 3. Remove NOTE: comments
+grep -rl "NOTE: Using Any instead of JsonType" src/ | xargs -I {} sed -i '/NOTE: Using Any instead of JsonType/d' {}
+```
+
+**All 33 files are listed in the "Affected Files" section above with categorization.**
 
 ### Prerequisites for Migration
 

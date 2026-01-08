@@ -200,9 +200,6 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.utils import sanitize_error_message
 
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
-
 # Type alias for DLQ callback functions
 DlqCallbackType = Callable[[ModelDlqEvent], Awaitable[None]]
 

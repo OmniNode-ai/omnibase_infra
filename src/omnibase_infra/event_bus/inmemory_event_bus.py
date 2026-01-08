@@ -59,9 +59,6 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
-
 logger = logging.getLogger(__name__)
 
 
