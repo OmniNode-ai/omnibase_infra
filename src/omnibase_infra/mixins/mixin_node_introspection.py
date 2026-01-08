@@ -233,11 +233,53 @@ INTROSPECTION_TOPIC = "node.introspection"
 HEARTBEAT_TOPIC = "node.heartbeat"
 REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
 
-# Performance threshold constants (in milliseconds)
-PERF_THRESHOLD_GET_CAPABILITIES_MS = 50.0
-PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS = 30.0
-PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS = 50.0
-PERF_THRESHOLD_CACHE_HIT_MS = 1.0
+# =============================================================================
+# Performance Threshold Constants (in milliseconds)
+# =============================================================================
+#
+# These thresholds define acceptable performance limits for introspection
+# operations. When operations exceed these thresholds:
+#   - The `threshold_exceeded` field is set to True in metrics
+#   - The operation name is added to the `slow_operations` list
+#   - A warning is logged with timing details
+#
+# Threshold Values:
+#   - PERF_THRESHOLD_GET_CAPABILITIES_MS (50.0): Maximum time for get_capabilities()
+#   - PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS (30.0): Maximum time for method discovery
+#   - PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS (50.0): Maximum time for full introspection
+#   - PERF_THRESHOLD_CACHE_HIT_MS (1.0): Maximum time for cache hit retrieval
+#
+# IMPORTANT - Synchronization Requirements:
+# =========================================
+# When modifying these threshold values, ensure consistency across:
+#
+# 1. Test File:
+#    tests/unit/mixins/test_mixin_node_introspection.py
+#    - TestMixinNodeIntrospectionPerformance class
+#    - TestMixinNodeModelIntrospectionPerformanceMetrics class
+#    - TestCacheHitPerformanceRobust class
+#    - TestThresholdExceeded class
+#    - TestPerformanceBenchmarks class
+#    - TestMethodCountScaling class
+#    Note: Tests import these constants directly, so values auto-sync.
+#    However, test assertions may use derived thresholds (e.g., 10ms for
+#    relaxed cache tests) that should be reviewed when changing base values.
+#
+# 2. TypedDict Documentation:
+#    src/omnibase_infra/types/typed_dict/typed_dict_performance_metrics_cache.py
+#    - "Performance Thresholds" docstring section (lines 111-116)
+#    - Attribute docstrings reference specific threshold values
+#    These are documentation-only and must be manually updated.
+#
+# 3. Module __all__ Export:
+#    These constants are exported in __all__ at the bottom of this file
+#    for external consumers who may validate against them.
+#
+# =============================================================================
+PERF_THRESHOLD_GET_CAPABILITIES_MS: float = 50.0
+PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS: float = 30.0
+PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS: float = 50.0
+PERF_THRESHOLD_CACHE_HIT_MS: float = 1.0
 
 
 class MixinNodeIntrospection:

@@ -107,3 +107,67 @@ class ModelParsedDSN(BaseModel):
     )
 
     model_config = ConfigDict(frozen=True)
+
+    def __repr__(self) -> str:
+        """Return string representation with masked password.
+
+        This method overrides the default Pydantic __repr__ to prevent
+        credential exposure in logs, debug output, and error messages.
+        The actual password value remains accessible via the .password
+        attribute for legitimate use cases.
+
+        Returns:
+            String representation with password shown as '[REDACTED]' if set,
+            or None if not set.
+
+        Example:
+            >>> dsn = ModelParsedDSN(
+            ...     scheme="postgresql",
+            ...     username="admin",
+            ...     password="secret123",
+            ...     hostname="localhost",
+            ...     port=5432,
+            ...     database="mydb",
+            ... )
+            >>> repr(dsn)  # Shows '[REDACTED]' instead of 'secret123'
+            "ModelParsedDSN(scheme='postgresql', username='admin', ...)"
+        """
+        password_display = "[REDACTED]" if self.password else None
+        return (
+            f"ModelParsedDSN(scheme={self.scheme!r}, username={self.username!r}, "
+            f"password={password_display!r}, hostname={self.hostname!r}, "
+            f"port={self.port!r}, database={self.database!r}, query={self.query!r})"
+        )
+
+    def __str__(self) -> str:
+        """Return string representation with masked password.
+
+        Delegates to __repr__ to ensure consistent password masking across
+        all string conversion contexts (str(), print(), f-strings, etc.).
+
+        Returns:
+            String representation with password masked.
+        """
+        return self.__repr__()
+
+    def to_sanitized_dict(self) -> dict[str, object]:
+        """Return a dict representation with the password masked.
+
+        Useful for logging and debugging without exposing credentials.
+
+        Returns:
+            dict[str, object]: Model data with password replaced by '[REDACTED]' if set.
+
+        Example:
+            >>> dsn = ModelParsedDSN(
+            ...     scheme="postgresql", username="user", password="secret",
+            ...     hostname="localhost", port=5432, database="mydb"
+            ... )
+            >>> dsn.to_sanitized_dict()
+            {'scheme': 'postgresql', 'username': 'user', 'password': '[REDACTED]',
+             'hostname': 'localhost', 'port': 5432, 'database': 'mydb', 'query': {}}
+        """
+        data = self.model_dump()
+        if data.get("password"):
+            data["password"] = "[REDACTED]"
+        return data

@@ -109,7 +109,16 @@ class TypedDictPerformanceMetricsCache(TypedDict):
         ```
 
     Performance Thresholds:
-        The following thresholds are defined in MixinNodeIntrospection:
+        The following thresholds are defined as module-level constants in:
+        src/omnibase_infra/mixins/mixin_node_introspection.py
+
+        Constants (SOURCE OF TRUTH - update this docstring if values change):
+        - PERF_THRESHOLD_GET_CAPABILITIES_MS: 50.0ms
+        - PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS: 30.0ms
+        - PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS: 50.0ms
+        - PERF_THRESHOLD_CACHE_HIT_MS: 1.0ms
+
+        Summary:
         - get_capabilities: <50ms
         - discover_capabilities: <30ms
         - total_introspection: <50ms
