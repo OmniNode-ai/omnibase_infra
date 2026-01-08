@@ -118,6 +118,8 @@ from uuid import UUID
 
 import asyncpg
 
+from omnibase_infra.enums import EnumContractType
+
 # Configure logging - controlled by BACKFILL_DEBUG environment variable
 # When enabled, logs to stderr with detailed information (never secrets)
 _log_level = logging.DEBUG if os.getenv("BACKFILL_DEBUG") else logging.WARNING
@@ -470,12 +472,13 @@ def extract_contract_type(capabilities: dict[str, object], node_type: str) -> st
         return str(config["contract_type"])
 
     # Fallback to node_type if it's a valid contract type
-    if node_type in ("effect", "compute", "reducer", "orchestrator"):
+    # Use EnumContractType.valid_type_values() to check valid types
+    if node_type in EnumContractType.valid_type_values():
         return node_type
 
     # Final fallback: 'unknown' marker ensures idempotency
     # (record will not be re-selected on subsequent runs)
-    return "unknown"
+    return EnumContractType.UNKNOWN.value
 
 
 def extract_protocols(capabilities: dict[str, object]) -> list[str]:
@@ -724,7 +727,7 @@ async def _process_batch_dry_run(
             contract_version = extract_contract_version(capabilities)
 
             # Track records that will get 'unknown' as fallback
-            if contract_type == "unknown":
+            if contract_type == EnumContractType.UNKNOWN.value:
                 unknown_count += 1
                 type_note = " (fallback - no type determinable)"
             else:

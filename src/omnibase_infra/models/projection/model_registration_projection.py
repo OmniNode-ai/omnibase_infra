@@ -28,15 +28,16 @@ from uuid import UUID
 from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumContractType, EnumRegistrationState
 from omnibase_infra.models.projection.model_sequence_info import ModelSequenceInfo
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 
 # Valid contract types for nodes (excludes runtime_host which is not a contract type)
+# Derived from EnumContractType.valid_type_values() for backwards compatibility
 ContractType = Literal["effect", "compute", "reducer", "orchestrator"]
-VALID_CONTRACT_TYPES: tuple[str, ...] = ("effect", "compute", "reducer", "orchestrator")
+VALID_CONTRACT_TYPES: tuple[str, ...] = EnumContractType.valid_type_values()
 
 
 class ModelRegistrationProjection(BaseModel):
@@ -164,9 +165,10 @@ class ModelRegistrationProjection(BaseModel):
         Raises:
             ValueError: If v is not None and not a valid contract type
         """
-        if v is not None and v not in VALID_CONTRACT_TYPES:
+        if v is not None and v not in EnumContractType.valid_type_values():
             raise ValueError(
-                f"contract_type must be one of {VALID_CONTRACT_TYPES}, got: {v!r}"
+                f"contract_type must be one of {EnumContractType.valid_type_values()}, "
+                f"got: {v!r}"
             )
         return v
 

@@ -82,7 +82,25 @@
 --
 -- =============================================================================
 
+-- =============================================================================
+-- ADD CAPABILITY COLUMNS
+-- =============================================================================
 -- Add new columns to registration_projections table
+--
+-- contract_type: Node archetype (effect, compute, reducer, orchestrator, unknown)
+--   - Valid values for NEW registrations: effect, compute, reducer, orchestrator
+--   - 'unknown': Backfill idempotency marker ONLY - indicates the backfill script
+--     processed this record but could not determine the contract type from the
+--     capabilities JSONB data. This is NOT an error state - it marks the record
+--     as processed while preserving that the type was undeterminable.
+--   - NULL: Record has not been processed/backfilled yet
+--   - See scripts/backfill_capabilities.py for the backfill logic
+--
+-- Array columns use empty array defaults so queries don't need NULL handling.
+-- These will be populated by:
+--   1. ProjectorRegistration.persist_state_transition() for new registrations
+--   2. scripts/backfill_capabilities.py for existing records
+--
 ALTER TABLE registration_projections
     ADD COLUMN IF NOT EXISTS contract_type TEXT,
     ADD COLUMN IF NOT EXISTS intent_types TEXT[] DEFAULT ARRAY[]::TEXT[],
@@ -93,22 +111,44 @@ ALTER TABLE registration_projections
 -- =============================================================================
 -- GIN INDEXES FOR CAPABILITY ARRAY QUERIES
 -- =============================================================================
+-- GIN (Generalized Inverted Index) indexes are optimized for array containment
+-- queries. Unlike B-tree indexes which work on single scalar values, GIN indexes
+-- the individual elements of arrays, enabling efficient @> (contains) queries.
+--
+-- WHY GIN FOR ARRAYS:
+--   - B-tree indexes cannot efficiently search within arrays
+--   - GIN indexes each array element separately, like a search engine
+--   - Enables queries like: WHERE capability_tags @> ARRAY['postgres.storage']
+--     which finds rows where capability_tags contains 'postgres.storage'
+--
+-- GIN INDEX TRADEOFFS:
+--   - Slower INSERT/UPDATE than B-tree (must index each array element)
+--   - Faster array containment queries than sequential scan
+--   - Index size scales with total array elements, not just row count
+--
+-- For tables with >100K rows or high write traffic, consider using
+-- 003a_capability_fields_concurrent.sql which creates indexes CONCURRENTLY
+-- to avoid blocking table writes during creation.
+-- =============================================================================
 
 -- GIN index for capability_tags array queries
 -- Query pattern: SELECT * FROM registration_projections
 --                WHERE capability_tags @> ARRAY['postgres.storage']
+-- Use case: Find nodes with specific capabilities (storage, messaging, etc.)
 CREATE INDEX IF NOT EXISTS idx_registration_capability_tags
     ON registration_projections USING GIN (capability_tags);
 
 -- GIN index for intent_types array queries
 -- Query pattern: SELECT * FROM registration_projections
 --                WHERE intent_types @> ARRAY['postgres.upsert']
+-- Use case: Find nodes that can handle specific intent types for routing
 CREATE INDEX IF NOT EXISTS idx_registration_intent_types
     ON registration_projections USING GIN (intent_types);
 
 -- GIN index for protocols array queries
 -- Query pattern: SELECT * FROM registration_projections
 --                WHERE protocols @> ARRAY['ProtocolDatabaseAdapter']
+-- Use case: Protocol-based service discovery (find implementers)
 CREATE INDEX IF NOT EXISTS idx_registration_protocols
     ON registration_projections USING GIN (protocols);
 

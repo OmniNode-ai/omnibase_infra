@@ -15,10 +15,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from omnibase_infra.models.projection.model_registration_projection import (
-    VALID_CONTRACT_TYPES,
-    ContractType,
-)
+from omnibase_infra.enums import EnumContractType
+from omnibase_infra.models.projection.model_registration_projection import ContractType
 
 
 class ModelCapabilityFields(BaseModel):
@@ -91,9 +89,10 @@ class ModelCapabilityFields(BaseModel):
         Raises:
             ValueError: If v is not None and not a valid contract type
         """
-        if v is not None and v not in VALID_CONTRACT_TYPES:
+        if v is not None and v not in EnumContractType.valid_type_values():
             raise ValueError(
-                f"contract_type must be one of {VALID_CONTRACT_TYPES}, got: {v!r}"
+                f"contract_type must be one of {EnumContractType.valid_type_values()}, "
+                f"got: {v!r}"
             )
         return v
 

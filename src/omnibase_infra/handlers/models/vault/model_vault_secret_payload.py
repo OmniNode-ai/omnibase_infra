@@ -7,10 +7,10 @@ This module provides the Pydantic model for vault.read_secret operation results.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
-# NOTE: Using Any instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
+# ONEX: Using object instead of Any per ADR guidelines. JsonType from omnibase_core
+# has Pydantic 2.x recursion issues with recursive type aliases.
 from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
@@ -54,10 +54,10 @@ class ModelVaultSecretPayload(ModelPayloadVault):
         default=EnumVaultOperationType.READ_SECRET,
         description="Operation type discriminator",
     )
-    data: dict[str, Any] = Field(
+    data: dict[str, object] = Field(
         description="Secret data as key-value dictionary",
     )
-    metadata: dict[str, Any] = Field(
+    metadata: dict[str, object] = Field(
         default_factory=dict,
         description="Vault metadata about the secret",
     )

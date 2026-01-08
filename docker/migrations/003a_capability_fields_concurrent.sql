@@ -184,8 +184,12 @@ END$$;
 -- -----------------------------------------------------------------------------
 -- GIN INDEX: capability_tags
 -- -----------------------------------------------------------------------------
+-- WHY GIN: GIN (Generalized Inverted Index) indexes individual array elements,
+-- enabling efficient @> (contains) queries. B-tree cannot search within arrays.
+--
 -- Query pattern: WHERE capability_tags @> ARRAY['postgres.storage']
 -- Supports: Array containment queries for capability-based discovery
+-- Use case: Find nodes with specific capabilities (storage, messaging, etc.)
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_registration_capability_tags
     ON registration_projections USING GIN (capability_tags);
@@ -193,8 +197,11 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_registration_capability_tags
 -- -----------------------------------------------------------------------------
 -- GIN INDEX: intent_types
 -- -----------------------------------------------------------------------------
+-- WHY GIN: Same as above - enables efficient array element searches.
+--
 -- Query pattern: WHERE intent_types @> ARRAY['postgres.upsert']
--- Supports: Finding nodes that handle specific intent types
+-- Supports: Finding nodes that handle specific intent types for routing
+-- Use case: Route intents to nodes capable of handling them
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_registration_intent_types
     ON registration_projections USING GIN (intent_types);
@@ -202,8 +209,11 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_registration_intent_types
 -- -----------------------------------------------------------------------------
 -- GIN INDEX: protocols
 -- -----------------------------------------------------------------------------
+-- WHY GIN: Same as above - enables efficient array element searches.
+--
 -- Query pattern: WHERE protocols @> ARRAY['ProtocolDatabaseAdapter']
 -- Supports: Protocol-based service discovery
+-- Use case: Find nodes implementing specific protocols
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_registration_protocols
     ON registration_projections USING GIN (protocols);
@@ -211,8 +221,20 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_registration_protocols
 -- -----------------------------------------------------------------------------
 -- B-TREE INDEX: contract_type + current_state
 -- -----------------------------------------------------------------------------
+-- WHY B-TREE: contract_type is a scalar value (not array), so B-tree is optimal.
+-- Composite index on (contract_type, current_state) supports both:
+--   - WHERE contract_type = 'effect'
+--   - WHERE contract_type = 'effect' AND current_state = 'active'
+--
 -- Query pattern: WHERE contract_type = 'effect' AND current_state = 'active'
 -- Supports: Filtering by node type and state
+--
+-- NOTE on contract_type values:
+--   - 'effect', 'compute', 'reducer', 'orchestrator': Valid ONEX node archetypes
+--   - 'unknown': Backfill idempotency marker for legacy records where the type
+--     could not be determined from capabilities JSONB (NOT an error state)
+--   - NULL: Record not yet processed/backfilled
+--   See 003_capability_fields.sql CHECK constraint for full documentation.
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_registration_contract_type_state
     ON registration_projections (contract_type, current_state);
