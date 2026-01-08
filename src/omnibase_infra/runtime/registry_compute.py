@@ -411,6 +411,7 @@ class RegistryCompute:
                         f"deterministic_async=True not specified. "
                         f"Compute plugins must be synchronous by default.",
                         plugin_id=plugin_id,
+                        async_method="execute",
                     )
 
         # Check ALL public methods for async (comprehensive validation)
@@ -597,11 +598,17 @@ class RegistryCompute:
                                 )
                         # Defer expensive list computation until actually raising error
                         registered = [k.plugin_id for k in self._registry]
+                        error_context = {
+                            "plugin_id": plugin_id,
+                            "registered_plugins": registered,
+                        }
+                        # Include version in context if it was specified
+                        if version is not None:
+                            error_context["version"] = version
                         raise ComputeRegistryError(
                             f"No compute plugin registered with id={plugin_id!r}. "
                             f"Registered plugins: {registered}",
-                            plugin_id=plugin_id,
-                            registered_plugins=registered,
+                            **error_context,
                         )
 
                     # If version specified, do exact match
