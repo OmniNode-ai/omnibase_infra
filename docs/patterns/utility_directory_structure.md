@@ -130,10 +130,22 @@ error_msg = sanitize_error_message(raw_error)
 
 ### Removal Timeline
 
-The `shared/utils/` directory will be removed in a future major version. Plan migrations before:
-- **Current**: Deprecation warnings emitted
-- **Next Minor**: No changes planned
-- **Next Major**: `shared/utils/` directory removed, breaking change
+The `shared/utils/` directory will be removed in **v2.0.0**. Plan migrations before:
+
+| Version | Status | Action Required |
+|---------|--------|-----------------|
+| **v1.x (Current)** | Deprecated | `DeprecationWarning` emitted on import |
+| **v1.x (Minor)** | No changes | Warnings continue; update imports now |
+| **v2.0.0** | **REMOVED** | Breaking change; imports will fail |
+
+**Deadline**: All code must migrate to `omnibase_infra.utils` before upgrading to v2.0.0.
+
+The deprecation warning explicitly states:
+```
+DeprecationWarning: Importing from 'omnibase_infra.shared.utils' is deprecated.
+Use 'omnibase_infra.utils' instead.
+This module will be removed in v2.0.0.
+```
 
 ## Node-Specific Utilities
 

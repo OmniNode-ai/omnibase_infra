@@ -215,17 +215,34 @@ error_handling:
   # Retry policy with exponential backoff
   # Handles transient infrastructure failures.
   #
-  # IMPORTANT: Orchestration Layer Retry Behavior
-  #   This retry_policy is declarative configuration consumed by handlers.
-  #   At the orchestration layer, the effective retry count is always 0 -
-  #   the orchestrator dispatches to handlers exactly once per operation.
-  #   Individual handlers are responsible for implementing retry loops using
-  #   these settings (max_retries, delays, exponential backoff).
+  # ==========================================================================
+  # IMPORTANT: Effect Layer vs Handler Layer Retry Behavior
+  # ==========================================================================
   #
-  #   This design ensures:
-  #   - Clear separation of concerns (orchestrator routes, handlers retry)
+  # Effect Layer (NodeRegistryEffect):
+  #   - Dispatches to handlers EXACTLY ONCE per operation
+  #   - Does NOT implement retry loops
+  #   - Returns immediately after handler execution
+  #   - Effective retry count at this layer: ZERO (0)
+  #
+  # Handler Layer (HandlerConsulRegister, HandlerPostgresUpsert, etc.):
+  #   - OWNS retry logic using this retry_policy configuration
+  #   - Implements exponential backoff for retriable errors
+  #   - Returns final ModelBackendResult after all retries exhausted
+  #   - Effective retry count: 0 to max_retries
+  #
+  # Caller Layer (Orchestrator or External):
+  #   - Can call "retry_partial_failure" operation after partial failures
+  #   - This is explicit retry, not automatic
+  #   - Retries only the failed backend, not both
+  #
+  # Why this separation?
+  #   - Clear separation of concerns (effect routes, handlers retry)
   #   - Per-backend retry isolation (Consul retries don't affect Postgres)
   #   - Consistent retry behavior across all handler implementations
+  #   - Callers have full control over partial failure retry strategy
+  #
+  # ==========================================================================
   retry_policy:
     max_retries: 3
     initial_delay_ms: 100
@@ -453,10 +470,19 @@ capabilities:
   - name: "parallel_execution"
     description: "Execute backend operations in parallel for reduced latency"
 # Model definitions
-# These definitions must exactly match the Pydantic models in:
-#   - omnibase_infra.nodes.effects.models.model_registry_request
-#   - omnibase_infra.nodes.effects.models.model_registry_response
-#   - omnibase_infra.nodes.effects.models.model_backend_result
+# These definitions must exactly match the Pydantic models.
+#
+# Module Resolution:
+#   The input_model and output_model reference the node's local models package:
+#     - omnibase_infra.nodes.node_registry_effect.models
+#   This package re-exports shared effect models from:
+#     - omnibase_infra.nodes.effects.models.model_registry_request
+#     - omnibase_infra.nodes.effects.models.model_registry_response
+#     - omnibase_infra.nodes.effects.models.model_backend_result
+#
+# Sync Status:
+#   Last verified: 2026-01-08
+#   All definitions below match the Pydantic model fields, types, and defaults.
 definitions:
   ModelRegistryRequest:
     type: object
@@ -528,6 +554,25 @@ definitions:
     description: "Result of an individual backend operation (Consul or PostgreSQL)"
     frozen: true
     extra: "forbid"
+    # ==========================================================================
+    # Design Note: No 'retries' Field at Effect Layer
+    # ==========================================================================
+    # ModelBackendResult intentionally does NOT include a 'retries' field.
+    #
+    # Rationale:
+    #   1. Effect layer dispatches to handlers ONCE per operation
+    #   2. Handlers own their retry logic internally using retry_policy
+    #   3. Retry count is handler-internal state, not exposed in results
+    #   4. Callers use error_code to determine if retry is appropriate
+    #
+    # If you need to track retries for observability:
+    #   - Handlers should emit metrics/logs during retry loops
+    #   - Use correlation_id to correlate retry attempts
+    #   - Orchestrator layer can track retry_partial_failure calls
+    #
+    # See: error_handling.retry_policy for handler retry configuration
+    # See: operation_routing.operations["retry_partial_failure"] for caller retries
+    # ==========================================================================
     properties:
       success:
         type: boolean

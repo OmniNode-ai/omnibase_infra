@@ -19,6 +19,40 @@ The pattern is designed for **dual-backend registration** where a node must be r
 
 ## Architecture
 
+### Mermaid Diagram (GitHub/GitLab Renderable)
+
+```mermaid
+flowchart TB
+    subgraph Input
+        REQ[ModelRegistryRequest<br/>operation: register_node]
+    end
+
+    subgraph "NodeRegistryEffect"
+        ROUTER[Operation Router<br/>routing_strategy: operation_match]
+    end
+
+    subgraph "Parallel Execution"
+        direction LR
+        CONSUL[HandlerConsulRegister]
+        POSTGRES[HandlerPostgresUpsert]
+    end
+
+    subgraph "Result Aggregation"
+        AGG[Aggregator<br/>all_or_partial]
+    end
+
+    subgraph Output
+        RESP[ModelRegistryResponse<br/>status: success/partial/failed]
+    end
+
+    REQ --> ROUTER
+    ROUTER -->|asyncio.gather| CONSUL
+    ROUTER -->|asyncio.gather| POSTGRES
+    CONSUL --> AGG
+    POSTGRES --> AGG
+    AGG --> RESP
+```
+
 ### High-Level Request Flow
 
 ```

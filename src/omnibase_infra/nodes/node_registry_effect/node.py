@@ -76,8 +76,6 @@ from omnibase_infra.nodes.node_registry_effect.models import (
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
     from omnibase_infra.nodes.effects.protocol_consul_client import ProtocolConsulClient
@@ -304,7 +302,7 @@ class NodeRegistryEffect(NodeEffect):
             Instantiated handler with required dependencies.
 
         Raises:
-            RuntimeError: If handler cannot be instantiated.
+            ProtocolConfigurationError: If handler name from contract.yaml is unknown.
         """
         backend = cast(str, handler_config.get("backend", ""))
         handler_info = cast(dict[str, object], handler_config.get("handler", {}))
@@ -329,13 +327,19 @@ class NodeRegistryEffect(NodeEffect):
                 self._get_postgres_adapter(),
             )
 
-        raise RuntimeError(f"Unknown handler: {handler_name}")
+        raise ProtocolConfigurationError(
+            f"Unknown handler '{handler_name}' specified in contract.yaml. "
+            f"Expected one of: HandlerConsulRegister, HandlerConsulDeregister, "
+            f"HandlerPostgresUpsert, HandlerPostgresDeactivate, HandlerPartialRetry.",
+            handler_name=handler_name,
+            backend=backend,
+        )
 
     async def execute_operation(
         self,
         request: ModelRegistryRequest,
         operation: OperationType = "register_node",
-        target_backend: str | None = None,
+        target_backend: Literal["consul", "postgres"] | None = None,
     ) -> ModelRegistryResponse:
         """Execute a registration operation against configured backends.
 

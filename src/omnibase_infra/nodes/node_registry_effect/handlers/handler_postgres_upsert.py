@@ -127,12 +127,12 @@ class HandlerPostgresUpsert:
                 metadata=request.metadata,
             )
 
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (time.perf_counter() - start_time) * 1000
 
             if result.success:
                 return ModelBackendResult(
                     success=True,
-                    duration_ms=elapsed_ms,
+                    duration_ms=duration_ms,
                     backend_id="postgres",
                     correlation_id=correlation_id,
                 )
@@ -144,59 +144,59 @@ class HandlerPostgresUpsert:
                     success=False,
                     error=sanitized_error,
                     error_code="POSTGRES_UPSERT_ERROR",
-                    duration_ms=elapsed_ms,
+                    duration_ms=duration_ms,
                     backend_id="postgres",
                     correlation_id=correlation_id,
                 )
 
         except (TimeoutError, InfraTimeoutError) as e:
             # Timeout during upsert - retriable error
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (time.perf_counter() - start_time) * 1000
             sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
                 error_code="POSTGRES_TIMEOUT_ERROR",
-                duration_ms=elapsed_ms,
+                duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
             )
 
         except InfraAuthenticationError as e:
             # Authentication failure - non-retriable error
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (time.perf_counter() - start_time) * 1000
             sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
                 error_code="POSTGRES_AUTH_ERROR",
-                duration_ms=elapsed_ms,
+                duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
             )
 
         except InfraConnectionError as e:
             # Connection failure - retriable error
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (time.perf_counter() - start_time) * 1000
             sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
                 error_code="POSTGRES_CONNECTION_ERROR",
-                duration_ms=elapsed_ms,
+                duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
             )
 
         except Exception as e:
             # Unknown exception - sanitize to prevent credential exposure
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (time.perf_counter() - start_time) * 1000
             sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
                 error_code="POSTGRES_UNKNOWN_ERROR",
-                duration_ms=elapsed_ms,
+                duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
             )

@@ -32,7 +32,7 @@ import warnings
 warnings.warn(
     "Importing from 'omnibase_infra.shared.utils' is deprecated. "
     "Use 'omnibase_infra.utils' instead. "
-    "This module will be removed in a future version.",
+    "This module will be removed in v2.0.0.",
     DeprecationWarning,
     stacklevel=2,
 )
