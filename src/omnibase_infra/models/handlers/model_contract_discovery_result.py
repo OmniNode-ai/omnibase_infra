@@ -74,7 +74,7 @@ class ModelContractDiscoveryResult(BaseModel):
 
 # Rebuild model to resolve forward reference after all imports are available.
 # model_rebuild() is called in omnibase_infra.runtime.handler_contract_source
-# after ModelHandlerValidationError is imported. See tests/unit/runtime/test_handler_contract_source.py
-# for TestModelContractDiscoveryResultForwardReference tests.
+# after ModelHandlerValidationError is imported. See the module docstring in
+# handler_contract_source.py for detailed explanation of this pattern.
 
 __all__ = ["ModelContractDiscoveryResult"]

@@ -47,8 +47,15 @@ class ProtocolContractDescriptor(Protocol):
     def handler_id(self) -> str:
         """Unique identifier for the handler.
 
+        The handler_id is typically formatted as "name@version" or just "name"
+        and must be unique within a discovery scope.
+
         Returns:
-            str: Globally unique handler identifier in format "name@version".
+            str: Globally unique handler identifier.
+
+        Example:
+            >>> descriptor.handler_id
+            'my_handler@1.0.0'
         """
         ...
 
@@ -56,8 +63,14 @@ class ProtocolContractDescriptor(Protocol):
     def name(self) -> str:
         """Human-readable name for the handler.
 
+        The name is a short, descriptive identifier without version suffix.
+
         Returns:
-            str: Handler name without version suffix.
+            str: Handler name suitable for display.
+
+        Example:
+            >>> descriptor.name
+            'My Handler'
         """
         ...
 

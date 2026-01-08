@@ -99,13 +99,16 @@ runtime:
 | 3 | `ProtocolHandler` | Interface defined with `handler_type` returning enum | [ ] |
 | 4 | `ProtocolEventBus` | Interface defined with `publish_envelope`, `subscribe` | [ ] |
 | 5 | `NodeRuntime` | Routes envelope to correct handler by type | [ ] |
-| 6 | `RegistryFileBased` | Loads contracts from directory, fails on invalid | [ ] |
+| 6 | `HandlerContractSource` | Discovers handler_contract.yaml files from filesystem | [ ] |
 | 7 | `HttpHandler` | Executes GET/POST, returns response envelope | [ ] |
 | 8 | `DbHandler` | Executes query/execute, returns response envelope | [ ] |
 | 9 | `InMemoryEventBus` | Publishes and consumes envelopes per topic | [ ] |
 | 10 | `BaseRuntimeHostProcess` | Loads contract, wires handlers, starts consumption | [ ] |
 | 11 | `wiring.py` | Registers handlers from config without duplicates | [ ] |
 | 12 | E2E Flow | Envelope in -> handler executes -> response out | [ ] |
+
+> **Note**: The checklist references core components. `omnibase_infra` provides `HandlerContractSource`
+> for handler contract discovery, while `omnibase_core` may provide `RegistryFileBased` for general contract loading.
 
 **MVP Smoke Test** (single command to verify):
 ```bash
@@ -434,6 +437,10 @@ Create the core runtime that hosts multiple node instances. **MINIMAL for MVP - 
 **Priority**: High
 **Labels**: `architecture`, `runtime`, `core`
 **Milestone**: v0.1.0 MVP
+
+> **Clarification**: This issue describes `RegistryFileBased` for `omnibase_core`, which handles general
+> contract loading. `omnibase_infra` provides `HandlerContractSource` for handler-specific contract
+> discovery from `handler_contract.yaml` files. These are complementary components with different scopes.
 
 **Description**:
 Create the file-based contract registry for loading node contracts from filesystem. **Simple for MVP - just load YAML to Pydantic, no skip rules.**

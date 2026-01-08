@@ -59,27 +59,11 @@ except ImportError:
 try:
     from omnibase_spi.protocols.handlers.types import ProtocolHandlerDescriptor
 except ImportError:
-    # Fallback: define minimal protocol stub for testing
-    from omnibase_core.models.primitives.model_semver import ModelSemVer
-
-    @runtime_checkable
-    class ProtocolHandlerDescriptor(Protocol):
-        """Fallback protocol definition for testing."""
-
-        @property
-        def handler_id(self) -> str:
-            """Unique identifier for the handler."""
-            ...
-
-        @property
-        def name(self) -> str:
-            """Human-readable name for the handler."""
-            ...
-
-        @property
-        def version(self) -> ModelSemVer:
-            """Semantic version of the handler."""
-            ...
+    # Fallback: import from our local protocol definition
+    # This avoids duplicating the protocol definition and ensures consistency
+    from omnibase_infra.runtime.protocol_contract_descriptor import (
+        ProtocolContractDescriptor as ProtocolHandlerDescriptor,
+    )
 
 
 # =============================================================================
@@ -441,7 +425,8 @@ class TestHandlerContractSourceDiscovery:
         Each descriptor must have:
         - handler_id: str
         - name: str
-        - version: str
+        - version: ModelSemVer type - use str() for string comparison
+          or access .major/.minor/.patch for component comparison
         - handler_kind: str
         - input_model: str
         - output_model: str

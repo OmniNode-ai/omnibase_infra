@@ -43,8 +43,13 @@ class ProtocolContractSource(Protocol):
     def source_type(self) -> str:
         """The type of handler source.
 
+        This identifier is used for observability and logging. The runtime
+        MUST NOT branch on this value.
+
         Returns:
-            str: Source type identifier (e.g., "CONTRACT", "DATABASE").
+            str: Source type identifier. Common values include:
+                - "CONTRACT": Filesystem-based contract discovery
+                - "DATABASE": Database-backed handler registry
         """
         ...
 
@@ -54,14 +59,25 @@ class ProtocolContractSource(Protocol):
         Scans configured sources for handler contracts and returns
         discovered handlers along with any validation errors encountered.
 
+        This method may be called multiple times and should return
+        consistent results (idempotent).
+
         Returns:
             ModelContractDiscoveryResult: Container with:
                 - descriptors: List of successfully discovered handlers
-                - validation_errors: List of errors for failed discoveries
+                  as ProtocolContractDescriptor instances
+                - validation_errors: List of ModelHandlerValidationError
+                  for failed discoveries (empty in strict mode)
 
         Raises:
-            ModelOnexError: In strict mode, if discovery encounters
-                validation or parsing errors.
+            ModelOnexError: In strict mode (default), if discovery encounters
+                validation, parsing, or I/O errors. Error codes include:
+                - HANDLER_SOURCE_001: Empty contract_paths
+                - HANDLER_SOURCE_002: Path does not exist
+                - HANDLER_SOURCE_003: YAML parse error
+                - HANDLER_SOURCE_004: Contract validation error
+                - HANDLER_SOURCE_005: File size limit exceeded
+                - HANDLER_SOURCE_006: File I/O error
         """
         ...
 
