@@ -1052,6 +1052,14 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
     ticket: OMN-1097
+  - file_pattern: 'model_handler_security_policy\.py'
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ModelHandlerSecurityPolicy defines security policies for ONEX handlers. The "Handler" refers to ONEX handler security constraints, not an anti-pattern manager class. Part of the two-layer security validation system (OMN-1098).
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1098
   - file_pattern: 'validation_aggregator\.py'
     class_pattern: "Class 'ValidationAggregator'"
     violation_pattern: 'has \d+ methods'
