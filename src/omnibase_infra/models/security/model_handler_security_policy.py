@@ -83,9 +83,9 @@ class ModelHandlerSecurityPolicy(BaseModel):
         description="Secret scopes this handler requires access to",
     )
 
-    allowed_domains: list[str] = Field(
-        default_factory=list,
-        description="Outbound domains this handler may access",
+    allowed_domains: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Outbound domains this handler may access (immutable tuple)",
     )
 
     data_classification: EnumDataClassification = Field(

@@ -30,31 +30,45 @@ class EnumSecurityRuleId(StrEnum):
     Used to categorize and identify specific security constraint failures
     during handler registration and invocation.
 
-    Registration-Time Violations (300-309):
-        These violations are detected when a handler attempts to register
-        with security requirements that exceed environment permissions.
+    Two-Layer Security Validation Architecture:
+        The security system validates handlers at two distinct points:
 
-    Invocation-Time Violations (310-319):
-        These violations are detected at runtime when a handler attempts
-        to access resources beyond its declared policy.
+        1. Registration-Time Violations (300-309):
+            Validated by: RegistrationSecurityValidator
+            Location: omnibase_infra.validation.registration_security_validator
+            When: Handler attempts to register with the system
+            Purpose: Prevents misconfigured handlers from registering
+
+        2. Invocation-Time Violations (310-319):
+            Enforced by: InvocationSecurityEnforcer
+            Location: omnibase_infra.runtime.invocation_security_enforcer
+            When: Handler attempts to access resources at runtime
+            Purpose: Enforces declared policy during handler execution
 
     Attributes:
         SECRET_SCOPE_NOT_PERMITTED: Handler requests secret scope not permitted
-            in the current environment.
+            in the current environment. (Registration-time, SECURITY-300)
         CLASSIFICATION_EXCEEDS_MAX: Handler's data classification exceeds the
-            maximum allowed for the environment.
+            maximum allowed for the environment. (Registration-time, SECURITY-301)
         ADAPTER_REQUESTING_SECRETS: Adapter handler attempting to request secrets
-            (adapters should not access secrets directly).
+            (adapters should not access secrets directly). (Registration-time, SECURITY-302)
         ADAPTER_NON_EFFECT_CATEGORY: Adapter handler has non-EFFECT category
-            (adapters must be EFFECT handlers).
+            (adapters must be EFFECT handlers). (Registration-time, SECURITY-303)
         ADAPTER_MISSING_DOMAIN_ALLOWLIST: Adapter handler missing required
             domain allowlist in environment requiring explicit allowlists.
+            (Registration-time, SECURITY-304)
         DOMAIN_ACCESS_DENIED: Handler attempted to access domain not in its
-            declared allowlist.
+            declared allowlist. (Invocation-time, SECURITY-310)
         SECRET_SCOPE_ACCESS_DENIED: Handler attempted to access secret scope
-            not in its declared scopes.
+            not in its declared scopes. (Invocation-time, SECURITY-311)
         CLASSIFICATION_CONSTRAINT_VIOLATION: Data processed exceeds handler's
-            declared classification level.
+            declared classification level. (Invocation-time, SECURITY-312)
+
+    See Also:
+        - RegistrationSecurityValidator: Registration-time validation
+        - InvocationSecurityEnforcer: Invocation-time enforcement
+        - ModelHandlerSecurityPolicy: Handler-declared security requirements
+        - ModelEnvironmentPolicy: Environment-level security constraints
     """
 
     # Registration-time violations (300-309)

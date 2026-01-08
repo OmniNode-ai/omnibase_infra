@@ -18,6 +18,10 @@ See Also:
     - docs/design/HANDLER_SECURITY_VALIDATION.md: Full design documentation
 """
 
+from omnibase_infra.models.security.classification_levels import (
+    CLASSIFICATION_SECURITY_LEVELS,
+    get_security_level,
+)
 from omnibase_infra.models.security.model_environment_policy import (
     ModelEnvironmentPolicy,
 )
@@ -26,6 +30,8 @@ from omnibase_infra.models.security.model_handler_security_policy import (
 )
 
 __all__ = [
+    "CLASSIFICATION_SECURITY_LEVELS",
     "ModelEnvironmentPolicy",
     "ModelHandlerSecurityPolicy",
+    "get_security_level",
 ]

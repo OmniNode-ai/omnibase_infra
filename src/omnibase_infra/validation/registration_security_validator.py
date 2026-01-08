@@ -40,40 +40,8 @@ from omnibase_infra.models.handlers import ModelHandlerIdentifier
 from omnibase_infra.models.security import (
     ModelEnvironmentPolicy,
     ModelHandlerSecurityPolicy,
+    get_security_level,
 )
-
-# Security level mapping for data classification comparison.
-# Higher values indicate more sensitive/restricted data.
-# This ordering reflects standard data classification hierarchies.
-_CLASSIFICATION_SECURITY_LEVELS: dict[EnumDataClassification, int] = {
-    EnumDataClassification.PUBLIC: 0,
-    EnumDataClassification.OPEN: 0,
-    EnumDataClassification.UNCLASSIFIED: 1,
-    EnumDataClassification.INTERNAL: 2,
-    EnumDataClassification.PRIVATE: 2,
-    EnumDataClassification.SENSITIVE: 3,
-    EnumDataClassification.CONFIDENTIAL: 4,
-    EnumDataClassification.RESTRICTED: 5,
-    EnumDataClassification.CLASSIFIED: 5,
-    EnumDataClassification.SECRET: 6,
-    EnumDataClassification.TOP_SECRET: 7,
-}
-
-
-def _get_security_level(classification: EnumDataClassification) -> int:
-    """Get the security level for a data classification.
-
-    Args:
-        classification: The data classification enum value.
-
-    Returns:
-        Integer security level (higher = more sensitive).
-
-    Raises:
-        KeyError: If the classification is not in the mapping.
-
-    """
-    return _CLASSIFICATION_SECURITY_LEVELS[classification]
 
 
 class RegistrationSecurityValidator:
@@ -236,8 +204,8 @@ def _validate_classification(
     errors: list[ModelHandlerValidationError] = []
 
     # Get security levels for comparison
-    handler_level = _get_security_level(handler_policy.data_classification)
-    max_level = _get_security_level(env_policy.max_data_classification)
+    handler_level = get_security_level(handler_policy.data_classification)
+    max_level = get_security_level(env_policy.max_data_classification)
 
     # Check if handler classification exceeds environment maximum
     if handler_level > max_level:

@@ -41,41 +41,10 @@ from uuid import UUID, uuid4
 from omnibase_core.enums import EnumDataClassification
 
 from omnibase_infra.enums import EnumSecurityRuleId
-from omnibase_infra.models.security import ModelHandlerSecurityPolicy
-
-# Security level mapping for data classification comparison.
-# Higher values indicate more sensitive/restricted data.
-# This ordering reflects standard data classification hierarchies.
-# IMPORTANT: This mapping MUST be identical to the one in
-# registration_security_validator.py to ensure consistent security decisions.
-_CLASSIFICATION_SECURITY_LEVELS: dict[EnumDataClassification, int] = {
-    EnumDataClassification.PUBLIC: 0,
-    EnumDataClassification.OPEN: 0,
-    EnumDataClassification.UNCLASSIFIED: 1,
-    EnumDataClassification.INTERNAL: 2,
-    EnumDataClassification.PRIVATE: 2,
-    EnumDataClassification.SENSITIVE: 3,
-    EnumDataClassification.CONFIDENTIAL: 4,
-    EnumDataClassification.RESTRICTED: 5,
-    EnumDataClassification.CLASSIFIED: 5,
-    EnumDataClassification.SECRET: 6,
-    EnumDataClassification.TOP_SECRET: 7,
-}
-
-
-def _get_security_level(classification: EnumDataClassification) -> int:
-    """Get numeric security level for a data classification.
-
-    Args:
-        classification: The data classification enum value.
-
-    Returns:
-        Integer security level (higher = more sensitive).
-
-    Raises:
-        KeyError: If the classification is not in the mapping.
-    """
-    return _CLASSIFICATION_SECURITY_LEVELS[classification]
+from omnibase_infra.models.security import (
+    ModelHandlerSecurityPolicy,
+    get_security_level,
+)
 
 
 class SecurityViolationError(Exception):
@@ -244,6 +213,11 @@ class InvocationSecurityEnforcer:
                     "include a valid domain (e.g., '*.example.com', not '*.' or '*.com')."
                 )
                 raise ValueError(msg)
+            # NOTE: Patterns like '*.co.uk' are technically valid but potentially too
+            # broad (matching any .co.uk subdomain). Proper validation would require
+            # checking against the Public Suffix List (PSL), which is beyond current
+            # scope. Security-conscious deployments should review domain allowlists
+            # manually and prefer specific domains over TLD-based wildcards.
 
     def _compile_domain_patterns(
         self, domains: list[str]
@@ -381,8 +355,8 @@ class InvocationSecurityEnforcer:
             >>> enforcer.check_classification_constraint(EnumDataClassification.PUBLIC)  # OK
             >>> enforcer.check_classification_constraint(EnumDataClassification.CONFIDENTIAL)  # Raises
         """
-        handler_level = _get_security_level(self._policy.data_classification)
-        data_level = _get_security_level(data_classification)
+        handler_level = get_security_level(self._policy.data_classification)
+        data_level = get_security_level(data_classification)
 
         if data_level > handler_level:
             raise SecurityViolationError(

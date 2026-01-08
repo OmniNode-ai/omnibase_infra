@@ -172,6 +172,41 @@ class TestDomainAccessEnforcement:
 
         assert exc_info.value.rule_id == EnumSecurityRuleId.DOMAIN_ACCESS_DENIED
 
+    def test_wildcard_does_not_match_nested_subdomains(self) -> None:
+        """Wildcard should only match single-level subdomains.
+
+        The pattern '*.example.com' matches 'api.example.com' but NOT
+        'api.staging.example.com' (nested/multi-level subdomain).
+
+        This is intentional behavior to enforce explicit domain declarations
+        and prevent overly broad wildcard matching.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=["*.example.com"],
+            data_classification=EnumDataClassification.INTERNAL,
+        )
+
+        enforcer = InvocationSecurityEnforcer(handler_policy)
+
+        # Single-level subdomain should succeed
+        enforcer.check_domain_access("api.example.com")
+        enforcer.check_domain_access("storage.example.com")
+
+        # Nested/multi-level subdomains should fail
+        with pytest.raises(SecurityViolationError) as exc_info:
+            enforcer.check_domain_access("api.staging.example.com")
+
+        assert exc_info.value.rule_id == EnumSecurityRuleId.DOMAIN_ACCESS_DENIED
+        assert "api.staging.example.com" in str(exc_info.value)
+
+        # Another nested subdomain example
+        with pytest.raises(SecurityViolationError) as exc_info:
+            enforcer.check_domain_access("a.b.example.com")
+
+        assert exc_info.value.rule_id == EnumSecurityRuleId.DOMAIN_ACCESS_DENIED
+
 
 class TestSecretScopeAccessEnforcement:
     """Tests for secret scope access enforcement at invocation time.
