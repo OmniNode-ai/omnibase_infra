@@ -920,29 +920,6 @@ pattern_exemptions:
       - docs/architecture/REGISTRATION_REDUCER.md
     ticket: OMN-1004
   # ==========================================================================
-  # Architecture Violation Model Exemptions (OMN-1099)
-  # ==========================================================================
-  # rule_id in ModelArchitectureViolation is a human-readable semantic identifier
-  # (e.g., "ARCH-001", "ARCH-002"), NOT a UUID. This follows the same pattern as
-  # policy_id, dispatcher_id, scheduler_id, and plugin_id.
-  - file_pattern: 'model_violation\.py'
-    violation_pattern: "Field 'rule_id' should use UUID"
-    reason: >
-      rule_id is a human-readable semantic identifier (e.g., "ARCH-001", "ARCH-002") for architecture validation rules. This follows the same pattern as policy_id, dispatcher_id, scheduler_id, and plugin_id - all are semantic identifiers, not UUIDs.
-
-    documentation:
-      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
-      - docs/validation/validator_reference.md
-    ticket: OMN-1099
-  - file_pattern: 'model_violation\.py'
-    violation_pattern: "Field 'rule_name' might reference an entity"
-    reason: >
-      rule_name is a display name for the architecture rule (e.g., "No Any Types", "No Handler Publishing"). It is NOT an entity reference but a human-readable label paired with rule_id as the semantic identifier.
-
-    documentation:
-      - CLAUDE.md (Registry Naming Conventions)
-    ticket: OMN-1099
-  # ==========================================================================
   # Handler Validation Error Model Exemptions (OMN-1091)
   # ==========================================================================
   # Handler validation error types are explicitly named per ticket requirements.

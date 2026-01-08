@@ -240,7 +240,7 @@ class TestCapabilityFieldsPersistence:
             entity_id=uuid4(),
             domain="registration",
             new_state=EnumRegistrationState.PENDING_REGISTRATION,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_version="1.0.0",
             capabilities=capabilities,
             event_id=uuid4(),
