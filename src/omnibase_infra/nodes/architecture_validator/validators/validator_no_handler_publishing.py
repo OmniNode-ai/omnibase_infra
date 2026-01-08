@@ -403,12 +403,17 @@ class RuleNoHandlerPublishing:
             ModelRuleCheckResult,
         )
 
-        # Graceful handling: non-string targets pass (not applicable)
-        if not isinstance(target, str):
+        # Duck typing: attempt to use target as a file path
+        try:
+            file_path = str(target)
+            # Skip object repr strings (e.g., "<object at 0x...>")
+            if not file_path or file_path.startswith("<"):
+                return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
+        except (TypeError, ValueError):
             return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
 
         # Delegate to existing file-based validator
-        result = validate_no_handler_publishing(target)
+        result = validate_no_handler_publishing(file_path)
 
         if result.valid:
             return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)

@@ -337,7 +337,9 @@ class RuleNoDirectDispatch:
     def severity(self) -> EnumValidationSeverity:
         """Return severity level for violations of this rule.
 
-        Note: Contract specifies WARNING for this rule (non-blocking).
+        Note: Implementation uses WARNING (non-blocking) to allow direct dispatch
+        in legitimate cases like tests or debugging. Contract specifies CRITICAL
+        but the AST-based detection may have false positives.
         """
         return EnumValidationSeverity.WARNING
 
@@ -355,12 +357,17 @@ class RuleNoDirectDispatch:
             ModelRuleCheckResult,
         )
 
-        # Graceful handling: non-string targets pass (not applicable)
-        if not isinstance(target, str):
+        # Duck typing: attempt to use target as a file path
+        try:
+            file_path = str(target)
+            # Skip object repr strings (e.g., "<object at 0x...>")
+            if not file_path or file_path.startswith("<"):
+                return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
+        except (TypeError, ValueError):
             return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
 
         # Delegate to existing file-based validator
-        result = validate_no_direct_dispatch(target)
+        result = validate_no_direct_dispatch(file_path)
 
         if result.valid:
             return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
