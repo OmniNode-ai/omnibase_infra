@@ -51,7 +51,7 @@ These invariants MUST be maintained throughout the implementation:
 │  └────────────────────────────────────────────────────────────┘ │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐ │
-│  │ FileRegistry | HealthEndpoint | MetricsCollector           │ │
+│  │ RegistryFileBased | HealthEndpoint | MetricsCollector       │ │
 │  └────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -596,9 +596,9 @@ class NodeRuntime:
         Args:
             contracts_dir: Directory containing node contract YAML files
         """
-        from omnibase_core.runtime.file_registry import FileRegistry
+        from omnibase_core.runtime.registry_file_based import RegistryFileBased
 
-        registry = FileRegistry(contracts_dir)
+        registry = RegistryFileBased(contracts_dir)
         contracts = registry.load_all()
 
         for contract in contracts:
@@ -745,9 +745,9 @@ class NodeRuntime:
         }
 ```
 
-### 1.7 FileRegistry Class
+### 1.7 RegistryFileBased Class
 
-**File**: `src/omnibase_core/runtime/file_registry.py` (NEW)
+**File**: `src/omnibase_core/runtime/registry_file_based.py` (NEW)
 
 ```python
 """File-based contract registry for Runtime Host."""
@@ -761,17 +761,17 @@ if TYPE_CHECKING:
     from omnibase_core.models.contracts.model_node_contract import ModelNodeContract
 
 
-class FileRegistry:
+class RegistryFileBased:
     """Registry that loads node contracts from filesystem.
 
-    FileRegistry scans a directory for YAML contract files and
+    RegistryFileBased scans a directory for YAML contract files and
     loads them into ModelNodeContract instances.
     """
 
     def __init__(self, contracts_dir: Path) -> None:
         self._contracts_dir = contracts_dir
         self._contracts: dict[str, "ModelNodeContract"] = {}
-        self._logger = logging.getLogger("file_registry")
+        self._logger = logging.getLogger("registry_file_based")
 
     def load_all(self) -> list["ModelNodeContract"]:
         """Load all contracts from the directory.
@@ -1057,7 +1057,7 @@ if __name__ == "__main__":
 - [ ] `ProtocolHandler` abstract class with `EnumHandlerType` return type
 - [ ] `NodeInstance` class with envelope handling (pass-through documented)
 - [ ] `NodeRuntime` class - NO event loop, NO bus consumer
-- [ ] `FileRegistry` class for contract loading
+- [ ] `RegistryFileBased` class for contract loading
 - [ ] `LocalHandler` working with dev/test warnings
 - [ ] CLI entry point clearly marked as dev/test only
 - [ ] Unit tests for all new classes (>90% coverage)
