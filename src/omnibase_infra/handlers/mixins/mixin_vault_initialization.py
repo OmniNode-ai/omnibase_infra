@@ -26,9 +26,6 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
-# ONEX: Using object instead of Any per ADR guidelines. JsonType from omnibase_core
-# would cause Pydantic 2.x recursion issues with recursive type aliases.
-
 logger = logging.getLogger(__name__)
 
 

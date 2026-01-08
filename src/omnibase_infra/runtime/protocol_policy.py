@@ -114,9 +114,6 @@ from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from omnibase_infra.enums import EnumPolicyType
 
-# NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
-
 
 @runtime_checkable
 class ProtocolPolicy(Protocol):

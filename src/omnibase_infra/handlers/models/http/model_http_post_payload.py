@@ -14,8 +14,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-# ONEX: Using object instead of Any per ADR guidelines. JsonType from omnibase_core
-# has Pydantic 2.x recursion issues with recursive type aliases.
+from omnibase_core.types import JsonType
 from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.http.enum_http_operation_type import (
@@ -79,7 +78,7 @@ class ModelHttpPostPayload(ModelPayloadHttp):
         default_factory=dict,
         description="Response headers as key-value dictionary",
     )
-    body: object = Field(
+    body: JsonType = Field(
         description="Response body",
     )
 
