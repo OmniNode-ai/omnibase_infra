@@ -178,7 +178,7 @@ class DirectDispatchVisitor(ast.NodeVisitor):
             ModelArchitectureViolation(
                 rule_id=RULE_ID,
                 rule_name=RULE_NAME,
-                severity=EnumValidationSeverity.ERROR,
+                severity=EnumValidationSeverity.WARNING,
                 target_type="handler",
                 target_name=self._current_class or "unknown",
                 message="Direct handler dispatch detected. Handlers must be invoked through runtime.",
