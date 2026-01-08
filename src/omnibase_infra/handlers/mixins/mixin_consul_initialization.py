@@ -33,7 +33,8 @@ from omnibase_infra.handlers.models.consul import ModelConsulHandlerConfig
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
 
-    from omnibase_core.types import JsonType
+# ONEX: Using object instead of Any per ADR guidelines. JsonType from omnibase_core
+# has Pydantic 2.x recursion issues with recursive type aliases.
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class MixinConsulInitialization:
 
     def _validate_consul_config(
         self,
-        config: dict[str, JsonType],
+        config: dict[str, object],
         correlation_id: UUID,
     ) -> ModelConsulHandlerConfig:
         """Validate and parse Consul configuration.

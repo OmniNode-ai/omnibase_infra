@@ -61,6 +61,10 @@ from __future__ import annotations
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+# NOTE: Using `object` instead of `JsonType` from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases. Per ONEX ADR, `Any` is not permitted
+# in function signatures - use `object` for generic payload types.
+
 # Sentinel values for "not set" state
 _SENTINEL_STR: str = ""
 
