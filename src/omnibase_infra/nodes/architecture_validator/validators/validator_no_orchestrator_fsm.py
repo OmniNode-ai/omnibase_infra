@@ -13,9 +13,20 @@ KEY CLARIFICATION from ticket OMN-1099:
 
 Related:
     - Ticket: OMN-1099 (Architecture Validator - FSM Rule Clarified)
+    - PR: #124 (Protocol-Compliant Rule Classes)
     - Rule: ARCH-003 (No Workflow FSM in Orchestrators)
 
-Example Violations:
+Detection Patterns:
+    1. **Class-level FSM**: STATES, TRANSITIONS, STATE_MACHINE, FSM,
+       ALLOWED_TRANSITIONS
+    2. **State prefix**: STATE_* constants (e.g., STATE_PENDING)
+    3. **Instance attributes**: _state, _workflow_state, _current_step,
+       _fsm_state, _current_state
+    4. **FSM methods**: transition(), can_transition(), apply_transition(),
+       get_current_state(), set_state()
+
+Example Violations::
+
     # VIOLATION: Orchestrator with state transition table
     class OrchestratorOrder(NodeOrchestrator):
         STATES = ["pending", "processing", "completed"]
@@ -34,7 +45,8 @@ Example Violations:
         def apply_transition(self, transition):
             ...
 
-Allowed Patterns:
+Allowed Patterns::
+
     # OK: Reducers with FSM (this is what reducers do)
     class ReducerOrder(NodeReducer):
         STATES = ["created", "processing", "completed"]  # Allowed

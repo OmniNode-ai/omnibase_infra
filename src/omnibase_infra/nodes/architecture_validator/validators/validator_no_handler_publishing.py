@@ -3,29 +3,52 @@
 """Validator for ARCH-002: No Handler Publishing.
 
 This validator uses AST analysis to detect handlers that directly publish
-events to the event bus. Only orchestrators may publish events.
+events to the event bus. Only orchestrators may publish events. This enforces
+the ONEX architectural principle that handlers are pure processors that
+return results, while orchestrators own the event publishing lifecycle.
 
-Detection patterns:
-    - Handler class with event_bus, bus, or publisher in __init__ signature
-    - Handler class with _bus, _event_bus, _publisher attributes
-    - Handler class calling publish(), emit(), or send_event() methods
+Related:
+    - Ticket: OMN-1099 (Architecture Validator)
+    - PR: #124 (Protocol-Compliant Rule Classes)
+    - Rule: ARCH-002 (No Handler Publishing)
+    - See also: docs/patterns/dispatcher_resilience.md
 
-Handler identification:
+Detection Patterns:
+    1. **Constructor parameters**: event_bus, bus, or publisher in __init__ signature
+    2. **Instance attributes**: _bus, _event_bus, _publisher assigned in handler
+    3. **Method calls**: publish(), emit(), or send_event() invocations
+
+Handler Identification:
     - Classes with "Handler" in the name (case sensitive)
-    - Classes with "Orchestrator" in the name are NOT handlers
+    - Classes with "Orchestrator" in the name are NOT handlers (excluded)
 
-Example violations:
-    >>> # BAD: Handler with event bus access
-    >>> class HandlerBad:
-    ...     def __init__(self, container, event_bus):
-    ...         self._bus = event_bus
-    ...     def handle(self, event):
-    ...         self._bus.publish(SomeEvent())  # VIOLATION
+Example Violations::
 
-    >>> # GOOD: Handler returns event for orchestrator to publish
-    >>> class HandlerGood:
-    ...     def handle(self, event):
-    ...         return ModelEventEnvelope(payload=SomeEvent())  # OK
+    # VIOLATION: Handler with event bus in constructor
+    class HandlerBad:
+        def __init__(self, container, event_bus):  # Forbidden parameter
+            self._bus = event_bus  # Forbidden attribute
+        def handle(self, event):
+            self._bus.publish(SomeEvent())  # Forbidden method call
+
+    # VIOLATION: Handler calling publish directly
+    class HandlerAlsoBad:
+        def handle(self, event):
+            self.emit(SomeEvent())  # Forbidden method
+
+Allowed Patterns::
+
+    # OK: Handler returns event envelope for orchestrator to publish
+    class HandlerGood:
+        def handle(self, event):
+            return ModelEventEnvelope(payload=SomeEvent())  # Correct pattern
+
+    # OK: Orchestrator with event bus (orchestrators ARE allowed)
+    class OrchestratorGood:
+        def __init__(self, container, event_bus):  # Allowed for orchestrators
+            self._bus = event_bus
+        def orchestrate(self, event):
+            self._bus.publish(response)  # Allowed
 """
 
 from __future__ import annotations
@@ -35,16 +58,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
-
-if TYPE_CHECKING:
-    from omnibase_infra.nodes.architecture_validator.models import ModelRuleCheckResult
-
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
 )
 from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
     ModelFileValidationResult,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.nodes.architecture_validator.models import ModelRuleCheckResult
 
 RULE_ID = "ARCH-002"
 RULE_NAME = "No Handler Publishing"
@@ -262,13 +284,21 @@ def validate_no_handler_publishing(file_path: str) -> ModelFileValidationResult:
         file_path: Path to the Python source file to validate.
 
     Returns:
-        ModelArchitectureValidationResult with validation status and any violations.
+        ModelFileValidationResult with:
+            - valid=True if no publishing patterns found in handlers
+            - valid=False with violations if publishing patterns detected
 
-    Example:
-        >>> result = validate_no_handler_publishing("path/to/handler.py")
-        >>> if not result.valid:
-        ...     for v in result.violations:
-        ...         print(f"{v.rule_id}: {v.message}")
+    Note:
+        Orchestrator classes are EXEMPT from this rule - they are allowed
+        to publish events. Only classes with "Handler" in the name (but not
+        "Orchestrator") are validated.
+
+    Example::
+
+        result = validate_no_handler_publishing("path/to/handler.py")
+        if not result.valid:
+            for v in result.violations:
+                print(f"{v.rule_id}: {v.message}")
     """
     path = Path(file_path)
 

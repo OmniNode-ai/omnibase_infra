@@ -8,23 +8,39 @@ tracking, circuit breaking, and other cross-cutting concerns.
 
 Related:
     - Ticket: OMN-1099 (Architecture Validator)
+    - PR: #124 (Protocol-Compliant Rule Classes)
     - Rule: ARCH-001 (No Direct Handler Dispatch)
 
-Example Violations:
+Detection Patterns:
+    1. **Handler variable tracking**: Variables assigned from Handler() instantiation
+    2. **Attribute access**: Attributes containing 'handler' (e.g., self._handler)
+    3. **Inline instantiation**: Handler().handle() calls
+
+Example Violations::
+
     # VIOLATION: Direct handler instantiation and call
     handler = MyHandler(container)
-    result = handler.handle(event)
+    result = handler.handle(event)  # Direct dispatch detected
+
+    # VIOLATION: Attribute-based handler call
+    self._handler.handle(event)  # Handler via attribute
 
     # VIOLATION: Inline handler dispatch
-    handler.handle(event)
+    MyHandler(container).handle(event)  # Instantiate and call
 
-Allowed Patterns:
-    # OK: Dispatch through runtime
+Allowed Patterns::
+
+    # OK: Dispatch through runtime (proper pattern)
     self.runtime.dispatch(event)
 
-    # OK: Test files are exempt
+    # OK: Test files are exempt (needed for unit testing)
     def test_handler():
-        handler.handle(test_event)  # Allowed in tests
+        handler.handle(test_event)  # Allowed in test files
+
+    # OK: Handler calling its own handle() method
+    class MyHandler:
+        def process(self, event):
+            return self.handle(event)  # self.handle() is allowed
 """
 
 from __future__ import annotations
@@ -34,16 +50,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
-
-if TYPE_CHECKING:
-    from omnibase_infra.nodes.architecture_validator.models import ModelRuleCheckResult
-
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
 )
 from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
     ModelFileValidationResult,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.nodes.architecture_validator.models import ModelRuleCheckResult
 
 RULE_ID = "ARCH-001"
 RULE_NAME = "No Direct Handler Dispatch"
@@ -337,9 +352,11 @@ class RuleNoDirectDispatch:
     def severity(self) -> EnumValidationSeverity:
         """Return severity level for violations of this rule.
 
-        Note: Implementation uses WARNING (non-blocking) to allow direct dispatch
-        in legitimate cases like tests or debugging. Contract specifies CRITICAL
-        but the AST-based detection may have false positives.
+        Note: Contract specifies CRITICAL severity, but implementation uses
+        WARNING as a pragmatic choice. AST-based pattern detection may produce
+        false positives for legitimate patterns like test mocks or debugging code.
+        Using WARNING allows non-blocking validation while still flagging potential
+        issues for review.
         """
         return EnumValidationSeverity.WARNING
 

@@ -2,26 +2,79 @@
 # Copyright (c) 2025 OmniNode Team
 """Validators for Architecture Validator node.
 
-This module contains validator implementations for each architecture rule:
-    - ARCH-001: No Direct Handler Dispatch validator
-    - ARCH-002: No Handler Publishing Events validator
-    - ARCH-003: No Workflow FSM in Orchestrators validator
+This module provides validator implementations for ONEX architecture rules.
+Each validator enforces a specific architectural constraint to ensure proper
+separation of concerns in the ONEX 4-node architecture.
 
-Two interfaces are provided:
+Related:
+    - Ticket: OMN-1099 (Architecture Validator - Protocol Compliance)
+    - PR: #124 (Protocol-Compliant Rule Classes)
 
-1. **Function-based validators** (legacy): Standalone functions for direct validation.
-   - `validate_no_direct_dispatch(file_path)`
-   - `validate_no_handler_publishing(file_path)`
-   - `validate_no_orchestrator_fsm(file_path)`
+Architecture Rules:
+    - ARCH-001: No Direct Handler Dispatch
+        Handlers must be dispatched through the runtime, not called directly.
+        Direct calls bypass event tracking, circuit breaking, and other
+        cross-cutting concerns.
 
-2. **Protocol-compliant rule classes**: Implement `ProtocolArchitectureRule` for
-   integration with the architecture validator framework.
-   - `RuleNoDirectDispatch`
-   - `RuleNoHandlerPublishing`
-   - `RuleNoOrchestratorFSM`
+    - ARCH-002: No Handler Publishing Events
+        Handlers must not have direct event bus access. Only orchestrators
+        may publish events. Handlers should return events for orchestrators
+        to publish.
 
-Validators are wired through the contract.yaml configuration and follow
-the detection_strategy patterns defined there.
+    - ARCH-003: No Workflow FSM in Orchestrators
+        Orchestrators must not implement workflow FSMs (finite state machines).
+        Reducers own state machines; orchestrators are "reaction planners"
+        that coordinate work based on reducer outputs.
+
+Two Interfaces:
+    **1. Function-based validators** - Direct file validation, returns detailed results.
+
+        Suitable for: Scripts, CLI tools, direct validation of single files.
+
+        Example::
+
+            from omnibase_infra.nodes.architecture_validator.validators import (
+                validate_no_direct_dispatch,
+            )
+
+            result = validate_no_direct_dispatch("/path/to/handler.py")
+            if not result.valid:
+                for violation in result.violations:
+                    print(f"{violation.location}: {violation.message}")
+
+    **2. Protocol-compliant rule classes** - Implement `ProtocolArchitectureRule`.
+
+        Suitable for: Integration with NodeArchitectureValidatorCompute, batch
+        validation, registry-based rule management.
+
+        Example::
+
+            from omnibase_infra.nodes.architecture_validator.validators import (
+                RuleNoDirectDispatch,
+                RuleNoHandlerPublishing,
+                RuleNoOrchestratorFSM,
+            )
+
+            rules = [
+                RuleNoDirectDispatch(),
+                RuleNoHandlerPublishing(),
+                RuleNoOrchestratorFSM(),
+            ]
+
+            for rule in rules:
+                result = rule.check("/path/to/file.py")
+                if not result.passed:
+                    print(f"{rule.rule_id}: {result.message}")
+
+Thread Safety:
+    All rule classes are stateless and safe for concurrent use across threads.
+    Function-based validators are also thread-safe as they create new AST
+    visitor instances for each invocation.
+
+Configuration:
+    Validators are wired through contract.yaml using the detection_strategy
+    patterns. See the architecture validator node contract for configuration
+    options and severity mappings.
 """
 
 from omnibase_infra.nodes.architecture_validator.validators.validator_no_direct_dispatch import (
