@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # mypy: disable-error-code="index, operator, arg-type, return-value"
-"""Concurrency tests for VaultHandler.
+"""Concurrency tests for HandlerVault.
 
 These tests verify thread safety of circuit breaker state variables
 and concurrent operation handling under production load scenarios.
@@ -23,7 +23,7 @@ from omnibase_infra.errors import (
     InfraUnavailableError,
     RuntimeHostError,
 )
-from omnibase_infra.handlers.handler_vault import VaultHandler
+from omnibase_infra.handlers.handler_vault import HandlerVault
 
 # Type alias for vault config dict values (str, int, float, bool, dict)
 VaultConfigValue = str | int | float | bool | dict[str, str | int | float | bool]
@@ -69,8 +69,8 @@ def mock_hvac_client() -> MagicMock:
     return client
 
 
-class TestVaultHandlerConcurrency:
-    """Test VaultHandler concurrent operation handling and thread safety."""
+class TestHandlerVaultConcurrency:
+    """Test HandlerVault concurrent operation handling and thread safety."""
 
     @pytest.mark.asyncio
     async def test_concurrent_circuit_breaker_state_updates(
@@ -86,7 +86,7 @@ class TestVaultHandlerConcurrency:
         2. Verifying the circuit breaker failure count matches observed failures
         3. Ensuring no RuntimeError from race conditions occurs
         """
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         vault_config["circuit_breaker_failure_threshold"] = 10
 
@@ -114,7 +114,7 @@ class TestVaultHandlerConcurrency:
             ]
             response_cycle = cycle(responses_pattern)
 
-            # Lock for thread-safe cycle access - VaultHandler.execute() runs hvac
+            # Lock for thread-safe cycle access - HandlerVault.execute() runs hvac
             # client calls in a ThreadPoolExecutor, so multiple threads may
             # concurrently call get_response() which accesses the shared iterator
             cycle_lock = threading.Lock()
@@ -207,7 +207,7 @@ class TestVaultHandlerConcurrency:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent successful operations don't cause race conditions."""
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         # Configure larger queue size to handle concurrent requests
         vault_config["max_concurrent_operations"] = 20
@@ -249,7 +249,7 @@ class TestVaultHandlerConcurrency:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent failures correctly trigger circuit breaker."""
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         vault_config["circuit_breaker_failure_threshold"] = 3
 
@@ -289,7 +289,7 @@ class TestVaultHandlerConcurrency:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent write operations are thread-safe."""
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -337,7 +337,7 @@ class TestVaultHandlerConcurrency:
         3. Handler state is properly cleaned up after shutdown
         4. All tasks complete (either successfully or with expected errors)
         """
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -422,7 +422,7 @@ class TestVaultHandlerConcurrency:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool correctly handles concurrent operation load."""
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         # Set thread pool size to 5 and queue multiplier to handle 25 requests
         # Queue size = 5 * 10 = 50, which can handle 25 concurrent requests
@@ -463,7 +463,7 @@ class TestVaultHandlerConcurrency:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test asyncio.Lock prevents race conditions in circuit breaker state updates."""
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         vault_config["circuit_breaker_failure_threshold"] = 5
 
@@ -514,7 +514,7 @@ class TestVaultHandlerConcurrency:
         does not cause race conditions when multiple concurrent requests attempt
         to transition the circuit breaker state after the reset timeout.
         """
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         vault_config["circuit_breaker_failure_threshold"] = 1
         vault_config["circuit_breaker_reset_timeout_seconds"] = (
@@ -613,7 +613,7 @@ class TestVaultHandlerConcurrency:
         3. Shutdown is safe even when tasks are in progress
         4. Double shutdown is handled gracefully
         """
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -664,7 +664,7 @@ class TestVaultHandlerConcurrency:
         in HALF_OPEN state simultaneously, only one succeeds in transitioning
         the circuit back to CLOSED state without race conditions.
         """
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         vault_config["circuit_breaker_failure_threshold"] = 1
         vault_config["circuit_breaker_reset_timeout_seconds"] = (
@@ -755,13 +755,13 @@ class TestVaultHandlerConcurrency:
                 )
 
 
-class TestVaultHandlerConcurrentRetry:
-    """Test VaultHandler concurrent retry operation handling.
+class TestHandlerVaultConcurrentRetry:
+    """Test HandlerVault concurrent retry operation handling.
 
     These tests verify that concurrent operations have isolated retry state
     and no race conditions occur when multiple operations retry simultaneously.
 
-    Similar to ConsulHandler retry tests, VaultHandler must maintain independent
+    Similar to HandlerConsul retry tests, HandlerVault must maintain independent
     retry state per operation when multiple requests fail and retry concurrently.
     """
 
@@ -777,7 +777,7 @@ class TestVaultHandlerConcurrentRetry:
         simultaneously, each maintains its own independent retry count
         and backoff state. No shared mutable state should cause interference.
         """
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         vault_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
 
@@ -875,7 +875,7 @@ class TestVaultHandlerConcurrentRetry:
         Some operations succeed immediately, others fail and retry.
         Each operation's retry logic should be independent.
         """
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         vault_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
 
@@ -961,7 +961,7 @@ class TestVaultHandlerConcurrentRetry:
         When all operations fail repeatedly, each should track its own
         retry count and all should exhaust retries independently.
         """
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         # Set threshold high enough for concurrent testing
         vault_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
@@ -1019,7 +1019,7 @@ class TestVaultHandlerConcurrentRetry:
         Multiple operation types (read_secret, write_secret, delete_secret)
         running concurrently should each have isolated retry state.
         """
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         vault_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
 
@@ -1147,7 +1147,7 @@ class TestVaultHandlerConcurrentRetry:
         Launch many concurrent operations with mixed success/failure
         to stress test the retry state isolation under load.
         """
-        handler = VaultHandler()
+        handler = HandlerVault()
 
         vault_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
         vault_config["max_concurrent_operations"] = 50
@@ -1269,8 +1269,8 @@ class TestVaultHandlerConcurrentRetry:
                 return success_response
 
             # Create two handlers
-            handler1 = VaultHandler()
-            handler2 = VaultHandler()
+            handler1 = HandlerVault()
+            handler2 = HandlerVault()
 
             mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
                 get_response_handler1

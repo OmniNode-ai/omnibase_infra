@@ -3,7 +3,7 @@
 """Consul Handler Response Model.
 
 This module provides the Pydantic model for Consul handler response envelopes
-used by the ConsulHandler.
+used by the HandlerConsul.
 
 This model provides type consistency with ModelDbQueryResponse, ensuring
 both handlers return strongly-typed Pydantic models with consistent

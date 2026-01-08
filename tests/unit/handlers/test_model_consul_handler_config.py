@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Unit tests for Consul handler configuration models.
 
-These tests validate the Pydantic configuration models for ConsulHandler,
+These tests validate the Pydantic configuration models for HandlerConsul,
 ensuring proper validation, defaults, and security handling.
 """
 

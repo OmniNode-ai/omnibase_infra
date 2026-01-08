@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Vault initialization mixin for VaultHandler.
+"""Vault initialization mixin for HandlerVault.
 
 Provides initialization-related helper methods for parsing configuration,
 creating the hvac client, and setting up infrastructure components.
@@ -26,14 +26,11 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
-# ONEX: Using object instead of Any per ADR guidelines. JsonType from omnibase_core
-# would cause Pydantic 2.x recursion issues with recursive type aliases.
-
 logger = logging.getLogger(__name__)
 
 
 class MixinVaultInitialization:
-    """Mixin providing initialization helpers for VaultHandler.
+    """Mixin providing initialization helpers for HandlerVault.
 
     Contains methods for:
     - Configuration parsing and validation

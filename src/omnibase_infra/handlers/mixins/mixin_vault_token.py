@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Vault token mixin for VaultHandler.
+"""Vault token mixin for HandlerVault.
 
 Provides token management operations including renewal, TTL tracking,
 and automatic token refresh before expiration.
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 class MixinVaultToken:
-    """Mixin providing token management for VaultHandler.
+    """Mixin providing token management for HandlerVault.
 
     Contains methods for:
     - Token renewal checking and auto-refresh
@@ -161,7 +161,7 @@ class MixinVaultToken:
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
-                "VaultHandler not initialized",
+                "HandlerVault not initialized",
                 context=ctx,
             )
 

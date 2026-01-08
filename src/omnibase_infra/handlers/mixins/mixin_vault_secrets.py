@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Vault secrets mixin for VaultHandler.
+"""Vault secrets mixin for HandlerVault.
 
 Provides CRUD operations for secrets in Vault KV v2 secrets engine.
 """
@@ -18,9 +18,6 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
-# ONEX: Using object instead of Any per ADR guidelines. JsonType from omnibase_core
-# has Pydantic 2.x recursion issues with recursive type aliases.
-
 T = TypeVar("T")
 
 # Handler ID for ModelHandlerOutput
@@ -30,7 +27,7 @@ DEFAULT_MOUNT_POINT: str = "secret"
 
 
 class MixinVaultSecrets:
-    """Mixin providing secret operations for VaultHandler.
+    """Mixin providing secret operations for HandlerVault.
 
     Contains methods for:
     - Reading secrets from KV v2

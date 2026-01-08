@@ -91,7 +91,7 @@ class TestModelFailedComponentConstruction:
         ("component_name", "error_message"),
         [
             ("ConsulAdapter", "Service discovery failed"),
-            ("VaultHandler", "Secret resolution timeout"),
+            ("HandlerVault", "Secret resolution timeout"),
             ("PostgresPool", "Connection pool exhausted"),
             ("RedisCache", "Cache invalidation error"),
         ],

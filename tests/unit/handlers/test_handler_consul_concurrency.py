@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # mypy: disable-error-code="index, operator, arg-type, return-value"
-"""Concurrency tests for ConsulHandler retry operations.
+"""Concurrency tests for HandlerConsul retry operations.
 
 These tests verify that concurrent operations have isolated retry state
 and no race conditions occur when multiple operations retry simultaneously.
 
-The ConsulHandler was refactored to use explicit retry state passing
+The HandlerConsul was refactored to use explicit retry state passing
 (via _init_retry_context and _try_execute_operation) rather than shared
 instance variables, ensuring thread-safe concurrent retry behavior.
 """
@@ -27,7 +27,7 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     InfraUnavailableError,
 )
-from omnibase_infra.handlers.handler_consul import ConsulHandler
+from omnibase_infra.handlers.handler_consul import HandlerConsul
 
 # Type alias for consul config dict values
 ConsulConfigValue = str | int | float | bool | dict[str, str | int | float | bool]
@@ -86,8 +86,8 @@ def mock_consul_client() -> MagicMock:
     return client
 
 
-class TestConsulHandlerConcurrentRetry:
-    """Test ConsulHandler concurrent retry operation handling."""
+class TestHandlerConsulConcurrentRetry:
+    """Test HandlerConsul concurrent retry operation handling."""
 
     @pytest.mark.asyncio
     async def test_concurrent_retry_operations_isolated_state(
@@ -101,7 +101,7 @@ class TestConsulHandlerConcurrentRetry:
         simultaneously, each maintains its own independent retry count
         and backoff state. No shared mutable state should cause interference.
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         # Use higher retry threshold to allow more concurrent failures
         consul_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
@@ -205,7 +205,7 @@ class TestConsulHandlerConcurrentRetry:
         Some operations succeed immediately, others fail and retry.
         Each operation's retry logic should be independent.
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         consul_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
 
@@ -294,7 +294,7 @@ class TestConsulHandlerConcurrentRetry:
         When all operations fail repeatedly, each should track its own
         retry count and all should exhaust retries independently.
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         # Set threshold high enough for concurrent testing
         consul_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
@@ -354,7 +354,7 @@ class TestConsulHandlerConcurrentRetry:
         Multiple operation types (kv_get, kv_put, register) running
         concurrently should each have isolated retry state.
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         consul_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
 
@@ -525,8 +525,8 @@ class TestConsulHandlerConcurrentRetry:
                 return success_response
 
             # Create two handlers
-            handler1 = ConsulHandler()
-            handler2 = ConsulHandler()
+            handler1 = HandlerConsul()
+            handler2 = HandlerConsul()
 
             mock_consul_client.kv.get.side_effect = get_response_handler1
             await handler1.initialize(consul_config)
@@ -654,7 +654,7 @@ class TestConsulHandlerConcurrentRetry:
         Launch many concurrent operations with mixed success/failure
         to stress test the retry state isolation under load.
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         consul_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
         consul_config["max_concurrent_operations"] = 50
@@ -743,7 +743,7 @@ class TestConsulHandlerConcurrentRetry:
         Multiple operations timing out should each track their own
         retry attempts independently.
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         consul_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
         consul_config["timeout_seconds"] = 1.0  # Minimum allowed
@@ -808,5 +808,5 @@ class TestConsulHandlerConcurrentRetry:
 
 
 __all__: list[str] = [
-    "TestConsulHandlerConcurrentRetry",
+    "TestHandlerConsulConcurrentRetry",
 ]

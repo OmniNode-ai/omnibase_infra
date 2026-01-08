@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Consul initialization operations mixin.
 
-This mixin provides initialization and setup helper methods for ConsulHandler,
+This mixin provides initialization and setup helper methods for HandlerConsul,
 extracted to reduce class complexity and improve maintainability.
 
 Provides:
@@ -33,16 +33,13 @@ from omnibase_infra.handlers.models.consul import ModelConsulHandlerConfig
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
 
-# ONEX: Using object instead of Any per ADR guidelines. JsonType from omnibase_core
-# has Pydantic 2.x recursion issues with recursive type aliases.
-
 logger = logging.getLogger(__name__)
 
 
 class ProtocolConsulInitDependencies(Protocol):
     """Protocol defining required dependencies for initialization operations.
 
-    ConsulHandler must provide these attributes for the mixin to work.
+    HandlerConsul must provide these attributes for the mixin to work.
     """
 
     _executor: ThreadPoolExecutor | None
@@ -64,7 +61,7 @@ class ProtocolConsulInitDependencies(Protocol):
 class MixinConsulInitialization:
     """Mixin providing Consul initialization helper methods.
 
-    This mixin extracts initialization operations from ConsulHandler to reduce
+    This mixin extracts initialization operations from HandlerConsul to reduce
     class complexity while maintaining full functionality.
 
     Required Dependencies (from host class):
