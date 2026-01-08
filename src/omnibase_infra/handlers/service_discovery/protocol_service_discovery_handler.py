@@ -28,6 +28,7 @@ from omnibase_infra.handlers.service_discovery.models import (
     ModelServiceInfo,
 )
 from omnibase_infra.nodes.node_service_discovery_effect.models import (
+    ModelDiscoveryQuery,
     ModelServiceDiscoveryHealthCheckResult,
 )
 
@@ -107,16 +108,16 @@ class ProtocolServiceDiscoveryHandler(Protocol):
 
     async def discover_services(
         self,
-        service_name: str,
-        tags: tuple[str, ...] | None = None,
+        query: ModelDiscoveryQuery,
         correlation_id: UUID | None = None,
     ) -> ModelDiscoveryResult:
-        """Discover services matching the given criteria.
+        """Discover services matching the query criteria.
 
         Args:
-            service_name: Name of the service to discover.
-            tags: Optional tags to filter services.
+            query: Query parameters including service_name, tags,
+                and health_filter for filtering services.
             correlation_id: Optional correlation ID for tracing.
+                If not provided, uses query.correlation_id.
 
         Returns:
             ModelDiscoveryResult with list of matching services

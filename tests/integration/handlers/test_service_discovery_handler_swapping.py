@@ -53,6 +53,7 @@ from omnibase_infra.handlers.service_discovery.protocol_service_discovery_handle
     ProtocolServiceDiscoveryHandler,
 )
 from omnibase_infra.nodes.node_service_discovery_effect.models import (
+    ModelDiscoveryQuery,
     ModelServiceDiscoveryHealthCheckResult,
 )
 
@@ -194,10 +195,11 @@ class BaseHandlerSwappingTests:
         assert register_result.service_id == sample_service_info.service_id
 
         # Discover the service
-        discover_result = await handler.discover_services(
+        query = ModelDiscoveryQuery(
             service_name=sample_service_info.service_name,
             correlation_id=correlation_id,
         )
+        discover_result = await handler.discover_services(query)
 
         # Verify discovery returned the registered service
         assert discover_result.success, "Discovery failed"
@@ -234,10 +236,11 @@ class BaseHandlerSwappingTests:
         )
 
         # Verify service is gone (discovery should not find it)
-        discover_result = await handler.discover_services(
+        query = ModelDiscoveryQuery(
             service_name=sample_service_info.service_name,
             correlation_id=correlation_id,
         )
+        discover_result = await handler.discover_services(query)
 
         # Service should not be in results
         for service in discover_result.services:
@@ -328,10 +331,11 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
             assert result.success
 
         # Discover specific service
-        discover_result = await handler.discover_services(
+        query = ModelDiscoveryQuery(
             service_name="api-gateway",
             correlation_id=correlation_id,
         )
+        discover_result = await handler.discover_services(query)
 
         assert discover_result.success
         assert len(discover_result.services) == 1
@@ -370,11 +374,12 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
         await handler.register_service(service2, correlation_id)
 
         # Discover with tag filter
-        discover_result = await handler.discover_services(
+        query = ModelDiscoveryQuery(
             service_name="my-service",
             tags=("primary",),
             correlation_id=correlation_id,
         )
+        discover_result = await handler.discover_services(query)
 
         assert discover_result.success
         assert len(discover_result.services) == 1
@@ -589,10 +594,11 @@ class TestRuntimeHandlerSwapping:
             )
 
             # Discover
-            discover_result = await handler.discover_services(
+            query = ModelDiscoveryQuery(
                 service_name=service_info.service_name,
                 correlation_id=correlation_id,
             )
+            discover_result = await handler.discover_services(query)
 
             # Deregister
             await handler.deregister_service(service_info.service_id, correlation_id)

@@ -65,12 +65,17 @@ def mock_handler() -> MockRegistrationStorageHandler:
 
 @pytest.fixture
 def mock_postgres_handler() -> MagicMock:
-    """Create a mock PostgreSQL handler for testing.
+    """Create a mock PostgreSQL handler that implements the protocol.
 
-    Uses MagicMock to simulate a PostgreSQL handler without requiring
-    actual database connection.
+    Uses spec to ensure the mock satisfies isinstance checks against
+    the @runtime_checkable protocol, simulating a PostgreSQL handler
+    without requiring actual database connection.
     """
-    handler = MagicMock()
+    from omnibase_infra.nodes.node_registration_storage_effect.protocols import (
+        ProtocolRegistrationStorageHandler,
+    )
+
+    handler = MagicMock(spec=ProtocolRegistrationStorageHandler)
     handler.handler_type = "postgresql"
     return handler
 

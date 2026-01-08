@@ -54,8 +54,16 @@ def mock_handler() -> MockServiceDiscoveryHandler:
 
 @pytest.fixture
 def mock_consul_handler() -> MagicMock:
-    """Create a mock Consul handler for testing."""
-    handler = MagicMock()
+    """Create a mock Consul handler that implements the protocol.
+
+    Uses spec to ensure the mock satisfies isinstance checks against
+    the @runtime_checkable protocol.
+    """
+    from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
+        ProtocolServiceDiscoveryHandler,
+    )
+
+    handler = MagicMock(spec=ProtocolServiceDiscoveryHandler)
     handler.handler_type = "consul"
     return handler
 

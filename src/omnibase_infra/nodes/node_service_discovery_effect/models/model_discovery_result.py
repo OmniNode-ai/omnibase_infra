@@ -23,7 +23,7 @@ Related:
 
 from __future__ import annotations
 
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -79,8 +79,8 @@ class ModelDiscoveryResult(BaseModel):
         default=None,
         description="Metadata about query execution",
     )
-    correlation_id: UUID = Field(
-        default_factory=uuid4,
+    correlation_id: UUID | None = Field(
+        default=None,
         description="Correlation ID for distributed tracing",
     )
 

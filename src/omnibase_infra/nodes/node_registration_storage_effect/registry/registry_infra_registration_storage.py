@@ -113,6 +113,9 @@ class RegistryInfraRegistrationStorage:
             container: ONEX dependency injection container.
             handler: Handler implementation to register.
 
+        Raises:
+            TypeError: If handler does not implement ProtocolRegistrationStorageHandler.
+
         Example:
             >>> from omnibase_infra.handlers.storage import (
             ...     HandlerPostgresRegistrationStorage,
@@ -120,6 +123,17 @@ class RegistryInfraRegistrationStorage:
             >>> handler = HandlerPostgresRegistrationStorage(pool, config)
             >>> RegistryInfraRegistrationStorage.register_handler(container, handler)
         """
+        # Import at runtime for isinstance check (protocol is @runtime_checkable)
+        from omnibase_infra.nodes.node_registration_storage_effect.protocols import (
+            ProtocolRegistrationStorageHandler,
+        )
+
+        if not isinstance(handler, ProtocolRegistrationStorageHandler):
+            raise TypeError(
+                f"Handler must implement ProtocolRegistrationStorageHandler, "
+                f"got {type(handler).__name__}"
+            )
+
         if container.service_registry is None:
             return
 

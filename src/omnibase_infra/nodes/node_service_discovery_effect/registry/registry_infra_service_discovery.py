@@ -59,6 +59,17 @@ class RegistryInfraServiceDiscovery:
     dependencies with the ONEX container. Supports both default
     registration and explicit handler configuration.
 
+    API Pattern Note:
+        This registry uses ``container.register_factory()`` and
+        ``container.register_instance()`` for protocol-based type-safe DI
+        resolution. This differs from RegistryInfraRegistrationStorage which
+        uses ``container.service_registry[key]`` dict access for multi-handler
+        routing by type string (e.g., "postgresql", "mock").
+
+        The different patterns serve different purposes:
+        - Protocol-based registration: Single handler per protocol type
+        - Dict-based registration: Multiple handlers with type routing
+
     Class Methods:
         register: Register with default/environment-based configuration.
         register_with_handler: Register with explicit handler instance.
@@ -100,6 +111,9 @@ class RegistryInfraServiceDiscovery:
             >>> container = ModelONEXContainer()
             >>> RegistryInfraServiceDiscovery.register(container)
         """
+        if container.service_registry is None:
+            return
+
         # Import here to avoid circular imports
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
             ProtocolServiceDiscoveryHandler,
@@ -127,6 +141,9 @@ class RegistryInfraServiceDiscovery:
             container: ONEX dependency injection container.
             handler: Pre-configured handler implementation.
 
+        Raises:
+            TypeError: If handler does not implement ProtocolServiceDiscoveryHandler.
+
         Example:
             >>> container = ModelONEXContainer()
             >>> handler = ConsulServiceDiscoveryHandler(config)
@@ -135,9 +152,19 @@ class RegistryInfraServiceDiscovery:
             ...     handler=handler,
             ... )
         """
+        # Import at runtime for isinstance check (protocol is @runtime_checkable)
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
             ProtocolServiceDiscoveryHandler,
         )
+
+        if not isinstance(handler, ProtocolServiceDiscoveryHandler):
+            raise TypeError(
+                f"Handler must implement ProtocolServiceDiscoveryHandler, "
+                f"got {type(handler).__name__}"
+            )
+
+        if container.service_registry is None:
+            return
 
         container.register_instance(ProtocolServiceDiscoveryHandler, handler)
 

@@ -24,6 +24,7 @@ from omnibase_infra.handlers.service_discovery.models import (
     ModelServiceInfo,
 )
 from omnibase_infra.nodes.node_service_discovery_effect.models import (
+    ModelDiscoveryQuery,
     ModelServiceDiscoveryHealthCheckDetails,
     ModelServiceDiscoveryHealthCheckResult,
 )
@@ -138,8 +139,7 @@ class MockServiceDiscoveryHandler:
         correlation_id = correlation_id or uuid4()
 
         async with self._lock:
-            if service_id in self._services:
-                del self._services[service_id]
+            self._services.pop(service_id, None)
 
         logger.debug(
             "Mock service deregistered",
@@ -151,35 +151,35 @@ class MockServiceDiscoveryHandler:
 
     async def discover_services(
         self,
-        service_name: str,
-        tags: tuple[str, ...] | None = None,
+        query: ModelDiscoveryQuery,
         correlation_id: UUID | None = None,
     ) -> ModelDiscoveryResult:
-        """Discover services matching the given criteria in the mock store.
+        """Discover services matching the query criteria in the mock store.
 
         Args:
-            service_name: Name of the service to discover.
-            tags: Optional tags to filter services.
+            query: Query parameters including service_name, tags,
+                and health_filter for filtering services.
             correlation_id: Optional correlation ID for tracing.
+                If not provided, uses query.correlation_id.
 
         Returns:
             ModelDiscoveryResult with list of matching services.
         """
-        correlation_id = correlation_id or uuid4()
+        correlation_id = correlation_id or query.correlation_id
         start_time = time.monotonic()
 
         async with self._lock:
             matching_services: list[ModelServiceInfo] = []
 
             for service in self._services.values():
-                # Match by service name
-                if service.service_name != service_name:
+                # Match by service name if provided
+                if query.service_name and service.service_name != query.service_name:
                     continue
 
                 # Match by tags if provided
-                if tags:
+                if query.tags:
                     service_tags = set(service.tags)
-                    if not all(tag in service_tags for tag in tags):
+                    if not all(tag in service_tags for tag in query.tags):
                         continue
 
                 matching_services.append(service)
@@ -189,7 +189,7 @@ class MockServiceDiscoveryHandler:
         logger.debug(
             "Mock service discovery completed",
             extra={
-                "service_name": service_name,
+                "service_name": query.service_name,
                 "found_count": len(matching_services),
                 "correlation_id": str(correlation_id),
             },
