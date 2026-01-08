@@ -63,7 +63,7 @@ from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSour
 #   3. model_rebuild() resolves the string annotation to the actual type after
 #      both classes are defined
 #
-# This is tested in: tests/integration/handlers/test_handler_contract_source.py
+# This is tested in: tests/unit/runtime/test_handler_contract_source.py
 ModelContractDiscoveryResult.model_rebuild()
 
 logger = logging.getLogger(__name__)
