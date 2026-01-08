@@ -26,7 +26,7 @@ from uuid import UUID
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection.model_sequence_info import ModelSequenceInfo
@@ -131,6 +131,28 @@ class ModelRegistrationProjection(BaseModel):
         default_factory=lambda: ModelSemVer(major=1, minor=0, patch=0),
         description="Semantic version of the registered node",
     )
+
+    @field_validator("node_version", mode="before")
+    @classmethod
+    def parse_node_version(cls, v: ModelSemVer | str) -> ModelSemVer:
+        """Parse node_version from string or ModelSemVer.
+
+        Args:
+            v: Either a ModelSemVer instance or a semver string.
+
+        Returns:
+            Validated ModelSemVer instance.
+
+        Raises:
+            ValueError: If the string is not a valid semantic version.
+        """
+        if isinstance(v, str):
+            try:
+                return ModelSemVer.parse(v)
+            except Exception as e:
+                raise ValueError(f"node_version: {e!s}") from e
+        return v
+
     capabilities: ModelNodeCapabilities = Field(
         default_factory=ModelNodeCapabilities,
         description="Node capabilities snapshot at registration",

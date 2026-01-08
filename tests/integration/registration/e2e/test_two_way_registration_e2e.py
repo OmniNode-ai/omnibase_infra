@@ -2409,14 +2409,12 @@ class TestSuite7GracefulDegradation:
         consul_success = ModelBackendResult(
             success=True,
             duration_ms=45.0,
-            retries=0,
         )
         postgres_failure = ModelBackendResult(
             success=False,
             error="Connection refused",
             error_code="DATABASE_CONNECTION_ERROR",
             duration_ms=5000.0,
-            retries=3,
         )
 
         response = ModelRegistryResponse.from_backend_results(
@@ -2454,12 +2452,10 @@ class TestSuite7GracefulDegradation:
             error="Service unavailable",
             error_code="SERVICE_UNAVAILABLE",
             duration_ms=3000.0,
-            retries=2,
         )
         postgres_success = ModelBackendResult(
             success=True,
             duration_ms=30.0,
-            retries=0,
         )
 
         response2 = ModelRegistryResponse.from_backend_results(
@@ -2526,12 +2522,10 @@ class TestSuite7GracefulDegradation:
         consul_result = ModelBackendResult(
             success=True,
             duration_ms=45.5,
-            retries=0,
         )
         postgres_result = ModelBackendResult(
             success=True,
             duration_ms=30.2,
-            retries=0,
         )
 
         response = ModelRegistryResponse.from_backend_results(

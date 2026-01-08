@@ -66,7 +66,6 @@ Note:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -91,9 +90,6 @@ from omnibase_infra.handlers.models import (
 )
 from omnibase_infra.mixins import MixinEnvelopeExtraction
 from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +222,7 @@ class DbHandler(MixinEnvelopeExtraction):
         """
         return EnumHandlerTypeCategory.EFFECT
 
-    async def initialize(self, config: dict[str, JsonType]) -> None:
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize database connection pool with fixed size (5).
 
         Args:
@@ -338,7 +334,7 @@ class DbHandler(MixinEnvelopeExtraction):
         logger.info("DbHandler shutdown complete")
 
     async def execute(
-        self, envelope: dict[str, JsonType]
+        self, envelope: dict[str, object]
     ) -> ModelHandlerOutput[ModelDbQueryResponse]:
         """Execute database operation (db.query or db.execute) from envelope.
 
@@ -465,7 +461,7 @@ class DbHandler(MixinEnvelopeExtraction):
         return sanitize_dsn(dsn)
 
     def _extract_parameters(
-        self, payload: dict[str, JsonType], operation: str, correlation_id: UUID
+        self, payload: dict[str, object], operation: str, correlation_id: UUID
     ) -> list[object]:
         """Extract and validate parameters from payload."""
         params_raw = payload.get("parameters")
@@ -633,7 +629,7 @@ class DbHandler(MixinEnvelopeExtraction):
 
     def _build_response(
         self,
-        rows: list[dict[str, JsonType]],
+        rows: list[dict[str, object]],
         row_count: int,
         correlation_id: UUID,
         input_envelope_id: UUID,

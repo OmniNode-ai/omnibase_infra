@@ -309,11 +309,10 @@ class OrchestratorPipeline:
 
         # Build registry request
         # Note: node_type must be converted from Literal string to EnumNodeKind
-        # Note: node_version must be converted from ModelSemVer to string
         request = ModelRegistryRequest(
             node_id=event.node_id,
             node_type=EnumNodeKind(event.node_type),
-            node_version=str(event.node_version),
+            node_version=event.node_version,
             correlation_id=correlation_id,
             endpoints=dict(event.endpoints) if event.endpoints else {},
             metadata=metadata_dict,

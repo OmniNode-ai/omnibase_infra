@@ -224,6 +224,9 @@ workflow_coordination:
       # Checkpoint and state persistence
       checkpoint_enabled: true
       checkpoint_interval_ms: 5000
+      # NOTE: state_persistence_enabled is defined in ModelWorkflowConfig but the
+      # workflow execution layer does NOT read or use this flag yet. Kept true for
+      # forward compatibility. Actual persistence happens via direct projector calls.
       state_persistence_enabled: true
       # Rollback configuration
       rollback_enabled: true

@@ -876,6 +876,7 @@ class RegistrationReducer:
             health_check=health_check,
         )
 
+        # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
             intent_type="consul.register",
             target=f"consul://service/{service_name}",
@@ -924,6 +925,7 @@ class RegistrationReducer:
             record=record,
         )
 
+        # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
             intent_type="postgres.upsert_registration",
             target=f"postgres://node_registrations/{event.node_id}",

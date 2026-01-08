@@ -54,6 +54,23 @@ from tests.helpers.ast_analysis import get_imported_root_modules
 _get_imported_root_modules = get_imported_root_modules
 
 
+def _payload_to_dict(payload: object) -> dict[str, object]:
+    """Convert intent payload to dict, handling both dict and Pydantic model payloads.
+
+    The reducer may return payloads as either:
+    - dict: When payload is constructed inline or from model_dump()
+    - Pydantic model: When payload is a proper ModelPayload* instance
+
+    This helper normalizes both cases for test assertions.
+    """
+    if isinstance(payload, dict):
+        return payload
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump()
+    # Fallback: try to convert to dict
+    return dict(payload) if payload else {}
+
+
 # Forbidden I/O libraries that must NEVER appear in reducer imports
 FORBIDDEN_IO_MODULES: set[str] = {
     # Database
@@ -666,9 +683,9 @@ class TestDeterminismGates:
             assert i1.intent_type == i2.intent_type
             assert i1.target == i2.target
             # Compare payload structure (excluding runtime-generated fields)
-            # Use model_dump() since payload is now a Pydantic model, not a dict
-            i1_payload = i1.payload.model_dump()
-            i2_payload = i2.payload.model_dump()
+            # Use _payload_to_dict() to handle both dict and Pydantic model payloads
+            i1_payload = _payload_to_dict(i1.payload)
+            i2_payload = _payload_to_dict(i2.payload)
             assert i1_payload.get("correlation_id") == i2_payload.get("correlation_id")
             assert i1_payload.get("service_id") == i2_payload.get("service_id")
 
@@ -840,9 +857,9 @@ class TestDeterminismGates:
                     f"{intent.target} != {first_intent.target}"
                 )
                 # Compare payload correlation_id and service_id
-                # Use model_dump() since payload is now a Pydantic model, not a dict
-                intent_payload = intent.payload.model_dump()
-                first_intent_payload = first_intent.payload.model_dump()
+                # Use _payload_to_dict() to handle both dict and Pydantic model payloads
+                intent_payload = _payload_to_dict(intent.payload)
+                first_intent_payload = _payload_to_dict(first_intent.payload)
                 assert intent_payload.get("correlation_id") == first_intent_payload.get(
                     "correlation_id"
                 ), f"Thread {i}, intent {j}: correlation_id mismatch"
@@ -1592,9 +1609,9 @@ class TestSecurityGates:
         all_violations: list[str] = []
 
         for intent in result.intents:
-            # Use model_dump() since payload is now a Pydantic model, not a dict
+            # Use _payload_to_dict() to handle both dict and Pydantic model payloads
             intent_violations = self._check_dict_for_sensitive_fields(
-                intent.payload.model_dump(), f"intent[{intent.intent_type}]"
+                _payload_to_dict(intent.payload), f"intent[{intent.intent_type}]"
             )
             all_violations.extend(intent_violations)
 
