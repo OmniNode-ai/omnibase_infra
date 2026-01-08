@@ -148,7 +148,7 @@ Utility Directory Structure
 Consul Integration
     ├── HashiCorp Consul connection and service discovery
     ├── Depends on: Circuit Breaker, Error Handling, Security Patterns
-    └── References: ConsulHandler, Registration Orchestrator
+    └── References: HandlerConsul, Registration Orchestrator
 
 Policy Registry Trust Model
     ├── Documents security boundaries for policy registration

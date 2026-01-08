@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # mypy: disable-error-code="index, operator, arg-type"
-"""Unit tests for DbHandler.
+"""Unit tests for HandlerDb.
 
 Comprehensive test suite covering initialization, query/execute operations,
 error handling, describe, and lifecycle management.
@@ -23,36 +23,36 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     RuntimeHostError,
 )
-from omnibase_infra.handlers.handler_db import DbHandler
+from omnibase_infra.handlers.handler_db import HandlerDb
 from tests.helpers import filter_handler_warnings
 
 
-class TestDbHandlerInitialization:
-    """Test suite for DbHandler initialization."""
+class TestHandlerDbInitialization:
+    """Test suite for HandlerDb initialization."""
 
     @pytest.fixture
-    def handler(self) -> DbHandler:
-        """Create DbHandler fixture."""
-        return DbHandler()
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
 
-    def test_handler_init_default_state(self, handler: DbHandler) -> None:
+    def test_handler_init_default_state(self, handler: HandlerDb) -> None:
         """Test handler initializes in uninitialized state."""
         assert handler._initialized is False
         assert handler._pool is None
         assert handler._pool_size == 5
         assert handler._timeout == 30.0
 
-    def test_handler_type_returns_infra_handler(self, handler: DbHandler) -> None:
+    def test_handler_type_returns_infra_handler(self, handler: HandlerDb) -> None:
         """Test handler_type property returns EnumHandlerType.INFRA_HANDLER."""
         assert handler.handler_type == EnumHandlerType.INFRA_HANDLER
 
-    def test_handler_category_returns_effect(self, handler: DbHandler) -> None:
+    def test_handler_category_returns_effect(self, handler: HandlerDb) -> None:
         """Test handler_category property returns EnumHandlerTypeCategory.EFFECT."""
         assert handler.handler_category == EnumHandlerTypeCategory.EFFECT
 
     @pytest.mark.asyncio
     async def test_initialize_missing_dsn_raises_error(
-        self, handler: DbHandler
+        self, handler: HandlerDb
     ) -> None:
         """Test initialize without DSN raises RuntimeHostError."""
         with pytest.raises(RuntimeHostError) as exc_info:
@@ -61,7 +61,7 @@ class TestDbHandlerInitialization:
         assert "dsn" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
-    async def test_initialize_empty_dsn_raises_error(self, handler: DbHandler) -> None:
+    async def test_initialize_empty_dsn_raises_error(self, handler: HandlerDb) -> None:
         """Test initialize with empty DSN raises RuntimeHostError."""
         with pytest.raises(RuntimeHostError) as exc_info:
             await handler.initialize({"dsn": ""})
@@ -69,7 +69,7 @@ class TestDbHandlerInitialization:
         assert "dsn" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
-    async def test_initialize_creates_pool(self, handler: DbHandler) -> None:
+    async def test_initialize_creates_pool(self, handler: HandlerDb) -> None:
         """Test initialize creates asyncpg connection pool."""
         mock_pool = MagicMock(spec=asyncpg.Pool)
 
@@ -91,7 +91,7 @@ class TestDbHandlerInitialization:
             await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_initialize_with_custom_timeout(self, handler: DbHandler) -> None:
+    async def test_initialize_with_custom_timeout(self, handler: HandlerDb) -> None:
         """Test initialize respects custom timeout."""
         mock_pool = MagicMock(spec=asyncpg.Pool)
 
@@ -113,7 +113,7 @@ class TestDbHandlerInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_connection_error_raises_infra_error(
-        self, handler: DbHandler
+        self, handler: HandlerDb
     ) -> None:
         """Test connection error during initialize raises InfraConnectionError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -128,7 +128,7 @@ class TestDbHandlerInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_invalid_password_raises_error(
-        self, handler: DbHandler
+        self, handler: HandlerDb
     ) -> None:
         """Test invalid password raises InfraAuthenticationError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -143,7 +143,7 @@ class TestDbHandlerInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_invalid_database_raises_error(
-        self, handler: DbHandler
+        self, handler: HandlerDb
     ) -> None:
         """Test invalid database name raises RuntimeHostError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -159,13 +159,13 @@ class TestDbHandlerInitialization:
             assert "database" in str(exc_info.value).lower()
 
 
-class TestDbHandlerQueryOperations:
+class TestHandlerDbQueryOperations:
     """Test suite for db.query operations."""
 
     @pytest.fixture
-    def handler(self) -> DbHandler:
-        """Create DbHandler fixture."""
-        return DbHandler()
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -174,7 +174,7 @@ class TestDbHandlerQueryOperations:
 
     @pytest.mark.asyncio
     async def test_query_successful_response(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test successful query returns correct response structure."""
         # Setup mock connection and rows
@@ -218,7 +218,7 @@ class TestDbHandlerQueryOperations:
 
     @pytest.mark.asyncio
     async def test_query_with_parameters(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test query with parameterized SQL."""
         mock_conn = AsyncMock()
@@ -254,7 +254,7 @@ class TestDbHandlerQueryOperations:
 
     @pytest.mark.asyncio
     async def test_query_empty_result(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test query returning no rows."""
         mock_conn = AsyncMock()
@@ -282,13 +282,13 @@ class TestDbHandlerQueryOperations:
             await handler.shutdown()
 
 
-class TestDbHandlerExecuteOperations:
+class TestHandlerDbExecuteOperations:
     """Test suite for db.execute operations."""
 
     @pytest.fixture
-    def handler(self) -> DbHandler:
-        """Create DbHandler fixture."""
-        return DbHandler()
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -297,7 +297,7 @@ class TestDbHandlerExecuteOperations:
 
     @pytest.mark.asyncio
     async def test_execute_insert_successful(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test successful INSERT returns correct row count."""
         mock_conn = AsyncMock()
@@ -334,7 +334,7 @@ class TestDbHandlerExecuteOperations:
 
     @pytest.mark.asyncio
     async def test_execute_update_multiple_rows(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test UPDATE affecting multiple rows."""
         mock_conn = AsyncMock()
@@ -365,7 +365,7 @@ class TestDbHandlerExecuteOperations:
 
     @pytest.mark.asyncio
     async def test_execute_delete(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test DELETE statement."""
         mock_conn = AsyncMock()
@@ -393,7 +393,7 @@ class TestDbHandlerExecuteOperations:
 
     @pytest.mark.asyncio
     async def test_execute_no_rows_affected(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test execute with no rows affected."""
         mock_conn = AsyncMock()
@@ -423,13 +423,13 @@ class TestDbHandlerExecuteOperations:
             await handler.shutdown()
 
 
-class TestDbHandlerErrorHandling:
+class TestHandlerDbErrorHandling:
     """Test suite for error handling."""
 
     @pytest.fixture
-    def handler(self) -> DbHandler:
-        """Create DbHandler fixture."""
-        return DbHandler()
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -438,7 +438,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_query_timeout_raises_infra_timeout(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test query timeout raises InfraTimeoutError."""
         mock_conn = AsyncMock()
@@ -468,7 +468,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_connection_lost_raises_infra_connection(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test connection loss raises InfraConnectionError."""
         mock_conn = AsyncMock()
@@ -498,7 +498,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_syntax_error_raises_runtime_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test SQL syntax error raises RuntimeHostError."""
         mock_conn = AsyncMock()
@@ -528,7 +528,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_undefined_table_raises_runtime_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test undefined table raises RuntimeHostError."""
         mock_conn = AsyncMock()
@@ -558,7 +558,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_unique_violation_raises_runtime_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test unique constraint violation raises RuntimeHostError."""
         mock_conn = AsyncMock()
@@ -591,7 +591,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_foreign_key_violation_raises_runtime_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test foreign key constraint violation raises RuntimeHostError."""
         mock_conn = AsyncMock()
@@ -624,7 +624,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_not_null_violation_raises_runtime_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test not null constraint violation raises RuntimeHostError."""
         mock_conn = AsyncMock()
@@ -657,7 +657,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_check_violation_raises_runtime_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test check constraint violation raises RuntimeHostError."""
         mock_conn = AsyncMock()
@@ -690,7 +690,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_unsupported_operation_raises_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test unsupported operation raises RuntimeHostError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -713,7 +713,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_missing_sql_raises_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test missing SQL field raises RuntimeHostError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -735,7 +735,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_empty_sql_raises_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test empty SQL field raises RuntimeHostError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -757,7 +757,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_invalid_parameters_type_raises_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test invalid parameters type raises RuntimeHostError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -782,7 +782,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_missing_operation_raises_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test missing operation field raises RuntimeHostError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -803,7 +803,7 @@ class TestDbHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_missing_payload_raises_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test missing payload field raises RuntimeHostError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -823,15 +823,15 @@ class TestDbHandlerErrorHandling:
             await handler.shutdown()
 
 
-class TestDbHandlerDescribe:
+class TestHandlerDbDescribe:
     """Test suite for describe operations."""
 
     @pytest.fixture
-    def handler(self) -> DbHandler:
-        """Create DbHandler fixture."""
-        return DbHandler()
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
 
-    def test_describe_returns_handler_metadata(self, handler: DbHandler) -> None:
+    def test_describe_returns_handler_metadata(self, handler: HandlerDb) -> None:
         """Test describe returns correct handler metadata."""
         description = handler.describe()
 
@@ -842,7 +842,7 @@ class TestDbHandlerDescribe:
         assert description.version == "0.1.0-mvp"
         assert description.initialized is False
 
-    def test_describe_lists_supported_operations(self, handler: DbHandler) -> None:
+    def test_describe_lists_supported_operations(self, handler: HandlerDb) -> None:
         """Test describe lists supported operations."""
         description = handler.describe()
 
@@ -852,7 +852,7 @@ class TestDbHandlerDescribe:
 
     @pytest.mark.asyncio
     async def test_describe_reflects_initialized_state(
-        self, handler: DbHandler
+        self, handler: HandlerDb
     ) -> None:
         """Test describe shows correct initialized state."""
         mock_pool = MagicMock(spec=asyncpg.Pool)
@@ -869,13 +869,13 @@ class TestDbHandlerDescribe:
             assert handler.describe().initialized is False
 
 
-class TestDbHandlerLifecycle:
+class TestHandlerDbLifecycle:
     """Test suite for lifecycle management."""
 
     @pytest.fixture
-    def handler(self) -> DbHandler:
-        """Create DbHandler fixture."""
-        return DbHandler()
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -886,7 +886,7 @@ class TestDbHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_shutdown_closes_pool(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test shutdown closes the connection pool properly."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -902,7 +902,7 @@ class TestDbHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_execute_after_shutdown_raises_error(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test execute after shutdown raises RuntimeHostError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -923,7 +923,7 @@ class TestDbHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_execute_before_initialize_raises_error(
-        self, handler: DbHandler
+        self, handler: HandlerDb
     ) -> None:
         """Test execute before initialize raises RuntimeHostError."""
         envelope: dict[str, object] = {
@@ -938,7 +938,7 @@ class TestDbHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_multiple_shutdown_calls_safe(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test multiple shutdown calls are safe (idempotent)."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -953,7 +953,7 @@ class TestDbHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_reinitialize_after_shutdown(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test handler can be reinitialized after shutdown."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -973,7 +973,7 @@ class TestDbHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_initialize_called_once_per_lifecycle(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test that initialize creates pool exactly once per call.
 
@@ -995,13 +995,13 @@ class TestDbHandlerLifecycle:
             await handler.shutdown()
 
 
-class TestDbHandlerCorrelationId:
+class TestHandlerDbCorrelationId:
     """Test suite for correlation ID handling."""
 
     @pytest.fixture
-    def handler(self) -> DbHandler:
-        """Create DbHandler fixture."""
-        return DbHandler()
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -1010,7 +1010,7 @@ class TestDbHandlerCorrelationId:
 
     @pytest.mark.asyncio
     async def test_correlation_id_from_envelope_uuid(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test correlation ID extracted from envelope as UUID."""
         mock_conn = AsyncMock()
@@ -1041,7 +1041,7 @@ class TestDbHandlerCorrelationId:
 
     @pytest.mark.asyncio
     async def test_correlation_id_from_envelope_string(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test correlation ID extracted from envelope as string."""
         mock_conn = AsyncMock()
@@ -1073,7 +1073,7 @@ class TestDbHandlerCorrelationId:
 
     @pytest.mark.asyncio
     async def test_correlation_id_generated_when_missing(
-        self, handler: DbHandler, mock_pool: MagicMock
+        self, handler: HandlerDb, mock_pool: MagicMock
     ) -> None:
         """Test correlation ID generated when not in envelope."""
         mock_conn = AsyncMock()
@@ -1104,7 +1104,7 @@ class TestDbHandlerCorrelationId:
             await handler.shutdown()
 
 
-class TestDbHandlerDsnSecurity:
+class TestHandlerDbDsnSecurity:
     """Test suite for DSN security and sanitization.
 
     Security Policy: DSN contains credentials and must NEVER be exposed in:
@@ -1112,15 +1112,15 @@ class TestDbHandlerDsnSecurity:
     - Log output
     - describe() metadata
 
-    See DbHandler class docstring "Security Policy - DSN Handling" for full policy.
+    See HandlerDb class docstring "Security Policy - DSN Handling" for full policy.
     """
 
     @pytest.fixture
-    def handler(self) -> DbHandler:
-        """Create DbHandler fixture."""
-        return DbHandler()
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
 
-    def test_sanitize_dsn_removes_password(self, handler: DbHandler) -> None:
+    def test_sanitize_dsn_removes_password(self, handler: HandlerDb) -> None:
         """Test _sanitize_dsn replaces password with asterisks."""
         # Standard format with password
         dsn = "postgresql://user:secret123@localhost:5432/mydb"
@@ -1130,14 +1130,14 @@ class TestDbHandlerDsnSecurity:
         assert "user" in sanitized
         assert "localhost" in sanitized
 
-    def test_sanitize_dsn_handles_special_characters(self, handler: DbHandler) -> None:
+    def test_sanitize_dsn_handles_special_characters(self, handler: HandlerDb) -> None:
         """Test _sanitize_dsn handles passwords with special characters."""
         dsn = "postgresql://admin:p@ss!word#123@db.example.com:5432/prod"
         sanitized = handler._sanitize_dsn(dsn)
         assert "p@ss!word#123" not in sanitized
         assert "***" in sanitized
 
-    def test_sanitize_dsn_preserves_structure(self, handler: DbHandler) -> None:
+    def test_sanitize_dsn_preserves_structure(self, handler: HandlerDb) -> None:
         """Test _sanitize_dsn preserves DSN structure for debugging."""
         dsn = "postgresql://user:password@host:5432/database"
         sanitized = handler._sanitize_dsn(dsn)
@@ -1146,7 +1146,7 @@ class TestDbHandlerDsnSecurity:
 
     @pytest.mark.asyncio
     async def test_connection_error_does_not_expose_dsn(
-        self, handler: DbHandler
+        self, handler: HandlerDb
     ) -> None:
         """Test that connection errors do NOT expose DSN credentials."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -1167,7 +1167,7 @@ class TestDbHandlerDsnSecurity:
             assert "check host and port" in error_str.lower()
 
     @pytest.mark.asyncio
-    async def test_auth_error_does_not_expose_dsn(self, handler: DbHandler) -> None:
+    async def test_auth_error_does_not_expose_dsn(self, handler: HandlerDb) -> None:
         """Test that authentication errors do NOT expose DSN credentials."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
             mock_create.side_effect = asyncpg.InvalidPasswordError("Invalid password")
@@ -1186,7 +1186,7 @@ class TestDbHandlerDsnSecurity:
             # Generic message should be present
             assert "check credentials" in error_str.lower()
 
-    def test_describe_does_not_expose_dsn(self, handler: DbHandler) -> None:
+    def test_describe_does_not_expose_dsn(self, handler: HandlerDb) -> None:
         """Test that describe() does NOT include DSN."""
         description = handler.describe()
 
@@ -1197,39 +1197,39 @@ class TestDbHandlerDsnSecurity:
         assert "postgresql://" not in desc_str
 
 
-class TestDbHandlerRowCountParsing:
+class TestHandlerDbRowCountParsing:
     """Test suite for row count parsing."""
 
     @pytest.fixture
-    def handler(self) -> DbHandler:
-        """Create DbHandler fixture."""
-        return DbHandler()
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
 
-    def test_parse_insert_row_count(self, handler: DbHandler) -> None:
+    def test_parse_insert_row_count(self, handler: HandlerDb) -> None:
         """Test parsing INSERT row count."""
         assert handler._parse_row_count("INSERT 0 1") == 1
         assert handler._parse_row_count("INSERT 0 5") == 5
         assert handler._parse_row_count("INSERT 0 100") == 100
 
-    def test_parse_update_row_count(self, handler: DbHandler) -> None:
+    def test_parse_update_row_count(self, handler: HandlerDb) -> None:
         """Test parsing UPDATE row count."""
         assert handler._parse_row_count("UPDATE 1") == 1
         assert handler._parse_row_count("UPDATE 10") == 10
         assert handler._parse_row_count("UPDATE 0") == 0
 
-    def test_parse_delete_row_count(self, handler: DbHandler) -> None:
+    def test_parse_delete_row_count(self, handler: HandlerDb) -> None:
         """Test parsing DELETE row count."""
         assert handler._parse_row_count("DELETE 3") == 3
         assert handler._parse_row_count("DELETE 0") == 0
 
-    def test_parse_invalid_returns_zero(self, handler: DbHandler) -> None:
+    def test_parse_invalid_returns_zero(self, handler: HandlerDb) -> None:
         """Test invalid result string returns 0."""
         assert handler._parse_row_count("") == 0
         assert handler._parse_row_count("INVALID") == 0
         assert handler._parse_row_count("INSERT") == 0
 
 
-class TestDbHandlerLogWarnings:
+class TestHandlerDbLogWarnings:
     """Test suite for log warning assertions (OMN-252 acceptance criteria).
 
     These tests verify that:
@@ -1241,9 +1241,9 @@ class TestDbHandlerLogWarnings:
     HANDLER_MODULE = "omnibase_infra.handlers.handler_db"
 
     @pytest.fixture
-    def handler(self) -> DbHandler:
-        """Create DbHandler fixture."""
-        return DbHandler()
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -1254,7 +1254,7 @@ class TestDbHandlerLogWarnings:
 
     @pytest.mark.asyncio
     async def test_no_unexpected_warnings_during_normal_operation(
-        self, handler: DbHandler, mock_pool: MagicMock, caplog: pytest.LogCaptureFixture
+        self, handler: HandlerDb, mock_pool: MagicMock, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test that normal operations produce no unexpected warnings.
 
@@ -1300,7 +1300,7 @@ class TestDbHandlerLogWarnings:
         )
 
 
-class TestDbHandlerMapPostgresError:
+class TestHandlerDbMapPostgresError:
     """Test suite for _map_postgres_error helper function.
 
     Tests the extracted error mapping helper that centralizes exception-to-error
@@ -1308,9 +1308,9 @@ class TestDbHandlerMapPostgresError:
     """
 
     @pytest.fixture
-    def handler(self) -> DbHandler:
-        """Create DbHandler fixture."""
-        return DbHandler()
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
 
     @pytest.fixture
     def error_context(self) -> ModelInfraErrorContext:
@@ -1326,7 +1326,7 @@ class TestDbHandlerMapPostgresError:
         )
 
     def test_query_canceled_returns_timeout_error(
-        self, handler: DbHandler, error_context: ModelInfraErrorContext
+        self, handler: HandlerDb, error_context: ModelInfraErrorContext
     ) -> None:
         """Test QueryCanceledError maps to InfraTimeoutError."""
         exc = asyncpg.QueryCanceledError("query timeout")
@@ -1339,7 +1339,7 @@ class TestDbHandlerMapPostgresError:
         assert str(handler._timeout) in str(result)
 
     def test_connection_error_returns_infra_connection_error(
-        self, handler: DbHandler, error_context: ModelInfraErrorContext
+        self, handler: HandlerDb, error_context: ModelInfraErrorContext
     ) -> None:
         """Test PostgresConnectionError maps to InfraConnectionError."""
         exc = asyncpg.PostgresConnectionError("connection lost")
@@ -1350,7 +1350,7 @@ class TestDbHandlerMapPostgresError:
         assert "connection" in str(result).lower()
 
     def test_syntax_error_returns_runtime_error(
-        self, handler: DbHandler, error_context: ModelInfraErrorContext
+        self, handler: HandlerDb, error_context: ModelInfraErrorContext
     ) -> None:
         """Test PostgresSyntaxError maps to RuntimeHostError with syntax prefix."""
         exc = asyncpg.PostgresSyntaxError("syntax error near 'SELEKT'")
@@ -1363,7 +1363,7 @@ class TestDbHandlerMapPostgresError:
         assert "SELEKT" in str(result)
 
     def test_undefined_table_returns_runtime_error(
-        self, handler: DbHandler, error_context: ModelInfraErrorContext
+        self, handler: HandlerDb, error_context: ModelInfraErrorContext
     ) -> None:
         """Test UndefinedTableError maps to RuntimeHostError with table prefix."""
         exc = asyncpg.UndefinedTableError("table not found")
@@ -1376,7 +1376,7 @@ class TestDbHandlerMapPostgresError:
         assert "nonexistent" in str(result)
 
     def test_undefined_column_returns_runtime_error(
-        self, handler: DbHandler, error_context: ModelInfraErrorContext
+        self, handler: HandlerDb, error_context: ModelInfraErrorContext
     ) -> None:
         """Test UndefinedColumnError maps to RuntimeHostError with column prefix."""
         exc = asyncpg.UndefinedColumnError("column not found")
@@ -1389,7 +1389,7 @@ class TestDbHandlerMapPostgresError:
         assert "unknown_col" in str(result)
 
     def test_unique_violation_returns_runtime_error(
-        self, handler: DbHandler, error_context: ModelInfraErrorContext
+        self, handler: HandlerDb, error_context: ModelInfraErrorContext
     ) -> None:
         """Test UniqueViolationError maps to RuntimeHostError with unique prefix."""
         exc = asyncpg.UniqueViolationError("unique violation")
@@ -1401,7 +1401,7 @@ class TestDbHandlerMapPostgresError:
         assert "Unique constraint violation" in str(result)
 
     def test_foreign_key_violation_returns_runtime_error(
-        self, handler: DbHandler, error_context: ModelInfraErrorContext
+        self, handler: HandlerDb, error_context: ModelInfraErrorContext
     ) -> None:
         """Test ForeignKeyViolationError maps to RuntimeHostError with FK prefix."""
         exc = asyncpg.ForeignKeyViolationError("foreign key violation")
@@ -1413,7 +1413,7 @@ class TestDbHandlerMapPostgresError:
         assert "Foreign key constraint violation" in str(result)
 
     def test_not_null_violation_returns_runtime_error(
-        self, handler: DbHandler, error_context: ModelInfraErrorContext
+        self, handler: HandlerDb, error_context: ModelInfraErrorContext
     ) -> None:
         """Test NotNullViolationError maps to RuntimeHostError with NOT NULL prefix."""
         exc = asyncpg.NotNullViolationError("not null violation")
@@ -1425,7 +1425,7 @@ class TestDbHandlerMapPostgresError:
         assert "Not null constraint violation" in str(result)
 
     def test_check_violation_returns_runtime_error(
-        self, handler: DbHandler, error_context: ModelInfraErrorContext
+        self, handler: HandlerDb, error_context: ModelInfraErrorContext
     ) -> None:
         """Test CheckViolationError maps to RuntimeHostError with check prefix."""
         exc = asyncpg.CheckViolationError("check violation")
@@ -1437,7 +1437,7 @@ class TestDbHandlerMapPostgresError:
         assert "Check constraint violation" in str(result)
 
     def test_unknown_postgres_error_returns_runtime_error_with_default_prefix(
-        self, handler: DbHandler, error_context: ModelInfraErrorContext
+        self, handler: HandlerDb, error_context: ModelInfraErrorContext
     ) -> None:
         """Test unknown PostgresError maps to RuntimeHostError with default prefix."""
         # Use a generic PostgresError that's not specifically mapped
@@ -1449,7 +1449,7 @@ class TestDbHandlerMapPostgresError:
         assert "Database error" in str(result)
 
     def test_error_without_message_attribute_uses_type_name(
-        self, handler: DbHandler, error_context: ModelInfraErrorContext
+        self, handler: HandlerDb, error_context: ModelInfraErrorContext
     ) -> None:
         """Test error without message attribute uses exception type name."""
         # PostgresError by default doesn't have a message attribute
@@ -1466,15 +1466,15 @@ class TestDbHandlerMapPostgresError:
 
 
 __all__: list[str] = [
-    "TestDbHandlerInitialization",
-    "TestDbHandlerQueryOperations",
-    "TestDbHandlerExecuteOperations",
-    "TestDbHandlerErrorHandling",
-    "TestDbHandlerDescribe",
-    "TestDbHandlerLifecycle",
-    "TestDbHandlerCorrelationId",
-    "TestDbHandlerDsnSecurity",
-    "TestDbHandlerRowCountParsing",
-    "TestDbHandlerLogWarnings",
-    "TestDbHandlerMapPostgresError",
+    "TestHandlerDbInitialization",
+    "TestHandlerDbQueryOperations",
+    "TestHandlerDbExecuteOperations",
+    "TestHandlerDbErrorHandling",
+    "TestHandlerDbDescribe",
+    "TestHandlerDbLifecycle",
+    "TestHandlerDbCorrelationId",
+    "TestHandlerDbDsnSecurity",
+    "TestHandlerDbRowCountParsing",
+    "TestHandlerDbLogWarnings",
+    "TestHandlerDbMapPostgresError",
 ]

@@ -53,9 +53,9 @@ config = ModelConsulHandlerConfig(
 ### Handler Initialization
 
 ```python
-from omnibase_infra.handlers import ConsulHandler
+from omnibase_infra.handlers import HandlerConsul
 
-handler = ConsulHandler()
+handler = HandlerConsul()
 await handler.initialize({
     "host": "consul.example.com",
     "port": 8500,

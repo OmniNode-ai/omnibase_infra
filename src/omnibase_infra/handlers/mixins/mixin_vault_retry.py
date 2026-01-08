@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Vault retry mixin for VaultHandler.
+"""Vault retry mixin for HandlerVault.
 
 Provides retry logic and error handling methods for vault operations
 with exponential backoff and circuit breaker integration.
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 class MixinVaultRetry:
-    """Mixin providing retry and error handling for VaultHandler.
+    """Mixin providing retry and error handling for HandlerVault.
 
     Contains methods for:
     - Retry loop with exponential backoff

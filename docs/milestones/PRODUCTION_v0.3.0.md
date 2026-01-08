@@ -244,7 +244,7 @@ To prevent scope creep, the following are explicitly **NOT** in scope for any mi
 ### Scenario 2: Database Connection Pool Exhaustion
 
 **Setup**:
-1. DbHandler with pool_size=5
+1. HandlerDb with pool_size=5
 2. Send 20 concurrent database operations
 3. Simulate slow queries (2s each)
 

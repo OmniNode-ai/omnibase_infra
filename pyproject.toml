@@ -26,11 +26,10 @@ python = "^3.12"
 # - Breaking changes are communicated through semver major versions
 # - Internal packages are co-developed with this codebase
 #
-# omnibase-core v0.6.2: Latest release with updated models and enums.
+# omnibase-core v0.6.3: Fixes circular import bug (OMN-1257).
+# - service_registry is now properly initialized in ModelONEXContainer
 # - Handler security models and EnumHandlerTypeCategory (OMN-1137)
-# - Note (OMN-1257): ModelONEXContainer.service_registry may be None due to
-#   circular import bug. container_wiring.py handles this gracefully.
-omnibase-core = "^0.6.2"
+omnibase-core = "^0.6.3"
 omnibase-spi = "^0.4.1"
 
 # ============================================================================

@@ -130,7 +130,7 @@ _POSTGRES_ERROR_PREFIXES: dict[type[asyncpg.PostgresError], str] = {
 }
 
 
-class DbHandler(MixinEnvelopeExtraction):
+class HandlerDb(MixinEnvelopeExtraction):
     """PostgreSQL database handler using asyncpg connection pool (MVP: query, execute only).
 
     Security Policy - DSN Handling:
@@ -170,7 +170,7 @@ class DbHandler(MixinEnvelopeExtraction):
     """
 
     def __init__(self) -> None:
-        """Initialize DbHandler in uninitialized state."""
+        """Initialize HandlerDb in uninitialized state."""
         self._pool: asyncpg.Pool | None = None
         self._pool_size: int = _DEFAULT_POOL_SIZE
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
@@ -331,7 +331,7 @@ class DbHandler(MixinEnvelopeExtraction):
             await self._pool.close()
             self._pool = None
         self._initialized = False
-        logger.info("DbHandler shutdown complete")
+        logger.info("HandlerDb shutdown complete")
 
     async def execute(
         self, envelope: dict[str, object]
@@ -368,7 +368,7 @@ class DbHandler(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "DbHandler not initialized. Call initialize() first.", context=ctx
+                "HandlerDb not initialized. Call initialize() first.", context=ctx
             )
 
         operation = envelope.get("operation")
@@ -495,7 +495,7 @@ class DbHandler(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "DbHandler not initialized - call initialize() first", context=ctx
+                "HandlerDb not initialized - call initialize() first", context=ctx
             )
 
         ctx = ModelInfraErrorContext(
@@ -551,7 +551,7 @@ class DbHandler(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "DbHandler not initialized - call initialize() first", context=ctx
+                "HandlerDb not initialized - call initialize() first", context=ctx
             )
 
         ctx = ModelInfraErrorContext(
@@ -693,4 +693,4 @@ class DbHandler(MixinEnvelopeExtraction):
         )
 
 
-__all__: list[str] = ["DbHandler"]
+__all__: list[str] = ["HandlerDb"]
