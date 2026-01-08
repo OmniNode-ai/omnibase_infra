@@ -17,7 +17,7 @@ Note:
     ModelHandlerValidationError to avoid circular imports. The forward
     reference is resolved via model_rebuild() in handler_contract_source.py
     after both classes are defined. This pattern is tested in
-    tests/integration/handlers/test_handler_contract_source.py.
+    tests/unit/runtime/test_handler_contract_source.py.
 """
 
 from omnibase_infra.models.handlers.model_contract_discovery_result import (

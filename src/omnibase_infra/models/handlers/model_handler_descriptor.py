@@ -15,13 +15,44 @@ See Also:
 
 .. versionadded:: 0.6.2
     Created as part of OMN-1097 filesystem handler discovery.
+
+.. versionchanged:: 0.6.3
+    Changed version field from str to ModelSemVer for better type safety
+    and consistency with rest of codebase.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+
+
+def _parse_version(v: ModelSemVer | str | dict) -> ModelSemVer:  # type: ignore[type-arg]
+    """Parse version input to ModelSemVer.
+
+    Accepts ModelSemVer instance, string (e.g., "1.0.0"), or dict
+    (e.g., {"major": 1, "minor": 0, "patch": 0}).
+
+    This validator enables flexible input while maintaining ModelSemVer
+    as the canonical type, supporting:
+    - Direct ModelSemVer instances (programmatic use)
+    - String versions (from YAML contract files)
+    - Dict representations (from JSON/dict sources)
+    """
+    if isinstance(v, ModelSemVer):
+        return v
+    if isinstance(v, str):
+        return ModelSemVer.parse(v)
+    if isinstance(v, dict):
+        return ModelSemVer.model_validate(v)
+    # Return as-is and let Pydantic raise validation error
+    return v  # type: ignore[return-value]
+
+
+# Annotated type for version field that accepts string, dict, or ModelSemVer
+_VersionField = Annotated[ModelSemVer, BeforeValidator(_parse_version)]
 
 # Type alias for valid ONEX handler kinds
 LiteralHandlerKind = Literal["compute", "effect", "reducer", "orchestrator"]
@@ -36,7 +67,7 @@ class ModelHandlerDescriptor(BaseModel):
     Attributes:
         handler_id: Unique identifier for the handler.
         name: Human-readable name for the handler.
-        version: Semantic version string.
+        version: Semantic version (ModelSemVer). Accepts string, dict, or ModelSemVer.
         handler_kind: Handler kind (compute, effect, reducer, orchestrator).
         input_model: Fully qualified input model class path.
         output_model: Fully qualified output model class path.
@@ -44,6 +75,8 @@ class ModelHandlerDescriptor(BaseModel):
         contract_path: Path to the source contract file.
 
     Example:
+        Create with string version (common when loading from YAML):
+
         >>> descriptor = ModelHandlerDescriptor(
         ...     handler_id="auth.handler",
         ...     name="Auth Handler",
@@ -52,9 +85,28 @@ class ModelHandlerDescriptor(BaseModel):
         ...     input_model="auth.models.AuthInput",
         ...     output_model="auth.models.AuthOutput",
         ... )
+        >>> descriptor.version.major
+        1
+
+        Create with ModelSemVer instance:
+
+        >>> from omnibase_core.models.primitives.model_semver import ModelSemVer
+        >>> descriptor = ModelHandlerDescriptor(
+        ...     handler_id="auth.handler",
+        ...     name="Auth Handler",
+        ...     version=ModelSemVer(major=2, minor=1, patch=0, prerelease=("beta", 1)),
+        ...     handler_kind="compute",
+        ...     input_model="auth.models.AuthInput",
+        ...     output_model="auth.models.AuthOutput",
+        ... )
+        >>> str(descriptor.version)
+        '2.1.0-beta.1'
 
     .. versionadded:: 0.6.2
         Created as part of OMN-1097 filesystem handler discovery.
+
+    .. versionchanged:: 0.6.3
+        Changed version field from str to ModelSemVer for better type safety.
     """
 
     model_config = ConfigDict(
@@ -73,11 +125,9 @@ class ModelHandlerDescriptor(BaseModel):
         min_length=1,
         description="Human-readable name for the handler",
     )
-    version: str = Field(
+    version: _VersionField = Field(
         ...,
-        min_length=1,
-        pattern=r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$",
-        description="Semantic version string (e.g., '1.0.0', '1.0.0-beta.1', '2.1.0+build.123')",
+        description="Semantic version (accepts string, dict, or ModelSemVer instance)",
     )
     handler_kind: LiteralHandlerKind = Field(
         ...,

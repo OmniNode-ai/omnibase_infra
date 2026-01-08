@@ -451,7 +451,11 @@ class TestHandlerContractSourceDiscovery:
         # Verify required properties exist and have correct values
         assert descriptor.handler_id == "single.test.handler"
         assert descriptor.name == "Single Test Handler"
-        assert descriptor.version == "1.0.0"
+        # version is ModelSemVer, compare using str() for string representation
+        assert str(descriptor.version) == "1.0.0"
+        assert descriptor.version.major == 1
+        assert descriptor.version.minor == 0
+        assert descriptor.version.patch == 0
         assert hasattr(descriptor, "handler_kind")
         assert hasattr(descriptor, "input_model")
         assert hasattr(descriptor, "output_model")

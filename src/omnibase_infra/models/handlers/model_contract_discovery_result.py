@@ -73,6 +73,6 @@ class ModelContractDiscoveryResult(BaseModel):
 
 
 # Rebuild model to resolve forward reference after all imports are available
-# This is called at the end of handlers/__init__.py after ModelHandlerValidationError is importable
+# This is called in runtime/handler_contract_source.py after ModelHandlerValidationError is importable
 
 __all__ = ["ModelContractDiscoveryResult"]
