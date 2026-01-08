@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import shutil
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -76,7 +76,7 @@ def all_rules() -> tuple[
 
 
 @pytest.fixture
-def project_temp_dir() -> Path:
+def project_temp_dir() -> Iterator[Path]:
     """Create temporary directory within project for testing.
 
     The NodeArchitectureValidator has security validation that rejects
@@ -89,6 +89,9 @@ def project_temp_dir() -> Path:
 
     Note:
         Directory is automatically cleaned up after test completion.
+
+    Raises:
+        pytest.fail: If pyproject.toml cannot be found (project root not detected).
     """
     current = Path(__file__).resolve()
     project_root = current.parent
@@ -96,6 +99,12 @@ def project_temp_dir() -> Path:
         if (project_root / "pyproject.toml").exists():
             break
         project_root = project_root.parent
+
+    if not (project_root / "pyproject.toml").exists():
+        pytest.fail(
+            "Could not find pyproject.toml in any parent directory. "
+            "Ensure tests are run from within the project repository."
+        )
 
     temp_dir = project_root / f"_test_tmp_{uuid.uuid4().hex[:8]}"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -138,12 +147,3 @@ def create_temp_file(project_temp_dir: Path) -> Callable[[str, str], Path]:
         return file_path
 
     return _create
-
-
-__all__ = [
-    "container",
-    "validator",
-    "all_rules",
-    "project_temp_dir",
-    "create_temp_file",
-]

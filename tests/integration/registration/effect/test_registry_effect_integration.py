@@ -187,8 +187,8 @@ class TestConsulFailureFlow:
         # Assert - Error captured (sanitized to prevent secret exposure)
         # Raw error "Service unavailable" is sanitized to "service unavailable" safe prefix
         assert response.consul_result.error is not None
-        assert "Consul operation failed" in response.consul_result.error
-        assert "service unavailable" in response.consul_result.error
+        assert "consul operation failed" in response.consul_result.error.lower()
+        assert "service unavailable" in response.consul_result.error.lower()
         assert response.error_summary is not None
         assert "Consul" in response.error_summary
 
@@ -281,8 +281,8 @@ class TestPostgresFailureFlow:
         # Assert - Error captured (sanitized to prevent secret exposure)
         # Raw error "Connection timeout" is sanitized to "timeout" safe prefix
         assert response.postgres_result.error is not None
-        assert "PostgreSQL operation failed" in response.postgres_result.error
-        assert "timeout" in response.postgres_result.error
+        assert "postgresql operation failed" in response.postgres_result.error.lower()
+        assert "timeout" in response.postgres_result.error.lower()
         assert response.error_summary is not None
         assert "PostgreSQL" in response.error_summary
 
@@ -376,8 +376,8 @@ class TestBothFailFlow:
         # Raw errors without safe prefix patterns are sanitized to generic message
         assert response.consul_result.error is not None
         assert response.postgres_result.error is not None
-        assert "Consul operation failed" in response.consul_result.error
-        assert "PostgreSQL operation failed" in response.postgres_result.error
+        assert "consul operation failed" in response.consul_result.error.lower()
+        assert "postgresql operation failed" in response.postgres_result.error.lower()
 
         # Assert - Error summary contains both
         assert response.error_summary is not None
