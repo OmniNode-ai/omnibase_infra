@@ -27,7 +27,7 @@ Limitations:
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 from urllib.parse import parse_qs, unquote, urlparse
 from uuid import uuid4
 
@@ -37,8 +37,8 @@ from omnibase_infra.types import ModelParsedDSN
 def _assert_postgres_scheme(scheme: str) -> Literal["postgresql", "postgres"]:
     """Type-safe scheme assertion for PostgreSQL DSN schemes.
 
-    This helper enables proper type narrowing for the Literal type,
-    avoiding the need for type: ignore comments.
+    This helper enables proper type narrowing for the Literal type
+    using typing.cast for explicit type assertion.
 
     Args:
         scheme: The scheme string to validate
@@ -53,7 +53,7 @@ def _assert_postgres_scheme(scheme: str) -> Literal["postgresql", "postgres"]:
     if scheme not in ("postgresql", "postgres"):
         msg = f"Invalid scheme: {scheme}"
         raise ValueError(msg)
-    return scheme  # type: ignore[return-value]
+    return cast(Literal["postgresql", "postgres"], scheme)
 
 
 def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:

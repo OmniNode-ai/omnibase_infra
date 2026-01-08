@@ -52,10 +52,10 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from omnibase_infra.types.typed_dict_capabilities import TypedDictCapabilities
 from omnibase_infra.types.typed_dict.typed_dict_performance_metrics_cache import (
     TypedDictPerformanceMetricsCache,
 )
+from omnibase_infra.types.typed_dict_capabilities import TypedDictCapabilities
 
 __all__ = ["TypedDictIntrospectionCache"]
 
