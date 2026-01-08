@@ -49,6 +49,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ProtocolConfigurationError,
     RuntimeHostError,
 )
 from omnibase_infra.models.projection import ModelRegistrationProjection
@@ -1335,14 +1336,18 @@ class TestProjectionReaderCapabilityQueries:
         self,
         reader: ProjectionReaderRegistration,
     ) -> None:
-        """Empty tags list should raise ValueError for get_by_capability_tags_all."""
-        with pytest.raises(ValueError, match="tags list cannot be empty"):
+        """Empty tags list should raise ProtocolConfigurationError for get_by_capability_tags_all."""
+        with pytest.raises(
+            ProtocolConfigurationError, match="tags list cannot be empty"
+        ):
             await reader.get_by_capability_tags_all([])
 
     async def test_get_by_capability_tags_any_rejects_empty_list(
         self,
         reader: ProjectionReaderRegistration,
     ) -> None:
-        """Empty tags list should raise ValueError for get_by_capability_tags_any."""
-        with pytest.raises(ValueError, match="tags list cannot be empty"):
+        """Empty tags list should raise ProtocolConfigurationError for get_by_capability_tags_any."""
+        with pytest.raises(
+            ProtocolConfigurationError, match="tags list cannot be empty"
+        ):
             await reader.get_by_capability_tags_any([])

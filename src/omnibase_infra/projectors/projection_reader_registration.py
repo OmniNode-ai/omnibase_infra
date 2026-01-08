@@ -74,6 +74,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ProtocolConfigurationError,
     RuntimeHostError,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
@@ -1147,9 +1148,15 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             ... )
         """
         if not tags:
-            raise ValueError(
+            raise ProtocolConfigurationError(
                 "tags list cannot be empty for get_by_capability_tags_all - "
-                "use get_by_state() to query all registrations"
+                "use get_by_state() to query all registrations",
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="get_by_capability_tags_all",
+                    target_name="projection_reader.registration",
+                    correlation_id=correlation_id or uuid4(),
+                ),
             )
 
         corr_id = correlation_id or uuid4()
@@ -1256,9 +1263,15 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             ... )
         """
         if not tags:
-            raise ValueError(
+            raise ProtocolConfigurationError(
                 "tags list cannot be empty for get_by_capability_tags_any - "
-                "use get_by_state() to query all registrations"
+                "use get_by_state() to query all registrations",
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="get_by_capability_tags_any",
+                    target_name="projection_reader.registration",
+                    correlation_id=correlation_id or uuid4(),
+                ),
             )
 
         corr_id = correlation_id or uuid4()
