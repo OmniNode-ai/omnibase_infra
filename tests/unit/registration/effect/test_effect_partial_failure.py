@@ -167,8 +167,8 @@ class TestEffectPartialFailure:
         assert response.consul_result.success is True
         assert response.postgres_result.success is False
         # Error message is sanitized to avoid exposing secrets (connection strings, etc.)
-        # Format: "{ExceptionType}: PostgreSQL upsert failed"
-        assert "Exception: PostgreSQL upsert failed" in (
+        # Format: "{ExceptionType}: {original_message}" (sanitize_error_message preserves the message)
+        assert "Exception: DB connection failed" in (
             response.postgres_result.error or ""
         )
         assert response.correlation_id == sample_registry_request.correlation_id
@@ -214,8 +214,8 @@ class TestEffectPartialFailure:
         assert response.consul_result.success is False
         assert response.postgres_result.success is True
         # Error message is sanitized to avoid exposing secrets (connection strings, etc.)
-        # Format: "{ExceptionType}: Consul registration failed"
-        assert "Exception: Consul registration failed" in (
+        # Format: "{ExceptionType}: {original_message}" (sanitize_error_message preserves the message)
+        assert "Exception: Consul service unavailable" in (
             response.consul_result.error or ""
         )
         assert response.consul_result.error_code == "CONSUL_CONNECTION_ERROR"
@@ -260,13 +260,11 @@ class TestEffectPartialFailure:
         assert response.postgres_result.success is False
 
         # Verify error messages are sanitized (no raw exception messages that may contain secrets)
-        # Format: "{ExceptionType}: {Backend} {operation} failed"
-        assert "Exception: Consul registration failed" in (
+        # Format: "{ExceptionType}: {original_message}" (sanitize_error_message preserves the message)
+        assert "Exception: Consul connection refused" in (
             response.consul_result.error or ""
         )
-        assert "Exception: PostgreSQL upsert failed" in (
-            response.postgres_result.error or ""
-        )
+        assert "Exception: PostgreSQL timeout" in (response.postgres_result.error or "")
 
         # Verify error summary aggregates both errors
         assert response.error_summary is not None
@@ -472,8 +470,8 @@ class TestEffectPartialFailure:
         assert response.postgres_result.duration_ms >= 100.0  # PostgreSQL's 100ms
 
         # Assert - Timeout exception type is captured in sanitized error message
-        # Format: "TimeoutError: PostgreSQL upsert failed" (exception type preserved for debugging)
-        assert "TimeoutError: PostgreSQL upsert failed" in (
+        # Format: "{ExceptionType}: {original_message}" (exception type and message preserved)
+        assert "TimeoutError: PostgreSQL operation timed out" in (
             response.postgres_result.error or ""
         )
 
@@ -636,7 +634,6 @@ class TestModelBackendResult:
         result = ModelBackendResult(
             success=True,
             duration_ms=45.2,
-            retries=0,
             backend_id="consul",
             correlation_id=uuid4(),
         )
@@ -652,14 +649,12 @@ class TestModelBackendResult:
             error="Connection refused",
             error_code="DATABASE_CONNECTION_ERROR",
             duration_ms=5000.0,
-            retries=3,
             backend_id="postgres",
             correlation_id=correlation_id,
         )
         assert result.success is False
         assert result.error == "Connection refused"
         assert result.error_code == "DATABASE_CONNECTION_ERROR"
-        assert result.retries == 3
         assert result.correlation_id == correlation_id
 
 

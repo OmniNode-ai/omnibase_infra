@@ -98,7 +98,9 @@ class StubConsulClient:
 
     State Tracking:
         - registrations: List of all successful registrations
+        - deregistrations: List of all successful deregistrations (service IDs)
         - call_count: Number of times register_service was called
+        - deregister_call_count: Number of times deregister_service was called
 
     Example:
         >>> client = StubConsulClient()
@@ -130,7 +132,9 @@ class StubConsulClient:
         self.failure_error = failure_error
         self.delay_seconds = delay_seconds
         self.registrations: list[ConsulRegistration] = []
+        self.deregistrations: list[str] = []
         self.call_count = 0
+        self.deregister_call_count = 0
         self._raise_exception: Exception | None = None
 
     def set_exception(self, exception: Exception) -> None:
@@ -151,7 +155,9 @@ class StubConsulClient:
         self.failure_error = "Consul registration failed"
         self.delay_seconds = 0.0
         self.registrations.clear()
+        self.deregistrations.clear()
         self.call_count = 0
+        self.deregister_call_count = 0
         self._raise_exception = None
 
     async def register_service(
@@ -203,6 +209,43 @@ class StubConsulClient:
 
         return ModelBackendResult(success=True)
 
+    async def deregister_service(
+        self,
+        service_id: str,
+    ) -> ModelBackendResult:
+        """Deregister a service from Consul.
+
+        Implements ProtocolConsulClient.deregister_service with controllable
+        behavior for testing.
+
+        Args:
+            service_id: Unique identifier for the service instance to remove.
+
+        Returns:
+            ModelBackendResult with success status and optional error.
+
+        Raises:
+            Exception: If set_exception was called with an exception.
+        """
+        self.deregister_call_count += 1
+
+        # Simulate network delay
+        if self.delay_seconds > 0:
+            await asyncio.sleep(self.delay_seconds)
+
+        # Raise configured exception
+        if self._raise_exception is not None:
+            raise self._raise_exception
+
+        # Simulate failure
+        if self.should_fail:
+            return ModelBackendResult(success=False, error=self.failure_error)
+
+        # Record successful deregistration
+        self.deregistrations.append(service_id)
+
+        return ModelBackendResult(success=True)
+
 
 class StubPostgresAdapter:
     """Stub implementing ProtocolPostgresAdapter for integration testing.
@@ -218,7 +261,9 @@ class StubPostgresAdapter:
 
     State Tracking:
         - registrations: List of all successful upserts
+        - deactivations: List of all successful deactivations (node IDs)
         - call_count: Number of times upsert was called
+        - deactivate_call_count: Number of times deactivate was called
 
     Example:
         >>> adapter = StubPostgresAdapter()
@@ -250,7 +295,9 @@ class StubPostgresAdapter:
         self.failure_error = failure_error
         self.delay_seconds = delay_seconds
         self.registrations: list[PostgresRegistration] = []
+        self.deactivations: list[UUID] = []
         self.call_count = 0
+        self.deactivate_call_count = 0
         self._raise_exception: Exception | None = None
 
     def set_exception(self, exception: Exception) -> None:
@@ -271,7 +318,9 @@ class StubPostgresAdapter:
         self.failure_error = "PostgreSQL upsert failed"
         self.delay_seconds = 0.0
         self.registrations.clear()
+        self.deactivations.clear()
         self.call_count = 0
+        self.deactivate_call_count = 0
         self._raise_exception = None
 
     async def upsert(
@@ -323,6 +372,43 @@ class StubPostgresAdapter:
             metadata=metadata,
         )
         self.registrations.append(registration)
+
+        return ModelBackendResult(success=True)
+
+    async def deactivate(
+        self,
+        node_id: UUID,
+    ) -> ModelBackendResult:
+        """Deactivate a node registration record.
+
+        Implements ProtocolPostgresAdapter.deactivate with controllable
+        behavior for testing.
+
+        Args:
+            node_id: Unique identifier for the node to deactivate.
+
+        Returns:
+            ModelBackendResult with success status and optional error.
+
+        Raises:
+            Exception: If set_exception was called with an exception.
+        """
+        self.deactivate_call_count += 1
+
+        # Simulate network delay
+        if self.delay_seconds > 0:
+            await asyncio.sleep(self.delay_seconds)
+
+        # Raise configured exception
+        if self._raise_exception is not None:
+            raise self._raise_exception
+
+        # Simulate failure
+        if self.should_fail:
+            return ModelBackendResult(success=False, error=self.failure_error)
+
+        # Record successful deactivation
+        self.deactivations.append(node_id)
 
         return ModelBackendResult(success=True)
 

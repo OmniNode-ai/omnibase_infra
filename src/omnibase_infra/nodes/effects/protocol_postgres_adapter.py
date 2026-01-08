@@ -73,5 +73,24 @@ class ProtocolPostgresAdapter(Protocol):
         """
         ...
 
+    async def deactivate(
+        self,
+        node_id: UUID,
+    ) -> ModelBackendResult:
+        """Deactivate a node registration record.
+
+        Marks the registration as inactive (soft delete) rather than
+        removing it entirely. This preserves historical data while
+        stopping the node from appearing in active registrations.
+
+        Args:
+            node_id: Unique identifier for the node to deactivate.
+
+        Returns:
+            ModelBackendResult with success status, optional error message,
+            timing information, and correlation context.
+        """
+        ...
+
 
 __all__ = ["ProtocolPostgresAdapter"]

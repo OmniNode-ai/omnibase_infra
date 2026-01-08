@@ -67,5 +67,23 @@ class ProtocolConsulClient(Protocol):
         """
         ...
 
+    async def deregister_service(
+        self,
+        service_id: str,
+    ) -> ModelBackendResult:
+        """Deregister a service from Consul.
+
+        Removes the service registration, stopping health checks and
+        removing it from service discovery.
+
+        Args:
+            service_id: Unique identifier for the service instance to remove.
+
+        Returns:
+            ModelBackendResult with success status, optional error message,
+            timing information, and correlation context.
+        """
+        ...
+
 
 __all__ = ["ProtocolConsulClient"]

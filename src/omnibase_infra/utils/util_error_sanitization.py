@@ -203,8 +203,98 @@ def sanitize_error_message(exception: Exception, max_length: int = 500) -> str:
     return f"{exception_type}: {exception_str}"
 
 
+# Safe error patterns that don't contain secrets.
+# These are checked in order - longer/more specific patterns should come first
+# to ensure they match before shorter substrings.
+# Used by sanitize_backend_error to extract safe portions of error messages.
+SAFE_ERROR_PATTERNS: tuple[str, ...] = (
+    # Connection patterns (longer first)
+    "connection refused",
+    "connection reset",
+    "connection timeout",
+    "connection closed",
+    # Network patterns
+    "network unreachable",
+    "host not found",
+    "dns lookup failed",
+    # Availability patterns
+    "service unavailable",
+    "too many connections",
+    "resource exhausted",
+    # Auth patterns (type only, not details)
+    "authentication failed",
+    "permission denied",
+    "access denied",
+    # State patterns
+    "already exists",
+    "not found",
+    "conflict",
+    # Generic patterns (last, most generic)
+    "timeout",
+    "unavailable",
+)
+
+
+def sanitize_backend_error(backend_name: str, raw_error: object) -> str:
+    """Sanitize a backend error message to avoid exposing secrets.
+
+    Backend error messages (from Consul, PostgreSQL, etc.) may contain
+    sensitive information like connection strings, credentials, or internal
+    hostnames. This function extracts only safe, generic error information.
+
+    This function uses an allowlist approach: it looks for known safe patterns
+    and only includes those. Unknown error content is replaced with a generic
+    message.
+
+    Args:
+        backend_name: Name of the backend (e.g., "consul", "postgres").
+        raw_error: Raw error from the backend (string, exception, or any object).
+
+    Returns:
+        Sanitized error message safe for logging and user-facing responses.
+        Format: "{backend_name} operation failed" or
+                "{backend_name} operation failed: {safe_pattern}"
+
+    Examples:
+        >>> sanitize_backend_error("postgres", "connection refused")
+        'postgres operation failed: connection refused'
+
+        >>> sanitize_backend_error("consul", "auth failed: password=secret123")
+        'consul operation failed'
+
+        >>> sanitize_backend_error("consul", None)
+        'consul operation failed'
+
+        >>> sanitize_backend_error("postgres", {"error": "timeout"})
+        'postgres operation failed: timeout'
+
+    Security:
+        This function is intentionally conservative. It only includes error
+        patterns that are known to be safe. Any unrecognized error content
+        is replaced with a generic message to prevent accidental secret exposure.
+    """
+    if raw_error is None:
+        return f"{backend_name} operation failed"
+
+    # Convert to string for analysis
+    error_str = str(raw_error).lower().strip()
+
+    if not error_str:
+        return f"{backend_name} operation failed"
+
+    # Check for safe, generic error patterns (checked in order - first match wins)
+    for safe_pattern in SAFE_ERROR_PATTERNS:
+        if safe_pattern in error_str:
+            return f"{backend_name} operation failed: {safe_pattern}"
+
+    # Default: don't expose the raw error, use generic message
+    return f"{backend_name} operation failed"
+
+
 __all__: list[str] = [
+    "SAFE_ERROR_PATTERNS",
     "SENSITIVE_PATTERNS",
+    "sanitize_backend_error",
     "sanitize_error_message",
     "sanitize_error_string",
 ]
