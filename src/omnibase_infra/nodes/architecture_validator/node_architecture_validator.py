@@ -58,7 +58,11 @@ from typing import TYPE_CHECKING
 
 from omnibase_core.nodes import NodeCompute
 
-from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
@@ -173,9 +177,10 @@ class NodeArchitectureValidatorCompute(
             rules: Tuple of architecture rules to validate against the contract.
 
         Raises:
-            RuntimeHostError: If any rule has a rule_id not in SUPPORTED_RULE_IDS.
-                The error message includes the unsupported rule_id and the list
-                of supported rules for debugging.
+            ProtocolConfigurationError: If any rule has a rule_id not in
+                SUPPORTED_RULE_IDS. The error message includes the unsupported
+                rule_id and the list of supported rules for debugging.
+                Includes ModelInfraErrorContext with RUNTIME transport type.
 
         Example:
             >>> # This is called automatically in __init__
@@ -185,19 +190,26 @@ class NodeArchitectureValidatorCompute(
             ... ))
             >>> # No error raised
 
-            >>> # Invalid rule raises RuntimeHostError
+            >>> # Invalid rule raises ProtocolConfigurationError
             >>> validator._validate_rules_against_contract((
             ...     UnknownRule(),  # rule_id="UNKNOWN_RULE"
             ... ))
-            RuntimeHostError: Rule 'UNKNOWN_RULE' is not in contract supported_rules...
+            ProtocolConfigurationError: Rule 'UNKNOWN_RULE' is not in contract...
 
         .. versionadded:: 0.8.0
         """
         for rule in rules:
             if rule.rule_id not in SUPPORTED_RULE_IDS:
-                raise RuntimeHostError(
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="validate_rules_against_contract",
+                )
+                raise ProtocolConfigurationError(
                     f"Rule '{rule.rule_id}' is not in contract supported_rules. "
-                    f"Supported rules: {sorted(SUPPORTED_RULE_IDS)}"
+                    f"Supported rules: {sorted(SUPPORTED_RULE_IDS)}",
+                    context=context,
+                    rule_id=rule.rule_id,
+                    supported_rules=sorted(SUPPORTED_RULE_IDS),
                 )
 
     def compute(

@@ -341,9 +341,9 @@ class HandlerWithBus:
 
         result = validate_no_handler_publishing(str(test_file))
 
-        # When implemented, violations should contain file path
+        # When implemented, violations should contain file path in location
         if not result.valid and result.violations:
-            assert str(test_file) in result.violations[0].file_path
+            assert str(test_file) in result.violations[0].location
 
 
 class TestValidatorMetadata:

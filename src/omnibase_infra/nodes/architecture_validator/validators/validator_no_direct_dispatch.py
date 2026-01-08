@@ -32,14 +32,12 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from omnibase_infra.nodes.architecture_validator.models.enum_violation_severity import (
-    EnumViolationSeverity,
+from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
+    ModelArchitectureViolation,
 )
 from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
     ModelArchitectureValidationResult,
-)
-from omnibase_infra.nodes.architecture_validator.models.model_violation import (
-    ModelArchitectureViolation,
 )
 
 RULE_ID = "ARCH-001"
@@ -155,14 +153,16 @@ class DirectDispatchVisitor(ast.NodeVisitor):
         Args:
             node: The Call AST node representing the violation.
         """
+        location = f"{self.file_path}:{node.lineno}"
         self.violations.append(
             ModelArchitectureViolation(
                 rule_id=RULE_ID,
                 rule_name=RULE_NAME,
-                severity=EnumViolationSeverity.ERROR,
-                file_path=self.file_path,
-                line_number=node.lineno,
+                severity=EnumValidationSeverity.ERROR,
+                target_type="handler",
+                target_name=self._current_class or "unknown",
                 message="Direct handler dispatch detected. Handlers must be invoked through runtime.",
+                location=location,
                 suggestion="Use runtime.dispatch(event) instead of handler.handle(event)",
             )
         )
@@ -232,16 +232,18 @@ def validate_no_direct_dispatch(file_path: str) -> ModelArchitectureValidationRe
         tree = ast.parse(source)
     except SyntaxError as e:
         # Return WARNING violation for syntax error
+        location = f"{file_path}:{e.lineno}" if e.lineno else file_path
         return ModelArchitectureValidationResult(
             valid=True,  # Still valid (not a rule violation), but with warning
             violations=[
                 ModelArchitectureViolation(
                     rule_id=RULE_ID,
                     rule_name=RULE_NAME,
-                    severity=EnumViolationSeverity.WARNING,
-                    file_path=file_path,
-                    line_number=e.lineno,
+                    severity=EnumValidationSeverity.WARNING,
+                    target_type="file",
+                    target_name=Path(file_path).name,
                     message=f"File has syntax error and could not be validated: {e.msg}",
+                    location=location,
                     suggestion="Fix the syntax error to enable architecture validation",
                 )
             ],

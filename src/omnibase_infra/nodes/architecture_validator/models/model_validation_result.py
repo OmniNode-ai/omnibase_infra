@@ -21,7 +21,7 @@ Example:
     >>> from omnibase_infra.nodes.architecture_validator.models import (
     ...     ModelArchitectureValidationResult,
     ...     ModelArchitectureViolation,
-    ...     EnumViolationSeverity,
+    ...     EnumValidationSeverity,
     ... )
     >>> # Passing result
     >>> result = ModelArchitectureValidationResult(
@@ -37,7 +37,9 @@ Example:
     >>> violation = ModelArchitectureViolation(
     ...     rule_id="ARCH-001",
     ...     rule_name="No Any Types",
-    ...     file_path="src/bad.py",
+    ...     severity=EnumValidationSeverity.ERROR,
+    ...     target_type="model",
+    ...     target_name="BadModel",
     ...     message="Found Any type",
     ... )
     >>> result = ModelArchitectureValidationResult(
@@ -54,7 +56,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.architecture_validator.models.model_violation import (
+from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
 )
 
@@ -166,12 +168,12 @@ class ModelArchitectureValidationResult(BaseModel):
         Returns:
             Count of violations with ERROR severity.
         """
-        from omnibase_infra.nodes.architecture_validator.models.model_violation import (
-            EnumViolationSeverity,
+        from omnibase_infra.nodes.architecture_validator.enums import (
+            EnumValidationSeverity,
         )
 
         return sum(
-            1 for v in self.violations if v.severity == EnumViolationSeverity.ERROR
+            1 for v in self.violations if v.severity == EnumValidationSeverity.ERROR
         )
 
     @property
@@ -181,12 +183,12 @@ class ModelArchitectureValidationResult(BaseModel):
         Returns:
             Count of violations with WARNING severity.
         """
-        from omnibase_infra.nodes.architecture_validator.models.model_violation import (
-            EnumViolationSeverity,
+        from omnibase_infra.nodes.architecture_validator.enums import (
+            EnumValidationSeverity,
         )
 
         return sum(
-            1 for v in self.violations if v.severity == EnumViolationSeverity.WARNING
+            1 for v in self.violations if v.severity == EnumValidationSeverity.WARNING
         )
 
     def __bool__(self) -> bool:

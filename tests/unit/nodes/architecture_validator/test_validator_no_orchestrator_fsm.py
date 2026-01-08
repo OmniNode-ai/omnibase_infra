@@ -447,11 +447,11 @@ class OrchestratorBad(NodeOrchestrator):
         # When validation fails, check violation details
         if not result.valid and result.violations:
             assert (
-                str(test_file) in result.violations[0].file_path
-                or test_file.name in result.violations[0].file_path
+                str(test_file) in result.violations[0].location
+                or test_file.name in result.violations[0].location
             ), (
-                f"Violation file_path should reference test file, "
-                f"got: {result.violations[0].file_path}"
+                f"Violation location should reference test file, "
+                f"got: {result.violations[0].location}"
             )
 
 

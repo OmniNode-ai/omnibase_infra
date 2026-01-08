@@ -46,14 +46,14 @@ from typing import TYPE_CHECKING
 
 from omnibase_core.nodes.node_compute import NodeCompute
 
+from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
+    ModelArchitectureViolation,
+)
 from omnibase_infra.nodes.architecture_validator.models.model_validation_request import (
     ModelArchitectureValidationRequest,
 )
 from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
     ModelArchitectureValidationResult,
-)
-from omnibase_infra.nodes.architecture_validator.models.model_violation import (
-    ModelArchitectureViolation,
 )
 from omnibase_infra.nodes.architecture_validator.validators import (
     validate_no_direct_dispatch,

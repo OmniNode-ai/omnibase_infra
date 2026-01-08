@@ -33,6 +33,7 @@ Example:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 
@@ -87,6 +88,7 @@ class ArchitectureViolationError(RuntimeHostError):
         message: str,
         violations: tuple[ModelArchitectureViolation, ...],
         context: ModelInfraErrorContext | None = None,
+        correlation_id: UUID | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize ArchitectureViolationError.
@@ -97,12 +99,15 @@ class ArchitectureViolationError(RuntimeHostError):
                 Should only include violations with ERROR severity (blocking).
             context: Optional infrastructure error context. If not provided,
                 a default context for architecture validation is created.
+            correlation_id: Optional correlation ID for distributed tracing.
+                Used when building the default context if context is None.
             **extra_context: Additional context information for debugging.
 
         Example:
             >>> raise ArchitectureViolationError(
             ...     message="Architecture validation failed with 3 blocking violations",
             ...     violations=blocking_violations,
+            ...     correlation_id=request_correlation_id,
             ... )
         """
         self.violations = violations
@@ -112,6 +117,7 @@ class ArchitectureViolationError(RuntimeHostError):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="validate_architecture",
+                correlation_id=correlation_id,
             )
 
         # Add violation summary to extra context

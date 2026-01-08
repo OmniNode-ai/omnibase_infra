@@ -57,22 +57,22 @@ validation_rules:
   supported_rules:
     - rule_id: "NO_HANDLER_PUBLISHING"
       description: "Handlers must not have direct event bus access"
-      severity: "CRITICAL"
+      severity: "error"
     - rule_id: "PURE_REDUCERS"
       description: "Reducers must not perform side effects or I/O"
-      severity: "CRITICAL"
+      severity: "error"
     - rule_id: "NO_FSM_IN_ORCHESTRATORS"
       description: "Orchestrators must not own FSM state"
-      severity: "HIGH"
+      severity: "error"
     - rule_id: "NO_WORKFLOW_IN_REDUCERS"
       description: "Reducers must not coordinate workflows"
-      severity: "HIGH"
+      severity: "error"
     - rule_id: "NO_DIRECT_HANDLER_DISPATCH"
       description: "Handlers must not dispatch to other handlers directly"
-      severity: "MEDIUM"
+      severity: "warning"
     - rule_id: "NO_LOCAL_ONLY_PATHS"
       description: "File paths must not use local-only absolute paths"
-      severity: "MEDIUM"
+      severity: "warning"
 # Dependencies (protocols this node requires)
 dependencies:
   - name: "protocol_architecture_rule"
@@ -159,25 +159,41 @@ definitions:
       rule_id:
         type: string
         description: "ID of the violated rule (e.g., NO_HANDLER_PUBLISHING)"
+      rule_name:
+        type: string
+        description: "Human-readable name of the violated rule"
       severity:
         type: string
-        enum: ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+        enum: ["error", "warning", "info"]
         description: "Severity level of the violation"
+      target_type:
+        type: string
+        description: "Type of target that violated the rule (e.g., 'handler', 'node')"
+      target_name:
+        type: string
+        description: "Name or identifier of the violating target"
       message:
         type: string
         description: "Human-readable description of the violation"
       location:
         type: string
-        description: "Location where the violation was found (class/method name)"
+        nullable: true
+        description: "File path and line number if available"
       suggestion:
         type: string
         nullable: true
         description: "Optional suggestion for fixing the violation"
+      details:
+        type: object
+        nullable: true
+        description: "Additional context-specific details for debugging"
     required:
       - rule_id
+      - rule_name
       - severity
+      - target_type
+      - target_name
       - message
-      - location
 # Metadata
 metadata:
   author: "OmniNode Team"

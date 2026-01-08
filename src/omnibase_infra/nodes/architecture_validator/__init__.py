@@ -40,12 +40,11 @@ Example:
     Added NodeArchitectureValidator as part of OMN-1099.
 """
 
-# OMN-1138: Generic architecture validator with pluggable rules
+# Canonical severity enum (from enums/ directory)
 from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
 
-# OMN-1099: Core architecture pattern validator
+# Models
 from omnibase_infra.nodes.architecture_validator.models import (
-    EnumViolationSeverity,
     ModelArchitectureValidationRequest,
     ModelArchitectureValidationResult,
     ModelArchitectureViolation,
@@ -73,7 +72,6 @@ __all__ = [
     # OMN-1099: NodeArchitectureValidator
     "NodeArchitectureValidator",
     "RegistryInfraArchitectureValidator",
-    "EnumViolationSeverity",
     # Shared models
     "ModelArchitectureValidationRequest",
     "ModelArchitectureValidationResult",
