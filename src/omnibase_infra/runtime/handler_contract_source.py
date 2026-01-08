@@ -5,19 +5,22 @@
 This module provides HandlerContractSource, which discovers handler contracts
 from the filesystem by recursively scanning configured paths for
 handler_contract.yaml files, parsing them, and transforming them into
-ProtocolHandlerDescriptor instances.
+ModelHandlerDescriptor instances wrapped in ModelContractDiscoveryResult.
 
 Part of OMN-1097: HandlerContractSource + Filesystem Discovery.
 
-The source implements ProtocolHandlerSource from omnibase_spi and supports
-two operation modes:
+The source implements ProtocolContractSource and supports two operation modes:
 - Strict mode (default): Raises on first error encountered
-- Graceful mode: Collects errors, continues discovery, returns results with errors
+- Graceful mode: Collects errors, continues discovery
+
+Both modes return ModelContractDiscoveryResult for a consistent interface.
+In strict mode, validation_errors will be empty since errors raise exceptions.
 
 See Also:
-    - ProtocolHandlerSource: Protocol definition in omnibase_spi
+    - ProtocolContractSource: Protocol definition for handler sources
     - ModelHandlerContract: Contract model from omnibase_core
     - ModelHandlerValidationError: Structured error model for validation failures
+    - ModelContractDiscoveryResult: Result model containing descriptors and errors
 
 .. versionadded:: 0.6.2
     Created as part of OMN-1097 filesystem handler discovery.
@@ -88,14 +91,19 @@ class HandlerContractSource:
     - Strict mode (default): Raises ModelOnexError on first error
     - Graceful mode: Collects all errors, continues discovery
 
+    Both modes return ModelContractDiscoveryResult for a consistent interface.
+    In strict mode, validation_errors will always be empty since errors raise
+    exceptions instead of being collected.
+
     Attributes:
         source_type: Returns "CONTRACT" as the source type identifier.
 
     Example:
-        >>> # Strict mode discovery
+        >>> # Strict mode discovery (raises on error)
         >>> source = HandlerContractSource(contract_paths=[Path("./handlers")])
-        >>> descriptors = await source.discover_handlers()
-        >>> print(f"Found {len(descriptors)} handlers")
+        >>> result = await source.discover_handlers()
+        >>> print(f"Found {len(result.descriptors)} handlers")
+        >>> # result.validation_errors is always empty in strict mode
 
         >>> # Graceful mode with error collection
         >>> source = HandlerContractSource(
@@ -146,7 +154,7 @@ class HandlerContractSource:
 
     async def discover_handlers(
         self,
-    ) -> list[ModelHandlerDescriptor] | ModelContractDiscoveryResult:
+    ) -> ModelContractDiscoveryResult:
         """Discover handler contracts from configured paths.
 
         Recursively scans all configured paths for handler_contract.yaml files,
@@ -154,11 +162,12 @@ class HandlerContractSource:
         them into ModelHandlerDescriptor instances.
 
         In strict mode (default), raises on the first error encountered.
-        In graceful mode, collects all errors and returns a result object.
+        In graceful mode, collects all errors and continues discovery.
 
         Returns:
-            In strict mode: List of ModelHandlerDescriptor instances.
-            In graceful mode: ModelContractDiscoveryResult with descriptors and errors.
+            ModelContractDiscoveryResult containing discovered descriptors and
+            any validation errors. In strict mode, validation_errors will be
+            empty (errors raise exceptions instead of being collected).
 
         Raises:
             ModelOnexError: In strict mode, if a path doesn't exist or
@@ -215,13 +224,10 @@ class HandlerContractSource:
         # Log discovery results
         self._log_discovery_results(len(descriptors), len(validation_errors))
 
-        if self._graceful_mode:
-            return ModelContractDiscoveryResult(
-                descriptors=descriptors,
-                validation_errors=validation_errors,
-            )
-
-        return descriptors
+        return ModelContractDiscoveryResult(
+            descriptors=descriptors,
+            validation_errors=validation_errors,
+        )
 
     def _find_contract_files(self, base_path: Path) -> list[Path]:
         """Find all handler_contract.yaml files under a base path.

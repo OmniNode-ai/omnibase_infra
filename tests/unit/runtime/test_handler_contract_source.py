@@ -342,19 +342,24 @@ class TestHandlerContractSourceDiscovery:
         source = HandlerContractSource(contract_paths=[tmp_path])
 
         # Discover handlers from nested structure
-        descriptors = await source.discover_handlers()
+        result = await source.discover_handlers()
 
         # Verify all 3 contracts were discovered
-        assert len(descriptors) == 3, (
-            f"Expected 3 descriptors from nested structure, got {len(descriptors)}"
+        assert len(result.descriptors) == 3, (
+            f"Expected 3 descriptors from nested structure, got {len(result.descriptors)}"
+        )
+
+        # Verify no validation errors in strict mode
+        assert len(result.validation_errors) == 0, (
+            f"Expected 0 validation errors in strict mode, got {len(result.validation_errors)}"
         )
 
         # Verify each descriptor is a ProtocolHandlerDescriptor
-        for descriptor in descriptors:
+        for descriptor in result.descriptors:
             assert isinstance(descriptor, ProtocolHandlerDescriptor)
 
         # Verify the expected handler_ids were discovered
-        discovered_ids = {d.handler_id for d in descriptors}
+        discovered_ids = {d.handler_id for d in result.descriptors}
         expected_ids = set(nested_contract_structure.keys())
         assert discovered_ids == expected_ids, (
             f"Handler ID mismatch. Expected: {expected_ids}, Got: {discovered_ids}"
@@ -372,10 +377,11 @@ class TestHandlerContractSourceDiscovery:
 
         source = HandlerContractSource(contract_paths=[single_contract_path])
 
-        descriptors = await source.discover_handlers()
+        result = await source.discover_handlers()
 
-        assert len(descriptors) == 1
-        assert descriptors[0].handler_id == "single.test.handler"
+        assert len(result.descriptors) == 1
+        assert len(result.validation_errors) == 0
+        assert result.descriptors[0].handler_id == "single.test.handler"
 
     @pytest.mark.asyncio
     async def test_returns_empty_list_for_empty_directory(
@@ -391,9 +397,10 @@ class TestHandlerContractSourceDiscovery:
 
         source = HandlerContractSource(contract_paths=[empty_directory])
 
-        descriptors = await source.discover_handlers()
+        result = await source.discover_handlers()
 
-        assert descriptors == []
+        assert result.descriptors == []
+        assert result.validation_errors == []
 
     @pytest.mark.asyncio
     async def test_discovers_from_multiple_paths(
@@ -416,10 +423,11 @@ class TestHandlerContractSourceDiscovery:
         # Configure source with multiple search paths
         source = HandlerContractSource(contract_paths=[single_contract_path, tmp_path])
 
-        descriptors = await source.discover_handlers()
+        result = await source.discover_handlers()
 
         # Should find: 1 from single_contract_path + 3 from nested structure
-        assert len(descriptors) == 4
+        assert len(result.descriptors) == 4
+        assert len(result.validation_errors) == 0
 
     @pytest.mark.asyncio
     async def test_descriptors_have_required_properties(
@@ -443,10 +451,11 @@ class TestHandlerContractSourceDiscovery:
 
         source = HandlerContractSource(contract_paths=[single_contract_path])
 
-        descriptors = await source.discover_handlers()
+        result = await source.discover_handlers()
 
-        assert len(descriptors) == 1
-        descriptor = descriptors[0]
+        assert len(result.descriptors) == 1
+        assert len(result.validation_errors) == 0
+        descriptor = result.descriptors[0]
 
         # Verify required properties exist and have correct values
         assert descriptor.handler_id == "single.test.handler"
@@ -581,11 +590,22 @@ class TestHandlerContractSourceIdempotency:
         result3 = await source.discover_handlers()
 
         # All results should be identical
-        assert len(result1) == len(result2) == len(result3) == 3
+        assert (
+            len(result1.descriptors)
+            == len(result2.descriptors)
+            == len(result3.descriptors)
+            == 3
+        )
+        assert (
+            len(result1.validation_errors)
+            == len(result2.validation_errors)
+            == len(result3.validation_errors)
+            == 0
+        )
 
-        ids1 = {d.handler_id for d in result1}
-        ids2 = {d.handler_id for d in result2}
-        ids3 = {d.handler_id for d in result3}
+        ids1 = {d.handler_id for d in result1.descriptors}
+        ids2 = {d.handler_id for d in result2.descriptors}
+        ids3 = {d.handler_id for d in result3.descriptors}
 
         assert ids1 == ids2 == ids3
 
@@ -643,11 +663,12 @@ class TestHandlerContractSourceFilePattern:
 
         source = HandlerContractSource(contract_paths=[tmp_path])
 
-        descriptors = await source.discover_handlers()
+        result = await source.discover_handlers()
 
         # Only the correctly named file should be discovered
-        assert len(descriptors) == 1
-        assert descriptors[0].handler_id == "valid.handler"
+        assert len(result.descriptors) == 1
+        assert len(result.validation_errors) == 0
+        assert result.descriptors[0].handler_id == "valid.handler"
 
 
 # =============================================================================
@@ -1178,14 +1199,15 @@ output_model: "test.models.Output"
         )
 
         source = HandlerContractSource(contract_paths=[tmp_path])
-        descriptors = await source.discover_handlers()
+        result = await source.discover_handlers()
 
         # Only the lowercase variant should be discovered
-        assert len(descriptors) == 1, (
-            f"Expected 1 descriptor (lowercase only), got {len(descriptors)}. "
+        assert len(result.descriptors) == 1, (
+            f"Expected 1 descriptor (lowercase only), got {len(result.descriptors)}. "
             "Case variations should not be discovered."
         )
-        assert descriptors[0].handler_id == "test.handler.lowercase"
+        assert len(result.validation_errors) == 0
+        assert result.descriptors[0].handler_id == "test.handler.lowercase"
 
 
 class TestHandlerContractSourceSymlinkHandling:
@@ -1230,12 +1252,13 @@ output_model: "test.models.Output"
 
         # Search only in symlink directory
         source = HandlerContractSource(contract_paths=[symlink_dir])
-        descriptors = await source.discover_handlers()
+        result = await source.discover_handlers()
 
-        assert len(descriptors) == 1, (
-            f"Expected 1 descriptor via symlink, got {len(descriptors)}"
+        assert len(result.descriptors) == 1, (
+            f"Expected 1 descriptor via symlink, got {len(result.descriptors)}"
         )
-        assert descriptors[0].handler_id == "test.handler.symlinked"
+        assert len(result.validation_errors) == 0
+        assert result.descriptors[0].handler_id == "test.handler.symlinked"
 
     @pytest.mark.asyncio
     async def test_deduplicates_symlinked_and_actual_contracts(
@@ -1274,13 +1297,14 @@ output_model: "test.models.Output"
 
         # Search both directories - should deduplicate
         source = HandlerContractSource(contract_paths=[actual_dir, symlink_dir])
-        descriptors = await source.discover_handlers()
+        result = await source.discover_handlers()
 
-        assert len(descriptors) == 1, (
-            f"Expected 1 descriptor (deduplicated), got {len(descriptors)}. "
+        assert len(result.descriptors) == 1, (
+            f"Expected 1 descriptor (deduplicated), got {len(result.descriptors)}. "
             "Symlinked files should be deduplicated with actual files."
         )
-        assert descriptors[0].handler_id == "test.handler.dedup"
+        assert len(result.validation_errors) == 0
+        assert result.descriptors[0].handler_id == "test.handler.dedup"
 
 
 def _permissions_are_enforced() -> bool:

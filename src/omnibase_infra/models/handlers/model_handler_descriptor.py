@@ -40,12 +40,25 @@ def _parse_version(v: ModelSemVer | str | dict) -> ModelSemVer:  # type: ignore[
     - Direct ModelSemVer instances (programmatic use)
     - String versions (from YAML contract files)
     - Dict representations (from JSON/dict sources)
+
+    Dict Validation:
+        When a dict is provided, the validator explicitly checks for required
+        keys ("major", "minor", "patch") before delegating to model_validate().
+        This provides clearer error messages when keys are missing, rather than
+        relying on Pydantic's generic validation errors.
+
+    Raises:
+        ValueError: If dict input is missing required keys (major, minor, patch).
     """
     if isinstance(v, ModelSemVer):
         return v
     if isinstance(v, str):
         return ModelSemVer.parse(v)
     if isinstance(v, dict):
+        required_keys = {"major", "minor", "patch"}
+        if not required_keys.issubset(v.keys()):
+            missing = required_keys - v.keys()
+            raise ValueError(f"Version dict missing required keys: {missing}")
         return ModelSemVer.model_validate(v)
     # Return as-is and let Pydantic raise validation error
     return v  # type: ignore[return-value]

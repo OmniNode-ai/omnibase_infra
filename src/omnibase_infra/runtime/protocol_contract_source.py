@@ -24,9 +24,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from omnibase_infra.runtime.protocol_contract_descriptor import (
-        ProtocolContractDescriptor,
-    )
+    from omnibase_infra.models.handlers import ModelContractDiscoveryResult
 
 
 @runtime_checkable
@@ -46,8 +44,13 @@ class ProtocolContractSource(Protocol):
         """The type of handler source."""
         ...
 
-    async def discover_handlers(self) -> list[ProtocolContractDescriptor]:
-        """Discover and return all handlers from this source."""
+    async def discover_handlers(self) -> ModelContractDiscoveryResult:
+        """Discover and return all handlers from this source.
+
+        Returns:
+            ModelContractDiscoveryResult containing discovered handler
+            descriptors and any validation errors encountered during discovery.
+        """
         ...
 
 
