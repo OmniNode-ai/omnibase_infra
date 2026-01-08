@@ -1999,9 +1999,11 @@ output_model: "test.models.Output"
         """Verify permission errors raise in strict mode.
 
         In strict mode (default), unreadable files should cause discovery to
-        fail with an appropriate error.
+        fail with ModelOnexError wrapping the permission error.
         """
         import stat
+
+        from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
@@ -2031,9 +2033,15 @@ output_model: "test.models.Output"
                 graceful_mode=False,  # Strict mode
             )
 
-            # Strict mode should raise on permission error
-            with pytest.raises((PermissionError, OSError)):
+            # Strict mode should raise ModelOnexError wrapping the permission error
+            with pytest.raises(ModelOnexError) as exc_info:
                 await source.discover_handlers()
+
+            # Verify error is related to permission denied
+            error_str = str(exc_info.value).lower()
+            assert "permission" in error_str or "handler_source_006" in error_str, (
+                f"Expected permission-related error, got: {exc_info.value}"
+            )
         finally:
             # Restore permissions for cleanup
             unreadable_contract.chmod(stat.S_IRUSR | stat.S_IWUSR)
