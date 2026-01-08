@@ -1015,6 +1015,30 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
     ticket: OMN-1091
+  # ==========================================================================
+  # Handler Contract Source Exemptions (OMN-1097)
+  # ==========================================================================
+  # handler_contract_source.py contains legitimate handler discovery code.
+  # The "Handler" in the class name refers to ONEX handler contracts, not an
+  # anti-pattern manager/helper class.
+  - file_pattern: 'handler_contract_source\.py'
+    class_pattern: "Class name 'HandlerContractSource'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      HandlerContractSource discovers handler contract YAML files from the filesystem. The "Handler" refers to ONEX handler contracts being discovered, not an anti-pattern manager class. This is legitimate handler infrastructure code.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - CLAUDE.md (ONEX Architecture - Handler Types)
+    ticket: OMN-1097
+  - file_pattern: 'model_handler_descriptor\.py'
+    violation_pattern: "Field 'handler_id' should use UUID"
+    reason: >
+      handler_id in ModelHandlerDescriptor is a human-readable semantic identifier from handler contracts (e.g., "auth.handler"). Consistent with ModelHandlerIdentifier and other handler models. Not a UUID.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
+    ticket: OMN-1097
   - file_pattern: 'validation_aggregator\.py'
     class_pattern: "Class 'ValidationAggregator'"
     violation_pattern: 'has \d+ methods'
