@@ -66,7 +66,7 @@ if TYPE_CHECKING:
     import asyncpg
     from omnibase_core.container import ModelONEXContainer
 
-    from omnibase_infra.handlers import ConsulHandler
+    from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
@@ -759,7 +759,7 @@ async def wire_registration_handlers(
     pool: asyncpg.Pool,
     liveness_interval_seconds: int | None = None,
     projector: ProjectorRegistration | None = None,
-    consul_handler: ConsulHandler | None = None,
+    consul_handler: HandlerConsul | None = None,
 ) -> dict[str, list[str] | str]:
     """Register registration orchestrator handlers with the container.
 
@@ -781,7 +781,7 @@ async def wire_registration_handlers(
             If provided, HandlerNodeIntrospected will persist projections to the
             database. If None, the handler operates in read-only mode (useful for
             testing or when projection persistence is handled elsewhere).
-        consul_handler: Optional ConsulHandler for dual registration with Consul.
+        consul_handler: Optional HandlerConsul for dual registration with Consul.
             If provided, HandlerNodeIntrospected will register nodes with Consul
             for service discovery. If None, only PostgreSQL registration occurs.
 

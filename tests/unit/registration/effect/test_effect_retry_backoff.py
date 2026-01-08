@@ -39,7 +39,7 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     InfraUnavailableError,
 )
-from omnibase_infra.handlers.handler_consul import ConsulHandler
+from omnibase_infra.handlers.handler_consul import HandlerConsul
 
 
 @pytest.fixture
@@ -112,7 +112,7 @@ class TestEffectRetryBackoff:
         - Second attempt succeeds
         - Total attempts = 2
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -167,7 +167,7 @@ class TestEffectRetryBackoff:
         Note: We verify backoff is applied by checking that elapsed time
         is at least the expected minimum backoff delay sum.
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -224,7 +224,7 @@ class TestEffectRetryBackoff:
         - Error includes proper context (transport_type, operation)
         - Correlation ID preserved in error
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -278,7 +278,7 @@ class TestEffectRetryBackoff:
         Note: Per handler_consul.py implementation, circuit breaker failures
         are recorded only on final retry attempt, not on each individual retry.
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         # Configure with circuit breaker threshold > max_attempts
         # initial_delay_seconds must be >= 0.1 per ModelConsulRetryConfig
@@ -363,7 +363,7 @@ class TestEffectRetryBackoff:
         because it indicates a configuration/permission issue that
         won't be resolved by retrying.
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -421,7 +421,7 @@ class TestEffectRetryBackoff:
         - Retries are attempted with backoff
         - All attempts fail leads to InfraTimeoutError
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -465,7 +465,7 @@ class TestEffectRetryBackoff:
         - Third (last) attempt succeeds
         - Result is returned successfully
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -517,7 +517,7 @@ class TestEffectRetryBackoff:
         - After enough failed operations, circuit opens
         - Subsequent operations fail fast with InfraUnavailableError
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         # Configure with low circuit breaker threshold
         # initial_delay_seconds must be >= 0.1 per ModelConsulRetryConfig

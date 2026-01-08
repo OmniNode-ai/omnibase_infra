@@ -97,7 +97,7 @@ if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
 
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
-    from omnibase_infra.handlers import ConsulHandler
+    from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
     )
@@ -439,24 +439,24 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
 
 
 @pytest.fixture
-async def real_consul_handler() -> AsyncGenerator[ConsulHandler, None]:
-    """Connected ConsulHandler with cleanup.
+async def real_consul_handler() -> AsyncGenerator[HandlerConsul, None]:
+    """Connected HandlerConsul with cleanup.
 
-    This fixture creates a ConsulHandler connected to the real Consul
+    This fixture creates a HandlerConsul connected to the real Consul
     server on the infrastructure server.
 
     Yields:
-        ConsulHandler: Initialized handler ready for operations.
+        HandlerConsul: Initialized handler ready for operations.
 
     Note:
         The handler is shut down after each test.
     """
-    from omnibase_infra.handlers import ConsulHandler
+    from omnibase_infra.handlers import HandlerConsul
 
     if not CONSUL_AVAILABLE:
         pytest.skip("Consul not available (CONSUL_HOST not set or unreachable)")
 
-    handler = ConsulHandler()
+    handler = HandlerConsul()
     await handler.initialize(
         {
             "host": CONSUL_HOST,
@@ -477,7 +477,7 @@ async def real_consul_handler() -> AsyncGenerator[ConsulHandler, None]:
 
 @pytest.fixture
 async def cleanup_consul_services(
-    real_consul_handler: ConsulHandler,
+    real_consul_handler: HandlerConsul,
 ) -> AsyncGenerator[list[str], None]:
     """Track and cleanup test services from Consul.
 

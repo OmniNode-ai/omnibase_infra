@@ -248,7 +248,7 @@ as violations. The target is to reduce to <200 through `dict[str, object]` to `J
    HandlerType = Union[
        ConsulAdapter,
        KafkaAdapter,
-       VaultHandler,
+       HandlerVault,
        PostgresAdapter,
        RedisAdapter,
        # ... 15 more

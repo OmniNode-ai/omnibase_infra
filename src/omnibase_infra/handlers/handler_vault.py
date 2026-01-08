@@ -63,7 +63,7 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
-class VaultHandler(
+class HandlerVault(
     MixinAsyncCircuitBreaker,
     MixinEnvelopeExtraction,
     MixinVaultInitialization,
@@ -123,7 +123,7 @@ class VaultHandler(
     """
 
     def __init__(self) -> None:
-        """Initialize VaultHandler in uninitialized state.
+        """Initialize HandlerVault in uninitialized state.
 
         Note: Circuit breaker is initialized during initialize() call when
         configuration is available. The mixin's _init_circuit_breaker() method
@@ -278,7 +278,7 @@ class VaultHandler(
         self._initialized = False
         self._config = None
         self._circuit_breaker_initialized = False
-        logger.info("VaultHandler shutdown complete")
+        logger.info("HandlerVault shutdown complete")
 
     async def execute(
         self, envelope: dict[str, object]
@@ -314,7 +314,7 @@ class VaultHandler(
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
-                "VaultHandler not initialized. Call initialize() first.",
+                "HandlerVault not initialized. Call initialize() first.",
                 context=ctx,
             )
 
@@ -419,4 +419,4 @@ class VaultHandler(
         }
 
 
-__all__: list[str] = ["VaultHandler"]
+__all__: list[str] = ["HandlerVault"]
