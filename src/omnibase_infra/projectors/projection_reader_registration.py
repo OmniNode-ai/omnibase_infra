@@ -1137,7 +1137,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             List of matching registration projections
 
         Raises:
-            ValueError: If tags list is empty
+            ProtocolConfigurationError: If tags list is empty
             InfraConnectionError: If database connection fails
             InfraTimeoutError: If query times out
             RuntimeHostError: For other database errors
@@ -1252,7 +1252,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             List of matching registration projections
 
         Raises:
-            ValueError: If tags list is empty
+            ProtocolConfigurationError: If tags list is empty
             InfraConnectionError: If database connection fails
             InfraTimeoutError: If query times out
             RuntimeHostError: For other database errors
