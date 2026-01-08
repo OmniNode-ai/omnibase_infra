@@ -5,17 +5,6 @@
 This module defines the state enumeration for the circuit breaker pattern
 used in infrastructure components for fault tolerance.
 
-The circuit breaker implements a 3-state pattern:
-    - CLOSED: Normal operation, requests allowed
-    - OPEN: Circuit tripped, requests blocked
-    - HALF_OPEN: Testing recovery, limited requests allowed
-
-State Transitions:
-    CLOSED -> OPEN: Failure count >= threshold
-    OPEN -> HALF_OPEN: Current time - last_failure_time > reset_timeout
-    HALF_OPEN -> CLOSED: First successful operation
-    HALF_OPEN -> OPEN: First failed operation
-
 See Also:
     - MixinAsyncCircuitBreaker: Mixin implementing the circuit breaker pattern
     - docs/patterns/circuit_breaker_implementation.md: Implementation guide

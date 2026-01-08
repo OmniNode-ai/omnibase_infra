@@ -610,7 +610,7 @@ pattern_exemptions:
 
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
-    ticket: OMN-529
+    ticket: OMN-1270
   - file_pattern: 'service_health\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'

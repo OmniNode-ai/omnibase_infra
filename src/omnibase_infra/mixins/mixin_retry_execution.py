@@ -46,8 +46,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, TypeVar, cast
 from uuid import UUID
 
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.enums.enum_retry_error_category import EnumRetryErrorCategory
+from omnibase_infra.enums import EnumInfraTransportType, EnumRetryErrorCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
