@@ -13,7 +13,12 @@ Related Tickets:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from omnibase_infra.models.projection.model_registration_projection import (
+    VALID_CONTRACT_TYPES,
+    ContractType,
+)
 
 
 class ModelCapabilityFields(BaseModel):
@@ -61,13 +66,37 @@ class ModelCapabilityFields(BaseModel):
         extra="forbid",
     )
 
-    contract_type: str | None = Field(
+    contract_type: ContractType | None = Field(
         default=None,
         description=(
             "Contract type for the node. Valid values: 'effect', 'compute', "
             "'reducer', 'orchestrator'. None indicates unspecified."
         ),
     )
+
+    @field_validator("contract_type", mode="before")
+    @classmethod
+    def validate_contract_type(cls, v: str | None) -> str | None:
+        """Validate contract_type is a valid node contract type.
+
+        Provides fail-fast validation for contract_type to catch invalid values
+        at model instantiation time rather than at persistence time.
+
+        Args:
+            v: The contract_type value to validate
+
+        Returns:
+            The validated value (unchanged if valid)
+
+        Raises:
+            ValueError: If v is not None and not a valid contract type
+        """
+        if v is not None and v not in VALID_CONTRACT_TYPES:
+            raise ValueError(
+                f"contract_type must be one of {VALID_CONTRACT_TYPES}, got: {v!r}"
+            )
+        return v
+
     intent_types: list[str] | None = Field(
         default=None,
         description="Intent types this node handles (None = not specified)",

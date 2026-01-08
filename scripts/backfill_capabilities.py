@@ -440,8 +440,12 @@ def extract_capability_tags(capabilities: dict[str, object]) -> list[str]:
         if "capability_tags" in config and isinstance(config["capability_tags"], list):
             tags.extend(str(tag) for tag in config["capability_tags"])
 
-    # Sorted for deterministic output across runs (ensures idempotency in tests
-    # and consistent ordering regardless of dict iteration order)
+    # Deduplicate and sort for deterministic output across runs.
+    # Why determinism matters:
+    # 1. Idempotency - same input always produces same output
+    # 2. Testability - tests can assert on exact output order
+    # 3. Debugging - easier to compare outputs from different runs
+    # 4. Git diffs - if stored, changes are meaningful not noise
     return sorted(set(tags))
 
 
