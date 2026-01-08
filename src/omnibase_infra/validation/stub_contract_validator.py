@@ -23,7 +23,7 @@ Security Note:
     2. A passing result does NOT guarantee ONEX compliance
     3. Unexpected errors are RAISED (not silently returned) to prevent masking
     4. Use in production pipelines is STRONGLY DISCOURAGED
-    5. The 65% compliance score indicates incomplete validation
+    5. The 0.65 score (65% compliance) indicates incomplete validation
 
 Appropriate Use Cases:
     - Local development iteration
@@ -48,7 +48,11 @@ from pathlib import Path
 import yaml
 from omnibase_core.enums import EnumNodeType
 from omnibase_core.errors import OnexError
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.validation import ModelContractValidationResult
+
+# Stub validator interface version - indicates minimal/stub validation was performed
+_STUB_INTERFACE_VERSION = ModelSemVer(major=0, minor=0, patch=1)
 
 logger = logging.getLogger(__name__)
 
@@ -128,8 +132,8 @@ class StubContractValidator:
         contract validation.
 
     Limitations:
-        - Returns 65% compliance score for contracts that only pass basic checks
-          (reduced from 100% to clearly indicate incomplete validation)
+        - Returns 0.65 score (65% compliance) for contracts that only pass basic checks
+          (reduced from 1.0 to clearly indicate incomplete validation)
         - Cannot detect malformed contract structures beyond basic YAML
         - Does not validate against ONEX contract schema
         - May allow invalid contracts to pass validation
@@ -146,12 +150,15 @@ class StubContractValidator:
         >>> # WARNING: This emits a runtime warning!
         >>> validator = StubContractValidator()
         >>> result = validator.validate_contract_file(Path("contract.yaml"))
-        >>> # result.valid may be True even if contract is not fully compliant
+        >>> # result.is_valid may be True even if contract is not fully compliant
 
     See Also:
         - OMN-1104: Migration tracking issue
         - omnibase_core.validation: Target validation API
         - ModelContractBase: Contract model for proper validation
+
+    Raises:
+        RuntimeError: If instantiated in a production environment (ONEX_ENV=production).
     """
 
     # TODO(OMN-1104): Remove this stub after migrating to omnibase_core.validation API
@@ -159,6 +166,38 @@ class StubContractValidator:
     # depends on the removed ServiceContractValidator. The proper fix is to update
     # all validation code to use the new omnibase_core.validation API directly.
     # Tracking: https://linear.app/omninode/issue/OMN-1104
+
+    def __init__(self) -> None:
+        """Initialize the stub contract validator.
+
+        Raises:
+            RuntimeError: If ONEX_ENV environment variable is set to "production".
+                StubContractValidator cannot be used in production environments
+                as it performs only minimal validation and may allow invalid
+                contracts to pass.
+
+        Warns:
+            DeprecationWarning: Always emitted to indicate this is a temporary
+                stub that should be replaced with a real validator.
+        """
+        # SECURITY: Hard block for production environments
+        onex_env = os.getenv("ONEX_ENV", "development").lower()
+        if onex_env == "production":
+            raise RuntimeError(
+                "StubContractValidator cannot be used in production. "
+                "ONEX_ENV is set to 'production'. "
+                "Configure a real contract validator using omnibase_core.validation API. "
+                "See OMN-1104 for migration guidance."
+            )
+
+        # Emit deprecation warning on instantiation
+        warnings.warn(
+            "StubContractValidator is for development only. "
+            "Use a real validator in production. "
+            "See OMN-1104 for migration to omnibase_core.validation API.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     def validate_contract_file(
         self,
@@ -181,9 +220,9 @@ class StubContractValidator:
 
         Returns:
             ModelContractValidationResult with validation status and score.
-            Note: A score of 65.0 indicates basic checks passed, not full compliance.
-            Full compliance (100%) is only returned by the real validator.
-            The 65% threshold was chosen to clearly distinguish stub validation
+            Note: A score of 0.65 indicates basic checks passed, not full compliance.
+            Full compliance (1.0) is only returned by the real validator.
+            The 0.65 threshold was chosen to clearly distinguish stub validation
             from real ONEX compliance validation and prevent masking failures.
 
         Raises:
@@ -223,11 +262,11 @@ class StubContractValidator:
         try:
             if not contract_path.exists():
                 return ModelContractValidationResult(
-                    valid=False,
+                    is_valid=False,
                     score=0.0,
-                    errors=[f"Contract file not found: {contract_path}"],
+                    violations=[f"Contract file not found: {contract_path}"],
                     warnings=[],
-                    compliance_score=0.0,
+                    interface_version=_STUB_INTERFACE_VERSION,
                 )
 
             with contract_path.open("r", encoding="utf-8") as f:
@@ -237,11 +276,11 @@ class StubContractValidator:
 
             if not isinstance(contract_data, dict):
                 return ModelContractValidationResult(
-                    valid=False,
+                    is_valid=False,
                     score=0.0,
-                    errors=["Contract file does not contain valid YAML dict"],
+                    violations=["Contract file does not contain valid YAML dict"],
                     warnings=[],
-                    compliance_score=0.0,
+                    interface_version=_STUB_INTERFACE_VERSION,
                 )
 
             # Basic validation - check required fields
@@ -250,11 +289,11 @@ class StubContractValidator:
 
             if missing:
                 return ModelContractValidationResult(
-                    valid=False,
-                    score=50.0,
-                    errors=[f"Missing required fields: {missing}"],
+                    is_valid=False,
+                    score=0.5,
+                    violations=[f"Missing required fields: {missing}"],
                     warnings=[],
-                    compliance_score=50.0,
+                    interface_version=_STUB_INTERFACE_VERSION,
                 )
 
             # Check node_type matches expected if provided
@@ -267,34 +306,34 @@ class StubContractValidator:
                 )
                 if actual_type != expected_type:
                     return ModelContractValidationResult(
-                        valid=False,
-                        score=75.0,
-                        errors=[
+                        is_valid=False,
+                        score=0.75,
+                        violations=[
                             f"Node type mismatch: expected {expected_type}, got {actual_type}"
                         ],
                         warnings=[],
-                        compliance_score=75.0,
+                        interface_version=_STUB_INTERFACE_VERSION,
                     )
 
-            # WARNING: Stub validator returns reduced compliance score (65%) to indicate
+            # WARNING: Stub validator returns reduced compliance score (0.65) to indicate
             # that FULL ONEX compliance validation has NOT been performed. A score of
-            # 100% should only be returned by the real validator after complete checks.
-            # The 65% threshold was chosen to:
-            # 1. Clearly distinguish from real validation (which returns 100%)
+            # 1.0 should only be returned by the real validator after complete checks.
+            # The 0.65 threshold was chosen to:
+            # 1. Clearly distinguish from real validation (which returns 1.0)
             # 2. Prevent masking real validation failures in CI/CD pipelines
             # 3. Signal to consumers that additional validation is required
             # TODO(OMN-1104): Implement real validator that performs full ONEX checks
             return ModelContractValidationResult(
-                valid=True,
-                score=65.0,
-                errors=[],
+                is_valid=True,
+                score=0.65,
+                violations=[],
                 warnings=[
                     "STUB VALIDATOR: Only basic checks performed (65% compliance). "
                     "Full ONEX compliance validation was NOT executed. "
                     "This score intentionally low to prevent masking failures. "
                     "See OMN-1104 for migration to real validator."
                 ],
-                compliance_score=65.0,
+                interface_version=_STUB_INTERFACE_VERSION,
             )
 
         except yaml.YAMLError as e:
@@ -309,11 +348,11 @@ class StubContractValidator:
                 exc_info=True,
             )
             return ModelContractValidationResult(
-                valid=False,
+                is_valid=False,
                 score=0.0,
-                errors=[f"YAML parsing error: {e!s}"],
+                violations=[f"YAML parsing error: {e!s}"],
                 warnings=[],
-                compliance_score=0.0,
+                interface_version=_STUB_INTERFACE_VERSION,
             )
 
         except OSError as e:
@@ -325,11 +364,11 @@ class StubContractValidator:
                 exc_info=True,
             )
             return ModelContractValidationResult(
-                valid=False,
+                is_valid=False,
                 score=0.0,
-                errors=[f"File access error: {e!s}"],
+                violations=[f"File access error: {e!s}"],
                 warnings=[],
-                compliance_score=0.0,
+                interface_version=_STUB_INTERFACE_VERSION,
             )
 
         except Exception as e:
