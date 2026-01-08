@@ -1533,10 +1533,16 @@ class RuntimeHostProcess:
             try:
                 handler_cls = handler_registry.get(handler_type)
                 handler_classes.append(handler_cls)
-            except Exception:
+            except Exception as e:
                 # If a handler class can't be retrieved, skip it for validation
                 # (it will fail later during instantiation anyway)
-                pass
+                logger.debug(
+                    "Skipping handler class for architecture validation",
+                    extra={
+                        "handler_type": handler_type,
+                        "error": str(e),
+                    },
+                )
 
         request = ModelArchitectureValidationRequest(
             nodes=(),  # Nodes not yet available at this point

@@ -41,7 +41,7 @@ from omnibase_infra.nodes.architecture_validator.models.model_validation_request
     ModelArchitectureValidationRequest,
 )
 from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
-    ModelArchitectureValidationResult,
+    ModelFileValidationResult,
 )
 
 RULE_ID = "ARCH-002"
@@ -250,7 +250,7 @@ class HandlerPublishingVisitor(ast.NodeVisitor):
         )
 
 
-def validate_no_handler_publishing(file_path: str) -> ModelArchitectureValidationResult:
+def validate_no_handler_publishing(file_path: str) -> ModelFileValidationResult:
     """Validate that handlers do not publish events directly.
 
     This function parses a Python source file and uses AST analysis to
@@ -272,7 +272,7 @@ def validate_no_handler_publishing(file_path: str) -> ModelArchitectureValidatio
 
     # Handle non-existent files or non-Python files
     if not path.exists() or path.suffix != ".py":
-        return ModelArchitectureValidationResult(
+        return ModelFileValidationResult(
             valid=True,
             violations=[],
             files_checked=0,
@@ -286,7 +286,7 @@ def validate_no_handler_publishing(file_path: str) -> ModelArchitectureValidatio
     except SyntaxError as e:
         # Return WARNING violation for syntax error
         location = f"{file_path}:{e.lineno}" if e.lineno else file_path
-        return ModelArchitectureValidationResult(
+        return ModelFileValidationResult(
             valid=True,  # Still valid (not a rule violation), but with warning
             violations=[
                 ModelArchitectureViolation(
@@ -308,7 +308,7 @@ def validate_no_handler_publishing(file_path: str) -> ModelArchitectureValidatio
     visitor = HandlerPublishingVisitor(file_path)
     visitor.visit(tree)
 
-    return ModelArchitectureValidationResult(
+    return ModelFileValidationResult(
         valid=len(visitor.violations) == 0,
         violations=visitor.violations,
         files_checked=1,

@@ -65,7 +65,7 @@ from omnibase_infra.nodes.architecture_validator.models.model_architecture_viola
     ModelArchitectureViolation,
 )
 from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
-    ModelArchitectureValidationResult,
+    ModelFileValidationResult,
 )
 
 RULE_ID = "ARCH-003"
@@ -260,7 +260,7 @@ class OrchestratorFSMVisitor(ast.NodeVisitor):
         )
 
 
-def validate_no_orchestrator_fsm(file_path: str) -> ModelArchitectureValidationResult:
+def validate_no_orchestrator_fsm(file_path: str) -> ModelFileValidationResult:
     """Validate that orchestrators do not implement workflow FSMs.
 
     This function checks a Python file for FSM patterns in orchestrator code
@@ -299,7 +299,7 @@ def validate_no_orchestrator_fsm(file_path: str) -> ModelArchitectureValidationR
 
     # Skip non-existent or non-Python files
     if not path.exists() or path.suffix != ".py":
-        return ModelArchitectureValidationResult(
+        return ModelFileValidationResult(
             valid=True,
             violations=[],
             files_checked=0,
@@ -312,7 +312,7 @@ def validate_no_orchestrator_fsm(file_path: str) -> ModelArchitectureValidationR
     except SyntaxError as e:
         # Return WARNING violation for syntax error
         location = f"{file_path}:{e.lineno}" if e.lineno else file_path
-        return ModelArchitectureValidationResult(
+        return ModelFileValidationResult(
             valid=True,  # Still valid (not a rule violation), but with warning
             violations=[
                 ModelArchitectureViolation(
@@ -333,7 +333,7 @@ def validate_no_orchestrator_fsm(file_path: str) -> ModelArchitectureValidationR
     visitor = OrchestratorFSMVisitor(file_path)
     visitor.visit(tree)
 
-    return ModelArchitectureValidationResult(
+    return ModelFileValidationResult(
         valid=len(visitor.violations) == 0,
         violations=visitor.violations,
         files_checked=1,

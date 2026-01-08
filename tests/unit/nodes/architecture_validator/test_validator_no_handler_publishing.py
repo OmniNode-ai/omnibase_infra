@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
-    ModelArchitectureValidationResult,
+    ModelFileValidationResult,
 )
 from omnibase_infra.nodes.architecture_validator.validators.validator_no_handler_publishing import (
     validate_no_handler_publishing,
@@ -306,7 +306,7 @@ class HandlerBroken:
         try:
             result = validate_no_handler_publishing(str(test_file))
             # Either valid with warning or invalid is acceptable
-            assert isinstance(result, ModelArchitectureValidationResult)
+            assert isinstance(result, ModelFileValidationResult)
         except SyntaxError:
             # Also acceptable to raise SyntaxError
             pass

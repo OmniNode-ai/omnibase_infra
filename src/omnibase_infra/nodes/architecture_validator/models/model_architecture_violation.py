@@ -139,6 +139,11 @@ class ModelArchitectureViolation(BaseModel):
             Dictionary with all violation fields as strings, suitable for
             JSON logging or metrics systems.
 
+        Note:
+            The ``details`` field is intentionally excluded from this output
+            because it may contain complex objects that are not JSON-serializable.
+            For full violation details, access the ``details`` attribute directly.
+
         Example:
             >>> violation.to_structured_dict()
             {'rule_id': 'no-any-types', 'severity': 'error', ...}

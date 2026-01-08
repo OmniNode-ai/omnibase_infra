@@ -33,7 +33,7 @@ Example:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 
@@ -101,6 +101,7 @@ class ArchitectureViolationError(RuntimeHostError):
                 a default context for architecture validation is created.
             correlation_id: Optional correlation ID for distributed tracing.
                 Used when building the default context if context is None.
+                Auto-generated using uuid4() if not provided.
             **extra_context: Additional context information for debugging.
 
         Example:
@@ -111,6 +112,10 @@ class ArchitectureViolationError(RuntimeHostError):
             ... )
         """
         self.violations = violations
+
+        # Auto-generate correlation_id if not provided (per ONEX standards)
+        if correlation_id is None:
+            correlation_id = uuid4()
 
         # Build default context if not provided
         if context is None:

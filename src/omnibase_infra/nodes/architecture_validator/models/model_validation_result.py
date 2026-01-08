@@ -1,13 +1,18 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Architecture validation result model for the architecture validator node.
+"""File-based validation result model for the architecture validator node.
 
-This module defines the output model for architecture validation results.
-It contains the overall validation status, any violations found, and
-metadata about the validation run.
+This module defines the output model for file-based architecture validation
+results (OMN-1099). It contains the overall validation status, any violations
+found, and metadata about the validation run.
+
+Note:
+    This is distinct from ModelArchitectureValidationResult in
+    model_architecture_validation_result.py (OMN-1138) which is used for
+    node/handler validation with different fields (nodes_checked, handlers_checked).
 
 Design Pattern:
-    ModelArchitectureValidationResult overrides ``__bool__`` to return
+    ModelFileValidationResult overrides ``__bool__`` to return
     ``True`` only when validation passed (no violations). This enables
     idiomatic conditional checks::
 
@@ -18,13 +23,15 @@ Design Pattern:
             print(f"Found {len(result.violations)} violations")
 
 Example:
+    >>> from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
+    ...     ModelFileValidationResult,
+    ... )
     >>> from omnibase_infra.nodes.architecture_validator.models import (
-    ...     ModelArchitectureValidationResult,
     ...     ModelArchitectureViolation,
     ...     EnumValidationSeverity,
     ... )
     >>> # Passing result
-    >>> result = ModelArchitectureValidationResult(
+    >>> result = ModelFileValidationResult(
     ...     valid=True,
     ...     violations=[],
     ...     files_checked=42,
@@ -42,7 +49,7 @@ Example:
     ...     target_name="BadModel",
     ...     message="Found Any type",
     ... )
-    >>> result = ModelArchitectureValidationResult(
+    >>> result = ModelFileValidationResult(
     ...     valid=False,
     ...     violations=[violation],
     ...     files_checked=42,
@@ -61,12 +68,17 @@ from omnibase_infra.nodes.architecture_validator.models.model_architecture_viola
 )
 
 
-class ModelArchitectureValidationResult(BaseModel):
-    """Result of architecture validation containing status and violations.
+class ModelFileValidationResult(BaseModel):
+    """Result of file-based architecture validation containing status and violations.
 
-    This model represents the complete result of a validation run,
-    including whether validation passed, any violations found,
+    This model represents the complete result of a file-based validation run
+    (OMN-1099), including whether validation passed, any violations found,
     and metadata about what was checked.
+
+    Note:
+        This is distinct from ModelArchitectureValidationResult in
+        model_architecture_validation_result.py (OMN-1138) which uses
+        nodes_checked and handlers_checked instead of files_checked.
 
     Attributes:
         valid: True if no violations were found, False otherwise.
@@ -105,7 +117,7 @@ class ModelArchitectureValidationResult(BaseModel):
 
     Example:
         >>> # Create a passing result
-        >>> result = ModelArchitectureValidationResult(
+        >>> result = ModelFileValidationResult(
         ...     valid=True,
         ...     files_checked=100,
         ...     rules_checked=["ARCH-001", "ARCH-002", "ARCH-003"],
@@ -116,7 +128,7 @@ class ModelArchitectureValidationResult(BaseModel):
         True
         >>>
         >>> # Create a failing result
-        >>> result = ModelArchitectureValidationResult(
+        >>> result = ModelFileValidationResult(
         ...     valid=False,
         ...     violations=[violation],
         ...     files_checked=100,
@@ -209,11 +221,11 @@ class ModelArchitectureValidationResult(BaseModel):
             True if valid is True, False otherwise.
 
         Example:
-            >>> result_pass = ModelArchitectureValidationResult(valid=True)
+            >>> result_pass = ModelFileValidationResult(valid=True)
             >>> bool(result_pass)
             True
             >>>
-            >>> result_fail = ModelArchitectureValidationResult(
+            >>> result_fail = ModelFileValidationResult(
             ...     valid=False,
             ...     violations=[some_violation],
             ... )
@@ -230,7 +242,7 @@ class ModelArchitectureValidationResult(BaseModel):
         """
         status = "PASSED" if self.valid else "FAILED"
         return (
-            f"ModelArchitectureValidationResult("
+            f"ModelFileValidationResult("
             f"status={status}, "
             f"files={self.files_checked}, "
             f"violations={self.violation_count})"
@@ -241,7 +253,7 @@ class ModelArchitectureValidationResult(BaseModel):
         cls,
         files_checked: int = 0,
         rules_checked: list[str] | None = None,
-    ) -> ModelArchitectureValidationResult:
+    ) -> ModelFileValidationResult:
         """Create a passing validation result.
 
         Factory method for creating a result with no violations.
@@ -251,10 +263,10 @@ class ModelArchitectureValidationResult(BaseModel):
             rules_checked: List of rule IDs that were applied.
 
         Returns:
-            ModelArchitectureValidationResult with valid=True and no violations.
+            ModelFileValidationResult with valid=True and no violations.
 
         Example:
-            >>> result = ModelArchitectureValidationResult.passed(
+            >>> result = ModelFileValidationResult.passed(
             ...     files_checked=50,
             ...     rules_checked=["ARCH-001", "ARCH-002"],
             ... )
@@ -274,7 +286,7 @@ class ModelArchitectureValidationResult(BaseModel):
         violations: list[ModelArchitectureViolation],
         files_checked: int = 0,
         rules_checked: list[str] | None = None,
-    ) -> ModelArchitectureValidationResult:
+    ) -> ModelFileValidationResult:
         """Create a failing validation result.
 
         Factory method for creating a result with violations.
@@ -285,10 +297,10 @@ class ModelArchitectureValidationResult(BaseModel):
             rules_checked: List of rule IDs that were applied.
 
         Returns:
-            ModelArchitectureValidationResult with valid=False and violations.
+            ModelFileValidationResult with valid=False and violations.
 
         Example:
-            >>> result = ModelArchitectureValidationResult.failed(
+            >>> result = ModelFileValidationResult.failed(
             ...     violations=[violation1, violation2],
             ...     files_checked=50,
             ...     rules_checked=["ARCH-001"],
@@ -306,4 +318,4 @@ class ModelArchitectureValidationResult(BaseModel):
         )
 
 
-__all__ = ["ModelArchitectureValidationResult"]
+__all__ = ["ModelFileValidationResult"]

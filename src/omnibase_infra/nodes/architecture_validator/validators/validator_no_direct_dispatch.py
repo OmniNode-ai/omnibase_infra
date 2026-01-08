@@ -37,7 +37,7 @@ from omnibase_infra.nodes.architecture_validator.models.model_architecture_viola
     ModelArchitectureViolation,
 )
 from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
-    ModelArchitectureValidationResult,
+    ModelFileValidationResult,
 )
 
 RULE_ID = "ARCH-001"
@@ -189,7 +189,7 @@ def _is_test_file(file_path: str) -> bool:
     )
 
 
-def validate_no_direct_dispatch(file_path: str) -> ModelArchitectureValidationResult:
+def validate_no_direct_dispatch(file_path: str) -> ModelFileValidationResult:
     """Validate that handlers are not dispatched directly.
 
     This function checks a Python file for direct handler dispatch patterns
@@ -211,7 +211,7 @@ def validate_no_direct_dispatch(file_path: str) -> ModelArchitectureValidationRe
 
     # Test files are exempt
     if _is_test_file(file_path):
-        return ModelArchitectureValidationResult(
+        return ModelFileValidationResult(
             valid=True,
             violations=[],
             files_checked=1,
@@ -220,7 +220,7 @@ def validate_no_direct_dispatch(file_path: str) -> ModelArchitectureValidationRe
 
     # Non-existent or non-Python files
     if not path.exists() or path.suffix != ".py":
-        return ModelArchitectureValidationResult(
+        return ModelFileValidationResult(
             valid=True,
             violations=[],
             files_checked=0,
@@ -233,7 +233,7 @@ def validate_no_direct_dispatch(file_path: str) -> ModelArchitectureValidationRe
     except SyntaxError as e:
         # Return WARNING violation for syntax error
         location = f"{file_path}:{e.lineno}" if e.lineno else file_path
-        return ModelArchitectureValidationResult(
+        return ModelFileValidationResult(
             valid=True,  # Still valid (not a rule violation), but with warning
             violations=[
                 ModelArchitectureViolation(
@@ -254,7 +254,7 @@ def validate_no_direct_dispatch(file_path: str) -> ModelArchitectureValidationRe
     visitor = DirectDispatchVisitor(file_path)
     visitor.visit(tree)
 
-    return ModelArchitectureValidationResult(
+    return ModelFileValidationResult(
         valid=len(visitor.violations) == 0,
         violations=visitor.violations,
         files_checked=1,

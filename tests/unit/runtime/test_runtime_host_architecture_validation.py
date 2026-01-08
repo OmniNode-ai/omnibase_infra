@@ -45,11 +45,12 @@ class MockArchitectureRule:
     """Mock architecture rule for testing.
 
     Can be configured to pass or fail with specific severity.
+    Uses valid rule IDs from SUPPORTED_RULE_IDS to pass validation.
     """
 
     def __init__(
         self,
-        rule_id: str = "MOCK_RULE",
+        rule_id: str = "NO_HANDLER_PUBLISHING",  # Use valid rule from SUPPORTED_RULE_IDS
         name: str = "Mock Rule",
         description: str = "A mock rule for testing",
         severity: EnumValidationSeverity = EnumValidationSeverity.ERROR,
@@ -149,8 +150,9 @@ class TestErrorSeverityBlocksStartup:
     async def test_error_violation_blocks_startup_no_handlers(self) -> None:
         """With no handlers, validation passes (nothing to validate)."""
         # Create a rule that always fails with ERROR severity
+        # Use valid rule ID from SUPPORTED_RULE_IDS
         failing_rule = MockArchitectureRule(
-            rule_id="ALWAYS_FAILS",
+            rule_id="NO_HANDLER_PUBLISHING",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
         )
@@ -192,13 +194,14 @@ class TestErrorSeverityBlocksStartup:
             """Mock handler class for testing."""
 
         # Create multiple failing rules
+        # Use valid rule IDs from SUPPORTED_RULE_IDS
         rule1 = MockArchitectureRule(
-            rule_id="RULE_1",
+            rule_id="NO_HANDLER_PUBLISHING",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
         )
         rule2 = MockArchitectureRule(
-            rule_id="RULE_2",
+            rule_id="PURE_REDUCERS",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
         )
@@ -222,8 +225,8 @@ class TestErrorSeverityBlocksStartup:
             # Should have 2 violations (one from each rule)
             assert len(exc_info.value.violations) == 2
             violation_rule_ids = {v.rule_id for v in exc_info.value.violations}
-            assert "RULE_1" in violation_rule_ids
-            assert "RULE_2" in violation_rule_ids
+            assert "NO_HANDLER_PUBLISHING" in violation_rule_ids
+            assert "PURE_REDUCERS" in violation_rule_ids
 
     @pytest.mark.asyncio
     async def test_event_bus_not_started_on_validation_failure(self) -> None:
@@ -232,8 +235,9 @@ class TestErrorSeverityBlocksStartup:
         class MockHandlerClass:
             pass
 
+        # Use valid rule ID from SUPPORTED_RULE_IDS
         failing_rule = MockArchitectureRule(
-            rule_id="BLOCKER",
+            rule_id="NO_FSM_IN_ORCHESTRATORS",
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
         )
@@ -274,7 +278,7 @@ class TestWarningSeverityDoesntBlock:
             pass
 
         warning_rule = MockArchitectureRule(
-            rule_id="WARNING_RULE",
+            rule_id="NO_DIRECT_HANDLER_DISPATCH",  # Use valid WARNING-severity rule
             severity=EnumValidationSeverity.WARNING,
             should_pass=False,
         )
@@ -316,7 +320,7 @@ class TestWarningSeverityDoesntBlock:
             pass
 
         warning_rule = MockArchitectureRule(
-            rule_id="WARNING_RULE",
+            rule_id="NO_DIRECT_HANDLER_DISPATCH",  # Use valid WARNING-severity rule
             name="Warning Rule",
             severity=EnumValidationSeverity.WARNING,
             should_pass=False,
@@ -370,7 +374,7 @@ class TestValidationOrder:
             pass
 
         failing_rule = MockArchitectureRule(
-            rule_id="BLOCKER",
+            rule_id="NO_WORKFLOW_IN_REDUCERS",  # Use valid ERROR-severity rule
             severity=EnumValidationSeverity.ERROR,
             should_pass=False,
         )
@@ -434,7 +438,7 @@ class TestContainerHandling:
 
         # Rule that passes
         passing_rule = MockArchitectureRule(
-            rule_id="PASS",
+            rule_id="NO_LOCAL_ONLY_PATHS",  # Use valid rule from SUPPORTED_RULE_IDS
             should_pass=True,
         )
 
@@ -482,7 +486,7 @@ class TestContainerHandling:
     async def test_creates_container_if_none_provided(self) -> None:
         """Creates container if none was injected."""
         passing_rule = MockArchitectureRule(
-            rule_id="PASS",
+            rule_id="NO_LOCAL_ONLY_PATHS",  # Use valid rule from SUPPORTED_RULE_IDS
             should_pass=True,
         )
 
@@ -544,7 +548,7 @@ class TestPassingValidation:
     async def test_passing_rules_allow_startup(self) -> None:
         """Passing rules allow normal startup."""
         passing_rule = MockArchitectureRule(
-            rule_id="PASS",
+            rule_id="NO_LOCAL_ONLY_PATHS",  # Use valid rule from SUPPORTED_RULE_IDS
             should_pass=True,
         )
 
@@ -577,7 +581,7 @@ class TestPassingValidation:
     async def test_success_logged(self, caplog: pytest.LogCaptureFixture) -> None:
         """Successful validation is logged."""
         passing_rule = MockArchitectureRule(
-            rule_id="PASS",
+            rule_id="NO_LOCAL_ONLY_PATHS",  # Use valid rule from SUPPORTED_RULE_IDS
             should_pass=True,
         )
 
