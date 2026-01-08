@@ -99,47 +99,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from enum import Enum
 from uuid import UUID, uuid4
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumCircuitState, EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 
 logger = logging.getLogger(__name__)
-
-
-class CircuitState(str, Enum):
-    """Circuit breaker state machine.
-
-    The circuit breaker implements a 3-state pattern for fault tolerance:
-
-    States:
-        CLOSED: Normal operation
-            - All requests are allowed
-            - Failures are counted
-            - Transitions to OPEN when failure threshold is reached
-
-        OPEN: Circuit tripped
-            - All requests are blocked
-            - Raises InfraUnavailableError immediately
-            - Automatically transitions to HALF_OPEN after reset timeout
-
-        HALF_OPEN: Testing recovery
-            - Limited requests allowed for testing
-            - First success transitions to CLOSED
-            - First failure transitions back to OPEN
-
-    State Transitions:
-        CLOSED → OPEN: Failure count >= threshold
-        OPEN → HALF_OPEN: Current time - last_failure_time > reset_timeout
-        HALF_OPEN → CLOSED: First successful operation
-        HALF_OPEN → OPEN: First failed operation
-    """
-
-    CLOSED = "closed"
-    OPEN = "open"
-    HALF_OPEN = "half_open"
 
 
 class MixinAsyncCircuitBreaker:
@@ -592,4 +558,4 @@ class MixinAsyncCircuitBreaker:
         self._circuit_breaker_open_until = 0.0
 
 
-__all__ = ["CircuitState", "MixinAsyncCircuitBreaker", "ModelCircuitBreakerConfig"]
+__all__ = ["EnumCircuitState", "MixinAsyncCircuitBreaker", "ModelCircuitBreakerConfig"]

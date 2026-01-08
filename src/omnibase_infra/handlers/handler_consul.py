@@ -62,7 +62,7 @@ from omnibase_infra.mixins import (
     MixinAsyncCircuitBreaker,
     MixinEnvelopeExtraction,
     MixinRetryExecution,
-    RetryErrorClassification,
+    ModelRetryErrorClassification,
 )
 
 T = TypeVar("T")
@@ -266,7 +266,7 @@ class ConsulHandler(
 
     def _classify_error(
         self, error: Exception, operation: str
-    ) -> RetryErrorClassification:
+    ) -> ModelRetryErrorClassification:
         """Classify Consul-specific exceptions for retry handling.
 
         Args:
@@ -274,10 +274,10 @@ class ConsulHandler(
             operation: The operation name for context.
 
         Returns:
-            RetryErrorClassification with retry decision and error details.
+            ModelRetryErrorClassification with retry decision and error details.
         """
         if isinstance(error, TimeoutError):
-            return RetryErrorClassification(
+            return ModelRetryErrorClassification(
                 category=EnumRetryErrorCategory.TIMEOUT,
                 should_retry=True,
                 record_circuit_failure=True,
@@ -285,7 +285,7 @@ class ConsulHandler(
             )
 
         if isinstance(error, consul.ACLPermissionDenied):
-            return RetryErrorClassification(
+            return ModelRetryErrorClassification(
                 category=EnumRetryErrorCategory.AUTHENTICATION,
                 should_retry=False,
                 record_circuit_failure=True,
@@ -293,7 +293,7 @@ class ConsulHandler(
             )
 
         if isinstance(error, consul.Timeout):
-            return RetryErrorClassification(
+            return ModelRetryErrorClassification(
                 category=EnumRetryErrorCategory.TIMEOUT,
                 should_retry=True,
                 record_circuit_failure=True,
@@ -301,7 +301,7 @@ class ConsulHandler(
             )
 
         if isinstance(error, consul.ConsulException):
-            return RetryErrorClassification(
+            return ModelRetryErrorClassification(
                 category=EnumRetryErrorCategory.CONNECTION,
                 should_retry=True,
                 record_circuit_failure=True,
@@ -309,7 +309,7 @@ class ConsulHandler(
             )
 
         # Unknown error - retry eligible
-        return RetryErrorClassification(
+        return ModelRetryErrorClassification(
             category=EnumRetryErrorCategory.UNKNOWN,
             should_retry=True,
             record_circuit_failure=True,
