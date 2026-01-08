@@ -597,18 +597,13 @@ class RegistryCompute:
                                     extra={"plugin_id": plugin_id},
                                 )
                         # Defer expensive list computation until actually raising error
-                        registered = [k.plugin_id for k in self._registry]
-                        error_context = {
-                            "plugin_id": plugin_id,
-                            "registered_plugins": registered,
-                        }
-                        # Include version in context if it was specified
-                        if version is not None:
-                            error_context["version"] = version
+                        registered: list[str] = [k.plugin_id for k in self._registry]
                         raise ComputeRegistryError(
                             f"No compute plugin registered with id={plugin_id!r}. "
                             f"Registered plugins: {registered}",
-                            **error_context,
+                            plugin_id=plugin_id,
+                            registered_plugins=registered,
+                            version=version if version is not None else None,
                         )
 
                     # If version specified, do exact match
