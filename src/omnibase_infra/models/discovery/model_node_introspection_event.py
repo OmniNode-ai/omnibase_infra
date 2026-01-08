@@ -204,6 +204,10 @@ class ModelNodeIntrospectionEvent(BaseModel):
                         "operations": ["execute", "query", "batch_execute"],
                         "protocols": ["ProtocolDatabaseAdapter"],
                         "has_fsm": True,
+                        "method_signatures": {
+                            "execute": "(query: str) -> list[dict]",
+                            "query": "(sql: str, params: dict) -> list[dict]",
+                        },
                     },
                     "endpoints": {
                         "health": "http://localhost:8080/health",
