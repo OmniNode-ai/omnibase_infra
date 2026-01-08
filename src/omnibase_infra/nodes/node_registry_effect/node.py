@@ -293,60 +293,6 @@ class NodeRegistryEffect(NodeEffect):
             "configure the container to provide ProtocolPostgresAdapter."
         )
 
-    def _create_handler(
-        self, handler_config: dict[str, object]
-    ) -> (
-        HandlerConsulRegister
-        | HandlerConsulDeregister
-        | HandlerPostgresUpsert
-        | HandlerPostgresDeactivate
-        | HandlerPartialRetry
-    ):
-        """Create a handler instance from configuration.
-
-        Args:
-            handler_config: Handler configuration from contract.yaml containing:
-                - handler.name: Handler class name
-                - handler.module: Module path for the handler
-                - backend: Backend type (consul, postgres, dynamic)
-
-        Returns:
-            Instantiated handler with required dependencies.
-
-        Raises:
-            ProtocolConfigurationError: If handler name from contract.yaml is unknown.
-        """
-        backend = cast(str, handler_config.get("backend", ""))
-        handler_info = cast(dict[str, object], handler_config.get("handler", {}))
-        handler_name = cast(str, handler_info.get("name", ""))
-
-        # Instantiate based on handler class and backend
-        if handler_name == "HandlerConsulRegister":
-            return HandlerConsulRegister(self._get_consul_client())
-
-        elif handler_name == "HandlerConsulDeregister":
-            return HandlerConsulDeregister(self._get_consul_client())
-
-        elif handler_name == "HandlerPostgresUpsert":
-            return HandlerPostgresUpsert(self._get_postgres_adapter())
-
-        elif handler_name == "HandlerPostgresDeactivate":
-            return HandlerPostgresDeactivate(self._get_postgres_adapter())
-
-        elif handler_name == "HandlerPartialRetry":
-            return HandlerPartialRetry(
-                self._get_consul_client(),
-                self._get_postgres_adapter(),
-            )
-
-        raise ProtocolConfigurationError(
-            f"Unknown handler '{handler_name}' specified in contract.yaml. "
-            f"Expected one of: HandlerConsulRegister, HandlerConsulDeregister, "
-            f"HandlerPostgresUpsert, HandlerPostgresDeactivate, HandlerPartialRetry.",
-            handler_name=handler_name,
-            backend=backend,
-        )
-
     async def execute_operation(
         self,
         request: ModelRegistryRequest,

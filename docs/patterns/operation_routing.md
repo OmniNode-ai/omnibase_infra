@@ -237,18 +237,21 @@ operation_routing:
                                       │
                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           _create_handler()                                 │
+│                      Inline Handler Instantiation                           │
+│                        (in execute_operation)                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  handler_config: { handler: { name: "HandlerConsulRegister" },              │
-│                    backend: "consul" }                                      │
+│  For each handler_config in handler_configs:                                │
+│    Extract: backend, handler.name                                           │
 │                                                                             │
-│  Match handler.name:                                                        │
-│    "HandlerConsulRegister"   -> HandlerConsulRegister(consul_client)        │
-│    "HandlerConsulDeregister" -> HandlerConsulDeregister(consul_client)      │
-│    "HandlerPostgresUpsert"   -> HandlerPostgresUpsert(postgres_adapter)     │
-│    "HandlerPostgresDeactivate" -> HandlerPostgresDeactivate(postgres_adap)  │
-│    "HandlerPartialRetry"     -> HandlerPartialRetry(consul, postgres)       │
+│  Match backend + handler.name:                                              │
+│    consul + "HandlerConsulRegister"   -> HandlerConsulRegister(consul)      │
+│    consul + "HandlerConsulDeregister" -> HandlerConsulDeregister(consul)    │
+│    postgres + "HandlerPostgresUpsert" -> HandlerPostgresUpsert(postgres)    │
+│    postgres + "HandlerPostgresDeactivate" -> HandlerPostgresDeactivate(pg)  │
+│                                                                             │
+│  For retry_partial_failure:                                                 │
+│    HandlerPartialRetry(consul, postgres)                                    │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
