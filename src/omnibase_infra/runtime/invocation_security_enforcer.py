@@ -43,21 +43,23 @@ from omnibase_core.enums import EnumDataClassification
 from omnibase_infra.enums import EnumSecurityRuleId
 from omnibase_infra.models.security import ModelHandlerSecurityPolicy
 
-# Security level mapping for data classifications
-# Higher values indicate more sensitive data
+# Security level mapping for data classification comparison.
+# Higher values indicate more sensitive/restricted data.
+# This ordering reflects standard data classification hierarchies.
+# IMPORTANT: This mapping MUST be identical to the one in
+# registration_security_validator.py to ensure consistent security decisions.
 _CLASSIFICATION_SECURITY_LEVELS: dict[EnumDataClassification, int] = {
     EnumDataClassification.PUBLIC: 0,
-    EnumDataClassification.INTERNAL: 1,
-    EnumDataClassification.CONFIDENTIAL: 2,
-    EnumDataClassification.RESTRICTED: 3,
-    EnumDataClassification.SECRET: 4,
-    EnumDataClassification.TOP_SECRET: 5,
-    # Additional classifications mapped to appropriate levels
-    EnumDataClassification.OPEN: 0,  # Same as PUBLIC
-    EnumDataClassification.PRIVATE: 1,  # Same as INTERNAL
-    EnumDataClassification.SENSITIVE: 2,  # Same as CONFIDENTIAL
-    EnumDataClassification.CLASSIFIED: 4,  # Same as SECRET
-    EnumDataClassification.UNCLASSIFIED: 0,  # Same as PUBLIC
+    EnumDataClassification.OPEN: 0,
+    EnumDataClassification.UNCLASSIFIED: 1,
+    EnumDataClassification.INTERNAL: 2,
+    EnumDataClassification.PRIVATE: 2,
+    EnumDataClassification.SENSITIVE: 3,
+    EnumDataClassification.CONFIDENTIAL: 4,
+    EnumDataClassification.RESTRICTED: 5,
+    EnumDataClassification.CLASSIFIED: 5,
+    EnumDataClassification.SECRET: 6,
+    EnumDataClassification.TOP_SECRET: 7,
 }
 
 
@@ -68,14 +70,11 @@ def _get_security_level(classification: EnumDataClassification) -> int:
         classification: The data classification enum value.
 
     Returns:
-        Numeric security level (0 = lowest, 5 = highest).
+        Integer security level (higher = more sensitive).
 
     Raises:
-        ValueError: If classification is not recognized.
+        KeyError: If the classification is not in the mapping.
     """
-    if classification not in _CLASSIFICATION_SECURITY_LEVELS:
-        msg = f"Unknown data classification: {classification}"
-        raise ValueError(msg)
     return _CLASSIFICATION_SECURITY_LEVELS[classification]
 
 
@@ -186,6 +185,66 @@ class InvocationSecurityEnforcer:
             list(handler_policy.allowed_domains)
         )
 
+    def _validate_domain_pattern(self, pattern: str) -> None:
+        """Validate a domain pattern for security compliance.
+
+        Ensures domain patterns are well-formed and don't contain
+        potentially misleading or insecure constructs.
+
+        Args:
+            pattern: Domain pattern to validate.
+
+        Raises:
+            ValueError: If the pattern is invalid.
+
+        Valid patterns:
+            - "example.com" (exact match)
+            - "*.example.com" (single-level wildcard)
+
+        Invalid patterns:
+            - "**.example.com" (double wildcard - misleading)
+            - "*.*.example.com" (nested wildcards)
+            - "*example.com" (wildcard without dot separator)
+            - "" (empty string)
+        """
+        if not pattern:
+            msg = "Domain pattern cannot be empty"
+            raise ValueError(msg)
+
+        # Check for double wildcards or nested wildcards
+        if "**" in pattern:
+            msg = (
+                f"Invalid domain pattern '{pattern}': double wildcards (** ) are not "
+                "supported. Use '*.example.com' for single-level subdomain matching."
+            )
+            raise ValueError(msg)
+
+        # Check for multiple wildcards
+        if pattern.count("*") > 1:
+            msg = (
+                f"Invalid domain pattern '{pattern}': multiple wildcards are not "
+                "supported. Use a single '*.domain.com' pattern."
+            )
+            raise ValueError(msg)
+
+        # Wildcard must be at the start followed by a dot
+        if "*" in pattern and not pattern.startswith("*."):
+            msg = (
+                f"Invalid domain pattern '{pattern}': wildcard must be at the start "
+                "followed by a dot (e.g., '*.example.com')."
+            )
+            raise ValueError(msg)
+
+        # Validate the domain part after wildcard
+        if pattern.startswith("*."):
+            suffix = pattern[2:]
+            if not suffix or "." not in suffix:
+                msg = (
+                    f"Invalid domain pattern '{pattern}': wildcard patterns must "
+                    "include a valid domain (e.g., '*.example.com', not '*.' or '*.com')."
+                )
+                raise ValueError(msg)
+
     def _compile_domain_patterns(
         self, domains: list[str]
     ) -> tuple[re.Pattern[str], ...]:
@@ -202,6 +261,9 @@ class InvocationSecurityEnforcer:
         Returns:
             Tuple of compiled regex patterns (immutable).
 
+        Raises:
+            ValueError: If any pattern is invalid (see _validate_domain_pattern).
+
         Note:
             Wildcard patterns only match a single subdomain level.
             "*.example.com" matches "api.example.com" but NOT
@@ -209,6 +271,9 @@ class InvocationSecurityEnforcer:
         """
         patterns: list[re.Pattern[str]] = []
         for domain in domains:
+            # Validate pattern before compilation
+            self._validate_domain_pattern(domain)
+
             if domain.startswith("*."):
                 # Convert *.example.com to regex: ^[^.]+\.example\.com$
                 # [^.]+ matches one or more non-dot characters (single subdomain)

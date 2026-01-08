@@ -125,7 +125,13 @@ class ModelEnvironmentPolicy(BaseModel):
 
     adapter_secrets_override_allowed: bool = Field(
         default=False,
-        description="Whether adapters can request secrets (usually False)",
+        description=(
+            "Whether adapters can request secrets directly (usually False). "
+            "SECURITY WARNING: Enabling in production violates least-privilege "
+            "principles. Adapters should use platform secret management (e.g., Vault) "
+            "rather than direct secret access. Only enable for development/testing "
+            "environments where secret isolation is less critical."
+        ),
     )
 
 
