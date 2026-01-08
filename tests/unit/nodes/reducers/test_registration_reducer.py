@@ -2749,7 +2749,8 @@ class TestDeterminismProperty:
         minor=st.integers(min_value=0, max_value=99),
         patch=st.integers(min_value=0, max_value=99),
     )
-    @settings(max_examples=50)
+    # Deadline disabled: test exceeds 200ms default under CPU load from parallel tests
+    @settings(max_examples=50, deadline=None)
     def test_reduce_is_deterministic_for_any_valid_input(
         self, node_type: EnumNodeKind, major: int, minor: int, patch: int
     ) -> None:
