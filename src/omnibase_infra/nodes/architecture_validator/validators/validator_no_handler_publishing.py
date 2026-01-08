@@ -32,16 +32,15 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+
+if TYPE_CHECKING:
+    from omnibase_infra.nodes.architecture_validator.models import ModelRuleCheckResult
+
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
-)
-from omnibase_infra.nodes.architecture_validator.models.model_rule_check_result import (
-    ModelRuleCheckResult,
-)
-from omnibase_infra.nodes.architecture_validator.models.model_validation_request import (
-    ModelArchitectureValidationRequest,
 )
 from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
     ModelFileValidationResult,
@@ -306,6 +305,44 @@ def validate_no_handler_publishing(file_path: str) -> ModelFileValidationResult:
             files_checked=1,
             rules_checked=[RULE_ID],
         )
+    except (PermissionError, OSError) as e:
+        # Return WARNING violation for file I/O errors
+        return ModelFileValidationResult(
+            valid=True,  # Still valid (not a rule violation), but with warning
+            violations=[
+                ModelArchitectureViolation(
+                    rule_id=RULE_ID,
+                    rule_name=RULE_NAME,
+                    severity=EnumValidationSeverity.WARNING,
+                    target_type="file",
+                    target_name=Path(file_path).name,
+                    message=f"File could not be read: {e}",
+                    location=file_path,
+                    suggestion="Ensure file is readable and has correct permissions",
+                )
+            ],
+            files_checked=1,
+            rules_checked=[RULE_ID],
+        )
+    except UnicodeDecodeError as e:
+        # Return WARNING violation for encoding errors
+        return ModelFileValidationResult(
+            valid=True,  # Still valid (not a rule violation), but with warning
+            violations=[
+                ModelArchitectureViolation(
+                    rule_id=RULE_ID,
+                    rule_name=RULE_NAME,
+                    severity=EnumValidationSeverity.WARNING,
+                    target_type="file",
+                    target_name=Path(file_path).name,
+                    message=f"File has encoding error and could not be validated: {e.reason}",
+                    location=file_path,
+                    suggestion="Ensure file is valid UTF-8 encoded",
+                )
+            ],
+            files_checked=1,
+            rules_checked=[RULE_ID],
+        )
 
     # Analyze the AST
     visitor = HandlerPublishingVisitor(file_path)
@@ -332,7 +369,7 @@ class RuleNoHandlerPublishing:
     @property
     def rule_id(self) -> str:
         """Return the canonical rule ID matching contract.yaml."""
-        return "NO_HANDLER_PUBLISHING"
+        return RULE_ID
 
     @property
     def name(self) -> str:
@@ -362,6 +399,10 @@ class RuleNoHandlerPublishing:
         Returns:
             ModelRuleCheckResult indicating pass/fail with details.
         """
+        from omnibase_infra.nodes.architecture_validator.models import (
+            ModelRuleCheckResult,
+        )
+
         # Graceful handling: non-string targets pass (not applicable)
         if not isinstance(target, str):
             return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)

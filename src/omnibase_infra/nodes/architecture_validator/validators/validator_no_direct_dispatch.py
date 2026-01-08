@@ -255,6 +255,44 @@ def validate_no_direct_dispatch(file_path: str) -> ModelFileValidationResult:
             files_checked=1,
             rules_checked=[RULE_ID],
         )
+    except (PermissionError, OSError) as e:
+        # Return WARNING violation for file I/O errors
+        return ModelFileValidationResult(
+            valid=True,  # Still valid (not a rule violation), but with warning
+            violations=[
+                ModelArchitectureViolation(
+                    rule_id=RULE_ID,
+                    rule_name=RULE_NAME,
+                    severity=EnumValidationSeverity.WARNING,
+                    target_type="file",
+                    target_name=Path(file_path).name,
+                    message=f"File could not be read: {e}",
+                    location=file_path,
+                    suggestion="Ensure file is readable and has correct permissions",
+                )
+            ],
+            files_checked=1,
+            rules_checked=[RULE_ID],
+        )
+    except UnicodeDecodeError as e:
+        # Return WARNING violation for encoding errors
+        return ModelFileValidationResult(
+            valid=True,  # Still valid (not a rule violation), but with warning
+            violations=[
+                ModelArchitectureViolation(
+                    rule_id=RULE_ID,
+                    rule_name=RULE_NAME,
+                    severity=EnumValidationSeverity.WARNING,
+                    target_type="file",
+                    target_name=Path(file_path).name,
+                    message=f"File has encoding error and could not be validated: {e.reason}",
+                    location=file_path,
+                    suggestion="Ensure file is valid UTF-8 encoded",
+                )
+            ],
+            files_checked=1,
+            rules_checked=[RULE_ID],
+        )
 
     visitor = DirectDispatchVisitor(file_path)
     visitor.visit(tree)
@@ -280,7 +318,7 @@ class RuleNoDirectDispatch:
     @property
     def rule_id(self) -> str:
         """Return the canonical rule ID matching contract.yaml."""
-        return "NO_DIRECT_HANDLER_DISPATCH"
+        return RULE_ID
 
     @property
     def name(self) -> str:
