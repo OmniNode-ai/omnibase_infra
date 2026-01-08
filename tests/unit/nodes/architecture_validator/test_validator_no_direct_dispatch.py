@@ -243,8 +243,8 @@ class Service:  # Line 3
         # These assertions should FAIL in RED phase
         assert not result.valid
         assert len(result.violations) >= 1
-        # The violation should be on line 6
-        assert result.violations[0].line_number == 6
+        # The violation should be on line 6 (location format is "path:line")
+        assert ":6" in result.violations[0].location
 
 
 class TestNoDirectDispatchEdgeCases:

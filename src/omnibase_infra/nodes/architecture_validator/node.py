@@ -46,10 +46,14 @@ from typing import TYPE_CHECKING
 
 from omnibase_core.nodes.node_compute import NodeCompute
 
-from omnibase_infra.nodes.architecture_validator.models import (
-    ModelArchitectureValidationRequest,
-    ModelArchitectureValidationResult,
+from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
+)
+from omnibase_infra.nodes.architecture_validator.models.model_validation_request import (
+    ModelArchitectureValidationRequest,
+)
+from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
+    ModelFileValidationResult,
 )
 from omnibase_infra.nodes.architecture_validator.validators import (
     validate_no_direct_dispatch,
@@ -61,7 +65,7 @@ if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
 # Type alias for validator functions
-_ValidatorFunc = Callable[[str], ModelArchitectureValidationResult]
+_ValidatorFunc = Callable[[str], ModelFileValidationResult]
 
 
 class NodeArchitectureValidator(NodeCompute):
@@ -130,7 +134,7 @@ class NodeArchitectureValidator(NodeCompute):
     def compute(
         self,
         request: ModelArchitectureValidationRequest,
-    ) -> ModelArchitectureValidationResult:
+    ) -> ModelFileValidationResult:
         """Compute architecture validation results.
 
         Analyzes the specified paths for architecture violations based on
@@ -183,14 +187,14 @@ class NodeArchitectureValidator(NodeCompute):
 
                 # Fail fast if requested
                 if request.fail_fast and all_violations:
-                    return ModelArchitectureValidationResult(
+                    return ModelFileValidationResult(
                         valid=False,
                         violations=all_violations,
                         files_checked=files_checked,
                         rules_checked=rules_checked,
                     )
 
-        return ModelArchitectureValidationResult(
+        return ModelFileValidationResult(
             valid=len(all_violations) == 0,
             violations=all_violations,
             files_checked=files_checked,

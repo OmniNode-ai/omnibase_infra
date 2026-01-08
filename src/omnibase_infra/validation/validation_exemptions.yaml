@@ -928,8 +928,7 @@ pattern_exemptions:
   # HandlerPublishingVisitor is a class that validates handler publishing constraints.
   # The "Handler" name is appropriate because it IS validating handler behavior.
   - file_pattern: 'validator_no_handler_publishing\.py'
-    class_pattern: "Class name 'HandlerPublishingVisitor'"
-    violation_pattern: "contains anti-pattern 'Handler'"
+    violation_pattern: "Class name .* contains anti-pattern 'Handler'"
     reason: >
       HandlerPublishingVisitor is an AST visitor class that validates handler publishing constraints. The "Handler" name is intentional and appropriate because it validates that handlers do NOT have direct event bus access. This is a validator class, not a handler implementation.
 
@@ -938,12 +937,50 @@ pattern_exemptions:
       - docs/patterns/security_patterns.md
     ticket: OMN-1099
   # ==========================================================================
+  # Architecture Validator Semantic ID Exemptions (OMN-1138)
+  # ==========================================================================
+  # Architecture validation rules use semantic string identifiers (e.g.,
+  # 'NO_HANDLER_PUBLISHING', 'PURE_REDUCERS') rather than UUIDs. These are
+  # human-readable rule codes similar to error codes, not database entity IDs.
+  - file_pattern: 'model_rule_check_result\.py'
+    violation_pattern: "Field 'rule_id' should use UUID"
+    reason: >
+      rule_id is a semantic identifier for architecture rules (e.g., 'NO_HANDLER_PUBLISHING'). These are human-readable rule codes like error codes, not database entity UUIDs.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
+    ticket: OMN-1138
+  - file_pattern: 'model_architecture_violation\.py'
+    violation_pattern: "Field 'rule_id' should use UUID"
+    reason: >
+      rule_id is a semantic identifier for architecture rules (e.g., 'NO_HANDLER_PUBLISHING'). These are human-readable rule codes, not database entity UUIDs.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
+    ticket: OMN-1138
+  - file_pattern: 'model_architecture_violation\.py'
+    violation_pattern: "Field 'rule_name' might reference an entity"
+    reason: >
+      rule_name is a human-readable display name for the rule (e.g., 'No Handler Publishing'). It's a static description, not a reference to a named entity.
+
+    documentation:
+      - CLAUDE.md (Model Field Naming - display names vs entity references)
+    ticket: OMN-1138
+  - file_pattern: 'model_architecture_violation\.py'
+    violation_pattern: "Field 'target_name' might reference an entity"
+    reason: >
+      target_name is dynamically derived from type(target).__name__ during validation. It's a runtime-computed description for logging, not an entity reference.
+
+    documentation:
+      - CLAUDE.md (Model Field Naming - computed display names)
+    ticket: OMN-1138
+  # ==========================================================================
   # Architecture Validator Model Exemptions (OMN-1099)
   # ==========================================================================
   # ModelViolation uses semantic identifiers for validation rules, not UUIDs.
   # rule_id is a human-readable identifier (e.g., "NO-HANDLER-PUBLISH-001").
   # rule_name is a display name for the rule, not an entity reference.
-  - file_pattern: 'nodes/architecture_validator/models/model_violation\.py'
+  - file_pattern: 'model_violation\.py'
     violation_pattern: "Field 'rule_id' should use UUID"
     reason: >
       rule_id is a human-readable semantic identifier for validation rules (e.g., "NO-HANDLER-PUBLISH-001", "NO-ANY-TYPE-002"). This follows the same pattern as policy_id, dispatcher_id, and other semantic identifiers. Not a UUID.
@@ -952,7 +989,7 @@ pattern_exemptions:
       - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
       - docs/patterns/error_handling_patterns.md
     ticket: OMN-1099
-  - file_pattern: 'nodes/architecture_validator/models/model_violation\.py'
+  - file_pattern: 'model_violation\.py'
     violation_pattern: "Field 'rule_name' might reference an entity"
     reason: >
       rule_name is the display name for a validation rule (e.g., "No Handler Publishing", "No Any Types"). It is the human-readable label shown in violation reports, not an entity reference requiring UUID + display_name pattern.
