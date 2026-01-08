@@ -24,8 +24,8 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_infra.nodes.architecture_validator.models import (
-    ModelArchitectureValidationResult,
+from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
+    ModelFileValidationResult,
 )
 from omnibase_infra.nodes.architecture_validator.validators.validator_no_handler_publishing import (
     validate_no_handler_publishing,
@@ -306,7 +306,7 @@ class HandlerBroken:
         try:
             result = validate_no_handler_publishing(str(test_file))
             # Either valid with warning or invalid is acceptable
-            assert isinstance(result, ModelArchitectureValidationResult)
+            assert isinstance(result, ModelFileValidationResult)
         except SyntaxError:
             # Also acceptable to raise SyntaxError
             pass
@@ -341,9 +341,9 @@ class HandlerWithBus:
 
         result = validate_no_handler_publishing(str(test_file))
 
-        # When implemented, violations should contain file path
+        # When implemented, violations should contain file path in location
         if not result.valid and result.violations:
-            assert str(test_file) in result.violations[0].file_path
+            assert str(test_file) in result.violations[0].location
 
 
 class TestValidatorMetadata:

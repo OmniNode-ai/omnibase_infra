@@ -430,8 +430,10 @@ class TestTimeoutHandling:
     async def test_handle_runtime_tick_raises_without_coordinator(
         self, simple_mock_container: MagicMock
     ) -> None:
-        """Test that handle_runtime_tick raises RuntimeError without coordinator."""
+        """Test that handle_runtime_tick raises ProtocolConfigurationError without coordinator."""
         from datetime import UTC, datetime
+
+        from omnibase_infra.errors import ProtocolConfigurationError
 
         # Create a minimal tick mock
         tick = MagicMock()
@@ -441,7 +443,7 @@ class TestTimeoutHandling:
 
         orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await orchestrator.handle_runtime_tick(tick)
 
         assert "Timeout coordinator not configured" in str(exc_info.value)

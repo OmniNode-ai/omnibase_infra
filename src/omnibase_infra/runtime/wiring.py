@@ -38,11 +38,11 @@ Adding New Handlers:
         class MyCustomHandler:
             '''Handler for custom protocol operations.'''
 
-            async def initialize(self, config: dict[str, JsonType]) -> None:
+            async def initialize(self, config: dict[str, object]) -> None:
                 '''Initialize handler with configuration.'''
                 self._config = config
 
-            async def execute(self, envelope: dict[str, JsonType]) -> dict[str, JsonType]:
+            async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
                 '''Execute operation from envelope and return response.'''
                 # Handle the envelope and return response dict
                 return {"success": True, "data": ...}
@@ -114,6 +114,7 @@ Example Usage:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from omnibase_infra.errors import ProtocolConfigurationError
@@ -137,7 +138,9 @@ from omnibase_infra.runtime.handler_registry import (
 
 if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
-    from omnibase_core.types import JsonType
+
+    # NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
+    # recursion issues with recursive type aliases.
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
 logger = logging.getLogger(__name__)
@@ -275,7 +278,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
 
 
 def wire_handlers_from_contract(
-    contract_config: JsonType,
+    contract_config: Mapping[str, object],
 ) -> dict[str, list[str]]:
     """Register handlers and event buses based on contract configuration.
 

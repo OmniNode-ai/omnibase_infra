@@ -283,6 +283,109 @@ pattern_exemptions:
       - PEP 8 - Exception for stdlib compatibility
     ticket: OMN-1263
   # ==========================================================================
+  # Architecture Validator AST Visitor Method Exemptions (OMN-1099)
+  # ==========================================================================
+  # Python ast.NodeVisitor API requires specific method names like visit_ClassDef,
+  # visit_FunctionDef, etc. These are NOT snake_case but are mandated by the
+  # Python standard library. Reference: https://docs.python.org/3/library/ast.html
+  - file_pattern: 'validator_no_handler_publishing\.py'
+    violation_pattern: "Function name 'visit_ClassDef' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_ClassDef is a standard AST visitor method name that the ast module dispatches to.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+      - PEP 8 - Exception for stdlib compatibility
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_handler_publishing\.py'
+    violation_pattern: "Function name 'visit_FunctionDef' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_FunctionDef is a standard AST visitor method name that the ast module dispatches to.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_handler_publishing\.py'
+    violation_pattern: "Function name 'visit_AsyncFunctionDef' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_AsyncFunctionDef is a standard AST visitor method name that the ast module dispatches to.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_handler_publishing\.py'
+    violation_pattern: "Function name 'visit_Assign' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_Assign is a standard AST visitor method name that the ast module dispatches to.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_handler_publishing\.py'
+    violation_pattern: "Function name 'visit_AnnAssign' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_AnnAssign is a standard AST visitor method name that the ast module dispatches to.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_handler_publishing\.py'
+    violation_pattern: "Function name 'visit_Call' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_Call is a standard AST visitor method name that the ast module dispatches to.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_direct_dispatch\.py'
+    violation_pattern: "Function name 'visit_ClassDef' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_ClassDef is a standard AST visitor method name that the ast module dispatches to.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_direct_dispatch\.py'
+    violation_pattern: "Function name 'visit_Assign' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_Assign is a standard AST visitor method name that the ast module dispatches to.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_direct_dispatch\.py'
+    violation_pattern: "Function name 'visit_Call' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_Call is a standard AST visitor method name that the ast module dispatches to.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_orchestrator_fsm\.py'
+    violation_pattern: "Function name 'visit_ClassDef' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_ClassDef is a standard AST visitor method name that the ast module dispatches to.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_orchestrator_fsm\.py'
+    violation_pattern: "Function name 'visit_FunctionDef' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_FunctionDef is a standard AST visitor method name that the ast module dispatches to.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_orchestrator_fsm\.py'
+    violation_pattern: "Function name 'visit_Assign' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_Assign is a standard AST visitor method name that the ast module dispatches to.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+    ticket: OMN-1099
+  # ==========================================================================
   # RuntimeShapeValidator Exemptions
   # ==========================================================================
   # Design Doc: docs/patterns/error_handling_patterns.md - Validation error patterns
@@ -821,6 +924,29 @@ pattern_exemptions:
       - docs/architecture/REGISTRATION_REDUCER.md
     ticket: OMN-1004
   # ==========================================================================
+  # Architecture Violation Model Exemptions (OMN-1099)
+  # ==========================================================================
+  # rule_id in ModelArchitectureViolation is a human-readable semantic identifier
+  # (e.g., "ARCH-001", "ARCH-002"), NOT a UUID. This follows the same pattern as
+  # policy_id, dispatcher_id, scheduler_id, and plugin_id.
+  - file_pattern: 'model_violation\.py'
+    violation_pattern: "Field 'rule_id' should use UUID"
+    reason: >
+      rule_id is a human-readable semantic identifier (e.g., "ARCH-001", "ARCH-002") for architecture validation rules. This follows the same pattern as policy_id, dispatcher_id, scheduler_id, and plugin_id - all are semantic identifiers, not UUIDs.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
+      - docs/validation/validator_reference.md
+    ticket: OMN-1099
+  - file_pattern: 'model_violation\.py'
+    violation_pattern: "Field 'rule_name' might reference an entity"
+    reason: >
+      rule_name is a display name for the architecture rule (e.g., "No Any Types", "No Handler Publishing"). It is NOT an entity reference but a human-readable label paired with rule_id as the semantic identifier.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions)
+    ticket: OMN-1099
+  # ==========================================================================
   # Handler Validation Error Model Exemptions (OMN-1091)
   # ==========================================================================
   # Handler validation error types are explicitly named per ticket requirements.
@@ -912,7 +1038,82 @@ pattern_exemptions:
       - docs/patterns/security_patterns.md
     ticket: OMN-1091
   # ==========================================================================
-  # Architecture Validator Model Exemptions (model_violation.py)
+  # Validation Result Model Exemptions (OMN-1104)
+  # ==========================================================================
+  # field_name in ModelValidationResult is a validation field path identifier,
+  # not an entity reference. It represents which field in the validated object
+  # failed validation (e.g., "node_id", "node_type").
+  - file_pattern: 'model_validation_result\.py'
+    violation_pattern: "Field 'field_name' might reference an entity"
+    reason: >
+      field_name is a validation field path (e.g., "node_id"), not an entity reference. It indicates which field in the validated object failed validation.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+    ticket: OMN-1104
+  # ==========================================================================
+  # Consul Registration Payload Exemptions (OMN-1104)
+  # ==========================================================================
+  # service_id and service_name are Consul native formats (strings), not UUIDs
+  # or entity references. Consul service registry uses string identifiers.
+  - file_pattern: 'model_payload_consul_register\.py'
+    violation_pattern: "Field 'service_id' should use UUID"
+    reason: >
+      service_id is Consul's native string format for service identifiers. Consul does not use UUIDs for service identification - it uses human-readable string IDs.
+
+    documentation:
+      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
+    ticket: OMN-1104
+  - file_pattern: 'model_payload_consul_register\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name is a display string for the Consul service catalog, not an entity reference. It's the human-readable name shown in Consul's UI.
+
+    documentation:
+      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
+    ticket: OMN-1104
+  # ==========================================================================
+  # Architecture Validator Semantic ID Exemptions (OMN-1138)
+  # ==========================================================================
+  # Architecture validation rules use semantic string identifiers (e.g.,
+  # 'NO_HANDLER_PUBLISHING', 'PURE_REDUCERS') rather than UUIDs. These are
+  # human-readable rule codes similar to error codes, not database entity IDs.
+  - file_pattern: 'model_rule_check_result\.py'
+    violation_pattern: "Field 'rule_id' should use UUID"
+    reason: >
+      rule_id is a semantic identifier for architecture rules (e.g., 'NO_HANDLER_PUBLISHING'). These are human-readable rule codes like error codes, not database entity UUIDs.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
+    ticket: OMN-1138
+  - file_pattern: 'model_architecture_violation\.py'
+    violation_pattern: "Field 'rule_id' should use UUID"
+    reason: >
+      rule_id is a semantic identifier for architecture rules (e.g., 'NO_HANDLER_PUBLISHING'). These are human-readable rule codes, not database entity UUIDs.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
+    ticket: OMN-1138
+  - file_pattern: 'model_architecture_violation\.py'
+    violation_pattern: "Field 'rule_name' might reference an entity"
+    reason: >
+      rule_name is a human-readable display name for the rule (e.g., 'No Handler Publishing'). It's a static description, not a reference to a named entity.
+
+    documentation:
+      - CLAUDE.md (Model Field Naming - display names vs entity references)
+    ticket: OMN-1138
+  - file_pattern: 'model_architecture_violation\.py'
+    violation_pattern: "Field 'target_name' might reference an entity"
+    reason: >
+      target_name is dynamically derived from type(target).__name__ during validation. It's a runtime-computed description for logging, not an entity reference.
+
+    documentation:
+      - CLAUDE.md (Model Field Naming - computed display names)
+    ticket: OMN-1138
+  # ==========================================================================
+  # Architecture Validator Model Exemptions (model_violation.py) [OMN-1263]
   # ==========================================================================
   # Architecture violation rule_id and rule_name are human-readable identifiers.
   - file_pattern: 'model_violation\.py'
@@ -922,7 +1123,7 @@ pattern_exemptions:
 
     documentation:
       - CLAUDE.md (ONEX Architecture - Handler Validation)
-    ticket: OMN-1099
+    ticket: OMN-1263
   - file_pattern: 'model_violation\.py'
     violation_pattern: "Field 'rule_name' might reference an entity"
     reason: >
@@ -930,22 +1131,30 @@ pattern_exemptions:
 
     documentation:
       - CLAUDE.md (ONEX Architecture - Handler Validation)
-    ticket: OMN-1099
+    ticket: OMN-1263
   # ==========================================================================
-  # Architecture Validator AST Visitor Class Exemptions (OMN-1263)
+  # Architecture Validator OMN-1099 Exemptions (AST Visitor Pattern)
   # ==========================================================================
-  # The *Visitor classes in the architecture validator use "Handler" in their names
-  # because they specifically validate handler-related architectural constraints.
+  # OMN-1099 validators (no-direct-dispatch, no-handler-publishing, no-orchestrator-fsm)
+  # use Python AST visitor pattern which requires visit_* method names per Python stdlib.
+  # NOTE: model_violation.py exemptions for rule_id/rule_name are defined earlier
+  # in the "Architecture Violation Model Exemptions (OMN-1099)" section.
   - file_pattern: 'validator_no_handler_publishing\.py'
-    class_pattern: "Class name 'HandlerPublishingVisitor'"
-    violation_pattern: "contains anti-pattern 'Handler'"
+    violation_pattern: "Class name .* contains anti-pattern 'Handler'"
     reason: >
-      HandlerPublishingVisitor is an AST visitor class that specifically validates handler publishing constraints. The "Handler" in the name describes what the visitor validates (handlers), not an anti-pattern class suffix like "*Handler" for service classes.
+      HandlerPublishingVisitor is an AST visitor class that detects handler publishing patterns. The name correctly describes its purpose: visiting AST nodes to find handlers that incorrectly publish events.
 
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
-      - CLAUDE.md (ONEX Architecture - Handler Types)
-    ticket: OMN-1263
+      - Python ast module (NodeVisitor pattern)
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_.*\.py'
+    violation_pattern: "Function name 'visit_.*' should use snake_case"
+    reason: >
+      AST visitor methods must follow Python's ast.NodeVisitor naming convention. visit_ClassDef, visit_FunctionDef, etc. are required method names for the AST visitor pattern from Python stdlib.
+
+    documentation:
+      - Python ast module documentation (NodeVisitor.visit_* methods)
+    ticket: OMN-1099
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

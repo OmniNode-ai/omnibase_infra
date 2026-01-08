@@ -65,9 +65,6 @@ from omnibase_infra.mixins import (
     RetryErrorClassification,
 )
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
-
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
@@ -319,7 +316,7 @@ class ConsulHandler(
             error_message=f"Unexpected error: {type(error).__name__}",
         )
 
-    async def initialize(self, config: dict[str, JsonType]) -> None:
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize Consul client with configuration.
 
         Args:
@@ -440,7 +437,7 @@ class ConsulHandler(
         )
 
     async def execute(
-        self, envelope: dict[str, JsonType]
+        self, envelope: dict[str, object]
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Execute Consul operation from envelope.
 
@@ -690,7 +687,7 @@ class ConsulHandler(
 
             return None, new_state
 
-    def describe(self) -> dict[str, JsonType]:
+    def describe(self) -> dict[str, object]:
         """Return handler metadata and capabilities for introspection.
 
         This method exposes the handler's type classification along with its

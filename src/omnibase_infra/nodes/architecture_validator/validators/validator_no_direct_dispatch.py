@@ -32,10 +32,12 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from omnibase_infra.nodes.architecture_validator.models import (
-    EnumViolationSeverity,
-    ModelArchitectureValidationResult,
+from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
+)
+from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
+    ModelFileValidationResult,
 )
 
 RULE_ID = "ARCH-001"
@@ -151,14 +153,16 @@ class DirectDispatchVisitor(ast.NodeVisitor):
         Args:
             node: The Call AST node representing the violation.
         """
+        location = f"{self.file_path}:{node.lineno}"
         self.violations.append(
             ModelArchitectureViolation(
                 rule_id=RULE_ID,
                 rule_name=RULE_NAME,
-                severity=EnumViolationSeverity.ERROR,
-                file_path=self.file_path,
-                line_number=node.lineno,
+                severity=EnumValidationSeverity.ERROR,
+                target_type="handler",
+                target_name=self._current_class or "unknown",
                 message="Direct handler dispatch detected. Handlers must be invoked through runtime.",
+                location=location,
                 suggestion="Use runtime.dispatch(event) instead of handler.handle(event)",
             )
         )
@@ -185,7 +189,7 @@ def _is_test_file(file_path: str) -> bool:
     )
 
 
-def validate_no_direct_dispatch(file_path: str) -> ModelArchitectureValidationResult:
+def validate_no_direct_dispatch(file_path: str) -> ModelFileValidationResult:
     """Validate that handlers are not dispatched directly.
 
     This function checks a Python file for direct handler dispatch patterns
@@ -207,7 +211,7 @@ def validate_no_direct_dispatch(file_path: str) -> ModelArchitectureValidationRe
 
     # Test files are exempt
     if _is_test_file(file_path):
-        return ModelArchitectureValidationResult(
+        return ModelFileValidationResult(
             valid=True,
             violations=[],
             files_checked=1,
@@ -216,7 +220,7 @@ def validate_no_direct_dispatch(file_path: str) -> ModelArchitectureValidationRe
 
     # Non-existent or non-Python files
     if not path.exists() or path.suffix != ".py":
-        return ModelArchitectureValidationResult(
+        return ModelFileValidationResult(
             valid=True,
             violations=[],
             files_checked=0,
@@ -228,16 +232,18 @@ def validate_no_direct_dispatch(file_path: str) -> ModelArchitectureValidationRe
         tree = ast.parse(source)
     except SyntaxError as e:
         # Return WARNING violation for syntax error
-        return ModelArchitectureValidationResult(
+        location = f"{file_path}:{e.lineno}" if e.lineno else file_path
+        return ModelFileValidationResult(
             valid=True,  # Still valid (not a rule violation), but with warning
             violations=[
                 ModelArchitectureViolation(
                     rule_id=RULE_ID,
                     rule_name=RULE_NAME,
-                    severity=EnumViolationSeverity.WARNING,
-                    file_path=file_path,
-                    line_number=e.lineno,
+                    severity=EnumValidationSeverity.WARNING,
+                    target_type="file",
+                    target_name=Path(file_path).name,
                     message=f"File has syntax error and could not be validated: {e.msg}",
+                    location=location,
                     suggestion="Fix the syntax error to enable architecture validation",
                 )
             ],
@@ -248,7 +254,7 @@ def validate_no_direct_dispatch(file_path: str) -> ModelArchitectureValidationRe
     visitor = DirectDispatchVisitor(file_path)
     visitor.visit(tree)
 
-    return ModelArchitectureValidationResult(
+    return ModelFileValidationResult(
         valid=len(visitor.violations) == 0,
         violations=visitor.violations,
         files_checked=1,
