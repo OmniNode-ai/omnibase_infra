@@ -48,7 +48,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -108,7 +108,9 @@ if TYPE_CHECKING:
         ProjectionReaderRegistration,
         ProjectorRegistration,
     )
+    from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
     from omnibase_infra.services import TimeoutEmitter, TimeoutScanner
+    from tests.helpers.deterministic import DeterministicClock
 
 
 # =============================================================================
@@ -300,7 +302,7 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
 @pytest.fixture
 async def wired_container(
     postgres_pool: asyncpg.Pool,
-) -> AsyncGenerator[ModelONEXContainer, None]:
+) -> ModelONEXContainer:
     """Container with infrastructure services and registration handlers wired.
 
     This fixture creates a fully wired ModelONEXContainer with:
@@ -317,7 +319,7 @@ async def wired_container(
     Args:
         postgres_pool: Database connection pool.
 
-    Yields:
+    Returns:
         ModelONEXContainer: Fully wired container for dependency injection.
     """
     from omnibase_core.container import ModelONEXContainer
@@ -346,10 +348,8 @@ async def wired_container(
     # Wire registration handlers with database pool
     await wire_registration_handlers(container, postgres_pool)
 
-    # Yield container for proper fixture teardown semantics.
-    # ModelONEXContainer doesn't have explicit cleanup methods currently,
-    # but using yield allows for future cleanup needs and ensures proper
-    # pytest async fixture lifecycle management.
+    # Return container. Note: ModelONEXContainer doesn't have explicit cleanup
+    # methods currently. If future cleanup needs arise, change this to yield.
     return container
 
 
@@ -788,7 +788,7 @@ IntrospectableTestNode = ProtocolIntrospectableTestNode
 def introspection_event_factory(
     unique_node_id: UUID,
     unique_correlation_id: UUID,
-):
+) -> Callable[..., ModelNodeIntrospectionEvent]:
     """Factory for creating ModelNodeIntrospectionEvent instances.
 
     Returns a callable that creates introspection events with the
@@ -832,7 +832,7 @@ def introspection_event_factory(
 @pytest.fixture
 def runtime_tick_factory(
     unique_correlation_id: UUID,
-):
+) -> Callable[..., ModelRuntimeTick]:
     """Factory for creating ModelRuntimeTick instances.
 
     Returns a callable that creates runtime tick events with
@@ -877,7 +877,7 @@ def runtime_tick_factory(
 
 
 @pytest.fixture
-def deterministic_clock():
+def deterministic_clock() -> DeterministicClock:
     """Create a deterministic clock for time control.
 
     Returns:
