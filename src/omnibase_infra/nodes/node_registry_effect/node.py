@@ -55,11 +55,12 @@ import logging
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import yaml  # type: ignore[import-untyped]
 from omnibase_core.nodes.node_effect import NodeEffect
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.nodes.node_registry_effect.handlers import (
     HandlerConsulDeregister,
     HandlerConsulRegister,
@@ -159,13 +160,13 @@ class NodeRegistryEffect(NodeEffect):
         super().__init__(container)
 
         # Cached contract configuration
-        self._operation_routing: dict[str, Any] | None = None
+        self._operation_routing: dict[str, object] | None = None
 
         # Backend adapters (resolved lazily from container)
         self._consul_client: ProtocolConsulClient | None = None
         self._postgres_adapter: ProtocolPostgresAdapter | None = None
 
-    def _load_operation_routing(self) -> dict[str, Any]:
+    def _load_operation_routing(self) -> dict[str, object]:
         """Load and cache operation routing configuration from contract.yaml.
 
         Returns:
@@ -187,7 +188,7 @@ class NodeRegistryEffect(NodeEffect):
 
     def _get_handlers_for_operation(
         self, operation: OperationType
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, object]]:
         """Get handler configurations for an operation from contract.yaml.
 
         Args:
@@ -197,9 +198,9 @@ class NodeRegistryEffect(NodeEffect):
             List of handler configurations with handler class, module, and backend.
         """
         routing = self._load_operation_routing()
-        operations = routing.get("operations", [])
+        operations = cast(list[dict[str, object]], routing.get("operations", []))
 
-        matching_handlers: list[dict[str, Any]] = []
+        matching_handlers: list[dict[str, object]] = []
         for op_config in operations:
             if op_config.get("operation") == operation:
                 matching_handlers.append(op_config)
@@ -229,7 +230,7 @@ class NodeRegistryEffect(NodeEffect):
             The Consul client instance.
 
         Raises:
-            RuntimeError: If Consul client is not configured.
+            ProtocolConfigurationError: If Consul client is not configured.
         """
         if self._consul_client is not None:
             return self._consul_client
@@ -246,7 +247,7 @@ class NodeRegistryEffect(NodeEffect):
             except Exception:
                 pass
 
-        raise RuntimeError(
+        raise ProtocolConfigurationError(
             "Consul client not configured. Call set_consul_client() or configure "
             "the container to provide ProtocolConsulClient."
         )
@@ -258,7 +259,7 @@ class NodeRegistryEffect(NodeEffect):
             The PostgreSQL adapter instance.
 
         Raises:
-            RuntimeError: If PostgreSQL adapter is not configured.
+            ProtocolConfigurationError: If PostgreSQL adapter is not configured.
         """
         if self._postgres_adapter is not None:
             return self._postgres_adapter
@@ -277,13 +278,13 @@ class NodeRegistryEffect(NodeEffect):
             except Exception:
                 pass
 
-        raise RuntimeError(
+        raise ProtocolConfigurationError(
             "PostgreSQL adapter not configured. Call set_postgres_adapter() or "
             "configure the container to provide ProtocolPostgresAdapter."
         )
 
     def _create_handler(
-        self, handler_config: dict[str, Any]
+        self, handler_config: dict[str, object]
     ) -> (
         HandlerConsulRegister
         | HandlerConsulDeregister
@@ -305,9 +306,9 @@ class NodeRegistryEffect(NodeEffect):
         Raises:
             RuntimeError: If handler cannot be instantiated.
         """
-        backend = handler_config.get("backend", "")
-        handler_info = handler_config.get("handler", {})
-        handler_name = handler_info.get("name", "")
+        backend = cast(str, handler_config.get("backend", ""))
+        handler_info = cast(dict[str, object], handler_config.get("handler", {}))
+        handler_name = cast(str, handler_info.get("name", ""))
 
         # Instantiate based on handler class and backend
         if handler_name == "HandlerConsulRegister":
@@ -361,7 +362,7 @@ class NodeRegistryEffect(NodeEffect):
                 - error_summary: Aggregated error messages if any failed
 
         Raises:
-            RuntimeError: If backend adapters are not configured.
+            ProtocolConfigurationError: If backend adapters are not configured.
             ValueError: If operation is invalid or target_backend is missing
                 for retry_partial_failure.
 
@@ -466,9 +467,9 @@ class NodeRegistryEffect(NodeEffect):
         ) = None
 
         for config in handler_configs:
-            backend = config.get("backend", "")
-            handler_info = config.get("handler", {})
-            handler_name = handler_info.get("name", "")
+            backend = cast(str, config.get("backend", ""))
+            handler_info = cast(dict[str, object], config.get("handler", {}))
+            handler_name = cast(str, handler_info.get("name", ""))
 
             if backend == "consul":
                 if handler_name == "HandlerConsulRegister":

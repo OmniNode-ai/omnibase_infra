@@ -58,7 +58,7 @@ class ModelPartialRetryRequest(BaseModel):
         ...,
         description="Semantic version of the node",
     )
-    target_backend: str = Field(
+    target_backend: Literal["consul", "postgres"] = Field(
         ...,
         description="Backend to retry: 'consul' or 'postgres'",
     )

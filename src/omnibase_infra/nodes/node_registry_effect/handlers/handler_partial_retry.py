@@ -38,7 +38,7 @@ Related Tickets:
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 from uuid import UUID
 
 from omnibase_infra.errors import (
@@ -81,7 +81,7 @@ class ProtocolPartialRetryRequest(Protocol):
     node_id: UUID
     node_type: EnumNodeKind
     node_version: str
-    target_backend: str
+    target_backend: Literal["consul", "postgres"]
     idempotency_key: str | None
     service_name: str | None
     tags: list[str]
