@@ -51,7 +51,6 @@ import asyncio
 import json
 import logging
 import os
-import warnings
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -438,11 +437,9 @@ class TestRuntimeE2EFlow:
                 assert completion.get("node_id") == str(unique_node_id)
 
             except TimeoutError:
-                warnings.warn(
+                logger.warning(
                     "Runtime did not publish completion event within timeout. "
-                    "This may indicate the output topic is not configured.",
-                    UserWarning,
-                    stacklevel=1,
+                    "This may indicate the output topic is not configured."
                 )
 
         finally:
@@ -488,11 +485,11 @@ class TestRuntimeE2EFlow:
                 await asyncio.sleep(0.5)
 
         if consul_entry is None:
-            warnings.warn(
-                f"Service {service_name} not found in Consul within {max_wait_seconds}s. "
+            logger.warning(
+                "Service %s not found in Consul within %ss. "
                 "Dual registration may not be configured in runtime.",
-                UserWarning,
-                stacklevel=1,
+                service_name,
+                max_wait_seconds,
             )
             return  # Exit test early but don't fail
 
@@ -623,12 +620,13 @@ class TestRuntimePerformance:
 
         # Check soft SLA and warn if exceeded (but don't fail)
         if processing_time > soft_sla:
-            warnings.warn(
-                f"Runtime processing time {processing_time:.2f}s exceeded soft SLA target "
-                f"of {soft_sla}s. This may indicate CI latency or a performance regression. "
-                f"(Hard limit is {hard_sla}s, configurable via E2E_SLA_TARGET env var)",
-                UserWarning,
-                stacklevel=1,
+            logger.warning(
+                "Runtime processing time %.2fs exceeded soft SLA target of %ss. "
+                "This may indicate CI latency or a performance regression. "
+                "(Hard limit is %ss, configurable via E2E_SLA_TARGET env var)",
+                processing_time,
+                soft_sla,
+                hard_sla,
             )
 
         # Log processing time for debugging (only visible with -v flag)

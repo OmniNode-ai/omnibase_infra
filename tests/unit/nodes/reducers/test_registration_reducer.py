@@ -2627,7 +2627,7 @@ class TestCircuitBreakerNonApplicability:
             # Verify payloads are typed models (ProtocolIntentPayload implementations)
             assert isinstance(
                 intent.payload,
-                (ModelPayloadConsulRegister, ModelPayloadPostgresUpsertRegistration),
+                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
             )
 
     def test_reducer_is_deterministic(
@@ -3956,7 +3956,7 @@ class TestCommandFoldingPrevention:
             # Verify payload is a typed model (ProtocolIntentPayload implementation)
             assert isinstance(
                 intent.payload,
-                (ModelPayloadConsulRegister, ModelPayloadPostgresUpsertRegistration),
+                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
             ), (
                 f"Intent payload should be a typed payload model, "
                 f"found {type(intent.payload)}"
@@ -5771,7 +5771,7 @@ class TestCommandFoldingProhibited:
             # Intent payload should be a typed model (ProtocolIntentPayload)
             assert isinstance(
                 intent.payload,
-                (ModelPayloadConsulRegister, ModelPayloadPostgresUpsertRegistration),
+                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
             ), f"Intent payload should be typed model, not {type(intent.payload)}"
 
             # Intent should not have execute/run methods

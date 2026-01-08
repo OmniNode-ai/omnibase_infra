@@ -21,7 +21,7 @@ PRODUCTION SAFETY WARNING:
     - Running tests against a staging replica with production-like data
 
 Fixture Dependency Graph:
-    postgres_pool (session-scoped)
+    postgres_pool (module-scoped)
         -> schema_initialized
             -> seeded_test_data
                 -> query_analyzer
@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 from dotenv import load_dotenv
 
 from omnibase_infra.utils import sanitize_error_message
@@ -152,12 +153,17 @@ def _build_postgres_dsn() -> str:
     )
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="module")
 async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
     """Create asyncpg connection pool for database performance tests.
 
-    Function-scoped to ensure each test gets a fresh connection pool
-    and avoid event loop conflicts with pytest-asyncio.
+    Module-scoped for performance: creating a connection pool is expensive, and
+    performance tests in the same module can safely share a single pool. This
+    avoids the overhead of creating a new pool for every test function.
+
+    Note:
+        Uses @pytest_asyncio.fixture(scope="module") to ensure proper event loop
+        handling with async fixtures at module scope.
 
     Yields:
         asyncpg.Pool: Connection pool for database operations.
@@ -214,7 +220,6 @@ async def schema_initialized(
     Note:
         Migrations are expected to be idempotent (use IF NOT EXISTS, ON CONFLICT, etc.).
         The migration_history table tracks applied migrations to prevent re-application.
-        Function-scoped to work properly with pytest-asyncio event loop handling.
     """
     # Apply all migrations in order
     migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
@@ -561,7 +566,7 @@ class ExplainResult:
         plan: Parsed plan dictionary.
     """
 
-    def __init__(self, raw_plan: list[dict] | str | None) -> None:
+    def __init__(self, raw_plan: list[dict[str, object]] | str | None) -> None:
         """Initialize with raw EXPLAIN JSON output.
 
         Args:
@@ -609,9 +614,9 @@ class ExplainResult:
 
     def _find_nodes(
         self,
-        node: dict | None = None,
+        node: dict[str, object] | None = None,
         node_type: str | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, object]]:
         """Recursively find all nodes in the plan tree.
 
         Args:
