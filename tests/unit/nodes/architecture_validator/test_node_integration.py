@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
-from omnibase_infra.nodes.architecture_validator.models import (
+from omnibase_infra.nodes.architecture_validator.models.model_validation_request import (
     ModelArchitectureValidationRequest,
 )
 from omnibase_infra.nodes.architecture_validator.node import NodeArchitectureValidator
