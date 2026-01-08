@@ -24,6 +24,54 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
+# Service Registry Availability Check
+# =============================================================================
+
+
+def check_service_registry_available() -> bool:
+    """Check if ServiceRegistry is available in ModelONEXContainer.
+
+    Creates a temporary container to check for service_registry availability,
+    then explicitly cleans up the container to prevent resource leaks.
+
+    This function is used by test modules to determine whether to skip tests
+    that require ServiceRegistry. The check is needed because omnibase_core 0.6.x
+    has a circular import issue that causes ServiceRegistry to be None when
+    the container is initialized.
+
+    Returns:
+        True if service_registry is available and not None, False otherwise.
+
+    Note:
+        The circular import path in omnibase_core 0.6.2 is:
+        model_onex_container.py -> container_service_registry.py ->
+        container/__init__.py -> container_service_resolver.py ->
+        ModelONEXContainer (still loading)
+
+        Tests requiring ServiceRegistry should skip gracefully when this
+        function returns False. Upgrade to omnibase_core >= 0.6.3 to resolve.
+    """
+    container = None
+    try:
+        from omnibase_core.container import ModelONEXContainer
+
+        container = ModelONEXContainer()
+        return container.service_registry is not None
+    except AttributeError:
+        # service_registry attribute removed in omnibase_core 0.6.x
+        return False
+    except TypeError:
+        # ModelONEXContainer.__init__ signature changed (new required params)
+        return False
+    except ImportError:
+        # omnibase_core not installed or import failed
+        return False
+    finally:
+        # Explicit cleanup of temporary container
+        del container
+
+
+# =============================================================================
 # Duck Typing Conformance Helpers
 # =============================================================================
 
@@ -427,6 +475,14 @@ async def container_with_registries() -> AsyncGenerator[ModelONEXContainer, None
         ...     # Per ONEX conventions, check for required methods rather than isinstance
         ...     assert hasattr(policy_reg, "register_policy")
         ...     assert hasattr(handler_reg, "register")
+
+    Raises:
+        pytest.skip: If omnibase_core has a circular import bug causing
+            service_registry to be None. This is a known issue in
+            omnibase_core 0.6.2 where the import chain
+            model_onex_container.py -> container_service_registry.py ->
+            container/__init__.py -> container_service_resolver.py ->
+            ModelONEXContainer (still loading) causes a circular import failure.
     """
     from omnibase_core.container import ModelONEXContainer
 
@@ -439,12 +495,27 @@ async def container_with_registries() -> AsyncGenerator[ModelONEXContainer, None
     # In omnibase_core 0.6.2+, this may still return None if module unavailable
     container = ModelONEXContainer(enable_service_registry=True)
 
-    # Check if service_registry is available (OMN-1257)
+    # Check for omnibase_core circular import bug (service_registry is None)
+    # This occurs in omnibase_core 0.6.2 due to circular import:
+    # model_onex_container.py -> container_service_registry.py ->
+    # container/__init__.py -> container_service_resolver.py ->
+    # ModelONEXContainer (still loading) -> CIRCULAR IMPORT FAILURE
     if container.service_registry is None:
         pytest.skip(
-            "ServiceRegistry not available in omnibase_core. "
-            "Tests requiring container.service_registry will be skipped. "
-            "Check omnibase_core logs for 'ServiceRegistry not available' warnings."
+            "Skipped: omnibase_core circular import bug - service_registry is None. "
+            "This is a known issue in omnibase_core 0.6.2 where ServiceRegistry "
+            "import fails during ModelONEXContainer initialization due to circular "
+            "imports. See: model_onex_container.py -> container_service_registry.py "
+            "-> container/__init__.py -> container_service_resolver.py -> "
+            "ModelONEXContainer (still loading)"
+        )
+
+    # Additional validation: check that service_registry has required methods
+    if not hasattr(container.service_registry, "register_instance"):
+        pytest.skip(
+            "Skipped: omnibase_core API incompatibility - service_registry missing "
+            "'register_instance' method. This may indicate an omnibase_core version "
+            "mismatch or incomplete ServiceRegistry initialization."
         )
 
     try:

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import httpx
@@ -42,9 +41,6 @@ from omnibase_infra.errors import (
 from omnibase_infra.handlers.models.http import ModelHttpBodyContent
 from omnibase_infra.mixins import MixinEnvelopeExtraction
 from omnibase_infra.utils import parse_env_float, parse_env_int
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +193,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         """
         return EnumInfraTransportType.HTTP
 
-    async def initialize(self, config: dict[str, JsonType]) -> None:
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize HTTP client with configurable timeout and size limits.
 
         Args:
@@ -301,8 +297,8 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         logger.info("HttpRestHandler shutdown complete")
 
     async def execute(
-        self, envelope: dict[str, JsonType]
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
+        self, envelope: dict[str, object]
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Execute HTTP operation (http.get or http.post) from envelope.
 
         Args:
@@ -313,7 +309,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
                 - envelope_id: Optional envelope ID for causality tracking
 
         Returns:
-            ModelHandlerOutput[dict[str, JsonType]] containing:
+            ModelHandlerOutput[dict[str, object]] containing:
                 - result: dict with status, payload (status_code, headers, body), and correlation_id
                 - input_envelope_id: UUID for causality tracking
                 - correlation_id: UUID for request/response correlation
@@ -405,7 +401,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
 
     def _extract_headers(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, object],
         operation: str,
         url: str,
         correlation_id: UUID,
@@ -638,7 +634,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         headers: dict[str, str],
         body_content: ModelHttpBodyContent,
         ctx: ModelInfraErrorContext,
-    ) -> tuple[bytes | str | None, dict[str, JsonType] | None, dict[str, str]]:
+    ) -> tuple[bytes | str | None, dict[str, object] | None, dict[str, str]]:
         """Prepare request content for HTTP request.
 
         Handles body serialization for POST requests, managing pre-serialized bytes
@@ -660,7 +656,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             ProtocolConfigurationError: If body is not JSON-serializable.
         """
         request_content: bytes | str | None = None
-        request_json: dict[str, JsonType] | None = None
+        request_json: dict[str, object] | None = None
         request_headers = dict(headers)  # Copy to avoid mutating caller's headers
 
         body = body_content.body
@@ -702,7 +698,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         correlation_id: UUID,
         input_envelope_id: UUID,
         pre_serialized: bytes | None = None,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Execute HTTP request with pre-read response size validation.
 
         Uses httpx streaming to validate Content-Length header BEFORE reading
@@ -720,7 +716,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
                 instead of re-serializing the body, avoiding double serialization.
 
         Returns:
-            ModelHandlerOutput[dict[str, JsonType]] with wrapped response data
+            ModelHandlerOutput[dict[str, object]] with wrapped response data
         """
         if self._client is None:
             ctx = ModelInfraErrorContext(
@@ -791,7 +787,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         body_bytes: bytes,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonType]]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Build response envelope from httpx Response and pre-read body bytes.
 
         This method is used with streaming responses where the body has already
@@ -861,7 +857,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             },
         )
 
-    def describe(self) -> dict[str, JsonType]:
+    def describe(self) -> dict[str, object]:
         """Return handler metadata and capabilities for introspection.
 
         This method exposes the handler's three-dimensional type classification

@@ -21,6 +21,9 @@ This directory contains detailed implementation guides and best practices for ON
 - **[Container Dependency Injection](./container_dependency_injection.md)** - Service registration, resolution, and testing patterns
 - **[Utility Directory Structure](./utility_directory_structure.md)** - Distinction between `utils/` and `shared/utils/` directories
 
+### Infrastructure Integration
+- **[Consul Integration](./consul_integration.md)** - HashiCorp Consul connection, health checks, service registration, security patterns
+
 ### Security
 - **[Security Patterns](./security_patterns.md)** - Comprehensive security guide covering error sanitization, input validation, authentication, authorization, secret management, network security, and production checklists
 - **[Policy Registry Trust Model](./policy_registry_trust_model.md)** - Trust assumptions, validation boundaries, and security mitigations for policy registration
@@ -68,6 +71,9 @@ This directory contains detailed implementation guides and best practices for ON
 | Validate user input | [Security Patterns](./security_patterns.md) | Input Validation |
 | Configure TLS/SSL | [Security Patterns](./security_patterns.md) | Network Security |
 | Manage secrets with Vault | [Security Patterns](./security_patterns.md) | Secret Management |
+| Connect to Consul | [Consul Integration](./consul_integration.md) | Connection Patterns |
+| Register service with Consul | [Consul Integration](./consul_integration.md) | Service Registration |
+| Consul health checks | [Consul Integration](./consul_integration.md) | Health Checks |
 | Implement authentication | [Security Patterns](./security_patterns.md) | Authentication and Authorization |
 | Review production security | [Security Patterns](./security_patterns.md) | Production Security Checklist |
 | Write actionable assertions | [Testing Patterns](./testing_patterns.md) | The "HOW TO FIX" Pattern |
@@ -138,6 +144,11 @@ Utility Directory Structure
     ├── Documents utils/ vs shared/utils/ distinction
     ├── Provides decision matrix for utility placement
     └── References: Error Sanitization, Correlation ID
+
+Consul Integration
+    ├── HashiCorp Consul connection and service discovery
+    ├── Depends on: Circuit Breaker, Error Handling, Security Patterns
+    └── References: ConsulHandler, Registration Orchestrator
 
 Policy Registry Trust Model
     ├── Documents security boundaries for policy registration

@@ -9,7 +9,6 @@ It contains the same data as ModelPostgresUpsertRegistrationIntent but with an
 Related:
     - ModelPostgresUpsertRegistrationIntent: Core intent model (uses `kind` discriminator)
     - ProtocolIntentPayload: Protocol requiring `intent_type` property
-    - OMN-1260: Fix JsonValue/JsonType and validation import migration
 """
 
 from __future__ import annotations
@@ -17,15 +16,16 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from omnibase_core.models.reducer.payloads import ModelIntentPayloadBase
-from pydantic import BaseModel, Field, SerializeAsAny
+from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
+
+# NOTE: ModelIntentPayloadBase was removed in omnibase_core 0.6.2
+# Using pydantic.BaseModel directly as the base class
 
 
-class ModelPayloadPostgresUpsertRegistration(ModelIntentPayloadBase):
+class ModelPayloadPostgresUpsertRegistration(BaseModel):
     """Payload for PostgreSQL upsert registration intents.
 
-    This payload extends ModelIntentPayloadBase to satisfy ProtocolIntentPayload,
-    enabling use with ModelIntent for reducer output.
+    This payload follows the ONEX intent payload pattern for use with ModelIntent.
 
     Uses SerializeAsAny wrapper: the `record` field accepts any BaseModel subclass,
     and serialization preserves all subclass fields via Pydantic's SerializeAsAny
@@ -36,6 +36,8 @@ class ModelPayloadPostgresUpsertRegistration(ModelIntentPayloadBase):
         correlation_id: Correlation ID for distributed tracing.
         record: The registration record to upsert (uses SerializeAsAny for subclass preservation).
     """
+
+    model_config = ConfigDict(frozen=True)
 
     intent_type: Literal["postgres.upsert_registration"] = Field(
         default="postgres.upsert_registration",

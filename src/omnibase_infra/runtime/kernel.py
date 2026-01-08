@@ -73,6 +73,7 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
+    ServiceResolutionError,
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
@@ -87,18 +88,38 @@ from omnibase_infra.runtime.container_wiring import (
     wire_registration_handlers,
 )
 from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
-from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT, HealthServer
+from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.introspection_event_router import (
     IntrospectionEventRouter,
 )
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+
+# Circular Import Note (OMN-529):
+# ---------------------------------
+# ServiceHealth and DEFAULT_HTTP_PORT are imported inside bootstrap() rather than
+# at module level to avoid a circular import. The import chain is:
+#
+#   1. omnibase_infra/runtime/__init__.py imports kernel_bootstrap from kernel.py
+#   2. If kernel.py imported ServiceHealth at module level, it would load service_health.py
+#   3. service_health.py imports ModelHealthCheckResponse from runtime.models
+#   4. This triggers initialization of omnibase_infra.runtime package (step 1)
+#   5. Runtime package tries to import kernel.py which is still initializing -> circular!
+#
+# The lazy import in bootstrap() is acceptable because:
+#   - ServiceHealth is only instantiated at runtime, not at import time
+#   - Type checking uses forward references (no import needed)
+#   - No import-time side effects are bypassed
+#   - The omnibase_infra.services.__init__.py already excludes ServiceHealth exports
+#     to prevent accidental circular imports from other modules
+#
+# See also: omnibase_infra/services/__init__.py "ServiceHealth Import Guide" section
 from omnibase_infra.runtime.validation import validate_runtime_config
 from omnibase_infra.utils.correlation import generate_correlation_id
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
+# NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
+# recursion issues with recursive type aliases.
 
 logger = logging.getLogger(__name__)
 
@@ -368,9 +389,16 @@ async def bootstrap() -> int:
         Health endpoint: http://0.0.0.0:8085/health
         ============================================================
     """
+    # Lazy import to break circular dependency chain - see "Circular Import Note"
+    # comment near line 98 for detailed explanation of the import cycle.
+    from omnibase_infra.services.service_health import (
+        DEFAULT_HTTP_PORT,
+        ServiceHealth,
+    )
+
     # Initialize resources to None for cleanup guard in finally block
     runtime: RuntimeHostProcess | None = None
-    health_server: HealthServer | None = None
+    health_server: ServiceHealth | None = None
     postgres_pool: asyncpg.Pool | None = None
     introspection_unsubscribe: Callable[[], Awaitable[None]] | None = None
     correlation_id = generate_correlation_id()
@@ -477,7 +505,58 @@ async def bootstrap() -> int:
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
         container = ModelONEXContainer()
-        wire_summary = await wire_infrastructure_services(container)
+        if container.service_registry is None:
+            logger.warning(
+                "DEGRADED_MODE: service_registry is None (omnibase_core circular import bug?), "
+                "skipping container wiring (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "error_type": "NoneType",
+                    "correlation_id": correlation_id,
+                    "degraded_mode": True,
+                    "degraded_reason": "service_registry_unavailable",
+                    "component": "container_wiring",
+                },
+            )
+            wire_summary: dict[str, list[str] | str] = {
+                "services": [],
+                "status": "degraded",
+            }  # Empty summary for degraded mode
+        else:
+            try:
+                wire_summary = await wire_infrastructure_services(container)
+            except ServiceResolutionError as e:
+                # Service resolution failed during wiring - container configuration issue.
+                logger.warning(
+                    "DEGRADED_MODE: Container wiring failed due to service resolution error, "
+                    "continuing in degraded mode (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                        "degraded_mode": True,
+                        "degraded_reason": "service_resolution_error",
+                        "component": "container_wiring",
+                    },
+                )
+                wire_summary = {"services": [], "status": "degraded"}
+            except (RuntimeError, AttributeError) as e:
+                # Unexpected error during wiring - container internals issue.
+                logger.warning(
+                    "DEGRADED_MODE: Container wiring failed with unexpected error, "
+                    "continuing in degraded mode (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                        "degraded_mode": True,
+                        "degraded_reason": "wiring_error",
+                        "component": "container_wiring",
+                    },
+                )
+                wire_summary = {"services": [], "status": "degraded"}
         container_duration = time.time() - container_start_time
         logger.debug(
             "Container wired in %.3fs (correlation_id=%s)",
@@ -598,34 +677,50 @@ async def bootstrap() -> int:
                     HandlerNodeIntrospected,
                 )
 
-                logger.debug(
-                    "Resolving HandlerNodeIntrospected from container (correlation_id=%s)",
-                    correlation_id,
-                )
-                handler_introspected: HandlerNodeIntrospected = (
-                    await container.service_registry.resolve_service(
-                        HandlerNodeIntrospected
+                # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+                if container.service_registry is None:
+                    logger.warning(
+                        "DEGRADED_MODE: ServiceRegistry not available, skipping introspection dispatcher creation (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "error_type": "NoneType",
+                            "correlation_id": correlation_id,
+                            "degraded_mode": True,
+                            "degraded_reason": "service_registry_unavailable",
+                            "component": "introspection_dispatcher",
+                        },
                     )
-                )
-                logger.debug(
-                    "HandlerNodeIntrospected resolved successfully (correlation_id=%s)",
-                    correlation_id,
-                    extra={
-                        "handler_class": handler_introspected.__class__.__name__,
-                    },
-                )
+                    # Set introspection_dispatcher to None and continue without it
+                    introspection_dispatcher = None
+                else:
+                    logger.debug(
+                        "Resolving HandlerNodeIntrospected from container (correlation_id=%s)",
+                        correlation_id,
+                    )
+                    handler_introspected: HandlerNodeIntrospected = (
+                        await container.service_registry.resolve_service(
+                            HandlerNodeIntrospected
+                        )
+                    )
+                    logger.debug(
+                        "HandlerNodeIntrospected resolved successfully (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "handler_class": handler_introspected.__class__.__name__,
+                        },
+                    )
 
-                introspection_dispatcher = DispatcherNodeIntrospected(
-                    handler_introspected
-                )
-                logger.info(
-                    "Introspection dispatcher created and wired (correlation_id=%s)",
-                    correlation_id,
-                    extra={
-                        "dispatcher_class": introspection_dispatcher.__class__.__name__,
-                        "handler_class": handler_introspected.__class__.__name__,
-                    },
-                )
+                    introspection_dispatcher = DispatcherNodeIntrospected(
+                        handler_introspected
+                    )
+                    logger.info(
+                        "Introspection dispatcher created and wired (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "dispatcher_class": introspection_dispatcher.__class__.__name__,
+                            "handler_class": handler_introspected.__class__.__name__,
+                        },
+                    )
 
             except Exception as pool_error:
                 # Log warning but continue without registration support
@@ -660,23 +755,82 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
-        # 5. Resolve ProtocolBindingRegistry from container
-        from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+        # 5. Resolve ProtocolBindingRegistry from container or create new instance
+        # NOTE: Fallback to creating new instance is intentional degraded mode behavior.
+        # The handler registry is optional for basic runtime operation - core event
+        # processing continues even without explicit handler bindings. However,
+        # ProtocolConfigurationError should NOT be masked as it indicates invalid
+        # configuration that would cause undefined behavior.
+        handler_registry: ProtocolBindingRegistry | None = None
 
-        handler_registry: ProtocolBindingRegistry = (
-            await container.service_registry.resolve_service(ProtocolBindingRegistry)
-        )
+        # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+        if container.service_registry is not None:
+            try:
+                handler_registry = await container.service_registry.resolve_service(
+                    ProtocolBindingRegistry
+                )
+            except ServiceResolutionError as e:
+                # Service not registered - expected in minimal configurations.
+                # Create a new instance directly as fallback.
+                logger.warning(
+                    "DEGRADED_MODE: ProtocolBindingRegistry not registered in container, "
+                    "creating new instance (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                        "degraded_mode": True,
+                        "degraded_reason": "service_not_registered",
+                        "component": "handler_registry",
+                    },
+                )
+                handler_registry = ProtocolBindingRegistry()
+            except (RuntimeError, AttributeError) as e:
+                # Unexpected resolution failure - container internals issue.
+                # Log with more diagnostic context but still allow degraded operation.
+                logger.warning(
+                    "DEGRADED_MODE: Unexpected error resolving ProtocolBindingRegistry, "
+                    "creating new instance (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                        "degraded_mode": True,
+                        "degraded_reason": "resolution_error",
+                        "component": "handler_registry",
+                    },
+                )
+                handler_registry = ProtocolBindingRegistry()
+            # NOTE: ProtocolConfigurationError is NOT caught here - configuration
+            # errors should propagate and stop startup to prevent undefined behavior.
+        else:
+            # ServiceRegistry not available, create a new ProtocolBindingRegistry directly
+            logger.warning(
+                "DEGRADED_MODE: ServiceRegistry not available, creating ProtocolBindingRegistry directly (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "error_type": "NoneType",
+                    "correlation_id": correlation_id,
+                    "degraded_mode": True,
+                    "degraded_reason": "service_registry_unavailable",
+                    "component": "handler_registry",
+                },
+            )
+            handler_registry = ProtocolBindingRegistry()
 
         # 6. Create runtime host process with config and pre-resolved registry
         # RuntimeHostProcess accepts config as dict; cast model_dump() result to
-        # dict[str, JsonType] to avoid implicit Any typing (Pydantic's model_dump()
+        # dict[str, object] to avoid implicit Any typing (Pydantic's model_dump()
         # returns dict[str, Any] but all our model fields are strongly typed)
         runtime_create_start_time = time.time()
         runtime = RuntimeHostProcess(
+            container=container,
             event_bus=event_bus,
             input_topic=config.input_topic,
             output_topic=config.output_topic,
-            config=cast("dict[str, JsonType]", config.model_dump()),
+            config=cast("dict[str, object]", config.model_dump()),
             handler_registry=handler_registry,
         )
         runtime_create_duration = time.time() - runtime_create_start_time
@@ -776,7 +930,8 @@ async def bootstrap() -> int:
             )
             http_port = DEFAULT_HTTP_PORT
 
-        health_server = HealthServer(
+        health_server = ServiceHealth(
+            container=container,
             runtime=runtime,
             port=http_port,
             version=KERNEL_VERSION,

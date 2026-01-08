@@ -12,8 +12,17 @@ Reducers are responsible for:
 - Dual registration coordination (Consul + PostgreSQL)
 
 Available Reducers:
-- RegistrationReducer: Canonical pure reducer for dual registration workflow.
-  Uses ModelReducerOutput from omnibase_core. (~80 lines, stateless)
+- NodeRegistrationReducer: Declarative FSM-driven reducer (ONEX pattern).
+  Located at: nodes/node_registration_reducer/node.py
+  Uses contract.yaml for FSM state transitions.
+
+- RegistrationReducer: Pure function reducer (legacy interface).
+  Uses ModelReducerOutput from omnibase_core.
+  NOTE: This is maintained for backwards compatibility. New code should
+  use NodeRegistrationReducer from nodes.node_registration_reducer.
+
+Related:
+    - OMN-1104: Refactor RegistrationReducer to be fully declarative
 """
 
 from omnibase_infra.nodes.reducers.registration_reducer import RegistrationReducer
