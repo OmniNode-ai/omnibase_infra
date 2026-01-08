@@ -68,6 +68,9 @@ Environment Variables:
     POSTGRES_USER: Database user (default: postgres)
     POSTGRES_PASSWORD: Database password (required)
     BACKFILL_DEBUG: Enable debug logging to stderr (optional)
+    BACKFILL_CONNECTION_TIMEOUT: Connection timeout in seconds (default: 30.0).
+        Must be a positive number, maximum 600 seconds. Increase for very large
+        tables (>10M rows) to prevent connection pool exhaustion.
 
 Error Codes:
     The script uses error codes for debugging and actionable error messages:
@@ -78,6 +81,7 @@ Error Codes:
         CFG_PORT_001: Invalid POSTGRES_PORT value
         CFG_USER_001: Invalid POSTGRES_USER format
         CFG_DB_001: Invalid POSTGRES_DATABASE format
+        CFG_TIMEOUT_001: Invalid BACKFILL_CONNECTION_TIMEOUT value
 
     Database Errors (DB_*):
         DB_CONN_001: Connection refused (host/port unreachable)
@@ -142,6 +146,7 @@ class ErrorCode:
     CFG_INVALID_PORT = "CFG_PORT_001"
     CFG_INVALID_USER = "CFG_USER_001"
     CFG_INVALID_DATABASE = "CFG_DB_001"
+    CFG_INVALID_TIMEOUT = "CFG_TIMEOUT_001"
 
     # Database errors (DB_xxx_xxx)
     DB_CONNECTION_REFUSED = "DB_CONN_001"
@@ -286,6 +291,50 @@ def _validate_identifier(value: str, name: str, error_code: str) -> str:
     return value
 
 
+def _get_connection_timeout() -> float:
+    """Get connection timeout from environment with validation.
+
+    Reads the BACKFILL_CONNECTION_TIMEOUT environment variable and validates
+    that it is a positive number not exceeding 600 seconds.
+
+    Returns:
+        Connection timeout in seconds (default: 30.0)
+
+    Raises:
+        ConfigurationError: If the timeout value is invalid
+    """
+    timeout_str = os.getenv("BACKFILL_CONNECTION_TIMEOUT", "30.0")
+
+    try:
+        timeout = float(timeout_str)
+    except ValueError:
+        raise ConfigurationError(
+            "BACKFILL_CONNECTION_TIMEOUT: must be a valid number. "
+            f"Got: '{timeout_str}'. Check the BACKFILL_CONNECTION_TIMEOUT "
+            "environment variable.",
+            error_code=ErrorCode.CFG_INVALID_TIMEOUT,
+        )
+
+    if timeout <= 0:
+        raise ConfigurationError(
+            "BACKFILL_CONNECTION_TIMEOUT: must be a positive number. "
+            f"Got: {timeout}. Check the BACKFILL_CONNECTION_TIMEOUT "
+            "environment variable.",
+            error_code=ErrorCode.CFG_INVALID_TIMEOUT,
+        )
+
+    if timeout > 600:
+        raise ConfigurationError(
+            "BACKFILL_CONNECTION_TIMEOUT: must not exceed 600 seconds. "
+            f"Got: {timeout}. Check the BACKFILL_CONNECTION_TIMEOUT "
+            "environment variable.",
+            error_code=ErrorCode.CFG_INVALID_TIMEOUT,
+        )
+
+    logger.debug("Connection timeout: %.1f seconds", timeout)
+    return timeout
+
+
 def _get_validated_config() -> dict[str, str | int]:
     """Get and validate database connection configuration from environment.
 
@@ -331,12 +380,14 @@ async def get_connection() -> asyncpg.Connection:
         asyncpg.PostgresError: If connection fails
     """
     config = _get_validated_config()
+    timeout = _get_connection_timeout()
 
     logger.debug(
-        "Attempting database connection to %s:%s/%s",
+        "Attempting database connection to %s:%s/%s (timeout=%.1fs)",
         config["host"],
         config["port"],
         config["database"],
+        timeout,
     )
 
     # Use explicit parameters instead of DSN string for safer construction
@@ -346,7 +397,7 @@ async def get_connection() -> asyncpg.Connection:
         user=config["user"],
         database=config["database"],
         password=config["password"],
-        timeout=30.0,  # 30 second connection timeout
+        timeout=timeout,
     )
 
 

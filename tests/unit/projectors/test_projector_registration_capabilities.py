@@ -31,6 +31,7 @@ from omnibase_core.enums import EnumNodeKind
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.models.projection import ModelCapabilityFields
 from omnibase_infra.models.projection.model_registration_projection import (
     VALID_CONTRACT_TYPES,
     ModelRegistrationProjection,
@@ -226,6 +227,15 @@ class TestCapabilityFieldsPersistence:
         capabilities = ModelNodeCapabilities(postgres=True)
         now = datetime.now(UTC)
 
+        # Use ModelCapabilityFields for capability data
+        capability_fields = ModelCapabilityFields(
+            contract_type="effect",
+            intent_types=["postgres.upsert"],
+            protocols=["ProtocolDatabaseAdapter"],
+            capability_tags=["postgres.storage"],
+            contract_version="1.0.0",
+        )
+
         result = await projector.persist_state_transition(
             entity_id=uuid4(),
             domain="registration",
@@ -235,12 +245,7 @@ class TestCapabilityFieldsPersistence:
             capabilities=capabilities,
             event_id=uuid4(),
             now=now,
-            # Capability fields
-            contract_type="effect",
-            intent_types=["postgres.upsert"],
-            protocols=["ProtocolDatabaseAdapter"],
-            capability_tags=["postgres.storage"],
-            contract_version="1.0.0",
+            capability_fields=capability_fields,
         )
 
         assert result is True
@@ -250,6 +255,54 @@ class TestCapabilityFieldsPersistence:
         # Verify SQL includes new columns
         assert "contract_type" in sql
         assert "intent_types" in sql
+
+
+@pytest.mark.unit
+class TestModelCapabilityFields:
+    """Test the ModelCapabilityFields dataclass."""
+
+    def test_capability_fields_defaults_to_none(self) -> None:
+        """Test that all fields default to None."""
+        fields = ModelCapabilityFields()
+        assert fields.contract_type is None
+        assert fields.intent_types is None
+        assert fields.protocols is None
+        assert fields.capability_tags is None
+        assert fields.contract_version is None
+
+    def test_capability_fields_accepts_all_values(self) -> None:
+        """Test that all fields can be set."""
+        fields = ModelCapabilityFields(
+            contract_type="effect",
+            intent_types=["intent.a", "intent.b"],
+            protocols=["Protocol1", "Protocol2"],
+            capability_tags=["tag1", "tag2"],
+            contract_version="1.0.0",
+        )
+        assert fields.contract_type == "effect"
+        assert fields.intent_types == ["intent.a", "intent.b"]
+        assert fields.protocols == ["Protocol1", "Protocol2"]
+        assert fields.capability_tags == ["tag1", "tag2"]
+        assert fields.contract_version == "1.0.0"
+
+    def test_capability_fields_is_frozen(self) -> None:
+        """Test that ModelCapabilityFields is immutable."""
+        fields = ModelCapabilityFields(contract_type="effect")
+        with pytest.raises(Exception):  # Pydantic raises ValidationError for frozen models
+            fields.contract_type = "compute"  # type: ignore[misc]
+
+    def test_capability_fields_serializes_correctly(self) -> None:
+        """Test that capability fields serialize to dict."""
+        fields = ModelCapabilityFields(
+            contract_type="reducer",
+            intent_types=["state.update"],
+        )
+        data = fields.model_dump()
+        assert data["contract_type"] == "reducer"
+        assert data["intent_types"] == ["state.update"]
+        assert data["protocols"] is None
+        assert data["capability_tags"] is None
+        assert data["contract_version"] is None
 
 
 @pytest.mark.unit

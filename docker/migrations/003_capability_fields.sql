@@ -121,29 +121,54 @@ CREATE INDEX IF NOT EXISTS idx_registration_contract_type_state
 -- =============================================================================
 -- CHECK CONSTRAINT FOR CONTRACT_TYPE
 -- =============================================================================
--- Ensure contract_type values are consistent with node_type valid values.
+-- Ensures contract_type values match valid ONEX node archetypes.
 --
--- The 'unknown' Value Explained:
--- -----------------------------
--- The 'unknown' value serves a specific purpose in the migration idempotency model:
+-- VALID VALUES:
+--   - effect, compute, reducer, orchestrator: Standard ONEX node archetypes
+--   - unknown: IDEMPOTENCY MARKER ONLY (see below)
+--   - NULL: Record has not been processed/backfilled yet
 --
--- 1. WHY 'unknown' exists:
---    Legacy registrations created before this migration lack explicit contract type
---    information in their capabilities JSONB. When the backfill script processes
---    these records, it cannot reliably determine the contract type (effect, compute,
---    reducer, orchestrator) from the existing data.
+-- =============================================================================
+-- IMPORTANT: 'unknown' USAGE DISTINCTION
+-- =============================================================================
+-- The 'unknown' value is an IDEMPOTENCY MARKER for legacy records processed
+-- by the backfill script (scripts/backfill_capabilities.py) where the
+-- contract_type could NOT be determined from the capabilities JSONB.
 --
--- 2. Idempotency marker:
---    The migration uses contract_type IS NULL to identify unprocessed records:
---    - NULL  = Record has not been processed by backfill script
---    - value = Record has been processed (including 'unknown' for legacy records)
---    This allows the backfill script to be safely re-run without reprocessing
---    already-handled records.
+-- It is NOT a valid contract type for new registrations:
+--   - New registrations via ProjectorRegistration.persist_state_transition()
+--     should ALWAYS use a valid type (effect/compute/reducer/orchestrator)
+--   - 'unknown' should ONLY appear in legacy records migrated by backfill
+--   - Application code should treat 'unknown' as "type not determined"
 --
--- 3. Backfill behavior:
---    The backfill script (003b_backfill_capability_fields.py) sets 'unknown' only
---    when it cannot determine the contract type. New registrations created after
---    this migration will have the correct contract type set by the projector.
+-- BACKFILL BEHAVIOR (scripts/backfill_capabilities.py):
+-- -----------------------------------------------------
+-- The backfill script uses contract_type IS NULL to identify unprocessed records:
+--   - NULL    = Record has not been processed by backfill script
+--   - value   = Record has been processed (including 'unknown' for legacy)
+--
+-- This allows the backfill script to be safely re-run (idempotent) without
+-- reprocessing already-handled records. The script sets 'unknown' ONLY when
+-- it cannot reliably determine the contract type from existing capabilities data.
+--
+-- RUNTIME BEHAVIOR (ProjectorRegistration):
+-- -----------------------------------------
+-- New registrations created AFTER this migration will have the correct
+-- contract type set by the projector based on the node's contract.yaml.
+-- These should NEVER use 'unknown' - they should always have a proper type.
+--
+-- QUERY PATTERNS:
+-- ---------------
+--   -- Exclude legacy records with unknown type:
+--   WHERE contract_type IS NOT NULL AND contract_type != 'unknown'
+--
+--   -- Find all records needing type resolution:
+--   WHERE contract_type = 'unknown'
+--
+-- This separation ensures:
+--   1. Backfill idempotency: NULL -> 'unknown' marks record as processed
+--   2. Clean data model: New records always have proper types
+--   3. Query clarity: Easy to distinguish legacy vs properly-typed records
 --
 -- Note: Using DO block to handle constraint already existing (idempotent)
 

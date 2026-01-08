@@ -38,6 +38,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.projection import (
+    ModelCapabilityFields,
     ModelRegistrationProjection,
     ModelSequenceInfo,
 )
@@ -870,12 +871,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         ack_deadline: datetime | None = None,
         liveness_deadline: datetime | None = None,
         correlation_id: UUID | None = None,
-        # Capability fields (OMN-1134)
-        contract_type: str | None = None,
-        intent_types: list[str] | None = None,
-        protocols: list[str] | None = None,
-        capability_tags: list[str] | None = None,
-        contract_version: str | None = None,
+        capability_fields: ModelCapabilityFields | None = None,
     ) -> bool:
         """Persist a state transition for a registration entity.
 
@@ -912,6 +908,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             ack_deadline: Optional deadline for acknowledgment
             liveness_deadline: Optional deadline for heartbeat
             correlation_id: Optional correlation ID for tracing
+            capability_fields: Optional capability fields for GIN-indexed queries
 
         Returns:
             True if the transition was persisted successfully
@@ -922,6 +919,11 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             RuntimeHostError: For other database errors
 
         Example:
+            >>> from omnibase_infra.models.projection import ModelCapabilityFields
+            >>> fields = ModelCapabilityFields(
+            ...     contract_type="effect",
+            ...     intent_types=["postgres.upsert"],
+            ... )
             >>> await projector.persist_state_transition(
             ...     entity_id=node_id,
             ...     domain="registration",
@@ -931,6 +933,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             ...     capabilities=ModelNodeCapabilities(),
             ...     event_id=correlation_id,
             ...     now=datetime.now(UTC),
+            ...     capability_fields=fields,
             ... )
         """
         corr_id = correlation_id or uuid4()
@@ -979,6 +982,9 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         # Serialize capabilities to JSON for JSONB column
         capabilities_json = capabilities.model_dump_json()
 
+        # Extract capability fields from model or use defaults
+        cap = capability_fields or ModelCapabilityFields()
+
         params = (
             entity_id,
             domain,
@@ -986,11 +992,11 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             node_type,
             node_version,
             capabilities_json,
-            contract_type,  # Capability fields (OMN-1134)
-            intent_types or [],  # TEXT[]
-            protocols or [],  # TEXT[]
-            capability_tags or [],  # TEXT[]
-            contract_version,
+            cap.contract_type,  # Capability fields (OMN-1134)
+            cap.intent_types or [],  # TEXT[]
+            cap.protocols or [],  # TEXT[]
+            cap.capability_tags or [],  # TEXT[]
+            cap.contract_version,
             ack_deadline,
             liveness_deadline,
             event_id,
