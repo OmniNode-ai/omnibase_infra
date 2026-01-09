@@ -53,10 +53,26 @@ from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 
-# Import deterministic utilities from test helpers
+# =============================================================================
+# Cross-Module Fixture Imports
+# =============================================================================
+# These imports bring in shared test utilities from other test modules:
+#
+# From tests/helpers/deterministic.py:
+#   - DeterministicClock: Controllable clock for time-dependent tests
+#     Allows precise control over timestamps without relying on real time.
+#     Used in deterministic_clock fixture below.
+#
+# From tests/integration/registration/effect/test_doubles.py:
+#   - StubConsulClient: Test double for Consul service registry operations
+#     Provides controllable success/failure behavior without real Consul.
+#   - StubPostgresAdapter: Test double for PostgreSQL registration persistence
+#     Provides controllable success/failure behavior without real database.
+#
+# These test doubles enable isolated testing of registration workflows
+# without external infrastructure dependencies.
+# =============================================================================
 from tests.helpers.deterministic import DeterministicClock
-
-# Import test doubles from sibling package
 from tests.integration.registration.effect.test_doubles import (
     StubConsulClient,
     StubPostgresAdapter,

@@ -63,6 +63,15 @@ _env_file = _project_root / ".env"
 if _env_file.exists():
     load_dotenv(_env_file)
 
+# =============================================================================
+# Cross-Module Import: Infrastructure Configuration
+# =============================================================================
+# From tests/infrastructure_config.py:
+#   - DEFAULT_POSTGRES_PORT: Standard PostgreSQL port (5436) on infrastructure server
+#
+# This import ensures consistent port configuration across all database
+# performance tests. See tests/infrastructure_config.py for full documentation.
+# =============================================================================
 from tests.infrastructure_config import (
     DEFAULT_POSTGRES_PORT,
 )

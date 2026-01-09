@@ -34,7 +34,7 @@ from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchC
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.runtime.registry_dispatcher import (
-    DispatcherRegistry,
+    RegistryDispatcher,
 )
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
 
@@ -268,9 +268,9 @@ def compute_dispatcher() -> ContextCapturingDispatcher:
 
 
 @pytest.fixture
-def dispatcher_registry() -> DispatcherRegistry:
-    """Create a fresh DispatcherRegistry."""
-    return DispatcherRegistry()
+def dispatcher_registry() -> RegistryDispatcher:
+    """Create a fresh RegistryDispatcher."""
+    return RegistryDispatcher()
 
 
 # =============================================================================

@@ -20,7 +20,7 @@ Thread Safety:
 
 Related:
     - OMN-934: Dispatcher registry for message dispatch engine
-    - DispatcherRegistry: Registry for managing dispatcher registrations
+    - RegistryDispatcher: Registry for managing dispatcher registrations
     - ModelDispatchResult: Result model for dispatch operations
 
 .. versionadded:: 0.5.0
@@ -72,8 +72,8 @@ class ProtocolMessageDispatcher(Protocol):
                else:
                    raise TypeError("Object does not implement ProtocolMessageDispatcher")
 
-        2. **DispatcherRegistry Validation** (comprehensive validation):
-           The ``DispatcherRegistry.register_dispatcher()`` method performs thorough
+        2. **RegistryDispatcher Validation** (comprehensive validation):
+           The ``RegistryDispatcher.register_dispatcher()`` method performs thorough
            validation including:
            - All required properties exist and have correct types
            - Execution shape is valid (category -> node_kind combination)

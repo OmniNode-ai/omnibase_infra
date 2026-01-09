@@ -30,9 +30,6 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-
-# TypedDict for exemption pattern structure
-# Forward migration type aliases for renamed types in omnibase_core 0.6.2
 from typing import Literal, TypedDict
 
 # Third-party imports
@@ -1239,39 +1236,35 @@ def get_validation_summary(
 
 
 __all__ = [
-    "EXEMPTIONS_YAML_PATH",
-    "INFRA_MAX_UNIONS",
-    "INFRA_MAX_VIOLATIONS",
-    "INFRA_NODES_PATH",
-    "INFRA_PATTERNS_STRICT",
     # Constants
-    "INFRA_SRC_PATH",
-    "INFRA_UNIONS_STRICT",
-    "SKIP_DIRECTORY_NAMES",
-    # Re-exported types from omnibase_core.validation
-    "ModelModuleImportResult",
-    "ExemptionPattern",
-    # Type aliases
-    "ValidationResult",
-    "get_architecture_exemptions",
+    "EXEMPTIONS_YAML_PATH",  # Path to exemptions YAML file
+    "INFRA_MAX_UNIONS",  # Maximum union count threshold
+    "INFRA_MAX_VIOLATIONS",  # Maximum violations threshold
+    "INFRA_NODES_PATH",  # Nodes directory path
+    "INFRA_PATTERNS_STRICT",  # Strict pattern validation flag
+    "INFRA_SRC_PATH",  # Source directory path
+    "INFRA_UNIONS_STRICT",  # Strict union validation flag
+    "SKIP_DIRECTORY_NAMES",  # Directories to skip
+    # Types
+    "ExemptionPattern",  # Exemption pattern TypedDict
+    "ModelModuleImportResult",  # Re-export from omnibase_core
+    "ValidationResult",  # Type alias for validation result
     # Exemption loaders
-    "get_pattern_exemptions",
-    # Path skip configuration
-    "get_skip_directories",
-    "get_union_exemptions",
-    "get_validation_summary",
-    # Union pattern utilities
-    "is_simple_optional",
+    "get_architecture_exemptions",  # Architecture exemption loader
+    "get_pattern_exemptions",  # Pattern exemption loader
+    "get_skip_directories",  # Skip directory loader
+    "get_union_exemptions",  # Union exemption loader
+    "get_validation_summary",  # Validation summary generator
     # Path utilities
-    "is_skip_directory",
-    "load_skip_directories_from_yaml",
-    "should_skip_path",
-    "validate_infra_all",
+    "is_simple_optional",  # Check if union is X | None
+    "is_skip_directory",  # Check if directory should be skipped
+    "load_skip_directories_from_yaml",  # Load skip dirs from YAML
+    "should_skip_path",  # Check if path should be skipped
     # Validators
-    "validate_infra_architecture",
-    "validate_infra_circular_imports",
-    "validate_infra_contract_deep",
-    "validate_infra_contracts",
-    "validate_infra_patterns",
-    "validate_infra_union_usage",
+    "validate_infra_all",  # Run all validators
+    "validate_infra_architecture",  # Architecture validation
+    "validate_infra_circular_imports",  # Circular import check
+    "validate_infra_contracts",  # Contract validation
+    "validate_infra_patterns",  # Pattern validation
+    "validate_infra_union_usage",  # Union usage validation
 ]

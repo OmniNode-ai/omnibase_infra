@@ -138,12 +138,18 @@ if TYPE_CHECKING:
 #   - Set VAULT_ADDR=http://localhost:8200 for local Vault
 #   - Leave unset to skip infrastructure-dependent tests in CI
 #
-# See tests/infrastructure_config.py for full documentation.
+# =============================================================================
+# Cross-Module Import: Infrastructure Configuration
+# =============================================================================
+# From tests/infrastructure_config.py:
+#   - REMOTE_INFRA_HOST: Default infrastructure server IP (192.168.86.200)
+#     Can be overridden via REMOTE_INFRA_HOST environment variable.
+#
+# This configuration provides centralized infrastructure endpoint management
+# for integration tests. See tests/infrastructure_config.py for full
+# documentation on environment variable overrides and CI/CD graceful skip behavior.
+# =============================================================================
 from tests.infrastructure_config import REMOTE_INFRA_HOST
-
-# Backwards compatibility alias (deprecated - use REMOTE_INFRA_HOST instead)
-REMOTE_INFRASTRUCTURE_IP = REMOTE_INFRA_HOST
-
 
 # =============================================================================
 # Environment Variable Utilities

@@ -50,7 +50,7 @@ from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.errors import ModelOnexError
 
 from omnibase_infra.enums import EnumMessageCategory
-from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.models.registry.model_domain_constraint import (
     ModelDomainConstraint,
 )
@@ -79,10 +79,23 @@ class MessageTypeRegistryError(RuntimeHostError):
     Extends RuntimeHostError for consistency with infrastructure error patterns.
 
     Example:
+        >>> from omnibase_infra.errors import ModelInfraErrorContext
+        >>> from uuid import uuid4
         >>> try:
         ...     handlers = registry.get_handlers("UnknownType", category, domain)
         ... except MessageTypeRegistryError as e:
         ...     print(f"Handler not found: {e}")
+        ...
+        >>> # With correlation context
+        >>> context = ModelInfraErrorContext.with_correlation(
+        ...     correlation_id=uuid4(),
+        ...     operation="get_handlers",
+        ... )
+        >>> raise MessageTypeRegistryError(
+        ...     "Message type not found",
+        ...     message_type="UnknownType",
+        ...     context=context,
+        ... )
 
     .. versionadded:: 0.5.0
     """
@@ -93,6 +106,7 @@ class MessageTypeRegistryError(RuntimeHostError):
         message_type: str | None = None,
         domain: str | None = None,
         category: EnumMessageCategory | None = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize MessageTypeRegistryError.
@@ -102,6 +116,7 @@ class MessageTypeRegistryError(RuntimeHostError):
             message_type: The message type that caused the error (if applicable)
             domain: The domain involved in the error (if applicable)
             category: The category involved in the error (if applicable)
+            context: Bundled infrastructure context for correlation_id and structured fields
             **extra_context: Additional context information
         """
         # Build extra context dict
@@ -116,7 +131,7 @@ class MessageTypeRegistryError(RuntimeHostError):
         super().__init__(
             message=message,
             error_code=EnumCoreErrorCode.VALIDATION_FAILED,
-            context=None,  # No ModelInfraErrorContext needed for registry errors
+            context=context,
             **extra,
         )
 

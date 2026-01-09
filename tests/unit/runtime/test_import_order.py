@@ -83,7 +83,7 @@ class TestRuntimeModuleImports:
 
         # Core components that warm the import cache
         assert hasattr(runtime, "DispatchContextEnforcer")
-        assert hasattr(runtime, "DispatcherRegistry")
+        assert hasattr(runtime, "RegistryDispatcher")
         assert hasattr(runtime, "ProtocolMessageDispatcher")
         assert hasattr(runtime, "MessageDispatchEngine")
 
@@ -135,12 +135,12 @@ class TestImportOrderIndependence:
 
         assert MessageDispatchEngine is not None
 
-    def test_import_dispatcher_registry_first(self) -> None:
-        """Test that registry_dispatcher can be imported directly."""
+    def test_import_registry_dispatcher_first(self) -> None:
+        """Test that RegistryDispatcher can be imported directly."""
         from omnibase_infra.runtime.registry_dispatcher import (
-            DispatcherRegistry,
             ProtocolMessageDispatcher,
+            RegistryDispatcher,
         )
 
-        assert DispatcherRegistry is not None
+        assert RegistryDispatcher is not None
         assert ProtocolMessageDispatcher is not None

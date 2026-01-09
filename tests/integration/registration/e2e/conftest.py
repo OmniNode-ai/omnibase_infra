@@ -82,7 +82,18 @@ elif _project_env_file.exists():
     # Remote infrastructure mode - use project .env
     load_dotenv(_project_env_file)
 
-# Import infrastructure configuration
+# =============================================================================
+# Cross-Module Imports
+# =============================================================================
+# From tests/infrastructure_config.py:
+#   - DEFAULT_CONSUL_PORT: Standard Consul port on infrastructure server (28500)
+#   - DEFAULT_POSTGRES_PORT: Standard PostgreSQL port on infrastructure server (5436)
+#
+# This configuration module centralizes infrastructure endpoints to:
+#   - Enable environment variable overrides for different deployments
+#   - Provide graceful skip behavior when infrastructure is unavailable
+#   - Document the ONEX development infrastructure server (192.168.86.200)
+# =============================================================================
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
@@ -185,7 +196,17 @@ def _check_consul_reachable() -> bool:
 CONSUL_AVAILABLE = _check_consul_reachable()
 
 
-# Import shared service registry availability check
+# =============================================================================
+# Cross-Module Import: Service Registry Availability
+# =============================================================================
+# From tests/conftest.py:
+#   - check_service_registry_available: Function that checks if ServiceRegistry
+#     is available in ModelONEXContainer. Returns False when omnibase_core 0.6.x
+#     has a circular import issue causing service_registry to be None.
+#
+# This check enables graceful test skipping when ServiceRegistry is unavailable,
+# which is a known issue in omnibase_core 0.6.2 due to circular imports.
+# =============================================================================
 from tests.conftest import check_service_registry_available
 
 SERVICE_REGISTRY_AVAILABLE = check_service_registry_available()
@@ -663,7 +684,7 @@ def unique_correlation_id() -> UUID:
 async def introspectable_test_node(
     real_kafka_event_bus: KafkaEventBus,
     unique_node_id: UUID,
-) -> IntrospectableTestNode:
+) -> ProtocolIntrospectableTestNode:
     """Test node implementing MixinNodeIntrospection for E2E testing.
 
     This fixture creates a test node that can publish introspection
@@ -772,10 +793,6 @@ class ProtocolIntrospectableTestNode(Protocol):
     async def handle_request(self, request: object) -> object:
         """Handle a sample request."""
         ...
-
-
-# Alias for backwards compatibility with existing test type annotations
-IntrospectableTestNode = ProtocolIntrospectableTestNode
 
 
 # =============================================================================
@@ -1027,7 +1044,6 @@ __all__ = [
     "unique_correlation_id",
     "introspectable_test_node",
     "ProtocolIntrospectableTestNode",
-    "IntrospectableTestNode",  # Alias for ProtocolIntrospectableTestNode
     # Event factory fixtures
     "introspection_event_factory",
     "runtime_tick_factory",
