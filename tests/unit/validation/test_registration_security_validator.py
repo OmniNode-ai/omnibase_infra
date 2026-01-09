@@ -826,11 +826,3 @@ class TestSecurityRuleIdValues:
         ]
 
         assert len(rule_ids) == len(set(rule_ids)), "Duplicate rule IDs found"
-
-
-# Marker for TDD RED phase - expected to fail
-pytestmark = pytest.mark.xfail(
-    reason="TDD RED phase: Validator and models not yet implemented (OMN-1098)",
-    raises=ImportError,
-    strict=False,  # Allow tests to pass once implemented
-)

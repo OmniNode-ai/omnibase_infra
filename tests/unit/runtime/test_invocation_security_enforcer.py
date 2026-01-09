@@ -67,7 +67,7 @@ class TestDomainAccessEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=["api.allowed.com", "storage.allowed.com"],
+            allowed_domains=("api.allowed.com", "storage.allowed.com"),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -89,7 +89,7 @@ class TestDomainAccessEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=["api.allowed.com", "storage.allowed.com"],
+            allowed_domains=("api.allowed.com", "storage.allowed.com"),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -108,7 +108,7 @@ class TestDomainAccessEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=["*.example.com", "api.specific.com"],
+            allowed_domains=("*.example.com", "api.specific.com"),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -136,7 +136,7 @@ class TestDomainAccessEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=[],  # Empty - no domains allowed
+            allowed_domains=(),  # Empty - no domains allowed
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -157,7 +157,7 @@ class TestDomainAccessEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=["example.com"],  # Only root domain
+            allowed_domains=("example.com",),  # Only root domain
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -184,7 +184,7 @@ class TestDomainAccessEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=["*.example.com"],
+            allowed_domains=("*.example.com",),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -225,7 +225,7 @@ class TestSecretScopeAccessEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset({"api-keys"}),  # Only api-keys declared
-            allowed_domains=[],
+            allowed_domains=(),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -243,7 +243,7 @@ class TestSecretScopeAccessEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset({"api-keys", "database-creds"}),
-            allowed_domains=[],
+            allowed_domains=(),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -262,7 +262,7 @@ class TestSecretScopeAccessEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),  # No secrets declared
-            allowed_domains=[],
+            allowed_domains=(),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -283,7 +283,7 @@ class TestSecretScopeAccessEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset({"api-keys"}),
-            allowed_domains=[],
+            allowed_domains=(),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -317,7 +317,7 @@ class TestClassificationConstraintEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=[],
+            allowed_domains=(),
             data_classification=EnumDataClassification.INTERNAL,  # Handler level
         )
 
@@ -343,7 +343,7 @@ class TestClassificationConstraintEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=[],
+            allowed_domains=(),
             data_classification=EnumDataClassification.CONFIDENTIAL,
         )
 
@@ -366,7 +366,7 @@ class TestClassificationConstraintEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=[],
+            allowed_domains=(),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -395,7 +395,7 @@ class TestClassificationConstraintEnforcement:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=[],
+            allowed_domains=(),
             data_classification=EnumDataClassification.PUBLIC,
         )
 
@@ -425,7 +425,7 @@ class TestEnforcerIntegration:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset({"api-keys"}),
-            allowed_domains=["api.example.com"],
+            allowed_domains=("api.example.com",),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -450,7 +450,7 @@ class TestEnforcerIntegration:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=[],
+            allowed_domains=(),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -474,7 +474,7 @@ class TestEnforcerIntegration:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=[],
+            allowed_domains=(),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -496,7 +496,7 @@ class TestEnforcerIntegration:
         # ARRANGE - Restrictive but valid policy
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset({"api-keys", "cache-config"}),
-            allowed_domains=["api.internal.com", "*.cache.internal.com"],
+            allowed_domains=("api.internal.com", "*.cache.internal.com"),
             data_classification=EnumDataClassification.CONFIDENTIAL,
         )
 
@@ -561,7 +561,7 @@ class TestSecurityViolationErrorAttributes:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=[],
+            allowed_domains=(),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -608,7 +608,7 @@ class TestSecurityViolationErrorAttributes:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=[],
+            allowed_domains=(),
             data_classification=EnumDataClassification.INTERNAL,
         )
 

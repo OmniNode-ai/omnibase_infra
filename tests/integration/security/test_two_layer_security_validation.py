@@ -18,6 +18,8 @@ Test Categories:
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from omnibase_core.enums import EnumDataClassification
 
@@ -103,7 +105,7 @@ class TestTwoLayerSecurityFlow:
         assert len(errors) == 0  # Registration successful
 
         # Now handler can be instantiated
-        enforcer = InvocationSecurityEnforcer(handler_policy)
+        enforcer = InvocationSecurityEnforcer(handler_policy, correlation_id=uuid4())
 
         # ASSERT - Compliant operations succeed
         enforcer.check_domain_access("api.example.com")
@@ -135,7 +137,7 @@ class TestTwoLayerSecurityFlow:
         assert len(errors) == 0
 
         # Handler instantiated
-        enforcer = InvocationSecurityEnforcer(handler_policy)
+        enforcer = InvocationSecurityEnforcer(handler_policy, correlation_id=uuid4())
 
         # ASSERT - Runtime violations are caught
         # Handler tries to access domain it didn't declare
@@ -191,7 +193,7 @@ class TestDefenseInDepthIntegration:
         assert len(errors) == 0
 
         # LAYER 2: Invocation enforcement
-        enforcer = InvocationSecurityEnforcer(handler_policy)
+        enforcer = InvocationSecurityEnforcer(handler_policy, correlation_id=uuid4())
 
         # Processing at or below declared level: OK
         enforcer.check_classification_constraint(EnumDataClassification.PUBLIC)
@@ -327,7 +329,7 @@ class TestSharedClassificationLevels:
         assert len(errors) == 0  # Should pass
 
         # Invocation: processing CONFIDENTIAL data
-        enforcer = InvocationSecurityEnforcer(handler_policy)
+        enforcer = InvocationSecurityEnforcer(handler_policy, correlation_id=uuid4())
         enforcer.check_classification_constraint(
             EnumDataClassification.CONFIDENTIAL
         )  # Should pass

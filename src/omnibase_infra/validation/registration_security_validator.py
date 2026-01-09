@@ -90,35 +90,44 @@ class RegistrationSecurityValidator:
     def validate(
         self,
         handler_policy: ModelHandlerSecurityPolicy,
+        handler_identity: ModelHandlerIdentifier | None = None,
     ) -> list[ModelHandlerValidationError]:
         """Validate handler security policy against environment constraints.
 
         Args:
             handler_policy: Handler-declared security policy.
+            handler_identity: Optional handler identity for error context.
+                Defaults to "unknown" if not provided.
 
         Returns:
             List of validation errors (empty if valid).
         """
-        return _validate_policies(handler_policy, self._environment_policy)
+        return _validate_policies(
+            handler_policy, self._environment_policy, handler_identity
+        )
 
     def is_valid(
         self,
         handler_policy: ModelHandlerSecurityPolicy,
+        handler_identity: ModelHandlerIdentifier | None = None,
     ) -> bool:
         """Check if handler security policy is valid for this environment.
 
         Args:
             handler_policy: Handler-declared security policy.
+            handler_identity: Optional handler identity for error context.
+                Defaults to "unknown" if not provided.
 
         Returns:
             True if valid (no errors), False otherwise.
         """
-        return len(self.validate(handler_policy)) == 0
+        return len(self.validate(handler_policy, handler_identity)) == 0
 
 
 def _validate_policies(
     handler_policy: ModelHandlerSecurityPolicy,
     env_policy: ModelEnvironmentPolicy,
+    handler_identity: ModelHandlerIdentifier | None = None,
 ) -> list[ModelHandlerValidationError]:
     """Core validation logic for handler security policy against environment.
 
@@ -128,21 +137,27 @@ def _validate_policies(
     Args:
         handler_policy: Handler-declared security policy.
         env_policy: Environment-level security constraints.
+        handler_identity: Optional handler identity for error context.
+            Defaults to "unknown" if not provided.
 
     Returns:
         List of validation errors (empty if valid).
     """
+    # Use default "unknown" if no identity provided
+    identity = handler_identity or ModelHandlerIdentifier.from_handler_id("unknown")
     errors: list[ModelHandlerValidationError] = []
 
     # 1. Check secret scopes (SECURITY-300)
-    errors.extend(_validate_secret_scopes(handler_policy, env_policy))
+    errors.extend(_validate_secret_scopes(handler_policy, env_policy, identity))
 
     # 2. Check data classification (SECURITY-301)
-    errors.extend(_validate_classification(handler_policy, env_policy))
+    errors.extend(_validate_classification(handler_policy, env_policy, identity))
 
     # 3. Check adapter constraints (SECURITY-302, 303, 304)
     if handler_policy.is_adapter:
-        errors.extend(_validate_adapter_constraints(handler_policy, env_policy))
+        errors.extend(
+            _validate_adapter_constraints(handler_policy, env_policy, identity)
+        )
 
     return errors
 
@@ -150,6 +165,7 @@ def _validate_policies(
 def _validate_secret_scopes(
     handler_policy: ModelHandlerSecurityPolicy,
     env_policy: ModelEnvironmentPolicy,
+    handler_identity: ModelHandlerIdentifier,
 ) -> list[ModelHandlerValidationError]:
     """Validate secret scopes against environment permissions.
 
@@ -158,6 +174,7 @@ def _validate_secret_scopes(
     Args:
         handler_policy: Handler-declared security policy.
         env_policy: Environment-level security constraints.
+        handler_identity: Handler identity for error context.
 
     Returns:
         List of errors for unpermitted secret scopes.
@@ -179,7 +196,7 @@ def _validate_secret_scopes(
                 f"Remove the '{scope}' secret scope from handler policy "
                 "or update environment policy to permit this scope"
             ),
-            handler_identity=ModelHandlerIdentifier.from_handler_id("unknown"),
+            handler_identity=handler_identity,
         )
         errors.append(error)
 
@@ -189,6 +206,7 @@ def _validate_secret_scopes(
 def _validate_classification(
     handler_policy: ModelHandlerSecurityPolicy,
     env_policy: ModelEnvironmentPolicy,
+    handler_identity: ModelHandlerIdentifier,
 ) -> list[ModelHandlerValidationError]:
     """Validate data classification against environment maximum.
 
@@ -197,6 +215,7 @@ def _validate_classification(
     Args:
         handler_policy: Handler-declared security policy.
         env_policy: Environment-level security constraints.
+        handler_identity: Handler identity for error context.
 
     Returns:
         List containing error if classification exceeds max, else empty.
@@ -221,7 +240,7 @@ def _validate_classification(
                 f"'{env_policy.max_data_classification.value}' or below, "
                 "or deploy to an environment with higher classification limits"
             ),
-            handler_identity=ModelHandlerIdentifier.from_handler_id("unknown"),
+            handler_identity=handler_identity,
         )
         errors.append(error)
 
@@ -231,6 +250,7 @@ def _validate_classification(
 def _validate_adapter_constraints(
     handler_policy: ModelHandlerSecurityPolicy,
     env_policy: ModelEnvironmentPolicy,
+    handler_identity: ModelHandlerIdentifier,
 ) -> list[ModelHandlerValidationError]:
     """Validate adapter-specific security constraints.
 
@@ -243,6 +263,7 @@ def _validate_adapter_constraints(
     Args:
         handler_policy: Handler-declared security policy (must have is_adapter=True).
         env_policy: Environment-level security constraints.
+        handler_identity: Handler identity for error context.
 
     Returns:
         List of errors for adapter constraint violations.
@@ -263,7 +284,7 @@ def _validate_adapter_constraints(
                 "platform secret management (Vault) instead, or enable "
                 "adapter_secrets_override_allowed in environment policy"
             ),
-            handler_identity=ModelHandlerIdentifier.from_handler_id("unknown"),
+            handler_identity=handler_identity,
         )
         errors.append(error)
 
@@ -280,7 +301,7 @@ def _validate_adapter_constraints(
                 "Set handler_type_category=EnumHandlerTypeCategory.EFFECT for adapter handlers, "
                 "or remove is_adapter=True if this is not an adapter"
             ),
-            handler_identity=ModelHandlerIdentifier.from_handler_id("unknown"),
+            handler_identity=handler_identity,
         )
         errors.append(error)
     elif handler_policy.handler_type_category != EnumHandlerTypeCategory.EFFECT:
@@ -294,7 +315,7 @@ def _validate_adapter_constraints(
                 "Change handler_type_category to EFFECT for adapter handlers, "
                 "or remove is_adapter=True if this is not an adapter"
             ),
-            handler_identity=ModelHandlerIdentifier.from_handler_id("unknown"),
+            handler_identity=handler_identity,
         )
         errors.append(error)
 
@@ -313,7 +334,7 @@ def _validate_adapter_constraints(
                 "Add allowed_domains to handler policy specifying which "
                 "external domains the adapter may communicate with"
             ),
-            handler_identity=ModelHandlerIdentifier.from_handler_id("unknown"),
+            handler_identity=handler_identity,
         )
         errors.append(error)
 
@@ -323,6 +344,7 @@ def _validate_adapter_constraints(
 def validate_handler_registration(
     handler_policy: ModelHandlerSecurityPolicy,
     env_policy: ModelEnvironmentPolicy,
+    handler_identity: ModelHandlerIdentifier | None = None,
 ) -> list[ModelHandlerValidationError]:
     """Validate handler security policy against environment constraints.
 
@@ -333,6 +355,8 @@ def validate_handler_registration(
     Args:
         handler_policy: Handler-declared security policy.
         env_policy: Environment-level security constraints.
+        handler_identity: Optional handler identity for error context.
+            Defaults to "unknown" if not provided.
 
     Returns:
         List of validation errors (empty if valid).
@@ -358,7 +382,7 @@ def validate_handler_registration(
         >>> len(errors)  # 1 error for unpermitted secret scope
         1
     """
-    return _validate_policies(handler_policy, env_policy)
+    return _validate_policies(handler_policy, env_policy, handler_identity)
 
 
 __all__ = [
