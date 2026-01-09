@@ -126,7 +126,7 @@ class ServiceCapabilityQuery:
         self,
         capability: str,
         contract_type: str | None = None,
-        state: EnumRegistrationState = EnumRegistrationState.ACTIVE,
+        state: EnumRegistrationState | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find nodes that provide a specific capability.
 
@@ -138,7 +138,10 @@ class ServiceCapabilityQuery:
                 "kafka.consumer", "consul.registration").
             contract_type: Optional filter by contract type ("effect", "compute",
                 "reducer", "orchestrator").
-            state: Filter by registration state (default: ACTIVE).
+            state: Registration state filter. When None (default), filters to
+                EnumRegistrationState.ACTIVE to return only actively registered
+                nodes. Pass an explicit EnumRegistrationState value to query
+                nodes in other states (e.g., PENDING, INACTIVE).
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -158,6 +161,7 @@ class ServiceCapabilityQuery:
             >>> for node in nodes:
             ...     print(f"Found: {node.entity_id} - {node.node_type}")
         """
+        state = state or EnumRegistrationState.ACTIVE
         logger.debug(
             "Finding nodes by capability",
             extra={
@@ -191,7 +195,7 @@ class ServiceCapabilityQuery:
         self,
         intent_type: str,
         contract_type: str = "effect",
-        state: EnumRegistrationState = EnumRegistrationState.ACTIVE,
+        state: EnumRegistrationState | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find effect nodes that handle a specific intent type.
 
@@ -203,7 +207,10 @@ class ServiceCapabilityQuery:
                 "consul.register", "kafka.publish").
             contract_type: Filter by contract type (default: "effect").
                 Intents are typically handled by effect nodes.
-            state: Filter by registration state (default: ACTIVE).
+            state: Registration state filter. When None (default), filters to
+                EnumRegistrationState.ACTIVE to return only actively registered
+                nodes. Pass an explicit EnumRegistrationState value to query
+                nodes in other states (e.g., PENDING, INACTIVE).
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -223,6 +230,7 @@ class ServiceCapabilityQuery:
             >>> for handler in handlers:
             ...     print(f"Can handle postgres.query: {handler.entity_id}")
         """
+        state = state or EnumRegistrationState.ACTIVE
         logger.debug(
             "Finding nodes by intent type",
             extra={
@@ -256,7 +264,7 @@ class ServiceCapabilityQuery:
         self,
         protocol: str,
         contract_type: str | None = None,
-        state: EnumRegistrationState = EnumRegistrationState.ACTIVE,
+        state: EnumRegistrationState | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find nodes implementing a specific protocol.
 
@@ -268,7 +276,10 @@ class ServiceCapabilityQuery:
                 "ProtocolReducer", "ProtocolDatabaseAdapter").
             contract_type: Optional filter by contract type ("effect", "compute",
                 "reducer", "orchestrator").
-            state: Filter by registration state (default: ACTIVE).
+            state: Registration state filter. When None (default), filters to
+                EnumRegistrationState.ACTIVE to return only actively registered
+                nodes. Pass an explicit EnumRegistrationState value to query
+                nodes in other states (e.g., PENDING, INACTIVE).
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -286,6 +297,7 @@ class ServiceCapabilityQuery:
             ... )
             >>> print(f"Found {len(adapters)} event publishers")
         """
+        state = state or EnumRegistrationState.ACTIVE
         logger.debug(
             "Finding nodes by protocol",
             extra={

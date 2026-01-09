@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ModelDependencySpec(BaseModel):
@@ -151,6 +151,24 @@ class ModelDependencySpec(BaseModel):
         max_length=1024,
         description="Human-readable description of the dependency",
     )
+
+    @model_validator(mode="after")
+    def validate_has_filter(self) -> ModelDependencySpec:
+        """Validate that at least one discovery filter is specified.
+
+        A dependency spec must have at least one of: capability, intent_types, or protocol.
+        Without any filter, the dependency cannot be resolved.
+
+        Raises:
+            ValueError: If no discovery filter is specified.
+        """
+        if not self.has_any_filter():
+            raise ValueError(
+                f"Dependency spec '{self.name}' must have at least one discovery filter: "
+                "capability, intent_types, or protocol. "
+                "Cannot resolve a dependency without any filter specified."
+            )
+        return self
 
     def has_capability_filter(self) -> bool:
         """Check if capability-based discovery is specified.

@@ -6,12 +6,15 @@ Provides selection logic for choosing a node from multiple candidates
 that match capability-based discovery criteria.
 
 Thread Safety:
-    This service uses an asyncio.Lock to protect round-robin state access.
-    All methods that access the state are async and properly synchronized.
+    Coroutine Safety (Single Event Loop):
+        This service uses an asyncio.Lock to protect round-robin state access.
+        All methods that access the state are async and properly synchronized.
+        Safe for concurrent use from multiple coroutines within the SAME event loop.
 
-    Note: For thread-safe usage with concurrent coroutines, either create a
-    new ServiceNodeSelector instance per call, or ensure proper external
-    synchronization when sharing instances across different event loops.
+    Multi-Threading (Multiple Event Loops):
+        NOT thread-safe across multiple event loops or threads.
+        Each event loop should have its own ServiceNodeSelector instance.
+        Do not share instances between threads.
 
 Related Tickets:
     - OMN-1135: ServiceCapabilityQuery for capability-based discovery
@@ -44,9 +47,10 @@ class ServiceNodeSelector:
     When multiple nodes match a capability query, this selector chooses one
     based on the configured strategy.
 
-    Note: For thread-safe usage with concurrent coroutines, either create a
-    new ServiceNodeSelector instance per call, or ensure proper external
-    synchronization when sharing instances across different event loops.
+    Note:
+        Coroutine-safe within a single event loop (uses asyncio.Lock).
+        NOT thread-safe across multiple event loops - create separate instances
+        per event loop or thread.
 
     Strategies:
         - FIRST: Return first candidate (deterministic)
@@ -132,7 +136,8 @@ class ServiceNodeSelector:
             return await self._select_round_robin(candidates, selection_key)
         elif strategy == EnumSelectionStrategy.LEAST_LOADED:
             raise NotImplementedError(
-                "LEAST_LOADED selection strategy is not yet implemented. "
+                f"LEAST_LOADED selection strategy is not yet implemented "
+                f"(selection_key={selection_key!r}). "
                 "Use FIRST, RANDOM, or ROUND_ROBIN instead."
             )
         else:
