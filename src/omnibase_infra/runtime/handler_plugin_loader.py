@@ -262,9 +262,15 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             )
 
         # Extract required fields from contract
-        handler_name = self._extract_handler_name(raw_data, contract_path)
-        handler_class_path = self._extract_handler_class(raw_data, contract_path)
-        handler_type = self._extract_handler_type(raw_data, contract_path)
+        handler_name = self._extract_handler_name(
+            raw_data, contract_path, correlation_id
+        )
+        handler_class_path = self._extract_handler_class(
+            raw_data, contract_path, correlation_id
+        )
+        handler_type = self._extract_handler_type(
+            raw_data, contract_path, correlation_id
+        )
         capability_tags = self._extract_capability_tags(raw_data)
 
         # Import and validate handler class
@@ -704,12 +710,14 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         self,
         raw_data: dict[str, object],
         contract_path: Path,
+        correlation_id: str | None = None,
     ) -> str:
         """Extract handler name from contract data.
 
         Args:
             raw_data: Parsed YAML contract data.
             contract_path: Path to contract file (for error context).
+            correlation_id: Optional correlation ID for error traceability.
 
         Returns:
             Handler name string.
@@ -724,6 +732,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="extract_handler_name",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "Contract missing required field: 'handler_name' or 'name'",
@@ -736,6 +745,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="extract_handler_name",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "Contract field 'handler_name' must be a non-empty string",
@@ -750,12 +760,14 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         self,
         raw_data: dict[str, object],
         contract_path: Path,
+        correlation_id: str | None = None,
     ) -> str:
         """Extract handler class path from contract data.
 
         Args:
             raw_data: Parsed YAML contract data.
             contract_path: Path to contract file (for error context).
+            correlation_id: Optional correlation ID for error traceability.
 
         Returns:
             Fully qualified handler class path.
@@ -769,6 +781,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="extract_handler_class",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "Contract missing required field: 'handler_class'",
@@ -781,6 +794,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="extract_handler_class",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "Contract field 'handler_class' must be a non-empty string",
@@ -795,12 +809,14 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         self,
         raw_data: dict[str, object],
         contract_path: Path,
+        correlation_id: str | None = None,
     ) -> EnumHandlerTypeCategory:
         """Extract handler type category from contract data.
 
         Args:
             raw_data: Parsed YAML contract data.
             contract_path: Path to contract file (for error context).
+            correlation_id: Optional correlation ID for error traceability.
 
         Returns:
             Handler type category enum value.
@@ -814,6 +830,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="extract_handler_type",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "Contract missing required field: 'handler_type'",
@@ -826,6 +843,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="extract_handler_type",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "Contract field 'handler_type' must be a non-empty string",
@@ -840,6 +858,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="extract_handler_type",
+                correlation_id=correlation_id,
             )
             valid_types = ", ".join(_HANDLER_TYPE_CATEGORY_MAP.keys())
             raise ProtocolConfigurationError(

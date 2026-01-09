@@ -3,6 +3,14 @@
 """Tests for HandlerPluginLoader validation logic.
 
 Part of OMN-1132: Handler Plugin Loader implementation.
+
+Design Note (PR #134 review):
+    Contract file creation is intentionally inline rather than extracted to a helper.
+    Each test requires slightly different YAML content (missing fields, invalid values,
+    whitespace-only values, etc.), and the 2-line creation pattern (path + write_text)
+    is clear and compact. Inline YAML makes each test's validation target immediately
+    visible without requiring readers to trace through helper abstractions.
+    pytest's tmp_path fixture handles cleanup automatically.
 """
 
 from __future__ import annotations
