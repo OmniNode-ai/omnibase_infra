@@ -428,6 +428,12 @@ class RuleNoHandlerPublishing:
 
         Returns:
             ModelRuleCheckResult indicating pass/fail with details.
+
+        Note:
+            When multiple violations are found, only the first violation's
+            message and location are returned. The total count is available
+            in ``details["total_violations"]``. This fail-fast behavior is
+            intentional - fix the first violation and re-run to find others.
         """
         from omnibase_infra.nodes.architecture_validator.models import (
             ModelRuleCheckResult,
