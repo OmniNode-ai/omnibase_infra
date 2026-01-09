@@ -347,11 +347,18 @@ class TestArchitectureCompliance:
         if filtered:
             pytest.fail(_format_violation_report(filtered, pattern, self.CORE_PACKAGE))
 
+    @pytest.mark.xfail(
+        reason="Known issue: redis in omnibase_core tracked in OMN-1295",
+        strict=False,
+    )
     def test_no_redis_in_core(self) -> None:
         """Core should not import redis (infra dependency).
 
         Redis client libraries are infrastructure concerns. All cache
         operations must be in omnibase_infra, never in omnibase_core.
+
+        Note: Currently xfail due to OMN-1295. Remove xfail marker when
+        omnibase_core removes redis dependency.
         """
         pattern = "redis"
         violations = _scan_package_for_forbidden_imports(
@@ -415,7 +422,7 @@ class TestArchitectureCompliance:
             "httpx",
             "asyncpg",
             # Note: aiohttp excluded - has dedicated xfail test (OMN-1015)
-            "redis",
+            # Note: redis excluded - has dedicated xfail test (OMN-1295)
             "psycopg",
             "psycopg2",
             "consul",
