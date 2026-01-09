@@ -13,6 +13,8 @@ from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.consul.model_payload_consul import (
     ModelPayloadConsul,
+)
+from omnibase_infra.handlers.models.consul.registry_payload_consul import (
     RegistryPayloadConsul,
 )
 

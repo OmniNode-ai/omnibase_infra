@@ -3,12 +3,12 @@
 """
 Dispatcher Registry for Message Dispatch Engine.
 
-This module provides the DispatcherRegistry class and ProtocolMessageDispatcher protocol
+This module provides the RegistryDispatcher class and ProtocolMessageDispatcher protocol
 for managing dispatcher registrations in the dispatch engine. Dispatchers are the execution
 units that process messages after routing.
 
 Design Pattern:
-    The DispatcherRegistry follows the "freeze after init" pattern (like EnvelopeRouter):
+    The RegistryDispatcher follows the "freeze after init" pattern (like EnvelopeRouter):
     1. Registration phase: Register dispatchers during startup (single-threaded)
     2. Freeze: Call freeze() to prevent further modifications
     3. Execution phase: Thread-safe read access for dispatcher lookup
@@ -35,7 +35,7 @@ Related:
 from __future__ import annotations
 
 __all__ = [
-    "DispatcherRegistry",
+    "RegistryDispatcher",
     "ProtocolMessageDispatcher",
 ]
 
@@ -80,11 +80,11 @@ class DispatchEntryInternal:
         self.registration_id = registration_id
 
 
-class DispatcherRegistry:
+class RegistryDispatcher:
     """
     Thread-safe registry for message dispatchers with freeze pattern.
 
-    The DispatcherRegistry manages dispatcher registrations for the dispatch engine.
+    The RegistryDispatcher manages dispatcher registrations for the dispatch engine.
     It stores dispatchers by category and message type, validates execution shapes
     at registration time, and provides efficient lookup for dispatching.
 
@@ -112,10 +112,10 @@ class DispatcherRegistry:
     Example:
         .. code-block:: python
 
-            from omnibase_core.runtime import DispatcherRegistry
+            from omnibase_core.runtime import RegistryDispatcher
 
             # 1. Create registry and register dispatchers
-            registry = DispatcherRegistry()
+            registry = RegistryDispatcher()
             registry.register_dispatcher(user_event_dispatcher)
             registry.register_dispatcher(order_command_dispatcher)
 
@@ -146,7 +146,7 @@ class DispatcherRegistry:
 
     def __init__(self) -> None:
         """
-        Initialize DispatcherRegistry with empty registries.
+        Initialize RegistryDispatcher with empty registries.
 
         Creates empty dispatcher registries. Dispatchers must be registered before
         dispatch. Call ``freeze()`` after registration to prevent further
@@ -190,7 +190,7 @@ class DispatcherRegistry:
         Example:
             .. code-block:: python
 
-                registry = DispatcherRegistry()
+                registry = RegistryDispatcher()
 
                 # Register with dispatcher's message_types
                 registry.register_dispatcher(user_event_dispatcher)
@@ -236,7 +236,7 @@ class DispatcherRegistry:
         with self._registration_lock:
             if self._frozen:
                 raise ModelOnexError(
-                    message="Cannot register dispatcher: DispatcherRegistry is frozen. "
+                    message="Cannot register dispatcher: RegistryDispatcher is frozen. "
                     "Registration is not allowed after freeze() has been called.",
                     error_code=EnumCoreErrorCode.INVALID_STATE,
                 )
@@ -278,7 +278,7 @@ class DispatcherRegistry:
         Example:
             .. code-block:: python
 
-                registry = DispatcherRegistry()
+                registry = RegistryDispatcher()
                 registry.register_dispatcher(dispatcher)
 
                 # Remove the dispatcher
@@ -297,7 +297,7 @@ class DispatcherRegistry:
         with self._registration_lock:
             if self._frozen:
                 raise ModelOnexError(
-                    message="Cannot unregister dispatcher: DispatcherRegistry is frozen. "
+                    message="Cannot unregister dispatcher: RegistryDispatcher is frozen. "
                     "Modification is not allowed after freeze() has been called.",
                     error_code=EnumCoreErrorCode.INVALID_STATE,
                 )
@@ -343,7 +343,7 @@ class DispatcherRegistry:
         Example:
             .. code-block:: python
 
-                registry = DispatcherRegistry()
+                registry = RegistryDispatcher()
                 registry.register_dispatcher(user_dispatcher)
                 registry.freeze()
 
@@ -405,7 +405,7 @@ class DispatcherRegistry:
         Example:
             .. code-block:: python
 
-                registry = DispatcherRegistry()
+                registry = RegistryDispatcher()
                 registry.register_dispatcher(my_dispatcher)
                 registry.freeze()
 
@@ -442,7 +442,7 @@ class DispatcherRegistry:
         Example:
             .. code-block:: python
 
-                registry = DispatcherRegistry()
+                registry = RegistryDispatcher()
                 registry.register_dispatcher(dispatcher)
 
                 # Freeze to prevent modifications
@@ -477,7 +477,7 @@ class DispatcherRegistry:
         Example:
             .. code-block:: python
 
-                registry = DispatcherRegistry()
+                registry = RegistryDispatcher()
                 assert not registry.is_frozen
 
                 registry.freeze()
@@ -498,7 +498,7 @@ class DispatcherRegistry:
         Example:
             .. code-block:: python
 
-                registry = DispatcherRegistry()
+                registry = RegistryDispatcher()
                 assert registry.dispatcher_count == 0
 
                 registry.register_dispatcher(dispatcher)
@@ -649,9 +649,9 @@ class DispatcherRegistry:
         Human-readable string representation.
 
         Returns:
-            str: Format "DispatcherRegistry[dispatchers=N, frozen=bool]"
+            str: Format "RegistryDispatcher[dispatchers=N, frozen=bool]"
         """
-        return f"DispatcherRegistry[dispatchers={len(self._dispatchers_by_id)}, frozen={self._frozen}]"
+        return f"RegistryDispatcher[dispatchers={len(self._dispatchers_by_id)}, frozen={self._frozen}]"
 
     def __repr__(self) -> str:
         """
@@ -675,6 +675,6 @@ class DispatcherRegistry:
             category_repr = repr([c.value for c in categories])
 
         return (
-            f"DispatcherRegistry(dispatchers={dispatcher_repr}, "
+            f"RegistryDispatcher(dispatchers={dispatcher_repr}, "
             f"categories={category_repr}, frozen={self._frozen})"
         )

@@ -71,9 +71,15 @@ class MockSyncPolicyV2:
 class MockHandler:
     """Generic mock handler for testing."""
 
+    def execute(self) -> None:
+        """Mock execute method for ProtocolHandler compliance."""
+
 
 class MockEventBus:
     """Generic mock event bus for testing."""
+
+    async def publish_envelope(self, envelope: object, topic: str) -> None:
+        """Mock publish_envelope method for ProtocolEventBus compliance."""
 
 
 class MockComputePlugin:
@@ -779,8 +785,12 @@ class TestHandlerRegistryConcurrentOperations:
                 errors.append(e)
 
         # Use unique protocol types to avoid overwrite conflicts
+        def handle(self) -> None:
+            pass
+
         handlers_with_unique_keys = [
-            (f"custom-{i}", type(f"MockHandler{i}", (), {})) for i in range(50)
+            (f"custom-{i}", type(f"MockHandler{i}", (), {"handle": handle}))
+            for i in range(50)
         ]
 
         threads = [
@@ -934,7 +944,7 @@ class TestEventBusRegistryConcurrentOperations:
 
         # Exactly one registration should succeed
         assert success_count == 1, f"Expected 1 success, got {success_count}"
-        # Remaining should have raised RuntimeHostError
+        # Remaining should have raised EventBusRegistryError
         assert len(errors) == num_threads - 1
 
     def test_concurrent_is_registered_during_registration(

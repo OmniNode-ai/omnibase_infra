@@ -8,16 +8,16 @@ based on the `kind` field in intent models.
 
 IMPORTANT - Union Sync Requirements (OMN-1007):
     This module defines explicit union types that MUST stay in sync with the
-    IntentRegistry in model_registry_intent.py. There are two parallel systems:
+    RegistryIntent in model_registry_intent.py. There are two parallel systems:
 
-    1. **IntentRegistry** (dynamic): Decorator-based registration for runtime
+    1. **RegistryIntent** (dynamic): Decorator-based registration for runtime
        type resolution. Used by ModelReducerExecutionResult for deserialization.
 
     2. **ModelRegistrationIntent** (static): Annotated union for Pydantic field
        validation. Used by ProtocolEffect.execute_intent() and similar APIs.
 
     When adding a new intent type, you MUST update BOTH:
-    - Register with @IntentRegistry.register("kind") on the model class
+    - Register with @RegistryIntent.register("kind") on the model class
     - Add the model to ModelRegistrationIntent union below
 
     Use validate_union_registry_sync() in tests to verify consistency.
@@ -35,7 +35,7 @@ Design Note:
     type narrowing in effect node handlers.
 
 Related:
-    - model_registry_intent.py: IntentRegistry and ModelRegistryIntent base
+    - model_registry_intent.py: RegistryIntent and ModelRegistryIntent base
     - protocols.py: ProtocolRegistrationIntent for duck-typed signatures
     - OMN-1007: Union reduction refactoring
 """
@@ -59,7 +59,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_u
     ModelPostgresUpsertIntent,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_intent import (
-    IntentRegistry,
+    RegistryIntent,
 )
 
 # Type alias for intent payloads
@@ -68,17 +68,17 @@ IntentPayload = ModelConsulIntentPayload | ModelPostgresIntentPayload
 # =============================================================================
 # Discriminated Union Definitions
 #
-# SYNC REQUIREMENT: These unions MUST stay in sync with IntentRegistry.
+# SYNC REQUIREMENT: These unions MUST stay in sync with RegistryIntent.
 # When adding a new intent type:
 #   1. Create model inheriting from ModelRegistryIntent
-#   2. Register with @IntentRegistry.register("kind")
+#   2. Register with @RegistryIntent.register("kind")
 #   3. Add model to the union below
 #   4. Run validate_union_registry_sync() to verify
 # =============================================================================
 
 # Discriminated union of all intent types using Annotated pattern
 # This enables type narrowing based on the `kind` field
-# SYNC: Must include all types registered in IntentRegistry
+# SYNC: Must include all types registered in RegistryIntent
 ModelRegistrationIntent = Annotated[
     ModelConsulRegistrationIntent | ModelPostgresUpsertIntent,
     Field(discriminator="kind"),
@@ -93,11 +93,11 @@ _UNION_INTENT_TYPES: tuple[type, ...] = (
 
 
 def validate_union_registry_sync() -> tuple[bool, list[str]]:
-    """Validate that ModelRegistrationIntent union matches IntentRegistry.
+    """Validate that ModelRegistrationIntent union matches RegistryIntent.
 
     This function checks that:
-    1. All types in the union are registered in IntentRegistry
-    2. All types in IntentRegistry are included in the union
+    1. All types in the union are registered in RegistryIntent
+    2. All types in RegistryIntent are included in the union
 
     Use this in tests to catch sync issues early.
 
@@ -115,7 +115,7 @@ def validate_union_registry_sync() -> tuple[bool, list[str]]:
         Created as part of OMN-1007 union sync fix.
     """
     errors: list[str] = []
-    registry_types = IntentRegistry.get_all_types()
+    registry_types = RegistryIntent.get_all_types()
 
     # Check 1: All union types are registered
     for union_type in _UNION_INTENT_TYPES:
@@ -130,7 +130,7 @@ def validate_union_registry_sync() -> tuple[bool, list[str]]:
         if kind_value not in registry_types:
             errors.append(
                 f"Union type {union_type.__name__} (kind='{kind_value}') "
-                f"is not registered in IntentRegistry"
+                f"is not registered in RegistryIntent"
             )
         elif registry_types[kind_value] is not union_type:
             errors.append(

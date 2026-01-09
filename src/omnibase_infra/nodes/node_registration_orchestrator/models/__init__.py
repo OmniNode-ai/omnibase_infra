@@ -49,13 +49,13 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_registrati
     validate_union_registry_sync,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_intent import (
-    IntentRegistry,
     ModelRegistryIntent,
+    RegistryIntent,
 )
 
 __all__ = [
     "IntentPayload",
-    "IntentRegistry",
+    "RegistryIntent",
     "ModelConsulIntentPayload",
     "ModelConsulRegistrationIntent",
     "ModelIntentExecutionResult",

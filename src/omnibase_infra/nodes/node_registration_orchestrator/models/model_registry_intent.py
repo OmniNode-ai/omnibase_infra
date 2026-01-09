@@ -4,14 +4,14 @@
 
 This module provides:
 - ModelRegistryIntent: Base model for all registration intents
-- IntentRegistry: Decorator-based registry for intent type discovery
+- RegistryIntent: Decorator-based registry for intent type discovery
 
 Design Pattern:
     Instead of maintaining explicit union types like:
         _IntentUnion = ModelConsulIntent | ModelPostgresIntent
 
     Intent models self-register via decorator:
-        @IntentRegistry.register("consul")
+        @RegistryIntent.register("consul")
         class ModelConsulRegistrationIntent(ModelRegistryIntent): ...
 
     The registry resolves types dynamically during Pydantic validation,
@@ -20,10 +20,10 @@ Design Pattern:
 IMPORTANT - Union Sync Requirement (OMN-1007):
     When adding a new intent type, you MUST update BOTH:
 
-    1. Register with @IntentRegistry.register("kind") decorator (this file)
+    1. Register with @RegistryIntent.register("kind") decorator (this file)
     2. Add the model to ModelRegistrationIntent union in model_registration_intent.py
 
-    The IntentRegistry enables dynamic type resolution for ModelReducerExecutionResult,
+    The RegistryIntent enables dynamic type resolution for ModelReducerExecutionResult,
     while ModelRegistrationIntent is a static discriminated union used for Pydantic
     field type hints in protocols (e.g., ProtocolEffect.execute_intent).
 
@@ -39,6 +39,8 @@ Related:
 
 from __future__ import annotations
 
+import threading
+import warnings
 from collections.abc import Callable
 from typing import ClassVar
 from uuid import UUID
@@ -46,28 +48,32 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
-class IntentRegistry:
+class RegistryIntent:
     """Registry for intent model types with decorator-based registration.
 
     This registry enables dynamic type resolution for Pydantic validation
     without requiring explicit union type definitions.
 
     Example:
-        @IntentRegistry.register("consul")
+        @RegistryIntent.register("consul")
         class ModelConsulRegistrationIntent(ModelRegistryIntent):
             kind: Literal["consul"] = "consul"
             ...
 
         # Later, resolve type from kind
-        intent_cls = IntentRegistry.get_type("consul")
+        intent_cls = RegistryIntent.get_type("consul")
         intent = intent_cls.model_validate(data)
 
     Thread Safety:
-        The registry is populated at module import time (class definition).
-        After startup, it is read-only and thread-safe for concurrent access.
+        All registration and mutation operations are protected by a class-level
+        threading.Lock to ensure thread-safe access. Read operations (get_type,
+        get_all_types, is_registered) are atomic dictionary operations and safe
+        for concurrent access. The lock ensures that check-and-set operations
+        in register() are atomic, preventing race conditions.
     """
 
     _types: ClassVar[dict[str, type[ModelRegistryIntent]]] = {}
+    _lock: ClassVar[threading.Lock] = threading.Lock()
 
     @classmethod
     def register(cls, kind: str) -> Callable[[type], type]:
@@ -84,7 +90,7 @@ class IntentRegistry:
             ValueError: If kind is already registered (prevents duplicates).
 
         Example:
-            @IntentRegistry.register("consul")
+            @RegistryIntent.register("consul")
             class ModelConsulRegistrationIntent(ModelRegistryIntent):
                 kind: Literal["consul"] = "consul"
                 service_name: str
@@ -92,12 +98,14 @@ class IntentRegistry:
         """
 
         def decorator(intent_cls: type) -> type:
-            if kind in cls._types:
-                raise ValueError(
-                    f"Intent kind '{kind}' already registered to {cls._types[kind].__name__}. "
-                    f"Cannot register {intent_cls.__name__}."
-                )
-            cls._types[kind] = intent_cls
+            # Thread-safe registration with atomic check-and-set
+            with cls._lock:
+                if kind in cls._types:
+                    raise ValueError(
+                        f"Intent kind '{kind}' already registered to {cls._types[kind].__name__}. "
+                        f"Cannot register {intent_cls.__name__}."
+                    )
+                cls._types[kind] = intent_cls
             return intent_cls
 
         return decorator
@@ -116,7 +124,7 @@ class IntentRegistry:
             KeyError: If kind is not registered.
 
         Example:
-            intent_cls = IntentRegistry.get_type("consul")
+            intent_cls = RegistryIntent.get_type("consul")
             intent = intent_cls.model_validate({"kind": "consul", ...})
         """
         if kind not in cls._types:
@@ -134,7 +142,7 @@ class IntentRegistry:
             Dict mapping kind strings to intent model classes.
 
         Example:
-            all_types = IntentRegistry.get_all_types()
+            all_types = RegistryIntent.get_all_types()
             for kind, intent_cls in all_types.items():
                 print(f"{kind}: {intent_cls.__name__}")
         """
@@ -151,8 +159,8 @@ class IntentRegistry:
             True if registered, False otherwise.
 
         Example:
-            if IntentRegistry.is_registered("consul"):
-                intent_cls = IntentRegistry.get_type("consul")
+            if RegistryIntent.is_registered("consul"):
+                intent_cls = RegistryIntent.get_type("consul")
         """
         return kind in cls._types
 
@@ -161,11 +169,22 @@ class IntentRegistry:
         """Clear all registered types.
 
         Warning:
-            This method is intended for testing purposes only.
-            Do not use in production code as it breaks the immutability
-            guarantee after startup.
+            This method is intended for **testing purposes only**.
+            Calling it in production code will emit a warning.
+            It breaks the immutability guarantee after startup.
+
+        Thread Safety:
+            This method is protected by the class-level lock to ensure
+            thread-safe clearing of the registry.
         """
-        cls._types.clear()
+        warnings.warn(
+            "RegistryIntent.clear() is intended for testing only. "
+            "Do not use in production code.",
+            UserWarning,
+            stacklevel=2,
+        )
+        with cls._lock:
+            cls._types.clear()
 
 
 class ModelRegistryIntent(BaseModel):
@@ -173,7 +192,7 @@ class ModelRegistryIntent(BaseModel):
 
     All concrete intent models MUST:
     1. Inherit from this base class
-    2. Use @IntentRegistry.register("kind") decorator
+    2. Use @RegistryIntent.register("kind") decorator
     3. Define kind as Literal["kind"] with matching default
     4. Be frozen (immutable) for thread safety
 
@@ -181,7 +200,7 @@ class ModelRegistryIntent(BaseModel):
     enabling type-safe access to common fields without type narrowing.
 
     Example:
-        @IntentRegistry.register("consul")
+        @RegistryIntent.register("consul")
         class ModelConsulRegistrationIntent(ModelRegistryIntent):
             kind: Literal["consul"] = "consul"
             service_name: str
@@ -194,7 +213,7 @@ class ModelRegistryIntent(BaseModel):
         correlation_id: Correlation ID for distributed tracing.
 
     Related:
-        - IntentRegistry: Registration decorator and type lookup
+        - RegistryIntent: Registration decorator and type lookup
         - ProtocolRegistrationIntent: Protocol for duck-typed signatures
     """
 
@@ -214,6 +233,6 @@ class ModelRegistryIntent(BaseModel):
 
 
 __all__ = [
-    "IntentRegistry",
+    "RegistryIntent",
     "ModelRegistryIntent",
 ]

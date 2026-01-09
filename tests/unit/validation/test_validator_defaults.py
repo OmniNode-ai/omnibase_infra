@@ -14,6 +14,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # Import all validators and constants
+from omnibase_core.validation import ModelModuleImportResult
+
 from omnibase_infra.validation.infra_validators import (
     INFRA_MAX_UNIONS,
     INFRA_MAX_VIOLATIONS,
@@ -21,7 +23,6 @@ from omnibase_infra.validation.infra_validators import (
     INFRA_PATTERNS_STRICT,
     INFRA_SRC_PATH,
     INFRA_UNIONS_STRICT,
-    ModelImportValidationResult,
     ValidationResult,
     validate_infra_all,
     validate_infra_architecture,
@@ -875,9 +876,7 @@ class TestDefaultsConsistency:
     def test_directory_defaults_consistency(self) -> None:
         """Verify directory defaults are consistent across entry points."""
         # All validators using INFRA_SRC_PATH should default to same value
-        validators: list[
-            Callable[..., ValidationResult | ModelImportValidationResult]
-        ] = [
+        validators: list[Callable[..., ValidationResult | ModelModuleImportResult]] = [
             validate_infra_architecture,
             validate_infra_patterns,
             validate_infra_union_usage,
