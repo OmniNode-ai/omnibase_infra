@@ -90,7 +90,7 @@ if TYPE_CHECKING:
         ProjectorRegistration,
     )
 
-    from .conftest import IntrospectableTestNode
+    from .conftest import ProtocolIntrospectableTestNode
 
 
 # Module-level markers
@@ -122,7 +122,7 @@ class TestSuite1NodeStartupIntrospection:
     @pytest.mark.asyncio
     async def test_node_publishes_introspection_on_startup(
         self,
-        introspectable_test_node: IntrospectableTestNode,
+        introspectable_test_node: ProtocolIntrospectableTestNode,
         real_kafka_event_bus: KafkaEventBus,
         unique_correlation_id: UUID,
     ) -> None:
@@ -235,7 +235,7 @@ class TestSuite1NodeStartupIntrospection:
     @pytest.mark.asyncio
     async def test_introspection_broadcast_latency_under_50ms(
         self,
-        introspectable_test_node: IntrospectableTestNode,
+        introspectable_test_node: ProtocolIntrospectableTestNode,
         real_kafka_event_bus: KafkaEventBus,
     ) -> None:
         """Test introspection broadcast latency is under 50ms.
@@ -972,7 +972,7 @@ class TestSuite3ReIntrospection:
     @pytest.mark.asyncio
     async def test_nodes_respond_with_fresh_introspection(
         self,
-        introspectable_test_node: IntrospectableTestNode,
+        introspectable_test_node: ProtocolIntrospectableTestNode,
         real_kafka_event_bus: KafkaEventBus,
         unique_correlation_id: UUID,
     ) -> None:
@@ -1070,7 +1070,7 @@ class TestSuite3ReIntrospection:
     @pytest.mark.asyncio
     async def test_request_response_correlation(
         self,
-        introspectable_test_node: IntrospectableTestNode,
+        introspectable_test_node: ProtocolIntrospectableTestNode,
         real_kafka_event_bus: KafkaEventBus,
         unique_correlation_id: UUID,
     ) -> None:
@@ -1192,7 +1192,7 @@ class TestSuite4HeartbeatPublishing:
     @pytest.mark.slow
     async def test_heartbeat_published_every_30_seconds(
         self,
-        introspectable_test_node: IntrospectableTestNode,
+        introspectable_test_node: ProtocolIntrospectableTestNode,
         real_kafka_event_bus: KafkaEventBus,
     ) -> None:
         """Test heartbeat publishes every 30 seconds.
@@ -1267,7 +1267,7 @@ class TestSuite4HeartbeatPublishing:
     @pytest.mark.asyncio
     async def test_heartbeat_includes_uptime_and_operations(
         self,
-        introspectable_test_node: IntrospectableTestNode,
+        introspectable_test_node: ProtocolIntrospectableTestNode,
         real_kafka_event_bus: KafkaEventBus,
     ) -> None:
         """Test heartbeat includes uptime and active operations count.
@@ -1336,7 +1336,7 @@ class TestSuite4HeartbeatPublishing:
     @pytest.mark.asyncio
     async def test_heartbeat_overhead_within_threshold(
         self,
-        introspectable_test_node: IntrospectableTestNode,
+        introspectable_test_node: ProtocolIntrospectableTestNode,
     ) -> None:
         """Test heartbeat emission overhead is within acceptable threshold.
 
@@ -1378,7 +1378,7 @@ class TestSuite4HeartbeatPublishing:
         registration_orchestrator: NodeRegistrationOrchestrator,
         projection_reader: ProjectionReaderRegistration,
         real_projector: ProjectorRegistration,
-        introspectable_test_node: IntrospectableTestNode,
+        introspectable_test_node: ProtocolIntrospectableTestNode,
         unique_node_id: UUID,
     ) -> None:
         """Test heartbeat updates liveness_deadline in projection.
@@ -1476,7 +1476,7 @@ class TestHeartbeatPerformanceExtended:
     @pytest.mark.slow
     async def test_heartbeat_interval_consistency_over_multiple_cycles(
         self,
-        introspectable_test_node: IntrospectableTestNode,
+        introspectable_test_node: ProtocolIntrospectableTestNode,
         real_kafka_event_bus: KafkaEventBus,
     ) -> None:
         """Test heartbeat interval remains consistent over multiple cycles.

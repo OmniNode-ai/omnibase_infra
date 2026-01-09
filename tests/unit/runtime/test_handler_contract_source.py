@@ -2033,14 +2033,22 @@ output_model: "test.models.Output"
                 graceful_mode=False,  # Strict mode
             )
 
-            # Strict mode wraps permission errors in ModelOnexError
+            # Strict mode should raise ModelOnexError with HANDLER_SOURCE_006 code
             # The underlying PermissionError is preserved as __cause__
             with pytest.raises(ModelOnexError) as exc_info:
                 await source.discover_handlers()
 
-            # Verify error code and that original error is preserved
-            assert exc_info.value.error_code == "HANDLER_SOURCE_006"
-            assert isinstance(exc_info.value.__cause__, (PermissionError, OSError))
+            # Verify error details
+            error = exc_info.value
+            assert error.error_code == "HANDLER_SOURCE_006", (
+                f"Expected error code HANDLER_SOURCE_006, got {error.error_code}"
+            )
+            # Verify error message mentions permission issue
+            assert "permission denied" in str(error).lower(), (
+                f"Error message should mention permission issue: {error}"
+            )
+            # Verify original error is preserved as __cause__
+            assert isinstance(error.__cause__, (PermissionError, OSError))
         finally:
             # Restore permissions for cleanup
             unreadable_contract.chmod(stat.S_IRUSR | stat.S_IWUSR)
