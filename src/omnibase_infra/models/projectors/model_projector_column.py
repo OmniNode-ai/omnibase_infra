@@ -30,7 +30,7 @@ class ModelProjectorColumn(BaseModel):
     """Definition of a single column in a projection table.
 
     Describes the column name, data type, constraints, and default value.
-    Used by ProjectorSchemaManager for schema validation and migration
+    Used by ProjectorSchemaValidator for schema validation and migration
     SQL generation.
 
     Attributes:

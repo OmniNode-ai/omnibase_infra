@@ -149,7 +149,6 @@ from omnibase_infra.runtime.projector_plugin_loader import (
 )
 from omnibase_infra.runtime.projector_schema_manager import (
     ProjectorSchemaError,
-    ProjectorSchemaManager,  # Deprecated alias
     ProjectorSchemaValidator,
 )
 
@@ -250,6 +249,5 @@ __all__: list[str] = [
     # Projector schema validation (OMN-1168)
     "ProjectorSchemaError",
     "ProjectorPluginLoader",
-    "ProjectorSchemaManager",  # Deprecated alias
     "ProjectorSchemaValidator",
 ]

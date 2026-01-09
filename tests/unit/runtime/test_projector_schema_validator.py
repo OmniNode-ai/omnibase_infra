@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for ProjectorSchemaManager.
+"""Unit tests for ProjectorSchemaValidator.
 
 This test suite validates schema management for ONEX projectors with:
 - Schema validation (table/column existence checks)
@@ -18,7 +18,7 @@ Test Organization:
 
 TDD Approach:
     These tests are written BEFORE the implementation to drive the design
-    of ProjectorSchemaManager. The tests define the expected API and behavior.
+    of ProjectorSchemaValidator. The tests define the expected API and behavior.
 
 Coverage Goals:
     - >90% code coverage for schema manager
@@ -220,10 +220,10 @@ def mock_connection() -> AsyncMock:
 # =============================================================================
 
 
-class MockProjectorSchemaManager:
+class MockProjectorSchemaValidator:
     """Mock implementation to define the expected API.
 
-    This class represents the expected interface for ProjectorSchemaManager.
+    This class represents the expected interface for ProjectorSchemaValidator.
     The actual implementation will replace this mock.
     """
 
@@ -311,7 +311,7 @@ class TestSchemaValidation:
         ]
 
         # When implementation exists, this will not raise
-        # manager = ProjectorSchemaManager(pool=mock_pool)
+        # manager = ProjectorSchemaValidator(pool=mock_pool)
         # await manager.ensure_schema_exists(sample_schema)
         # For now, we define the expected behavior
         assert True  # Placeholder for TDD
@@ -336,7 +336,7 @@ class TestSchemaValidation:
         mock_connection.fetchval.return_value = None
 
         # Expected: RuntimeHostError with table name and migration hint
-        # manager = ProjectorSchemaManager(pool=mock_pool)
+        # manager = ProjectorSchemaValidator(pool=mock_pool)
         # with pytest.raises(RuntimeHostError) as exc_info:
         #     await manager.ensure_schema_exists(sample_schema)
         # assert "test_projections" in str(exc_info.value)
@@ -370,7 +370,7 @@ class TestSchemaValidation:
         ]
 
         # Expected: RuntimeHostError with missing column names
-        # manager = ProjectorSchemaManager(pool=mock_pool)
+        # manager = ProjectorSchemaValidator(pool=mock_pool)
         # with pytest.raises(RuntimeHostError) as exc_info:
         #     await manager.ensure_schema_exists(sample_schema)
         # assert "data" in str(exc_info.value)
@@ -399,7 +399,7 @@ class TestSchemaValidation:
         ]
 
         # Expected: Query includes schema_name = 'onex'
-        # manager = ProjectorSchemaManager(pool=mock_pool)
+        # manager = ProjectorSchemaValidator(pool=mock_pool)
         # await manager.ensure_schema_exists(schema_with_qualified_name)
         # Verify SQL includes schema_name parameter
         assert True  # Placeholder for TDD
@@ -426,7 +426,7 @@ class TestMigrationSQLGeneration:
         - Includes PRIMARY KEY constraint
         - Includes NOT NULL constraints where specified
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # sql = manager.generate_migration_sql(sample_schema)
 
         # Expected SQL structure:
@@ -456,7 +456,7 @@ class TestMigrationSQLGeneration:
         - PRIMARY KEY includes all key columns
         - Column order matches primary_key list
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # sql = manager.generate_migration_sql(composite_pk_schema)
 
         # Expected: PRIMARY KEY (entity_id, domain)
@@ -472,7 +472,7 @@ class TestMigrationSQLGeneration:
         Expected behavior:
         - Table name includes schema prefix: onex.registrations
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # sql = manager.generate_migration_sql(schema_with_qualified_name)
 
         # Expected: CREATE TABLE IF NOT EXISTS onex.registrations
@@ -513,7 +513,7 @@ class TestMigrationSQLGeneration:
             indexes=[],
         )
 
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # sql = manager.generate_migration_sql(schema)
 
         # assert "DEFAULT 'pending'" in sql
@@ -534,7 +534,7 @@ class TestMigrationSQLGeneration:
         """
         index = sample_schema.indexes[0]  # idx_status on status
 
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # sql = manager.generate_index_sql(
         #     index=index,
         #     table_name=sample_schema.table,
@@ -558,7 +558,7 @@ class TestMigrationSQLGeneration:
         """
         index = schema_with_gin_index.indexes[0]  # idx_tags_gin
 
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # sql = manager.generate_index_sql(
         #     index=index,
         #     table_name=schema_with_gin_index.table,
@@ -582,7 +582,7 @@ class TestMigrationSQLGeneration:
             unique=True,
         )
 
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # sql = manager.generate_index_sql(
         #     index=index,
         #     table_name="users",
@@ -604,7 +604,7 @@ class TestMigrationSQLGeneration:
             where="is_active = true",
         )
 
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # sql = manager.generate_index_sql(
         #     index=index,
         #     table_name="users",
@@ -626,7 +626,7 @@ class TestMigrationSQLGeneration:
             columns=["domain", "current_state"],
         )
 
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # sql = manager.generate_index_sql(
         #     index=index,
         #     table_name="registrations",
@@ -650,7 +650,7 @@ class TestMigrationSQLGeneration:
             columns=["name"],
         )
 
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # sql = manager.generate_index_sql(
         #     index=index,
         #     table_name=schema_with_qualified_name.table,
@@ -676,7 +676,7 @@ class TestColumnTypeMapping:
 
         Expected: 'uuid' -> 'UUID'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("uuid")
         # assert result.upper() == "UUID"
         assert True  # Placeholder for TDD
@@ -686,7 +686,7 @@ class TestColumnTypeMapping:
 
         Expected: 'varchar(50)' -> 'VARCHAR(50)'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("varchar(50)")
         # assert result.upper() == "VARCHAR(50)"
         assert True  # Placeholder for TDD
@@ -699,7 +699,7 @@ class TestColumnTypeMapping:
         - varchar(255) -> VARCHAR(255)
         - varchar(1000) -> VARCHAR(1000)
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         test_cases = [
             ("varchar(1)", "VARCHAR(1)"),
             ("varchar(255)", "VARCHAR(255)"),
@@ -715,7 +715,7 @@ class TestColumnTypeMapping:
 
         Expected: 'timestamp' -> 'TIMESTAMP'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("timestamp")
         # assert "TIMESTAMP" in result.upper()
         assert True  # Placeholder for TDD
@@ -725,7 +725,7 @@ class TestColumnTypeMapping:
 
         Expected: 'timestamptz' -> 'TIMESTAMPTZ' or 'TIMESTAMP WITH TIME ZONE'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("timestamptz")
         # assert "TIMESTAMP" in result.upper()
         assert True  # Placeholder for TDD
@@ -735,7 +735,7 @@ class TestColumnTypeMapping:
 
         Expected: 'jsonb' -> 'JSONB'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("jsonb")
         # assert result.upper() == "JSONB"
         assert True  # Placeholder for TDD
@@ -745,7 +745,7 @@ class TestColumnTypeMapping:
 
         Expected: 'json' -> 'JSON'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("json")
         # assert result.upper() == "JSON"
         assert True  # Placeholder for TDD
@@ -755,7 +755,7 @@ class TestColumnTypeMapping:
 
         Expected: 'boolean' -> 'BOOLEAN'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("boolean")
         # assert result.upper() == "BOOLEAN"
         assert True  # Placeholder for TDD
@@ -765,7 +765,7 @@ class TestColumnTypeMapping:
 
         Expected: 'integer' -> 'INTEGER'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("integer")
         # assert result.upper() == "INTEGER"
         assert True  # Placeholder for TDD
@@ -775,7 +775,7 @@ class TestColumnTypeMapping:
 
         Expected: 'bigint' -> 'BIGINT'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("bigint")
         # assert result.upper() == "BIGINT"
         assert True  # Placeholder for TDD
@@ -785,7 +785,7 @@ class TestColumnTypeMapping:
 
         Expected: 'text' -> 'TEXT'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("text")
         # assert result.upper() == "TEXT"
         assert True  # Placeholder for TDD
@@ -795,7 +795,7 @@ class TestColumnTypeMapping:
 
         Expected: 'text[]' -> 'TEXT[]'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("text[]")
         # assert result.upper() == "TEXT[]"
         assert True  # Placeholder for TDD
@@ -805,7 +805,7 @@ class TestColumnTypeMapping:
 
         Expected: 'uuid[]' -> 'UUID[]'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("uuid[]")
         # assert result.upper() == "UUID[]"
         assert True  # Placeholder for TDD
@@ -815,7 +815,7 @@ class TestColumnTypeMapping:
 
         Expected: 'numeric(10,2)' -> 'NUMERIC(10,2)'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("numeric(10,2)")
         # assert result.upper() == "NUMERIC(10,2)"
         assert True  # Placeholder for TDD
@@ -825,7 +825,7 @@ class TestColumnTypeMapping:
 
         Expected: 'serial' -> 'SERIAL'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("serial")
         # assert result.upper() == "SERIAL"
         assert True  # Placeholder for TDD
@@ -835,7 +835,7 @@ class TestColumnTypeMapping:
 
         Expected: 'bytea' -> 'BYTEA'
         """
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # result = manager.map_column_type("bytea")
         # assert result.upper() == "BYTEA"
         assert True  # Placeholder for TDD
@@ -868,7 +868,7 @@ class TestTableExistence:
         # Mock: table exists (count = 1)
         mock_connection.fetchval.return_value = 1
 
-        # manager = MockProjectorSchemaManager(pool=mock_pool)
+        # manager = MockProjectorSchemaValidator(pool=mock_pool)
         # result = await manager.table_exists("registration_projections")
         # assert result is True
         assert True  # Placeholder for TDD
@@ -890,7 +890,7 @@ class TestTableExistence:
         # Mock: table does not exist
         mock_connection.fetchval.return_value = None
 
-        # manager = MockProjectorSchemaManager(pool=mock_pool)
+        # manager = MockProjectorSchemaValidator(pool=mock_pool)
         # result = await manager.table_exists("nonexistent_table")
         # assert result is False
         assert True  # Placeholder for TDD
@@ -912,7 +912,7 @@ class TestTableExistence:
         # Mock: table exists in 'onex' schema
         mock_connection.fetchval.return_value = 1
 
-        # manager = MockProjectorSchemaManager(pool=mock_pool)
+        # manager = MockProjectorSchemaValidator(pool=mock_pool)
         # result = await manager.table_exists(
         #     table_name="registrations",
         #     schema_name="onex",
@@ -940,7 +940,7 @@ class TestTableExistence:
 
         mock_connection.fetchval.return_value = 1
 
-        # manager = MockProjectorSchemaManager(pool=mock_pool)
+        # manager = MockProjectorSchemaValidator(pool=mock_pool)
         # result = await manager.table_exists("my_table")
 
         # Verify query used 'public' schema
@@ -962,7 +962,7 @@ class TestTableExistence:
             asyncpg.PostgresConnectionError("Connection refused")
         )
 
-        # manager = MockProjectorSchemaManager(pool=mock_pool)
+        # manager = MockProjectorSchemaValidator(pool=mock_pool)
         # with pytest.raises(InfraConnectionError):
         #     await manager.table_exists("test_table")
         assert True  # Placeholder for TDD
@@ -981,7 +981,7 @@ class TestTableExistence:
         mock_pool.acquire.return_value.__aexit__.return_value = None
         mock_connection.fetchval.side_effect = asyncpg.QueryCanceledError("timeout")
 
-        # manager = MockProjectorSchemaManager(pool=mock_pool)
+        # manager = MockProjectorSchemaValidator(pool=mock_pool)
         # with pytest.raises(InfraTimeoutError):
         #     await manager.table_exists("test_table")
         assert True  # Placeholder for TDD
@@ -1009,7 +1009,7 @@ class TestErrorHandling:
         # Expected error message pattern:
         # "Table 'test_projections' does not exist. Run 'onex migrate' to create schema."
         #
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # In the actual implementation, when ensure_schema_exists fails:
         # try:
         #     await manager.ensure_schema_exists(schema)
@@ -1073,7 +1073,7 @@ class TestErrorHandling:
         correlation_id = str(uuid4())
 
         # When implementation exists, errors should include correlation_id
-        # manager = MockProjectorSchemaManager(pool=mock_pool)
+        # manager = MockProjectorSchemaValidator(pool=mock_pool)
         # try:
         #     await manager.ensure_schema_exists(schema, correlation_id=correlation_id)
         # except RuntimeHostError as e:
@@ -1095,7 +1095,7 @@ class TestErrorHandling:
         )
 
         # Expected: Error message is sanitized
-        # manager = MockProjectorSchemaManager(pool=mock_pool)
+        # manager = MockProjectorSchemaValidator(pool=mock_pool)
         # try:
         #     await manager.table_exists("test_table")
         # except InfraConnectionError as e:
@@ -1126,7 +1126,7 @@ class TestEdgeCases:
         #     columns=[],  # Empty!
         #     indexes=[],
         # )
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # with pytest.raises((ValueError, ValidationError)):
         #     manager.generate_migration_sql(schema)
         assert True  # Placeholder for TDD
@@ -1145,7 +1145,7 @@ class TestEdgeCases:
         #     ],
         #     indexes=[],
         # )
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # with pytest.raises(ValueError):
         #     manager.generate_migration_sql(schema)
         assert True  # Placeholder for TDD
@@ -1169,7 +1169,7 @@ class TestEdgeCases:
         #         ),
         #     ],
         # )
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # with pytest.raises(ValueError):
         #     manager.generate_index_sql(
         #         index=schema.indexes[0],
@@ -1196,7 +1196,7 @@ class TestEdgeCases:
             indexes=[],
         )
 
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # sql = manager.generate_migration_sql(schema)
         # Reserved words should be quoted: "order", "group"
         # assert '"order"' in sql or '"ORDER"' in sql.upper()
@@ -1224,7 +1224,7 @@ class TestEdgeCases:
         #     ],
         #     indexes=[],
         # )
-        # manager = MockProjectorSchemaManager(pool=MagicMock())
+        # manager = MockProjectorSchemaValidator(pool=MagicMock())
         # Should warn or raise about identifier length
         assert True  # Placeholder for TDD
 
@@ -1279,7 +1279,7 @@ class TestConcurrentOperations:
             {"column_name": "is_active", "data_type": "boolean"},
         ]
 
-        # manager = MockProjectorSchemaManager(pool=mock_pool)
+        # manager = MockProjectorSchemaValidator(pool=mock_pool)
         # import asyncio
         # tasks = [
         #     manager.ensure_schema_exists(sample_schema)
@@ -1305,7 +1305,7 @@ class TestConcurrentOperations:
         mock_pool.acquire.return_value.__aexit__.return_value = None
         mock_connection.fetchval.return_value = 1
 
-        # manager = MockProjectorSchemaManager(pool=mock_pool)
+        # manager = MockProjectorSchemaValidator(pool=mock_pool)
         # import asyncio
         # tasks = [
         #     manager.table_exists("test_table")

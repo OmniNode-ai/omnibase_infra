@@ -85,6 +85,11 @@ class ProjectorShellPlaceholder:
             contract: The parsed and validated projector contract.
         """
         self._contract = contract
+        logger.warning(
+            "ProjectorShellPlaceholder loaded for '%s' - "
+            "projection methods will raise NotImplementedError until OMN-1169",
+            contract.projector_id,
+        )
 
     @property
     def projector_id(self) -> str:
@@ -105,6 +110,16 @@ class ProjectorShellPlaceholder:
     def contract(self) -> ModelProjectorContract:
         """Access the underlying contract."""
         return self._contract
+
+    @property
+    def is_placeholder(self) -> bool:
+        """Whether this is a placeholder implementation.
+
+        Returns:
+            True, as this is a placeholder that will raise NotImplementedError
+            on projection methods until OMN-1169 is implemented.
+        """
+        return True
 
     async def project(
         self,

@@ -70,7 +70,6 @@ from omnibase_infra.protocols.protocol_message_type_registry import (
 )
 from omnibase_infra.protocols.protocol_plugin_compute import ProtocolPluginCompute
 from omnibase_infra.protocols.protocol_projector_schema_validator import (
-    ProtocolProjectorSchemaManager,  # Deprecated alias
     ProtocolProjectorSchemaValidator,
 )
 from omnibase_infra.protocols.protocol_registry_metrics import ProtocolRegistryMetrics
@@ -86,7 +85,6 @@ __all__: list[str] = [
     "ProtocolMessageDispatcher",
     "ProtocolMessageTypeRegistry",
     "ProtocolPluginCompute",
-    "ProtocolProjectorSchemaManager",  # Deprecated alias
     "ProtocolProjectorSchemaValidator",
     "ProtocolRegistryMetrics",
     "ProtocolSnapshotPublisher",

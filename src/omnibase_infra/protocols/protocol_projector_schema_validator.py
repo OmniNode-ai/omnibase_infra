@@ -20,11 +20,7 @@ class ProtocolProjectorSchemaValidator(Protocol):
     Defines the interface that schema validators must implement to validate
     projection table schemas exist and are correctly structured.
 
-    Note:
-        Renamed from ProtocolProjectorSchemaManager to follow ONEX naming
-        conventions (validators validate, managers manage lifecycle).
-
-    See: tests/unit/runtime/test_projector_schema_manager.py for TDD tests.
+    See: tests/unit/runtime/test_projector_schema_validator.py for TDD tests.
     """
 
     async def ensure_schema_exists(
@@ -45,11 +41,6 @@ class ProtocolProjectorSchemaValidator(Protocol):
         ...
 
 
-# Backward compatibility alias (deprecated)
-ProtocolProjectorSchemaManager = ProtocolProjectorSchemaValidator
-
-
 __all__ = [
-    "ProtocolProjectorSchemaManager",  # Deprecated alias
     "ProtocolProjectorSchemaValidator",
 ]

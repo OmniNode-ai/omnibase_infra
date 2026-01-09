@@ -30,7 +30,7 @@ class ModelProjectorIndex(BaseModel):
     """Definition of a database index on a projection table.
 
     Describes the index name, columns, type, and optional partial index
-    predicate. Used by ProjectorSchemaManager for schema validation and
+    predicate. Used by ProjectorSchemaValidator for schema validation and
     migration SQL generation.
 
     Attributes:

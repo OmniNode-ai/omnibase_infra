@@ -46,6 +46,16 @@ class ProtocolEventProjector(Protocol):
         """Event types this projector consumes."""
         ...
 
+    @property
+    def is_placeholder(self) -> bool:
+        """Whether this is a placeholder implementation.
+
+        Returns:
+            True if this is a placeholder that will raise NotImplementedError
+            on projection methods, False for full implementations.
+        """
+        ...
+
     async def project(
         self,
         event: ModelEventEnvelope,
