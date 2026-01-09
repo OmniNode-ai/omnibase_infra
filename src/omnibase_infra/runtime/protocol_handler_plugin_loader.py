@@ -10,9 +10,9 @@ registry.
 Part of OMN-1132: Handler Plugin Loader implementation.
 
 Thread Safety:
-    Implementations may be invoked concurrently from multiple coroutines.
+    Implementations may be invoked concurrently from multiple threads.
     Implementations SHOULD be stateless or use appropriate synchronization
-    primitives (asyncio.Lock) for any shared mutable state.
+    primitives for any shared mutable state.
 
 Example Usage:
     ```python
@@ -24,25 +24,33 @@ Example Usage:
     class FileSystemHandlerPluginLoader:
         '''Loads handlers from filesystem contract files.'''
 
-        async def load_from_contract(self, contract_path: Path) -> ModelLoadedHandler:
+        def load_from_contract(
+            self,
+            contract_path: Path,
+            correlation_id: str | None = None,
+        ) -> ModelLoadedHandler:
             # Parse contract YAML and load handler class
             ...
 
-        async def load_from_directory(
-            self, directory: Path
+        def load_from_directory(
+            self,
+            directory: Path,
+            correlation_id: str | None = None,
         ) -> list[ModelLoadedHandler]:
             # Scan directory for contracts and load all handlers
             ...
 
-        async def discover_and_load(
-            self, patterns: list[str]
+        def discover_and_load(
+            self,
+            patterns: list[str],
+            correlation_id: str | None = None,
         ) -> list[ModelLoadedHandler]:
             # Match glob patterns and load discovered handlers
             ...
 
     # Type checking works via Protocol
     loader: ProtocolHandlerPluginLoader = FileSystemHandlerPluginLoader()
-    handlers = await loader.load_from_directory(Path("src/handlers"))
+    handlers = loader.load_from_directory(Path("src/handlers"))
     ```
 
 See Also:
@@ -103,9 +111,10 @@ class ProtocolHandlerPluginLoader(Protocol):
     .. versionadded:: 0.6.4
     """
 
-    async def load_from_contract(
+    def load_from_contract(
         self,
         contract_path: Path,
+        correlation_id: str | None = None,
     ) -> ModelLoadedHandler:
         """Load a single handler from a contract file.
 
@@ -117,6 +126,7 @@ class ProtocolHandlerPluginLoader(Protocol):
             contract_path: Path to the handler contract YAML file. Must be an
                 absolute or relative path to an existing file with .yaml or
                 .yml extension.
+            correlation_id: Optional correlation ID for tracing and error context.
 
         Returns:
             ModelLoadedHandler: Container with the loaded handler metadata
@@ -139,16 +149,17 @@ class ProtocolHandlerPluginLoader(Protocol):
             .. code-block:: python
 
                 loader: ProtocolHandlerPluginLoader = FileSystemHandlerPluginLoader()
-                handler = await loader.load_from_contract(
+                handler = loader.load_from_contract(
                     Path("src/handlers/user_handler/contract.yaml")
                 )
                 print(f"Loaded handler: {handler.handler_id}")
         """
         ...
 
-    async def load_from_directory(
+    def load_from_directory(
         self,
         directory: Path,
+        correlation_id: str | None = None,
     ) -> list[ModelLoadedHandler]:
         """Load all handlers from contract files in a directory.
 
@@ -163,6 +174,7 @@ class ProtocolHandlerPluginLoader(Protocol):
             directory: Path to the directory to scan for contract files.
                 Must be an existing directory. Subdirectories are scanned
                 recursively.
+            correlation_id: Optional correlation ID for tracing and error context.
 
         Returns:
             list[ModelLoadedHandler]: List of successfully loaded handlers.
@@ -180,7 +192,7 @@ class ProtocolHandlerPluginLoader(Protocol):
             .. code-block:: python
 
                 loader: ProtocolHandlerPluginLoader = FileSystemHandlerPluginLoader()
-                handlers = await loader.load_from_directory(
+                handlers = loader.load_from_directory(
                     Path("src/omnibase_infra/handlers")
                 )
                 print(f"Loaded {len(handlers)} handlers")
@@ -189,9 +201,10 @@ class ProtocolHandlerPluginLoader(Protocol):
         """
         ...
 
-    async def discover_and_load(
+    def discover_and_load(
         self,
         patterns: list[str],
+        correlation_id: str | None = None,
     ) -> list[ModelLoadedHandler]:
         """Discover contracts matching glob patterns and load handlers.
 
@@ -214,6 +227,7 @@ class ProtocolHandlerPluginLoader(Protocol):
                 - ``src/**/contract.yaml`` - all contracts under src
                 - ``handlers/*/contract.yaml`` - direct subdirs only
                 - ``**/*.handler.yaml`` - alternative naming convention
+            correlation_id: Optional correlation ID for tracing and error context.
 
         Returns:
             list[ModelLoadedHandler]: List of successfully loaded handlers.
@@ -231,7 +245,7 @@ class ProtocolHandlerPluginLoader(Protocol):
             .. code-block:: python
 
                 loader: ProtocolHandlerPluginLoader = FileSystemHandlerPluginLoader()
-                handlers = await loader.discover_and_load([
+                handlers = loader.discover_and_load([
                     "src/omnibase_infra/handlers/**/contract.yaml",
                     "src/omnibase_infra/nodes/**/contract.yaml",
                 ])

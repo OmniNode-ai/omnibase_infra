@@ -15,12 +15,20 @@ The loader implements ProtocolHandlerPluginLoader and supports:
 
 Thread Safety:
     The loader is designed to be stateless and safe for concurrent use
-    from multiple coroutines. Each load operation is independent.
+    from multiple threads. Each load operation is independent.
 
 See Also:
     - ProtocolHandlerPluginLoader: Protocol definition for plugin loaders
     - HandlerContractSource: Contract discovery and parsing
     - ModelLoadedHandler: Model representing loaded handler metadata
+
+Security Considerations:
+    This loader dynamically imports Python classes specified in YAML contracts.
+    Contract files should be treated as code and protected accordingly:
+    - Only load contracts from trusted sources
+    - Validate contract file permissions in production environments
+    - Be aware that module side effects execute during import
+    - Consider allowlisting import paths in high-security environments
 
 .. versionadded:: 0.7.0
     Created as part of OMN-1132 handler plugin loader implementation.
@@ -83,17 +91,17 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
     Example:
         >>> # Load a single handler from contract
         >>> loader = HandlerPluginLoader()
-        >>> handler = await loader.load_from_contract(
+        >>> handler = loader.load_from_contract(
         ...     Path("src/handlers/auth/handler_contract.yaml")
         ... )
         >>> print(f"Loaded: {handler.handler_name}")
 
         >>> # Load all handlers from a directory
-        >>> handlers = await loader.load_from_directory(Path("src/handlers"))
+        >>> handlers = loader.load_from_directory(Path("src/handlers"))
         >>> print(f"Loaded {len(handlers)} handlers")
 
         >>> # Discover with glob patterns
-        >>> handlers = await loader.discover_and_load([
+        >>> handlers = loader.discover_and_load([
         ...     "src/**/handler_contract.yaml",
         ...     "plugins/**/contract.yaml",
         ... ])
@@ -109,9 +117,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         All operations are performed on-demand based on provided paths.
         """
 
-    async def load_from_contract(
+    def load_from_contract(
         self,
         contract_path: Path,
+        correlation_id: str | None = None,
     ) -> ModelLoadedHandler:
         """Load a single handler from a contract file.
 
@@ -145,7 +154,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         logger.debug(
             "Loading handler from contract: %s",
             contract_path,
-            extra={"contract_path": str(contract_path)},
+            extra={
+                "contract_path": str(contract_path),
+                "correlation_id": correlation_id,
+            },
         )
 
         # Validate contract path exists
@@ -153,6 +165,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_contract",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"Contract file not found: {contract_path}",
@@ -165,6 +178,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_contract",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"Contract path is not a file: {contract_path}",
@@ -180,6 +194,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_contract",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"Failed to stat contract file: {e}",
@@ -192,6 +207,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_contract",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"Contract file exceeds size limit: {file_size} bytes "
@@ -211,6 +227,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_contract",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"Invalid YAML syntax in contract: {e}",
@@ -222,6 +239,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_contract",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"Failed to read contract file: {e}",
@@ -234,6 +252,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_contract",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "Contract file is empty",
@@ -256,6 +275,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_contract",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"Handler class {handler_class_path} does not implement "
@@ -287,9 +307,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             loaded_at=datetime.now(UTC),
         )
 
-    async def load_from_directory(
+    def load_from_directory(
         self,
         directory: Path,
+        correlation_id: str | None = None,
     ) -> list[ModelLoadedHandler]:
         """Load all handlers from contract files in a directory.
 
@@ -317,7 +338,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         logger.debug(
             "Loading handlers from directory: %s",
             directory,
-            extra={"directory": str(directory)},
+            extra={"directory": str(directory), "correlation_id": correlation_id},
         )
 
         # Validate directory exists
@@ -325,6 +346,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_directory",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"Directory not found: {directory}",
@@ -337,6 +359,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_directory",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"Path is not a directory: {directory}",
@@ -362,7 +385,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         handlers: list[ModelLoadedHandler] = []
         for contract_path in contract_files:
             try:
-                handler = await self.load_from_contract(contract_path)
+                handler = self.load_from_contract(contract_path, correlation_id)
                 handlers.append(handler)
             except (ProtocolConfigurationError, InfraConnectionError) as e:
                 logger.warning(
@@ -372,6 +395,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     extra={
                         "contract_path": str(contract_path),
                         "error": str(e),
+                        "correlation_id": correlation_id,
                     },
                 )
                 continue
@@ -389,9 +413,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         return handlers
 
-    async def discover_and_load(
+    def discover_and_load(
         self,
         patterns: list[str],
+        correlation_id: str | None = None,
     ) -> list[ModelLoadedHandler]:
         """Discover contracts matching glob patterns and load handlers.
 
@@ -415,13 +440,14 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         logger.debug(
             "Discovering handlers with patterns: %s",
             patterns,
-            extra={"patterns": patterns},
+            extra={"patterns": patterns, "correlation_id": correlation_id},
         )
 
         if not patterns:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="discover_and_load",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "Patterns list cannot be empty",
@@ -454,7 +480,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         handlers: list[ModelLoadedHandler] = []
         for contract_path in sorted(discovered_paths):
             try:
-                handler = await self.load_from_contract(contract_path)
+                handler = self.load_from_contract(contract_path, correlation_id)
                 handlers.append(handler)
             except (ProtocolConfigurationError, InfraConnectionError) as e:
                 logger.warning(
@@ -464,6 +490,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     extra={
                         "contract_path": str(contract_path),
                         "error": str(e),
+                        "correlation_id": correlation_id,
                     },
                 )
                 continue
@@ -495,9 +522,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         """
         # Check for required ProtocolHandler method: describe()
         # Per ONEX conventions, protocol compliance is verified via duck typing
-        return hasattr(handler_class, "describe") and callable(
-            getattr(handler_class, "describe", None)
-        )
+        return callable(getattr(handler_class, "describe", None))
 
     def _import_handler_class(
         self,
@@ -624,7 +649,16 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         seen: set[Path] = set()
         deduplicated: list[Path] = []
         for path in contract_files:
-            resolved = path.resolve()
+            try:
+                resolved = path.resolve()
+            except OSError as e:
+                logger.warning(
+                    "Failed to resolve path %s: %s",
+                    path,
+                    e,
+                    extra={"path": str(path), "error": str(e)},
+                )
+                continue
             if resolved not in seen:
                 seen.add(resolved)
                 deduplicated.append(path)
@@ -742,8 +776,16 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         handler_type = raw_data.get("handler_type")
 
         if handler_type is None:
-            # Default to EFFECT if not specified (conservative default)
-            return EnumHandlerTypeCategory.EFFECT
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="extract_handler_type",
+            )
+            raise ProtocolConfigurationError(
+                "Contract missing required field: 'handler_type'",
+                context=context,
+                loader_error="HANDLER_LOADER_004",
+                contract_path=str(contract_path),
+            )
 
         if not isinstance(handler_type, str):
             context = ModelInfraErrorContext(
