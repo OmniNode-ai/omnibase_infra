@@ -59,7 +59,7 @@ capability_outputs:
   - filesystem.list
   - filesystem.delete
   - filesystem.mkdir
-# NOTE: Models defined in OMN-1158 (FileSystemHandler Implementation)
+# NOTE: Models defined in OMN-1160 (FileSystemHandler Contract)
 input_model: omnibase_infra.handlers.filesystem.ModelFileSystemRequest
 output_model: omnibase_infra.handlers.filesystem.ModelFileSystemResult
 supports_lifecycle: true

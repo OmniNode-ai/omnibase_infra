@@ -132,8 +132,8 @@ class ModelFileSystemRequest(BaseModel):
     def validate_path_security(cls, v: str) -> str:
         """Validate path meets security requirements from contract.
 
-        Performs security validation to prevent injection attacks and ensure
-        cross-platform compatibility.
+        Performs security validation to prevent injection attacks, directory
+        traversal attacks, and ensure cross-platform compatibility.
 
         Path Separator Normalization:
             Path separators are normalized to forward slashes before validation.
@@ -142,7 +142,9 @@ class ModelFileSystemRequest(BaseModel):
             (data/subdir\\file.txt). The original path string is preserved in the
             return value; normalization is only used for validation logic.
 
-        Validations:
+        Validations (in order):
+            - No parent directory traversal (..) - prevents sandbox escape
+            - No absolute paths (/ or drive letters like C:) - enforces relative paths
             - No null bytes (prevents injection attacks)
             - No control characters (prevents terminal injection)
             - Max path length 4096 characters
@@ -156,8 +158,28 @@ class ModelFileSystemRequest(BaseModel):
             The validated path string (unchanged from input).
 
         Raises:
-            ValueError: If any security validation fails.
+            ValueError: If any security validation fails, including:
+                - Path contains parent directory traversal (..)
+                - Absolute paths are not allowed
+                - Path contains null bytes
+                - Path contains control characters
+                - Path exceeds maximum length
+                - Filename exceeds maximum length
+                - Path contains reserved Windows device name
         """
+        # Normalize path separators for security checks (fail fast on traversal)
+        normalized = v.replace("\\", "/")
+
+        # Check for path traversal (../) - CRITICAL: prevents sandbox escape
+        if ".." in normalized.split("/"):
+            raise ValueError("Path contains parent directory traversal (..)")
+
+        # Check for absolute paths - enforces relative paths only
+        # Unix absolute paths start with /
+        # Windows absolute paths have drive letter like C: or D:
+        if v.startswith("/") or (len(v) >= 2 and v[1] == ":"):
+            raise ValueError("Absolute paths are not allowed")
+
         # Check for null bytes (injection attack prevention)
         if "\x00" in v:
             raise ValueError("Path contains null bytes")

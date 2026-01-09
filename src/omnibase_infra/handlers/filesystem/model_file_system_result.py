@@ -124,6 +124,9 @@ class ModelFileSystemResult(BaseModel):
         filenames are returned. Valid filenames with embedded whitespace
         (e.g., "file name.txt") are accepted.
 
+        Empty lists are valid and represent empty directories. Only non-empty
+        lists have their individual entries validated.
+
         Args:
             v: The entries list to validate, or None.
 
@@ -132,9 +135,19 @@ class ModelFileSystemResult(BaseModel):
 
         Raises:
             ValueError: If any entry is empty or contains only whitespace.
+
+        Examples:
+            - entries=None -> valid (non-LIST operations)
+            - entries=[] -> valid (empty directory)
+            - entries=["file.txt"] -> valid
+            - entries=[""] -> raises ValueError
+            - entries=["   "] -> raises ValueError
         """
         if v is None:
             return v
+        if len(v) == 0:
+            return v  # Empty directory is valid
+        # Only validate entries if list is non-empty
         for entry in v:
             if not entry or not entry.strip():
                 raise ValueError("Directory entries cannot be empty or whitespace-only")
