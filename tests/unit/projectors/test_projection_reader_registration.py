@@ -49,6 +49,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ProtocolConfigurationError,
     RuntimeHostError,
 )
 from omnibase_infra.models.projection import ModelRegistrationProjection
@@ -68,6 +69,11 @@ def create_mock_row(
     liveness_deadline: datetime | None = None,
     ack_timeout_emitted_at: datetime | None = None,
     liveness_timeout_emitted_at: datetime | None = None,
+    contract_type: str | None = "effect",
+    intent_types: list[str] | None = None,
+    protocols: list[str] | None = None,
+    capability_tags: list[str] | None = None,
+    contract_version: str | None = "1.0.0",
 ) -> dict:
     """Create a mock database row with sensible defaults."""
     now = datetime.now(UTC)
@@ -81,6 +87,13 @@ def create_mock_row(
         "node_type": "effect",
         "node_version": "1.0.0",
         "capabilities": capabilities.model_dump_json(),
+        # Capability fields (OMN-1134)
+        "contract_type": contract_type,
+        "intent_types": intent_types or [],
+        "protocols": protocols or [],
+        "capability_tags": capability_tags or [],
+        "contract_version": contract_version,
+        # Timeout fields
         "ack_deadline": ack_deadline,
         "liveness_deadline": liveness_deadline,
         "ack_timeout_emitted_at": ack_timeout_emitted_at,
@@ -117,11 +130,10 @@ def reader(mock_pool: MagicMock) -> ProjectionReaderRegistration:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 class TestProjectionReaderBasics:
     """Test basic reader instantiation and configuration."""
 
-    async def test_reader_instantiation(self, mock_pool: MagicMock) -> None:
+    def test_reader_instantiation(self, mock_pool: MagicMock) -> None:
         """Test that reader initializes correctly with connection pool."""
         reader = ProjectionReaderRegistration(pool=mock_pool)
 
@@ -131,7 +143,7 @@ class TestProjectionReaderBasics:
         assert reader._circuit_breaker_failures == 0
         assert reader._circuit_breaker_open is False
 
-    async def test_reader_circuit_breaker_config(
+    def test_reader_circuit_breaker_config(
         self, reader: ProjectionReaderRegistration
     ) -> None:
         """Test that circuit breaker is configured correctly."""
@@ -140,7 +152,7 @@ class TestProjectionReaderBasics:
         assert reader.circuit_breaker_reset_timeout == 60.0
         assert reader.service_name == "projection_reader.registration"
 
-    async def test_row_to_projection_conversion(
+    def test_row_to_projection_conversion(
         self, reader: ProjectionReaderRegistration
     ) -> None:
         """Test internal row to projection conversion."""
@@ -156,7 +168,7 @@ class TestProjectionReaderBasics:
         assert projection.node_version == "1.0.0"
         assert isinstance(projection.capabilities, ModelNodeCapabilities)
 
-    async def test_row_to_projection_with_dict_capabilities(
+    def test_row_to_projection_with_dict_capabilities(
         self, reader: ProjectionReaderRegistration
     ) -> None:
         """Test row conversion with dict capabilities (already parsed)."""
@@ -869,3 +881,473 @@ class TestProjectionReaderCircuitBreaker:
 
         with pytest.raises(InfraUnavailableError):
             await reader.count_by_state()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestProjectionReaderCapabilityQueries:
+    """Test capability-based query methods (OMN-1134)."""
+
+    # ============================================================
+    # get_by_capability_tag tests
+    # ============================================================
+
+    async def test_get_by_capability_tag_returns_matching(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_capability_tag returns matching registrations."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+
+        mock_rows = [
+            create_mock_row(capability_tags=["postgres.storage", "kafka.consumer"]),
+            create_mock_row(capability_tags=["postgres.storage"]),
+        ]
+        mock_connection.fetch.return_value = mock_rows
+
+        result = await reader.get_by_capability_tag("postgres.storage")
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+        for proj in result:
+            assert "postgres.storage" in proj.capability_tags
+
+    async def test_get_by_capability_tag_empty_result(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_capability_tag returns empty list when no matches."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = []
+
+        result = await reader.get_by_capability_tag("nonexistent.tag")
+
+        assert result == []
+
+    async def test_get_by_capability_tag_with_state_filter(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_capability_tag with state filter."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+
+        mock_rows = [
+            create_mock_row(
+                state=EnumRegistrationState.ACTIVE,
+                capability_tags=["postgres.storage"],
+            ),
+        ]
+        mock_connection.fetch.return_value = mock_rows
+
+        result = await reader.get_by_capability_tag(
+            "postgres.storage",
+            state=EnumRegistrationState.ACTIVE,
+        )
+
+        assert len(result) == 1
+        assert result[0].current_state == EnumRegistrationState.ACTIVE
+
+        # Verify SQL includes state filter
+        call_args = mock_connection.fetch.call_args
+        sql = call_args[0][0]
+        assert "current_state" in sql
+
+    async def test_get_by_capability_tag_without_state_filter(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_capability_tag without state filter queries all states."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = []
+
+        await reader.get_by_capability_tag("postgres.storage")
+
+        # Verify SQL does NOT include state filter (3 params: domain, tag, limit)
+        call_args = mock_connection.fetch.call_args
+        args = call_args[0]
+        assert len(args) == 4  # sql + 3 params
+
+    # ============================================================
+    # get_by_intent_type tests
+    # ============================================================
+
+    async def test_get_by_intent_type_returns_matching(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_intent_type returns matching registrations."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+
+        mock_rows = [
+            create_mock_row(intent_types=["postgres.upsert", "postgres.query"]),
+        ]
+        mock_connection.fetch.return_value = mock_rows
+
+        result = await reader.get_by_intent_type("postgres.upsert")
+
+        assert len(result) == 1
+        assert "postgres.upsert" in result[0].intent_types
+
+    async def test_get_by_intent_type_with_state_filter(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_intent_type with state filter."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = []
+
+        await reader.get_by_intent_type(
+            "postgres.query",
+            state=EnumRegistrationState.ACTIVE,
+        )
+
+        # Verify SQL includes state filter (4 params: domain, intent, state, limit)
+        call_args = mock_connection.fetch.call_args
+        args = call_args[0]
+        assert len(args) == 5  # sql + 4 params
+        assert EnumRegistrationState.ACTIVE.value in args
+
+    # ============================================================
+    # get_by_protocol tests
+    # ============================================================
+
+    async def test_get_by_protocol_returns_matching(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_protocol returns matching registrations."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+
+        mock_rows = [
+            create_mock_row(
+                protocols=["ProtocolDatabaseAdapter", "ProtocolEventPublisher"]
+            ),
+        ]
+        mock_connection.fetch.return_value = mock_rows
+
+        result = await reader.get_by_protocol("ProtocolDatabaseAdapter")
+
+        assert len(result) == 1
+        assert "ProtocolDatabaseAdapter" in result[0].protocols
+
+    async def test_get_by_protocol_with_state_filter(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_protocol with state filter."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = []
+
+        await reader.get_by_protocol(
+            "ProtocolEventPublisher",
+            state=EnumRegistrationState.PENDING_REGISTRATION,
+        )
+
+        # Verify state filter is in params
+        call_args = mock_connection.fetch.call_args
+        args = call_args[0]
+        assert EnumRegistrationState.PENDING_REGISTRATION.value in args
+
+    # ============================================================
+    # get_by_contract_type tests
+    # ============================================================
+
+    async def test_get_by_contract_type_returns_matching(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_contract_type returns matching registrations."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+
+        mock_rows = [
+            create_mock_row(contract_type="effect"),
+            create_mock_row(contract_type="effect"),
+        ]
+        mock_connection.fetch.return_value = mock_rows
+
+        result = await reader.get_by_contract_type("effect")
+
+        assert len(result) == 2
+        for proj in result:
+            assert proj.contract_type == "effect"
+
+    async def test_get_by_contract_type_with_state_filter(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_contract_type with state filter."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+
+        mock_rows = [
+            create_mock_row(
+                contract_type="reducer",
+                state=EnumRegistrationState.ACTIVE,
+            ),
+        ]
+        mock_connection.fetch.return_value = mock_rows
+
+        result = await reader.get_by_contract_type(
+            "reducer",
+            state=EnumRegistrationState.ACTIVE,
+        )
+
+        assert len(result) == 1
+        assert result[0].contract_type == "reducer"
+        assert result[0].current_state == EnumRegistrationState.ACTIVE
+
+    async def test_get_by_contract_type_all_valid_types(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_contract_type works for all valid contract types."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = []
+
+        for contract_type in ["effect", "compute", "reducer", "orchestrator"]:
+            await reader.get_by_contract_type(contract_type)
+
+            # Verify contract type was passed to query
+            call_args = mock_connection.fetch.call_args
+            args = call_args[0]
+            assert contract_type in args
+
+    # ============================================================
+    # get_by_capability_tags_all tests
+    # ============================================================
+
+    async def test_get_by_capability_tags_all_returns_matching(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_capability_tags_all returns registrations with ALL tags."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+
+        mock_rows = [
+            create_mock_row(
+                capability_tags=["postgres.storage", "transactions", "async"]
+            ),
+        ]
+        mock_connection.fetch.return_value = mock_rows
+
+        result = await reader.get_by_capability_tags_all(
+            ["postgres.storage", "transactions"]
+        )
+
+        assert len(result) == 1
+        # Both tags must be present
+        assert "postgres.storage" in result[0].capability_tags
+        assert "transactions" in result[0].capability_tags
+
+    async def test_get_by_capability_tags_all_with_state_filter(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_capability_tags_all with state filter."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = []
+
+        await reader.get_by_capability_tags_all(
+            ["postgres.storage"],
+            state=EnumRegistrationState.ACTIVE,
+        )
+
+        # Verify SQL includes state filter
+        call_args = mock_connection.fetch.call_args
+        args = call_args[0]
+        assert EnumRegistrationState.ACTIVE.value in args
+
+    # ============================================================
+    # get_by_capability_tags_any tests
+    # ============================================================
+
+    async def test_get_by_capability_tags_any_returns_matching(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_capability_tags_any returns registrations with ANY tag."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+
+        mock_rows = [
+            create_mock_row(capability_tags=["postgres.storage"]),
+            create_mock_row(capability_tags=["mysql.storage"]),
+        ]
+        mock_connection.fetch.return_value = mock_rows
+
+        result = await reader.get_by_capability_tags_any(
+            ["postgres.storage", "mysql.storage", "sqlite.storage"]
+        )
+
+        assert len(result) == 2
+
+    async def test_get_by_capability_tags_any_with_state_filter(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_capability_tags_any with state filter."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = []
+
+        await reader.get_by_capability_tags_any(
+            ["postgres.storage", "mysql.storage"],
+            state=EnumRegistrationState.LIVENESS_EXPIRED,
+        )
+
+        # Verify SQL includes state filter
+        call_args = mock_connection.fetch.call_args
+        args = call_args[0]
+        assert EnumRegistrationState.LIVENESS_EXPIRED.value in args
+
+    # ============================================================
+    # Error handling tests for capability queries
+    # ============================================================
+
+    async def test_get_by_capability_tag_connection_error(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Test get_by_capability_tag handles connection errors."""
+        mock_pool.acquire.return_value.__aenter__.side_effect = (
+            asyncpg.PostgresConnectionError("Connection refused")
+        )
+
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await reader.get_by_capability_tag("postgres.storage")
+
+        assert "Failed to connect" in str(exc_info.value)
+
+    async def test_get_by_intent_type_timeout_error(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_intent_type handles timeout errors."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.side_effect = asyncpg.QueryCanceledError("timeout")
+
+        with pytest.raises(InfraTimeoutError) as exc_info:
+            await reader.get_by_intent_type("postgres.query")
+
+        assert "timed out" in str(exc_info.value)
+
+    async def test_get_by_protocol_generic_error(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_protocol handles generic errors."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.side_effect = Exception("Unknown error")
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await reader.get_by_protocol("ProtocolDatabaseAdapter")
+
+        assert "Failed to query by protocol" in str(exc_info.value)
+
+    async def test_circuit_breaker_blocks_capability_queries(
+        self,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Test circuit breaker blocks capability queries when open."""
+        reader = ProjectionReaderRegistration(pool=mock_pool)
+
+        # Open circuit breaker by triggering failures
+        mock_pool.acquire.return_value.__aenter__.side_effect = (
+            asyncpg.PostgresConnectionError("Connection refused")
+        )
+
+        for _ in range(5):
+            with pytest.raises(InfraConnectionError):
+                await reader.get_entity_state(entity_id=uuid4())
+
+        # All capability queries should be blocked
+        with pytest.raises(InfraUnavailableError):
+            await reader.get_by_capability_tag("postgres.storage")
+
+        with pytest.raises(InfraUnavailableError):
+            await reader.get_by_intent_type("postgres.query")
+
+        with pytest.raises(InfraUnavailableError):
+            await reader.get_by_protocol("ProtocolDatabaseAdapter")
+
+        with pytest.raises(InfraUnavailableError):
+            await reader.get_by_contract_type("effect")
+
+        with pytest.raises(InfraUnavailableError):
+            await reader.get_by_capability_tags_all(["postgres.storage"])
+
+        with pytest.raises(InfraUnavailableError):
+            await reader.get_by_capability_tags_any(["postgres.storage"])
+
+    # ============================================================
+    # Empty tags list validation tests
+    # ============================================================
+
+    async def test_get_by_capability_tags_all_rejects_empty_list(
+        self,
+        reader: ProjectionReaderRegistration,
+    ) -> None:
+        """Empty tags list should raise ProtocolConfigurationError for get_by_capability_tags_all."""
+        with pytest.raises(
+            ProtocolConfigurationError, match="tags list cannot be empty"
+        ):
+            await reader.get_by_capability_tags_all([])
+
+    async def test_get_by_capability_tags_any_rejects_empty_list(
+        self,
+        reader: ProjectionReaderRegistration,
+    ) -> None:
+        """Empty tags list should raise ProtocolConfigurationError for get_by_capability_tags_any."""
+        with pytest.raises(
+            ProtocolConfigurationError, match="tags list cannot be empty"
+        ):
+            await reader.get_by_capability_tags_any([])

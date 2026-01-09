@@ -18,8 +18,8 @@ from omnibase_infra.models.discovery.model_introspection_task_config import (
     ModelIntrospectionTaskConfig,
 )
 from omnibase_infra.models.discovery.model_node_introspection_event import (
-    CapabilitiesTypedDict,
     ModelNodeIntrospectionEvent,
+    TypedDictCapabilities,
 )
 
 __all__ = [
@@ -29,9 +29,9 @@ __all__ = [
     "INVALID_TOPIC_CHARS",
     "TOPIC_PATTERN",
     "VERSION_SUFFIX_PATTERN",
-    "CapabilitiesTypedDict",
     "ModelIntrospectionConfig",
     "ModelIntrospectionPerformanceMetrics",
     "ModelIntrospectionTaskConfig",
     "ModelNodeIntrospectionEvent",
+    "TypedDictCapabilities",
 ]

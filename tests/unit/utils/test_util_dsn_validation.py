@@ -28,73 +28,73 @@ class TestDsnValidation:
         dsn = "postgresql://user:password@localhost:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["scheme"] == "postgresql"
-        assert result["username"] == "user"
-        assert result["password"] == "password"
-        assert result["hostname"] == "localhost"
-        assert result["port"] == 5432
-        assert result["database"] == "mydb"
-        assert result["query"] == {}
+        assert result.scheme == "postgresql"
+        assert result.username == "user"
+        assert result.password == "password"
+        assert result.hostname == "localhost"
+        assert result.port == 5432
+        assert result.database == "mydb"
+        assert result.query == {}
 
     def test_valid_postgres_prefix(self) -> None:
         """Test 'postgres://' prefix (alternative to 'postgresql://')."""
         dsn = "postgres://user:password@localhost:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["scheme"] == "postgres"
-        assert result["hostname"] == "localhost"
+        assert result.scheme == "postgres"
+        assert result.hostname == "localhost"
 
     def test_valid_no_password(self) -> None:
         """Test DSN without password (trust auth or cert-based)."""
         dsn = "postgresql://user@localhost:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["username"] == "user"
-        assert result["password"] is None
-        assert result["hostname"] == "localhost"
+        assert result.username == "user"
+        assert result.password is None
+        assert result.hostname == "localhost"
 
     def test_valid_no_port(self) -> None:
         """Test DSN without port (defaults to 5432)."""
         dsn = "postgresql://user:password@localhost/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["hostname"] == "localhost"
-        assert result["port"] is None  # Will default to 5432 at connection time
-        assert result["database"] == "mydb"
+        assert result.hostname == "localhost"
+        assert result.port is None  # Will default to 5432 at connection time
+        assert result.database == "mydb"
 
     def test_valid_no_user_password(self) -> None:
         """Test DSN with only host/port/database (local trust)."""
         dsn = "postgresql://localhost:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["username"] is None
-        assert result["password"] is None
-        assert result["hostname"] == "localhost"
-        assert result["port"] == 5432
+        assert result.username is None
+        assert result.password is None
+        assert result.hostname == "localhost"
+        assert result.port == 5432
 
     def test_valid_ipv6_address(self) -> None:
         """Test DSN with IPv6 address in brackets."""
         dsn = "postgresql://user:pass@[::1]:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["hostname"] == "::1"
-        assert result["port"] == 5432
+        assert result.hostname == "::1"
+        assert result.port == 5432
 
     def test_valid_ipv6_full_address(self) -> None:
         """Test DSN with full IPv6 address."""
         dsn = "postgresql://user:pass@[2001:db8::1]:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["hostname"] == "2001:db8::1"
-        assert result["port"] == 5432
+        assert result.hostname == "2001:db8::1"
+        assert result.port == 5432
 
     def test_valid_ipv4_address(self) -> None:
         """Test DSN with IPv4 address."""
         dsn = "postgresql://user:pass@192.168.1.100:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["hostname"] == "192.168.1.100"
-        assert result["port"] == 5432
+        assert result.hostname == "192.168.1.100"
+        assert result.port == 5432
 
     def test_valid_url_encoded_password(self) -> None:
         """Test DSN with URL-encoded special characters in password."""
@@ -103,35 +103,35 @@ class TestDsnValidation:
         dsn = "postgresql://user:p%40ss%3Aw%2Frd%25special%21@localhost:5432/mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["username"] == "user"
+        assert result.username == "user"
         # urllib.parse.unquote decodes the password
-        assert result["password"] == "p@ss:w/rd%special!"
+        assert result.password == "p@ss:w/rd%special!"
 
     def test_valid_query_parameters(self) -> None:
         """Test DSN with query parameters (sslmode, connect_timeout, etc.)."""
         dsn = "postgresql://user:pass@localhost:5432/mydb?sslmode=require&connect_timeout=10"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["database"] == "mydb"
-        assert result["query"]["sslmode"] == "require"
-        assert result["query"]["connect_timeout"] == "10"
+        assert result.database == "mydb"
+        assert result.query["sslmode"] == "require"
+        assert result.query["connect_timeout"] == "10"
 
     def test_valid_minimal_dsn(self) -> None:
         """Test minimal valid DSN (scheme + database name)."""
         dsn = "postgresql:///mydb"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["scheme"] == "postgresql"
-        assert result["hostname"] is None  # Defaults to Unix socket
-        assert result["database"] == "mydb"
+        assert result.scheme == "postgresql"
+        assert result.hostname is None  # Defaults to Unix socket
+        assert result.database == "mydb"
 
     def test_valid_unix_socket_path(self) -> None:
         """Test DSN with Unix socket path."""
         dsn = "postgresql:///mydb?host=/var/run/postgresql"
         result = parse_and_validate_dsn(dsn)
 
-        assert result["database"] == "mydb"
-        assert result["query"]["host"] == "/var/run/postgresql"
+        assert result.database == "mydb"
+        assert result.query["host"] == "/var/run/postgresql"
 
     def test_invalid_missing_scheme(self) -> None:
         """Test DSN without scheme."""
@@ -262,7 +262,7 @@ class TestDsnValidation:
         result = parse_and_validate_dsn(dsn)
 
         # urllib.parse will parse full path as database
-        assert result["database"] == "my/db"
+        assert result.database == "my/db"
 
     def test_edge_case_empty_password(self) -> None:
         """Test DSN with empty password (user: format)."""
@@ -270,9 +270,9 @@ class TestDsnValidation:
 
         result = parse_and_validate_dsn(dsn)
 
-        assert result["username"] == "user"
+        assert result.username == "user"
         # Empty password is valid (different from no password)
-        assert result["password"] == ""
+        assert result.password == ""
 
     def test_edge_case_at_sign_in_password(self) -> None:
         """Test @ sign in password (must be URL-encoded)."""
@@ -282,7 +282,7 @@ class TestDsnValidation:
 
         result = parse_and_validate_dsn(dsn)
 
-        assert result["password"] == "p@ssword"
+        assert result.password == "p@ssword"
 
     def test_edge_case_colon_in_password(self) -> None:
         """Test colon in password (must be URL-encoded)."""
@@ -292,7 +292,7 @@ class TestDsnValidation:
 
         result = parse_and_validate_dsn(dsn)
 
-        assert result["password"] == "pass:word"
+        assert result.password == "pass:word"
 
 
 class TestDsnEdgeCasesIntegration:
@@ -337,4 +337,405 @@ class TestDsnEdgeCasesIntegration:
             )
 
 
-__all__: list[str] = ["TestDsnValidation", "TestDsnEdgeCasesIntegration"]
+class TestModelParsedDSNValidation:
+    """Tests for ModelParsedDSN Pydantic model validation.
+
+    This test class validates the Pydantic model constraints including:
+    - Immutability (frozen=True behavior)
+    - Port range validation (1-65535)
+    - Scheme validation (Literal["postgresql", "postgres"])
+    """
+
+    def test_frozen_immutability(self) -> None:
+        """Test that ModelParsedDSN is immutable (frozen=True).
+
+        The model uses ConfigDict(frozen=True), which should prevent
+        modification of any field after instantiation.
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.types import ModelParsedDSN
+
+        dsn = ModelParsedDSN(
+            scheme="postgresql",
+            username="user",
+            password="pass",  # noqa: S106 - test value
+            hostname="localhost",
+            port=5432,
+            database="mydb",
+        )
+
+        # Attempting to modify a frozen model should raise ValidationError
+        with pytest.raises(ValidationError):
+            dsn.hostname = "newhost"  # type: ignore[misc]
+
+    def test_frozen_immutability_all_fields(self) -> None:
+        """Test immutability applies to all fields."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.types import ModelParsedDSN
+
+        dsn = ModelParsedDSN(
+            scheme="postgresql",
+            hostname="localhost",
+            port=5432,
+            database="mydb",
+        )
+
+        # All fields should be immutable
+        with pytest.raises(ValidationError):
+            dsn.scheme = "postgres"  # type: ignore[misc]
+
+        with pytest.raises(ValidationError):
+            dsn.port = 5433  # type: ignore[misc]
+
+        with pytest.raises(ValidationError):
+            dsn.database = "otherdb"  # type: ignore[misc]
+
+    def test_port_validation_too_low(self) -> None:
+        """Test that port 0 is rejected.
+
+        Port must be >= 1 per the Field(ge=1) constraint.
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.types import ModelParsedDSN
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelParsedDSN(
+                scheme="postgresql",
+                hostname="localhost",
+                port=0,
+                database="db",
+            )
+
+        # Verify the error is about the port constraint
+        assert "port" in str(exc_info.value).lower()
+
+    def test_port_validation_negative(self) -> None:
+        """Test that negative port values are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.types import ModelParsedDSN
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelParsedDSN(
+                scheme="postgresql",
+                hostname="localhost",
+                port=-1,
+                database="db",
+            )
+
+        assert "port" in str(exc_info.value).lower()
+
+    def test_port_validation_too_high(self) -> None:
+        """Test that port > 65535 is rejected.
+
+        Port must be <= 65535 per the Field(le=65535) constraint.
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.types import ModelParsedDSN
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelParsedDSN(
+                scheme="postgresql",
+                hostname="localhost",
+                port=65536,
+                database="db",
+            )
+
+        assert "port" in str(exc_info.value).lower()
+
+    def test_port_validation_way_too_high(self) -> None:
+        """Test that extremely high port values are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.types import ModelParsedDSN
+
+        with pytest.raises(ValidationError):
+            ModelParsedDSN(
+                scheme="postgresql",
+                hostname="localhost",
+                port=99999,
+                database="db",
+            )
+
+    def test_port_validation_valid_range(self) -> None:
+        """Test valid port numbers across the acceptable range."""
+        from omnibase_infra.types import ModelParsedDSN
+
+        # Test boundary values and common ports
+        valid_ports = [1, 80, 443, 5432, 5433, 8080, 65535]
+
+        for port in valid_ports:
+            dsn = ModelParsedDSN(
+                scheme="postgresql",
+                hostname="localhost",
+                port=port,
+                database="db",
+            )
+            assert dsn.port == port
+
+    def test_port_validation_none_allowed(self) -> None:
+        """Test that None port is valid (optional field)."""
+        from omnibase_infra.types import ModelParsedDSN
+
+        dsn = ModelParsedDSN(
+            scheme="postgresql",
+            hostname="localhost",
+            database="db",
+            # port not specified, defaults to None
+        )
+        assert dsn.port is None
+
+    def test_scheme_validation_postgresql(self) -> None:
+        """Test that 'postgresql' scheme is accepted."""
+        from omnibase_infra.types import ModelParsedDSN
+
+        dsn = ModelParsedDSN(
+            scheme="postgresql",
+            hostname="localhost",
+            database="db",
+        )
+        assert dsn.scheme == "postgresql"
+
+    def test_scheme_validation_postgres(self) -> None:
+        """Test that 'postgres' scheme is accepted (alternative form)."""
+        from omnibase_infra.types import ModelParsedDSN
+
+        dsn = ModelParsedDSN(
+            scheme="postgres",
+            hostname="localhost",
+            database="db",
+        )
+        assert dsn.scheme == "postgres"
+
+    def test_scheme_validation_invalid_mysql(self) -> None:
+        """Test that 'mysql' scheme is rejected.
+
+        The Literal type constrains scheme to only 'postgresql' or 'postgres'.
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.types import ModelParsedDSN
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelParsedDSN(
+                scheme="mysql",  # type: ignore[arg-type]
+                hostname="localhost",
+                database="db",
+            )
+
+        # Verify the error mentions scheme or the invalid value
+        error_str = str(exc_info.value).lower()
+        assert "scheme" in error_str or "mysql" in error_str
+
+    def test_scheme_validation_invalid_mongodb(self) -> None:
+        """Test that 'mongodb' scheme is rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.types import ModelParsedDSN
+
+        with pytest.raises(ValidationError):
+            ModelParsedDSN(
+                scheme="mongodb",  # type: ignore[arg-type]
+                hostname="localhost",
+                database="db",
+            )
+
+    def test_scheme_validation_invalid_empty(self) -> None:
+        """Test that empty string scheme is rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.types import ModelParsedDSN
+
+        with pytest.raises(ValidationError):
+            ModelParsedDSN(
+                scheme="",  # type: ignore[arg-type]
+                hostname="localhost",
+                database="db",
+            )
+
+    def test_scheme_validation_case_sensitive(self) -> None:
+        """Test that scheme validation is case-sensitive.
+
+        'PostgreSQL' (capitalized) should be rejected since only
+        lowercase 'postgresql' and 'postgres' are valid.
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.types import ModelParsedDSN
+
+        with pytest.raises(ValidationError):
+            ModelParsedDSN(
+                scheme="PostgreSQL",  # type: ignore[arg-type]
+                hostname="localhost",
+                database="db",
+            )
+
+    def test_database_required(self) -> None:
+        """Test that database field is required (no default)."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.types import ModelParsedDSN
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelParsedDSN(
+                scheme="postgresql",
+                hostname="localhost",
+            )  # type: ignore[call-arg]
+
+        assert "database" in str(exc_info.value).lower()
+
+    def test_repr_masks_password(self) -> None:
+        """Test that __repr__ masks the password for security."""
+        from omnibase_infra.types import ModelParsedDSN
+
+        dsn = ModelParsedDSN(
+            scheme="postgresql",
+            username="admin",
+            password="super_secret",  # noqa: S106 - test value
+            hostname="localhost",
+            port=5432,
+            database="mydb",
+        )
+
+        repr_str = repr(dsn)
+
+        # Password should be masked
+        assert "super_secret" not in repr_str
+        assert "[REDACTED]" in repr_str
+
+        # Other fields should be visible
+        assert "admin" in repr_str
+        assert "localhost" in repr_str
+        assert "mydb" in repr_str
+
+    def test_str_masks_password(self) -> None:
+        """Test that __str__ also masks the password."""
+        from omnibase_infra.types import ModelParsedDSN
+
+        dsn = ModelParsedDSN(
+            scheme="postgresql",
+            password="another_secret",  # noqa: S106 - test value
+            hostname="localhost",
+            database="mydb",
+        )
+
+        str_output = str(dsn)
+
+        assert "another_secret" not in str_output
+        assert "[REDACTED]" in str_output
+
+    def test_password_still_accessible(self) -> None:
+        """Test that password is still accessible via attribute despite masking."""
+        from omnibase_infra.types import ModelParsedDSN
+
+        dsn = ModelParsedDSN(
+            scheme="postgresql",
+            password="real_password",  # noqa: S106 - test value
+            hostname="localhost",
+            database="mydb",
+        )
+
+        # The actual password should be accessible
+        assert dsn.password == "real_password"
+
+        # But not visible in string representations
+        assert "real_password" not in repr(dsn)
+
+    def test_to_sanitized_dict_with_password(self) -> None:
+        """Test that to_sanitized_dict() masks password when set."""
+        from omnibase_infra.types import ModelParsedDSN
+
+        dsn = ModelParsedDSN(
+            scheme="postgresql",
+            username="admin",
+            password="super_secret",  # noqa: S106 - test value
+            hostname="localhost",
+            port=5432,
+            database="mydb",
+            query={"sslmode": "require"},
+        )
+
+        result = dsn.to_sanitized_dict()
+
+        # Password should be masked
+        assert result["password"] == "[REDACTED]"
+        assert "super_secret" not in str(result)
+
+        # Other fields should be present and correct
+        assert result["scheme"] == "postgresql"
+        assert result["username"] == "admin"
+        assert result["hostname"] == "localhost"
+        assert result["port"] == 5432
+        assert result["database"] == "mydb"
+        assert result["query"] == {"sslmode": "require"}
+
+    def test_to_sanitized_dict_without_password(self) -> None:
+        """Test that to_sanitized_dict() leaves None password as None."""
+        from omnibase_infra.types import ModelParsedDSN
+
+        dsn = ModelParsedDSN(
+            scheme="postgresql",
+            username="admin",
+            hostname="localhost",
+            port=5432,
+            database="mydb",
+        )
+
+        result = dsn.to_sanitized_dict()
+
+        # None password should remain None (not masked)
+        assert result["password"] is None
+
+        # Other fields should be present
+        assert result["scheme"] == "postgresql"
+        assert result["username"] == "admin"
+
+    def test_to_sanitized_dict_with_empty_password(self) -> None:
+        """Test that to_sanitized_dict() leaves empty string password as-is.
+
+        An empty password is technically falsy, so it should not be masked.
+        This is correct behavior since empty string is different from a real password.
+        """
+        from omnibase_infra.types import ModelParsedDSN
+
+        dsn = ModelParsedDSN(
+            scheme="postgresql",
+            username="admin",
+            password="",  # Empty password
+            hostname="localhost",
+            database="mydb",
+        )
+
+        result = dsn.to_sanitized_dict()
+
+        # Empty password should remain empty (falsy, so not masked)
+        assert result["password"] == ""
+
+    def test_to_sanitized_dict_returns_new_dict(self) -> None:
+        """Test that to_sanitized_dict() returns a new dict each time."""
+        from omnibase_infra.types import ModelParsedDSN
+
+        dsn = ModelParsedDSN(
+            scheme="postgresql",
+            password="secret",  # noqa: S106 - test value
+            hostname="localhost",
+            database="mydb",
+        )
+
+        result1 = dsn.to_sanitized_dict()
+        result2 = dsn.to_sanitized_dict()
+
+        # Should be equal but not the same object
+        assert result1 == result2
+        assert result1 is not result2
+
+
+__all__: list[str] = [
+    "TestDsnValidation",
+    "TestDsnEdgeCasesIntegration",
+    "TestModelParsedDSNValidation",
+]

@@ -201,7 +201,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind
@@ -214,10 +214,12 @@ from omnibase_infra.models.discovery import (
 from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
     ModelIntrospectionPerformanceMetrics,
 )
-from omnibase_infra.models.discovery.model_node_introspection_event import (
-    CapabilitiesTypedDict,
-)
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
+from omnibase_infra.types import TypedDictCapabilities
+from omnibase_infra.types.typed_dict import (
+    TypedDictIntrospectionCache,
+    TypedDictPerformanceMetricsCache,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
@@ -231,70 +233,53 @@ INTROSPECTION_TOPIC = "node.introspection"
 HEARTBEAT_TOPIC = "node.heartbeat"
 REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
 
-# Performance threshold constants (in milliseconds)
-PERF_THRESHOLD_GET_CAPABILITIES_MS = 50.0
-PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS = 30.0
-PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS = 50.0
-PERF_THRESHOLD_CACHE_HIT_MS = 1.0
-
-
-class PerformanceMetricsCacheDict(TypedDict, total=False):
-    """TypedDict for JSON-serialized ModelIntrospectionPerformanceMetrics.
-
-    This type matches the output of ModelIntrospectionPerformanceMetrics.model_dump(mode="json"),
-    enabling proper type checking for cached performance metrics.
-
-    Attributes:
-        get_capabilities_ms: Time taken by get_capabilities() in milliseconds.
-        discover_capabilities_ms: Time taken by _discover_capabilities() in ms.
-        get_endpoints_ms: Time taken by get_endpoints() in milliseconds.
-        get_current_state_ms: Time taken by get_current_state() in milliseconds.
-        total_introspection_ms: Total time for get_introspection_data() in ms.
-        cache_hit: Whether the result was served from cache.
-        method_count: Number of methods discovered during reflection.
-        threshold_exceeded: Whether any operation exceeded performance thresholds.
-        slow_operations: List of operation names that exceeded their thresholds.
-        captured_at: UTC timestamp when metrics were captured (ISO string).
-    """
-
-    get_capabilities_ms: float
-    discover_capabilities_ms: float
-    get_endpoints_ms: float
-    get_current_state_ms: float
-    total_introspection_ms: float
-    cache_hit: bool
-    method_count: int
-    threshold_exceeded: bool
-    slow_operations: list[str]
-    captured_at: str  # datetime serializes to ISO string in JSON mode
-
-
-class IntrospectionCacheDict(TypedDict):
-    """TypedDict representing the JSON-serialized ModelNodeIntrospectionEvent.
-
-    This type matches the output of ModelNodeIntrospectionEvent.model_dump(mode="json"),
-    enabling proper type checking for cache operations without requiring type: ignore comments.
-
-    Note:
-        The capabilities field uses CapabilitiesTypedDict for type safety.
-        When serialized to JSON, the structure is:
-        operations (list[str]), protocols (list[str]),
-        has_fsm (bool), method_signatures (dict[str, str]).
-    """
-
-    node_id: str
-    node_type: str
-    # Uses CapabilitiesTypedDict for type safety
-    # JSON serialization preserves the structure from model_dump()
-    capabilities: CapabilitiesTypedDict
-    endpoints: dict[str, str]
-    current_state: str | None
-    version: str
-    reason: str
-    correlation_id: str | None  # UUID serializes to string in JSON mode
-    timestamp: str  # datetime serializes to ISO string in JSON mode
-    # Performance metrics from introspection operation (may be None)
-    performance_metrics: PerformanceMetricsCacheDict | None
+# =============================================================================
+# Performance Threshold Constants (in milliseconds)
+# =============================================================================
+#
+# These thresholds define acceptable performance limits for introspection
+# operations. When operations exceed these thresholds:
+#   - The `threshold_exceeded` field is set to True in metrics
+#   - The operation name is added to the `slow_operations` list
+#   - A warning is logged with timing details
+#
+# Threshold Values:
+#   - PERF_THRESHOLD_GET_CAPABILITIES_MS (50.0): Maximum time for get_capabilities()
+#   - PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS (30.0): Maximum time for method discovery
+#   - PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS (50.0): Maximum time for full introspection
+#   - PERF_THRESHOLD_CACHE_HIT_MS (1.0): Maximum time for cache hit retrieval
+#
+# IMPORTANT - Synchronization Requirements:
+# =========================================
+# When modifying these threshold values, ensure consistency across:
+#
+# 1. Test File:
+#    tests/unit/mixins/test_mixin_node_introspection.py
+#    - TestMixinNodeIntrospectionPerformance class
+#    - TestMixinNodeModelIntrospectionPerformanceMetrics class
+#    - TestCacheHitPerformanceRobust class
+#    - TestThresholdExceeded class
+#    - TestPerformanceBenchmarks class
+#    - TestMethodCountScaling class
+#    Note: Tests import these constants directly, so values auto-sync.
+#    However, test assertions may use derived thresholds (e.g., 10ms for
+#    relaxed cache tests) that should be reviewed when changing base values.
+#
+# 2. TypedDict Documentation:
+#    src/omnibase_infra/types/typed_dict/typed_dict_performance_metrics_cache.py
+#    - "Performance Thresholds" docstring section (lines 111-116)
+#    - Attribute docstrings reference specific threshold values
+#    These are documentation-only and must be manually updated.
+#
+# 3. Module __all__ Export:
+#    These constants are exported in __all__ at the bottom of this file
+#    for external consumers who may validate against them.
+#
+# =============================================================================
+PERF_THRESHOLD_GET_CAPABILITIES_MS: float = 50.0
+PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS: float = 30.0
+PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS: float = 50.0
+PERF_THRESHOLD_CACHE_HIT_MS: float = 1.0
 
 
 class MixinNodeIntrospection:
@@ -413,7 +398,7 @@ class MixinNodeIntrospection:
     # All of these are initialized in initialize_introspection()
     #
     # Caching attributes
-    _introspection_cache: IntrospectionCacheDict | None
+    _introspection_cache: TypedDictIntrospectionCache | None
     _introspection_cache_ttl: float
     _introspection_cached_at: float | None
 
@@ -942,7 +927,7 @@ class MixinNodeIntrospection:
             )
             return None
 
-    async def get_capabilities(self) -> CapabilitiesTypedDict:
+    async def get_capabilities(self) -> TypedDictCapabilities:
         """Extract node capabilities via reflection.
 
         Uses the inspect module to discover:
@@ -1035,7 +1020,7 @@ class MixinNodeIntrospection:
                 operations.append(name)
 
         # Build capabilities dict
-        capabilities: CapabilitiesTypedDict = {
+        capabilities: TypedDictCapabilities = {
             "operations": operations,
             "protocols": self._discover_protocols(),
             "has_fsm": self._has_fsm_state(),
@@ -1324,7 +1309,7 @@ class MixinNodeIntrospection:
         # Update cache - cast the model_dump output to our typed dict since we know
         # the structure matches (model_dump returns dict[str, Any] by default)
         self._introspection_cache = cast(
-            IntrospectionCacheDict, event.model_dump(mode="json")
+            TypedDictIntrospectionCache, event.model_dump(mode="json")
         )
         self._introspection_cached_at = current_time
 
@@ -2386,14 +2371,14 @@ class MixinNodeIntrospection:
 __all__ = [
     "HEARTBEAT_TOPIC",
     "INTROSPECTION_TOPIC",
+    "MixinNodeIntrospection",
+    "ModelIntrospectionPerformanceMetrics",
     "PERF_THRESHOLD_CACHE_HIT_MS",
     "PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS",
     "PERF_THRESHOLD_GET_CAPABILITIES_MS",
     "PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS",
     "REQUEST_INTROSPECTION_TOPIC",
-    "CapabilitiesTypedDict",  # Re-export from model for convenience
-    "IntrospectionCacheDict",
-    "MixinNodeIntrospection",
-    "ModelIntrospectionPerformanceMetrics",
-    "PerformanceMetricsCacheDict",  # TypedDict for cached performance metrics
+    "TypedDictCapabilities",  # Re-export from types for convenience
+    "TypedDictIntrospectionCache",  # Re-export from types for convenience
+    "TypedDictPerformanceMetricsCache",  # Re-export from types for convenience
 ]
