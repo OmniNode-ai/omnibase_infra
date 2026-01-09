@@ -30,10 +30,11 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import yaml
+from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.projectors import ModelProjectorContract
 from pydantic import ValidationError
@@ -122,7 +123,7 @@ class ProjectorShellPlaceholder:
     async def get_state(
         self,
         aggregate_id: UUID,
-    ) -> Any | None:
+    ) -> object | None:
         """Placeholder - not implemented until OMN-1169.
 
         Raises:
@@ -323,7 +324,7 @@ class ProjectorPluginLoader:
             raise ModelOnexError(
                 f"Contract file exceeds size limit: {file_size} bytes "
                 f"(max: {MAX_CONTRACT_SIZE} bytes)",
-                error_code="PROJECTOR_LOADER_001",
+                error_code=EnumCoreErrorCode.VALIDATION_FAILED,
             )
 
         with contract_path.open("r", encoding="utf-8") as f:
@@ -909,21 +910,147 @@ class ProjectorPluginLoader:
         Returns:
             ModelProjectorDiscoveryResult containing both loaded projectors
             and validation errors.
-        """
-        # Temporarily enable graceful mode
-        original_mode = self._graceful_mode
-        self._graceful_mode = True
 
-        try:
-            projectors = await self.load_from_directory(directory)
-            # In graceful mode, errors are logged but not collected
-            # For full error collection, we'd need to refactor
-            return ModelProjectorDiscoveryResult(
-                projectors=projectors,
-                validation_errors=[],
+        Raises:
+            FileNotFoundError: If directory does not exist.
+            NotADirectoryError: If directory is not a directory.
+        """
+        if not directory.exists():
+            raise FileNotFoundError(
+                f"Directory does not exist: {self._sanitize_path_for_logging(directory)}"
             )
-        finally:
-            self._graceful_mode = original_mode
+
+        if not directory.is_dir():
+            raise NotADirectoryError(
+                f"Path is not a directory: {self._sanitize_path_for_logging(directory)}"
+            )
+
+        start_time = time.perf_counter()
+        projectors: list[ProtocolEventProjector] = []
+        validation_errors: list[ModelProjectorValidationError] = []
+        discovered_paths: set[Path] = set()
+
+        allowed_bases = self._base_paths if self._base_paths else [directory]
+        contract_files = self._find_contract_files(directory)
+
+        logger.debug(
+            "Scanning directory for projector contracts with error collection: %s",
+            directory,
+            extra={
+                "directory": str(directory),
+                "contracts_found": len(contract_files),
+            },
+        )
+
+        for contract_file in contract_files:
+            resolved_path = contract_file.resolve()
+            if resolved_path in discovered_paths:
+                continue
+
+            discovered_paths.add(resolved_path)
+
+            # Security validation
+            is_valid, error_msg = self._validate_file_security(
+                contract_file, allowed_bases
+            )
+            if not is_valid:
+                logger.warning(
+                    "Security validation failed for %s, collecting error",
+                    self._sanitize_path_for_logging(contract_file),
+                    extra={
+                        "contract_file": str(contract_file),
+                    },
+                )
+                validation_errors.append(
+                    self._create_security_error(contract_file, error_msg or "")
+                )
+                continue
+
+            try:
+                contract = self._load_contract(contract_file)
+                projector = ProjectorShellPlaceholder(contract)
+                projectors.append(projector)
+                logger.debug(
+                    "Successfully parsed contract: %s",
+                    contract_file,
+                    extra={
+                        "contract_file": str(contract_file),
+                        "projector_id": contract.projector_id,
+                        "aggregate_type": contract.aggregate_type,
+                    },
+                )
+            except yaml.YAMLError as e:
+                error = self._create_parse_error(contract_file, e)
+                logger.warning(
+                    "Failed to parse YAML contract in %s, collecting error",
+                    self._sanitize_path_for_logging(contract_file),
+                    extra={
+                        "contract_file": str(contract_file),
+                        "error_type": "yaml_parse_error",
+                    },
+                )
+                validation_errors.append(error)
+            except ValidationError as e:
+                error = self._create_validation_error(contract_file, e)
+                logger.warning(
+                    "Contract validation failed in %s, collecting error",
+                    self._sanitize_path_for_logging(contract_file),
+                    extra={
+                        "contract_file": str(contract_file),
+                        "error_type": "validation_error",
+                        "error_count": len(e.errors()),
+                    },
+                )
+                validation_errors.append(error)
+            except ModelOnexError as e:
+                error_code = getattr(e, "error_code", None)
+                if error_code == EnumCoreErrorCode.VALIDATION_FAILED:
+                    # File size limit error
+                    try:
+                        file_size = contract_file.stat().st_size
+                    except OSError:
+                        file_size = 0
+                    error = self._create_size_limit_error(contract_file, file_size)
+                    logger.warning(
+                        "Contract file %s exceeds size limit, collecting error",
+                        self._sanitize_path_for_logging(contract_file),
+                        extra={
+                            "contract_file": str(contract_file),
+                            "error_type": "size_limit_error",
+                        },
+                    )
+                    validation_errors.append(error)
+                else:
+                    # For other ModelOnexError types, create a generic validation error
+                    error = ModelProjectorValidationError(
+                        error_type="ONEX_ERROR",
+                        contract_path=str(contract_file),
+                        message=str(e),
+                        remediation_hint="Check the contract file for issues",
+                    )
+                    validation_errors.append(error)
+            except OSError as e:
+                error = self._create_io_error(contract_file, e)
+                logger.warning(
+                    "Failed to read contract file, collecting error: %s",
+                    self._sanitize_path_for_logging(contract_file),
+                    extra={
+                        "contract_file": str(contract_file),
+                        "error_type": "io_error",
+                        "error_message": str(e),
+                    },
+                )
+                validation_errors.append(error)
+
+        duration_seconds = time.perf_counter() - start_time
+        self._log_discovery_results(
+            len(projectors), len(validation_errors), duration_seconds
+        )
+
+        return ModelProjectorDiscoveryResult(
+            projectors=projectors,
+            validation_errors=validation_errors,
+        )
 
 
 __all__ = [

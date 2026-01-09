@@ -10,7 +10,7 @@ Part of OMN-1168: ProjectorPluginLoader contract discovery loading.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
 if TYPE_CHECKING:
@@ -56,7 +56,7 @@ class ProtocolEventProjector(Protocol):
     async def get_state(
         self,
         aggregate_id: UUID,
-    ) -> Any | None:
+    ) -> object | None:
         """Get current projected state for an aggregate."""
         ...
 

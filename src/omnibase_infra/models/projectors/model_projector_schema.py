@@ -22,6 +22,10 @@ from omnibase_infra.models.projectors.model_projector_column import (
     ModelProjectorColumn,
 )
 from omnibase_infra.models.projectors.model_projector_index import ModelProjectorIndex
+from omnibase_infra.models.projectors.util_sql_identifiers import (
+    IDENT_PATTERN,
+    quote_identifier,
+)
 
 
 class ModelProjectorSchema(BaseModel):
@@ -97,6 +101,31 @@ class ModelProjectorSchema(BaseModel):
         "frozen": True,
     }
 
+    @field_validator("table_name")
+    @classmethod
+    def validate_table_name_identifier(cls, v: str) -> str:
+        """Validate that the table name is a valid PostgreSQL identifier.
+
+        Prevents SQL injection by ensuring the name matches the safe identifier
+        pattern (letters, digits, underscores, starting with letter or underscore).
+
+        Args:
+            v: Table name to validate.
+
+        Returns:
+            Validated table name.
+
+        Raises:
+            ValueError: If the name contains invalid characters.
+        """
+        if not IDENT_PATTERN.match(v):
+            raise ValueError(
+                f"Invalid table name '{v}': must match pattern "
+                "[A-Za-z_][A-Za-z0-9_]* (letters, digits, underscores only, "
+                "starting with letter or underscore)"
+            )
+        return v
+
     @field_validator("columns")
     @classmethod
     def validate_columns_not_empty(
@@ -155,24 +184,31 @@ class ModelProjectorSchema(BaseModel):
     def to_create_table_sql(self) -> str:
         """Generate CREATE TABLE SQL statement.
 
+        Uses quoted identifiers for table name and column names in the
+        primary key constraint to prevent SQL injection.
+
         Returns:
             SQL CREATE TABLE statement including columns and primary key.
 
         Example:
             >>> schema.to_create_table_sql()
-            'CREATE TABLE IF NOT EXISTS registration_projections (...)'
+            'CREATE TABLE IF NOT EXISTS "registration_projections" (...)'
         """
         column_defs = [col.to_sql_definition() for col in self.columns]
 
-        # Add primary key constraint
+        # Add primary key constraint with quoted column names
         pk_columns = self.get_primary_key_columns()
         if pk_columns:
-            pk_clause = f"PRIMARY KEY ({', '.join(pk_columns)})"
+            quoted_pk_columns = ", ".join(quote_identifier(col) for col in pk_columns)
+            pk_clause = f"PRIMARY KEY ({quoted_pk_columns})"
             column_defs.append(pk_clause)
 
         columns_sql = ",\n    ".join(column_defs)
 
-        return f"CREATE TABLE IF NOT EXISTS {self.table_name} (\n    {columns_sql}\n)"
+        # Quote table name to prevent SQL injection
+        quoted_table_name = quote_identifier(self.table_name)
+
+        return f"CREATE TABLE IF NOT EXISTS {quoted_table_name} (\n    {columns_sql}\n)"
 
     def to_create_indexes_sql(self) -> list[str]:
         """Generate CREATE INDEX SQL statements for all indexes.

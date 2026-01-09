@@ -10,7 +10,7 @@ Part of OMN-1168: ProjectorPluginLoader contract discovery loading.
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -29,7 +29,7 @@ class ProtocolProjectorSchemaValidator(Protocol):
 
     async def ensure_schema_exists(
         self,
-        schema: Any,
+        schema: object,
         correlation_id: str | None = None,
     ) -> None:
         """Ensure the schema table exists with required columns."""

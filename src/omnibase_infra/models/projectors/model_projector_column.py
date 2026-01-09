@@ -18,7 +18,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from omnibase_infra.models.projectors.util_sql_identifiers import (
+    IDENT_PATTERN,
+    quote_identifier,
+)
 
 
 class ModelProjectorColumn(BaseModel):
@@ -95,11 +100,38 @@ class ModelProjectorColumn(BaseModel):
         "frozen": True,
     }
 
+    @field_validator("name")
+    @classmethod
+    def validate_name_identifier(cls, v: str) -> str:
+        """Validate that the column name is a valid PostgreSQL identifier.
+
+        Prevents SQL injection by ensuring the name matches the safe identifier
+        pattern (letters, digits, underscores, starting with letter or underscore).
+
+        Args:
+            v: Column name to validate.
+
+        Returns:
+            Validated column name.
+
+        Raises:
+            ValueError: If the name contains invalid characters.
+        """
+        if not IDENT_PATTERN.match(v):
+            raise ValueError(
+                f"Invalid column name '{v}': must match pattern "
+                "[A-Za-z_][A-Za-z0-9_]* (letters, digits, underscores only, "
+                "starting with letter or underscore)"
+            )
+        return v
+
     def to_sql_definition(self) -> str:
         """Generate SQL column definition for CREATE TABLE statement.
 
+        Uses quoted identifiers to prevent SQL injection.
+
         Returns:
-            SQL column definition string (e.g., "entity_id UUID NOT NULL").
+            SQL column definition string (e.g., '"entity_id" UUID NOT NULL').
 
         Example:
             >>> column = ModelProjectorColumn(
@@ -108,7 +140,7 @@ class ModelProjectorColumn(BaseModel):
             ...     nullable=False,
             ... )
             >>> column.to_sql_definition()
-            'entity_id UUID NOT NULL'
+            '"entity_id" UUID NOT NULL'
         """
         # Map column_type to PostgreSQL type with length
         type_map: dict[str, str] = {
@@ -124,12 +156,15 @@ class ModelProjectorColumn(BaseModel):
         }
 
         sql_type = type_map[self.column_type]
-        parts = [self.name, sql_type]
+        # Quote the column name to prevent SQL injection
+        quoted_name = quote_identifier(self.name)
+        parts = [quoted_name, sql_type]
 
         if not self.nullable:
             parts.append("NOT NULL")
 
         if self.default is not None:
+            # Note: default is trusted SQL expression from contract.yaml
             parts.append(f"DEFAULT {self.default}")
 
         return " ".join(parts)

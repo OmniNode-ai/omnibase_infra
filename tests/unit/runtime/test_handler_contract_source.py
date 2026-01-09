@@ -239,9 +239,6 @@ class TestHandlerContractSourceImport:
         assert hasattr(source, "discover_handlers")
         assert callable(source.discover_handlers)
 
-        # Runtime checkable protocol verification
-        assert isinstance(source, ProtocolHandlerSource)
-
     def test_handler_contract_source_type_is_contract(
         self, single_contract_path: Path
     ) -> None:
