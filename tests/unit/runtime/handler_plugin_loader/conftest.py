@@ -62,7 +62,38 @@ EMPTY_CONTRACT_YAML = ""
 
 
 class MockValidHandler:
-    """Mock handler class that implements ProtocolHandler (has describe method)."""
+    """Mock handler class that implements ProtocolHandler.
+
+    Implements all 5 required protocol methods:
+    - handler_type (property): Returns handler type identifier
+    - initialize(): Async method for connection setup
+    - shutdown(): Async method for resource cleanup
+    - execute(): Async method for operation execution
+    - describe(): Sync method for introspection
+
+    Note: health_check() is optional per ProtocolHandler protocol and is not
+    included here to match the existing handlers (HandlerHttp, HandlerDb, etc.)
+    which also don't implement it.
+    """
+
+    @property
+    def handler_type(self) -> str:
+        """Return handler type identifier."""
+        return "mock"
+
+    async def initialize(self, config: dict[str, object]) -> None:
+        """Initialize handler (mock implementation)."""
+
+    async def shutdown(self, timeout_seconds: float = 30.0) -> None:
+        """Shutdown handler (mock implementation)."""
+
+    async def execute(
+        self,
+        request: object,
+        operation_config: object,
+    ) -> object:
+        """Execute operation (mock implementation)."""
+        return {}
 
     @classmethod
     def describe(cls) -> dict[str, object]:
@@ -75,7 +106,23 @@ class MockValidHandler:
 
 
 class MockInvalidHandler:
-    """Mock handler class that does NOT implement ProtocolHandler (no describe)."""
+    """Mock handler class that does NOT implement ProtocolHandler.
+
+    Missing all required protocol methods to test validation rejection.
+    """
+
+
+class MockPartialHandler:
+    """Mock handler with only describe() method.
+
+    This tests that validation rejects handlers that only implement
+    describe() but are missing other required methods (handler_type,
+    initialize, shutdown, execute).
+    """
+
+    def describe(self) -> dict[str, object]:
+        """Describe this handler (only method implemented)."""
+        return {"handler_id": "mock.partial.handler"}
 
 
 # =============================================================================

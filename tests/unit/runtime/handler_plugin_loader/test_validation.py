@@ -22,30 +22,64 @@ import pytest
 from .conftest import (
     VALID_HANDLER_CONTRACT_YAML,
     MockInvalidHandler,
+    MockPartialHandler,
     MockValidHandler,
 )
 
 
 class TestHandlerPluginLoaderValidation:
-    """Tests for handler validation logic."""
+    """Tests for handler validation logic.
+
+    Protocol Validation Requirements:
+        The handler plugin loader validates handlers against ProtocolHandler
+        from omnibase_spi.protocols.handlers.protocol_handler. A valid handler
+        must implement all 5 required methods:
+
+        - handler_type (property): Returns handler type identifier string
+        - initialize(config): Async method to initialize connections/pools
+        - shutdown(timeout_seconds): Async method to release resources
+        - execute(request, operation_config): Async method for operations
+        - describe(): Sync method returning handler metadata/capabilities
+
+        Note: health_check() is part of the protocol but is optional because
+        existing handlers (HandlerHttp, HandlerDb, etc.) do not implement it.
+    """
 
     def test_validate_handler_implements_protocol(self) -> None:
-        """Test protocol validation for handler with describe method."""
+        """Test protocol validation for handler with all required methods.
+
+        MockValidHandler implements all 5 required protocol methods:
+        handler_type, initialize, shutdown, execute, describe.
+        """
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
         loader = HandlerPluginLoader()
 
-        # MockValidHandler has describe method
+        # MockValidHandler has all 5 required methods
         assert loader._validate_handler_protocol(MockValidHandler) is True
 
-    def test_validate_handler_without_describe_method(self) -> None:
-        """Test protocol validation for handler without describe method."""
+    def test_validate_handler_without_any_protocol_methods(self) -> None:
+        """Test protocol validation for handler without any protocol methods."""
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
         loader = HandlerPluginLoader()
 
-        # MockInvalidHandler doesn't have describe method
+        # MockInvalidHandler has no protocol methods at all
         assert loader._validate_handler_protocol(MockInvalidHandler) is False
+
+    def test_validate_partial_handler_rejected(self) -> None:
+        """Test that handler with only describe() is rejected.
+
+        Ensures validation checks for ALL required methods, not just describe().
+        This prevents false positives where a class has describe() but is
+        missing other essential handler methods.
+        """
+        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+        loader = HandlerPluginLoader()
+
+        # MockPartialHandler only has describe(), missing other 4 methods
+        assert loader._validate_handler_protocol(MockPartialHandler) is False
 
     def test_validate_non_callable_describe_rejected(self) -> None:
         """Test that non-callable describe attribute is rejected."""
@@ -59,6 +93,100 @@ class TestHandlerPluginLoaderValidation:
 
         result = loader._validate_handler_protocol(HandlerWithNonCallableDescribe)
         assert result is False
+
+    def test_validate_missing_individual_methods(self) -> None:
+        """Test that each missing required method causes validation to fail.
+
+        Verifies that validation is comprehensive - missing ANY of the 5
+        required methods should cause rejection.
+        """
+        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+        loader = HandlerPluginLoader()
+
+        # Missing handler_type
+        class MissingHandlerType:
+            async def initialize(self, config: object) -> None:
+                pass
+
+            async def shutdown(self, timeout_seconds: float = 30.0) -> None:
+                pass
+
+            async def execute(self, request: object, config: object) -> object:
+                return {}
+
+            def describe(self) -> dict[str, object]:
+                return {}
+
+        assert loader._validate_handler_protocol(MissingHandlerType) is False
+
+        # Missing initialize
+        class MissingInitialize:
+            @property
+            def handler_type(self) -> str:
+                return "test"
+
+            async def shutdown(self, timeout_seconds: float = 30.0) -> None:
+                pass
+
+            async def execute(self, request: object, config: object) -> object:
+                return {}
+
+            def describe(self) -> dict[str, object]:
+                return {}
+
+        assert loader._validate_handler_protocol(MissingInitialize) is False
+
+        # Missing shutdown
+        class MissingShutdown:
+            @property
+            def handler_type(self) -> str:
+                return "test"
+
+            async def initialize(self, config: object) -> None:
+                pass
+
+            async def execute(self, request: object, config: object) -> object:
+                return {}
+
+            def describe(self) -> dict[str, object]:
+                return {}
+
+        assert loader._validate_handler_protocol(MissingShutdown) is False
+
+        # Missing execute
+        class MissingExecute:
+            @property
+            def handler_type(self) -> str:
+                return "test"
+
+            async def initialize(self, config: object) -> None:
+                pass
+
+            async def shutdown(self, timeout_seconds: float = 30.0) -> None:
+                pass
+
+            def describe(self) -> dict[str, object]:
+                return {}
+
+        assert loader._validate_handler_protocol(MissingExecute) is False
+
+        # Missing describe (already tested but included for completeness)
+        class MissingDescribe:
+            @property
+            def handler_type(self) -> str:
+                return "test"
+
+            async def initialize(self, config: object) -> None:
+                pass
+
+            async def shutdown(self, timeout_seconds: float = 30.0) -> None:
+                pass
+
+            async def execute(self, request: object, config: object) -> object:
+                return {}
+
+        assert loader._validate_handler_protocol(MissingDescribe) is False
 
     def test_capability_tags_extracted_correctly(self, tmp_path: Path) -> None:
         """Test that capability tags are extracted from contract."""

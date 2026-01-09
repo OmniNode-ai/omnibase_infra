@@ -21,7 +21,11 @@ See Also:
 
 from __future__ import annotations
 
+import logging
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
 
@@ -172,8 +176,18 @@ class ModelHandlerContract(BaseModel):
             return [value]
 
         if isinstance(value, list):
-            # Filter to only string tags, skip invalid types silently
-            return [tag for tag in value if isinstance(tag, str)]
+            # Filter to only string tags, warn about invalid types
+            valid_tags: list[str] = []
+            for tag in value:
+                if isinstance(tag, str):
+                    valid_tags.append(tag)
+                else:
+                    logger.warning(
+                        "Non-string capability tag filtered out: value=%r, type=%s",
+                        tag,
+                        type(tag).__name__,
+                    )
+            return valid_tags
 
         return []
 

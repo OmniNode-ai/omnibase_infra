@@ -511,6 +511,32 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             matched_paths = list(glob_base.glob(pattern))
             for path in matched_paths:
                 if path.is_file():
+                    # Early size validation to skip oversized files before expensive operations
+                    try:
+                        file_size = path.stat().st_size
+                    except OSError as e:
+                        logger.warning(
+                            "Failed to stat contract file %s: %s",
+                            path,
+                            e,
+                            extra={"path": str(path), "error": str(e)},
+                        )
+                        continue
+
+                    if file_size > MAX_CONTRACT_SIZE:
+                        logger.warning(
+                            "Skipping oversized contract file %s: %d bytes exceeds limit of %d bytes",
+                            path,
+                            file_size,
+                            MAX_CONTRACT_SIZE,
+                            extra={
+                                "path": str(path),
+                                "file_size": file_size,
+                                "max_size": MAX_CONTRACT_SIZE,
+                            },
+                        )
+                        continue
+
                     resolved = path.resolve()
                     discovered_paths.add(resolved)
 
@@ -560,17 +586,103 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         """Validate handler implements required protocol (ProtocolHandler).
 
         Uses duck typing to verify the handler class has the required
-        methods for ProtocolHandler compliance.
+        methods for ProtocolHandler compliance. Per ONEX conventions, protocol
+        compliance is verified via structural typing (duck typing) rather than
+        isinstance checks or explicit inheritance.
+
+        Protocol Requirements (from omnibase_spi.protocols.handlers.protocol_handler):
+            The ProtocolHandler protocol defines the following required members:
+
+            **Required Methods (validated)**:
+                - ``handler_type`` (property): Returns handler type identifier string
+                - ``initialize(config)``: Async method to initialize connections/pools
+                - ``shutdown(timeout_seconds)``: Async method to release resources
+                - ``execute(request, operation_config)``: Async method for operations
+                - ``describe()``: Sync method returning handler metadata/capabilities
+
+            **Optional Methods (not validated)**:
+                - ``health_check()``: Async method for connectivity verification.
+                  While part of the ProtocolHandler protocol, this method is not
+                  validated because existing handler implementations (HandlerHttp,
+                  HandlerDb, HandlerVault, HandlerConsul) do not implement it.
+                  Future handler implementations SHOULD include health_check().
+
+        Validation Approach:
+            This method checks for the presence and callability of all 5 required
+            methods. A handler class must have ALL of these methods to pass validation.
+            This prevents false positives where a class might have only ``describe()``
+            but lack other essential handler functionality.
+
+            The validation uses ``callable(getattr(...))`` for methods and
+            ``hasattr()`` for the ``handler_type`` property to accommodate both
+            instance properties and class-level descriptors.
+
+        Why Duck Typing:
+            ONEX uses duck typing for protocol validation to:
+            1. Avoid tight coupling to specific base classes
+            2. Enable flexibility in handler implementation strategies
+            3. Support mixin-based handler composition
+            4. Allow testing with mock handlers that satisfy the protocol
 
         Args:
-            handler_class: The handler class to validate.
+            handler_class: The handler class to validate. Must be a class type,
+                not an instance.
 
         Returns:
-            True if handler implements required protocol methods, False otherwise.
+            True if handler implements all required protocol methods, False otherwise.
+            Returns False if any required method is missing or not callable.
+
+        Example:
+            >>> class ValidHandler:
+            ...     @property
+            ...     def handler_type(self) -> str: return "test"
+            ...     async def initialize(self, config): pass
+            ...     async def shutdown(self, timeout_seconds=30.0): pass
+            ...     async def execute(self, request, config): pass
+            ...     def describe(self): return {}
+            ...
+            >>> loader = HandlerPluginLoader()
+            >>> loader._validate_handler_protocol(ValidHandler)
+            True
+
+            >>> class IncompleteHandler:
+            ...     def describe(self): return {}
+            ...
+            >>> loader._validate_handler_protocol(IncompleteHandler)
+            False
+
+        See Also:
+            - ``omnibase_spi.protocols.handlers.protocol_handler.ProtocolHandler``
+            - ``docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md``
         """
-        # Check for required ProtocolHandler method: describe()
-        # Per ONEX conventions, protocol compliance is verified via duck typing
-        return callable(getattr(handler_class, "describe", None))
+        # Check for required ProtocolHandler methods via duck typing
+        # All 5 core methods must be present for protocol compliance
+
+        # 1. handler_type property - can be property or method
+        if not hasattr(handler_class, "handler_type"):
+            return False
+
+        # 2. initialize() - async method for connection setup
+        if not callable(getattr(handler_class, "initialize", None)):
+            return False
+
+        # 3. shutdown() - async method for resource cleanup
+        if not callable(getattr(handler_class, "shutdown", None)):
+            return False
+
+        # 4. execute() - async method for operation execution
+        if not callable(getattr(handler_class, "execute", None)):
+            return False
+
+        # 5. describe() - sync method for introspection
+        if not callable(getattr(handler_class, "describe", None)):
+            return False
+
+        # Note: health_check() is part of ProtocolHandler but is NOT validated
+        # because existing handlers (HandlerHttp, HandlerDb, etc.) do not
+        # implement it. Future handlers SHOULD implement health_check().
+
+        return True
 
     def _import_handler_class(
         self,
@@ -682,12 +794,14 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         """Find all handler contract files under a directory.
 
         Searches for both handler_contract.yaml and contract.yaml files.
+        Files exceeding MAX_CONTRACT_SIZE are skipped during discovery
+        to fail fast before expensive path resolution and loading.
 
         Args:
             directory: Directory to search recursively.
 
         Returns:
-            List of paths to contract files.
+            List of paths to contract files that pass size validation.
         """
         contract_files: list[Path] = []
 
@@ -696,6 +810,32 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         valid_filenames = {HANDLER_CONTRACT_FILENAME, CONTRACT_YAML_FILENAME}
         for path in directory.rglob("*.yaml"):
             if path.name in valid_filenames and path.is_file():
+                # Early size validation to skip oversized files before expensive operations
+                try:
+                    file_size = path.stat().st_size
+                except OSError as e:
+                    logger.warning(
+                        "Failed to stat contract file %s: %s",
+                        path,
+                        e,
+                        extra={"path": str(path), "error": str(e)},
+                    )
+                    continue
+
+                if file_size > MAX_CONTRACT_SIZE:
+                    logger.warning(
+                        "Skipping oversized contract file %s: %d bytes exceeds limit of %d bytes",
+                        path,
+                        file_size,
+                        MAX_CONTRACT_SIZE,
+                        extra={
+                            "path": str(path),
+                            "file_size": file_size,
+                            "max_size": MAX_CONTRACT_SIZE,
+                        },
+                    )
+                    continue
+
                 contract_files.append(path)
 
         # Deduplicate by resolved path
