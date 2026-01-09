@@ -60,6 +60,7 @@ logger = logging.getLogger(__name__)
 import httpx
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration.model_node_capabilities import (
@@ -209,8 +210,8 @@ def introspection_event(unique_node_id: UUID) -> ModelNodeIntrospectionEvent:
     return ModelNodeIntrospectionEvent(
         node_id=unique_node_id,
         node_type=EnumNodeKind.EFFECT.value,
-        node_version="1.0.0",
-        capabilities=ModelNodeCapabilities(),
+        node_version=ModelSemVer.parse("1.0.0"),
+        declared_capabilities=ModelNodeCapabilities(),
         endpoints={
             "health": f"http://test-node-{unique_node_id.hex[:8]}:8080/health",
             "api": f"http://test-node-{unique_node_id.hex[:8]}:8080/api",
@@ -326,8 +327,8 @@ class TestRuntimeE2EFlow:
             ModelNodeIntrospectionEvent(
                 node_id=node_id,
                 node_type=EnumNodeKind.EFFECT.value,
-                node_version="1.0.0",
-                capabilities=ModelNodeCapabilities(),
+                node_version=ModelSemVer.parse("1.0.0"),
+                declared_capabilities=ModelNodeCapabilities(),
                 endpoints={
                     "health": f"http://node-{i}:8080/health",
                     "api": f"http://node-{i}:8080/api",

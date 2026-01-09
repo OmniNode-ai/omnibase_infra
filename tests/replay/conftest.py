@@ -32,7 +32,6 @@ from tests.helpers.deterministic import DeterministicClock, DeterministicIdGener
 # Import and re-export models from helpers for backwards compatibility
 from tests.helpers.replay_utils import (
     EventFactory,
-    EventSequenceEntry,
     EventSequenceLog,
     NodeType,
 )

@@ -22,14 +22,11 @@ Related:
 
 from __future__ import annotations
 
-from uuid import uuid4
-
 import pytest
 
 from omnibase_infra.enums import (
     EnumHandlerErrorType,
     EnumHandlerSourceType,
-    EnumHandlerType,
 )
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.errors import ModelHandlerValidationError

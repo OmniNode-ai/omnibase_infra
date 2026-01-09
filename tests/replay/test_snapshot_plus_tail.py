@@ -28,6 +28,7 @@ Related Tickets:
 from __future__ import annotations
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection.model_registration_projection import (
@@ -102,7 +103,7 @@ def sample_projection(
         domain="registration",
         current_state=EnumRegistrationState.ACTIVE,
         node_type="effect",
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         capabilities=ModelNodeCapabilities(postgres=True, read=True),
         last_applied_event_id=event_id,
         last_applied_offset=100,
@@ -225,7 +226,7 @@ class TestSnapshotPlusTail:
             node_id=sample_projection.entity_id,
             correlation_id=id_generator.next_uuid(),
             timestamp=clock.now(),
-            node_version="1.1.0",  # Updated version in tail
+            node_version=ModelSemVer.parse("1.1.0"),  # Updated version in tail
         )
 
         # Apply tail event to snapshot-derived state

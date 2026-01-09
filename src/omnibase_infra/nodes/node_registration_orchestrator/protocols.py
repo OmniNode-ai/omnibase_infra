@@ -224,7 +224,7 @@ class ProtocolReducer(Protocol):
                         node_id=event.node_id,
                         correlation_id=correlation_id,
                         payload=ModelConsulIntentPayload(
-                            service_name=f"onex-{event.node_type}",
+                            service_name=f"onex-{event.node_type.value}",
                         ),
                     ),
                     ModelPostgresUpsertIntent(
@@ -235,7 +235,7 @@ class ProtocolReducer(Protocol):
                             node_id=event.node_id,
                             node_type=event.node_type,
                             node_version=event.node_version,
-                            capabilities=event.capabilities,  # Strongly-typed model
+                            capabilities=event.declared_capabilities,  # Strongly-typed model
                             endpoints=event.endpoints,
                             node_role=event.node_role,
                             metadata=event.metadata,  # Strongly-typed model

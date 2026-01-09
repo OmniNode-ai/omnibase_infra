@@ -20,6 +20,31 @@ Use ModelSemVer directly for all version handling:
     # For parsing external input:
     version = ModelSemVer.parse("1.0.0")
     version_str = version.to_string()
+
+Database Persistence (asyncpg):
+    When storing ModelSemVer values in databases (PostgreSQL via asyncpg), convert
+    to string using the built-in str() function or the to_string() method:
+
+        from omnibase_core.models.primitives.model_semver import ModelSemVer
+
+        # Both of these produce "1.2.3":
+        version = ModelSemVer(major=1, minor=2, patch=3)
+        db_value = str(version)          # Using str()
+        db_value = version.to_string()   # Using method
+
+        # For asyncpg parameterized queries:
+        await conn.execute(
+            "INSERT INTO nodes (version) VALUES ($1)",
+            str(node_version),  # Explicit string conversion required
+        )
+
+        # When reading back from database:
+        version = ModelSemVer.parse(row["version"])
+
+    Note: asyncpg requires explicit string conversion for custom types like
+    ModelSemVer. Always use str() when passing ModelSemVer to database queries.
+    See ProjectorRegistration.persist() and ProjectionReaderRegistration for
+    the canonical write/read patterns.
 """
 
 from __future__ import annotations

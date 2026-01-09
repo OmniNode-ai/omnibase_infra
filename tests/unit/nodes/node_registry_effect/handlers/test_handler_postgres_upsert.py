@@ -20,6 +20,7 @@ from uuid import uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 from omnibase_infra.nodes.node_registry_effect.handlers.handler_postgres_upsert import (
@@ -51,7 +52,7 @@ def create_registry_request(
     return ModelRegistryRequest(
         node_id=node_id or uuid4(),
         node_type=node_type,
-        node_version=node_version,
+        node_version=ModelSemVer.parse(node_version),
         correlation_id=uuid4(),
         timestamp=TEST_NOW,
         endpoints=endpoints or {"http": "http://localhost:8080"},
@@ -95,13 +96,13 @@ class TestHandlerPostgresUpsertSuccess:
 
         node_id = uuid4()
         node_type = EnumNodeKind.EFFECT
-        node_version = "2.0.0"
+        node_version = ModelSemVer.parse("2.0.0")
         endpoints = {"grpc": "grpc://localhost:9090"}
         metadata = {"region": "us-east"}
         request = create_registry_request(
             node_id=node_id,
             node_type=node_type,
-            node_version=node_version,
+            node_version="2.0.0",  # Factory converts to ModelSemVer
             endpoints=endpoints,
             metadata=metadata,
         )

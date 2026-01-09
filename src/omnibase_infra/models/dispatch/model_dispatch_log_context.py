@@ -173,7 +173,7 @@ class ModelDispatchLogContext(BaseModel):
         """Convert None to -1.0 sentinel."""
         if v is None:
             return _SENTINEL_FLOAT
-        if isinstance(v, int | float):
+        if isinstance(v, (int, float)):
             return float(v)
         # Fallback for numeric strings - cast to float
         return float(str(v))

@@ -43,6 +43,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
 
@@ -557,7 +558,7 @@ def create_test_projection(
         domain="registration",
         current_state=state,
         node_type=node_type,
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         capabilities=ModelNodeCapabilities(postgres=True, read=True, write=True),
         ack_deadline=ack_deadline,
         liveness_deadline=liveness_deadline,

@@ -1359,7 +1359,7 @@ class TestCircuitBreakerUnderConcurrentLoad:
 
         successes = [r for r in results if r is True]
         failures = [
-            r for r in results if isinstance(r, ValueError | InfraUnavailableError)
+            r for r in results if isinstance(r, (ValueError, InfraUnavailableError))
         ]
 
         # All operations accounted for
