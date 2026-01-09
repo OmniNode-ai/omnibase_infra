@@ -732,20 +732,37 @@ class Handler{i}:
         # Should have at least one violation per file
         assert len(result.violations) >= file_count
 
-    def test_correlation_id_not_yet_supported(
+    def test_correlation_id_field_not_present_in_file_validation_models(
         self,
         validator: NodeArchitectureValidator,
         project_temp_dir: Path,
     ) -> None:
-        """Verify correlation_id is not currently supported in the request model.
+        """Document that file-based validation models do not include correlation_id.
 
-        Current state: The ModelArchitectureValidationRequest does not accept
-        correlation_id. ModelArchitectureValidationResult (a different model for
-        OMN-1138) does support correlation_id, but ModelFileValidationResult
-        (used by this validator) does not.
+        This is a GAP DOCUMENTATION test, NOT a correlation_id propagation test.
 
-        This test documents the current behavior and will need updating when
-        correlation_id support is added for distributed tracing.
+        Purpose:
+            Verify that ModelArchitectureValidationRequest (file-based) and
+            ModelFileValidationResult do NOT have correlation_id fields.
+            This documents a feature gap compared to the node/handler-based
+            validation models (OMN-1138) which DO support correlation_id.
+
+        Context:
+            - ModelArchitectureValidationRequest (model_validation_request.py):
+              File-based validation - NO correlation_id field
+            - ModelArchitectureValidationRequest (model_architecture_validation_request.py):
+              Node/handler-based validation - HAS correlation_id field
+            - ModelFileValidationResult: NO correlation_id field
+            - ModelArchitectureValidationResult (OMN-1138): HAS correlation_id field
+
+        Future Enhancement:
+            When correlation_id support is added to file-based validation:
+            1. Add correlation_id field to ModelArchitectureValidationRequest
+               (in model_validation_request.py)
+            2. Add correlation_id field to ModelFileValidationResult
+            3. Update this test to verify correlation_id propagation from
+               request through to result
+            4. Rename test to test_correlation_id_propagation_through_validation
         """
         clean_file = project_temp_dir / "correlation_test.py"
         clean_file.write_text("x = 1\n", encoding="utf-8")
@@ -754,15 +771,23 @@ class Handler{i}:
             paths=[str(clean_file)],
         )
 
-        # Verify the request model does NOT have correlation_id
-        assert "correlation_id" not in ModelArchitectureValidationRequest.model_fields
+        # Document: Request model (file-based) does NOT have correlation_id
+        assert (
+            "correlation_id" not in ModelArchitectureValidationRequest.model_fields
+        ), (
+            "correlation_id field found in ModelArchitectureValidationRequest - "
+            "this test should be updated to verify propagation instead"
+        )
 
         result = validator.compute(request)
 
-        # Verify the result model (ModelFileValidationResult) does NOT have correlation_id
-        assert "correlation_id" not in type(result).model_fields
+        # Document: Result model (file-based) does NOT have correlation_id
+        assert "correlation_id" not in type(result).model_fields, (
+            "correlation_id field found in result model - "
+            "this test should be updated to verify propagation instead"
+        )
 
-        # Validation should still work correctly
+        # Validation completes successfully regardless of correlation_id absence
         assert result.valid is True
         assert result.files_checked == 1
 
