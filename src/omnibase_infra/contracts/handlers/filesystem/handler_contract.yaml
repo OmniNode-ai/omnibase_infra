@@ -1,3 +1,4 @@
+# Handler ID follows convention: {node_type}.{domain}.handler
 handler_id: effect.filesystem.handler
 name: FileSystem Handler
 version: "1.0.0"
@@ -7,6 +8,9 @@ description: >
 descriptor:
   handler_kind: effect
   purity: side_effecting
+  # Idempotent: false because write operations may append (non-idempotent).
+  # Individual operations (write w/ overwrite, mkdir w/ exist_ok) can be
+  # idempotent, but the handler as a whole supports non-idempotent semantics.
   idempotent: false
   timeout_ms: 30000
   retry_policy:
@@ -19,6 +23,9 @@ descriptor:
     enabled: true
     failure_threshold: 5
     timeout_ms: 60000
+  # Serialized: Prevents race conditions for write operations to same file.
+  # Read-only operations could use concurrent policy, but handler scope
+  # includes writes so we use serialized for safety.
   concurrency_policy: serialized
   isolation_policy: none
   observability_level: standard
@@ -28,6 +35,7 @@ capability_outputs:
   - filesystem.list
   - filesystem.delete
   - filesystem.mkdir
+# NOTE: Models defined in OMN-1158 (FileSystemHandler Implementation)
 input_model: omnibase_infra.handlers.filesystem.ModelFileSystemRequest
 output_model: omnibase_infra.handlers.filesystem.ModelFileSystemResult
 supports_lifecycle: true
@@ -41,6 +49,11 @@ metadata:
   author: OmniNode Team
   ticket: OMN-1160
   security:
+    # SECURITY: Handler implementation MUST enforce these constraints:
+    # - Validate all paths are within allowed_paths before operations
+    # - Use Path.resolve() to canonicalize paths and prevent ../ attacks
+    # - Check symlinks don't point outside allowed paths
+    # - Reject absolute paths that escape the workspace
     allowed_paths:
       - "${WORKSPACE_ROOT}"
     max_file_size_bytes: 10485760
