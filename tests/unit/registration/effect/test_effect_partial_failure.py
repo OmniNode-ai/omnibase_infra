@@ -223,7 +223,7 @@ class TestEffectPartialFailure:
         assert response.consul_result.success is False
         assert response.postgres_result.success is True
         # Error message is sanitized to avoid exposing secrets (connection strings, etc.)
-        # Format: "{ExceptionType}: [error_code] {original_message}" or similar
+        # Format: "{ExceptionType}: {original_message}" (sanitize_error_message preserves the message)
         consul_error = response.consul_result.error or ""
         assert "InfraConnectionError" in consul_error
         assert "Consul service unavailable" in consul_error
