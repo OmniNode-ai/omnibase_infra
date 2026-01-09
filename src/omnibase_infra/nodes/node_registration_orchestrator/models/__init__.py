@@ -53,8 +53,12 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_i
     RegistryIntent,
 )
 
+# Backward compatibility alias (per PR #129 review request)
+IntentRegistry = RegistryIntent
+
 __all__ = [
     "IntentPayload",
+    "IntentRegistry",  # Backward compatibility alias
     "RegistryIntent",
     "ModelConsulIntentPayload",
     "ModelConsulRegistrationIntent",

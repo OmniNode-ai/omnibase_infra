@@ -52,9 +52,13 @@ class EventBusBindingRegistry:
     retrieval operations.
 
     Note:
-        Event bus registrations are permanent for the runtime lifecycle. The
-        registry intentionally omits unregister() and clear() methods to
-        prevent accidental removal of event bus bindings during runtime.
+        Unlike ProtocolBindingRegistry, this registry does not provide
+        unregister() or clear() methods. Event buses are infrastructure
+        components that should remain registered for the lifetime of the
+        application. Removing them at runtime could cause message routing
+        failures and system instability. Event bus registrations are
+        permanent for the runtime lifecycle to ensure consistent message
+        delivery throughout the application's execution.
 
     Attributes:
         _registry: Internal storage mapping bus_kind to bus class.

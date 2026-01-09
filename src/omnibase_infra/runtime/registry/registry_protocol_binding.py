@@ -244,8 +244,7 @@ class ProtocolBindingRegistry:
                     protocol_type=protocol_type,
                     registered_protocols=registered,
                 )
-
-        return handler_cls
+            return handler_cls
 
     def list_protocols(self) -> list[str]:
         """List registered protocol types.
