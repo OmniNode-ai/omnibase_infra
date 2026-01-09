@@ -85,6 +85,17 @@ class RegistryPayloadConsul:
         def decorator(
             payload_cls: type[ModelPayloadConsul],
         ) -> type[ModelPayloadConsul]:
+            # Runtime type validation
+            from omnibase_infra.handlers.models.consul.model_payload_consul import (
+                ModelPayloadConsul,
+            )
+
+            if not issubclass(payload_cls, ModelPayloadConsul):
+                raise TypeError(
+                    f"Registered class {payload_cls.__name__!r} must be a subclass "
+                    f"of ModelPayloadConsul, got {payload_cls.__mro__}"
+                )
+
             if operation_type in cls._types:
                 raise ValueError(
                     f"Consul payload operation_type '{operation_type}' already registered "

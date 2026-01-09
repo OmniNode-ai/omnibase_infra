@@ -83,6 +83,17 @@ class RegistryPayloadHttp:
         def decorator(
             payload_cls: type[ModelPayloadHttp],
         ) -> type[ModelPayloadHttp]:
+            # Runtime type validation
+            from omnibase_infra.handlers.models.http.model_payload_http import (
+                ModelPayloadHttp,
+            )
+
+            if not issubclass(payload_cls, ModelPayloadHttp):
+                raise TypeError(
+                    f"Registered class {payload_cls.__name__!r} must be a subclass "
+                    f"of ModelPayloadHttp, got {payload_cls.__mro__}"
+                )
+
             if operation_type in cls._types:
                 raise ValueError(
                     f"HTTP payload operation_type '{operation_type}' already registered "
