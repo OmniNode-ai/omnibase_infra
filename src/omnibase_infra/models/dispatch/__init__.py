@@ -115,8 +115,8 @@ from omnibase_infra.models.dispatch.model_dispatcher_registration import (
 )
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
 from omnibase_infra.models.dispatch.model_topic_parser import (
-    CacheInfo,
     ModelTopicParser,
+    TypeCacheInfo,
     clear_topic_parse_cache,
     get_topic_parse_cache_info,
 )
@@ -124,7 +124,7 @@ from omnibase_infra.models.dispatch.model_tracing_context import ModelTracingCon
 
 __all__ = [
     # Cache utilities
-    "CacheInfo",
+    "TypeCacheInfo",
     # Enums
     "EnumDispatchStatus",
     "EnumTopicStandard",

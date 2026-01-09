@@ -31,6 +31,38 @@ Union Reduction:
     ``ModelDispatchError | None`` field in parent models, reducing union count
     by 2 per parent model that uses it.
 
+JsonType Recursion Fix (OMN-1274):
+    The ``error_details`` field uses ``dict[str, object]`` instead of the
+    recursive ``JsonType`` type alias. Here is why:
+
+    **The Original Problem:**
+    ``JsonType`` was a recursive type alias::
+
+        JsonType = dict[str, "JsonType"] | list["JsonType"] | str | int | float | bool | None
+
+    Pydantic 2.x performs eager schema generation at **class definition time**.
+    When building JSON schemas for validation, it recursively expands type aliases,
+    causing ``RecursionError: maximum recursion depth exceeded``::
+
+        JsonType -> dict[str, JsonType] | list[JsonType] | ...
+                 -> dict[str, dict[str, JsonType] | ...] | ...
+                 -> ... (infinite expansion in _generate_schema.py)
+
+    **Why dict[str, object] is Correct for error_details:**
+    Error details are structured diagnostic information, always represented as
+    key-value dictionaries (e.g., ``{"host": "db.example.com", "retry_count": 3}``).
+    They do NOT need to support arrays or primitives at the root level.
+
+    Using ``dict[str, object]`` provides:
+    - Correct semantics: Error details are always dictionaries
+    - Type safety: Pydantic validates the outer structure
+    - No recursion: ``object`` avoids the recursive type expansion
+
+    **Caveats:**
+    - Values are typed as ``object`` (no static type checking on values)
+    - For fields needing full JSON support (any JSON value), use ``JsonType``
+      from ``omnibase_core.types`` (now fixed via TypeAlias pattern)
+
 Example:
     >>> from omnibase_core.enums import EnumCoreErrorCode
     >>> from omnibase_infra.models.dispatch import ModelDispatchError
@@ -51,6 +83,8 @@ Example:
 See Also:
     omnibase_infra.models.dispatch.ModelDispatchResult: Uses this for error info
     omnibase_core.enums.EnumCoreErrorCode: Error code enumeration
+    ADR: ``docs/decisions/adr-any-type-pydantic-workaround.md`` (historical)
+    Pydantic issue: https://github.com/pydantic/pydantic/issues/3278
 
 .. versionadded:: 0.7.0
     Added as part of OMN-1004 Optional Field Audit (Task 4.2).
@@ -60,10 +94,6 @@ from __future__ import annotations
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-# NOTE: Using `object` instead of `JsonType` from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases. Per ONEX ADR, `Any` is not permitted
-# in function signatures - use `object` for generic payload types.
 
 # Sentinel values for "not set" state
 _SENTINEL_STR: str = ""

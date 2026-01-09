@@ -561,7 +561,7 @@ class TestArchitecturalBenefits:
         # Assert: Composition works seamlessly
         assert result2.get("count") == 3
         sum_val = result2.get("sum")
-        assert isinstance(sum_val, int | float)
+        assert isinstance(sum_val, (int, float))
         assert abs(sum_val - 2.0) < 0.01  # 10/30 + 20/30 + 30/30 = 2.0
 
     def test_compute_plugins_enable_horizontal_scaling(self) -> None:

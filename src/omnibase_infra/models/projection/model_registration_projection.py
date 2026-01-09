@@ -22,16 +22,31 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from omnibase_core.enums import EnumNodeKind
-from pydantic import BaseModel, ConfigDict, Field
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumContractType, EnumRegistrationState
 from omnibase_infra.models.projection.model_sequence_info import ModelSequenceInfo
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
+
+# Valid contract types for nodes (excludes runtime_host which is not a contract type)
+# Derived from EnumContractType.valid_type_values() for backwards compatibility
+ContractType = Literal["effect", "compute", "reducer", "orchestrator"]
+VALID_CONTRACT_TYPES: tuple[str, ...] = EnumContractType.valid_type_values()
+
+# Contract type including 'unknown' for backfill/migration scenarios.
+# The 'unknown' value is allowed at the model layer but rejected at the persistence
+# layer unless allow_unknown_backfill=True is explicitly passed.
+# See: EnumContractType.UNKNOWN documentation and persist_state_transition()
+ContractTypeWithUnknown = Literal[
+    "effect", "compute", "reducer", "orchestrator", "unknown"
+]
 
 
 class ModelRegistrationProjection(BaseModel):
@@ -63,7 +78,7 @@ class ModelRegistrationProjection(BaseModel):
         capabilities: Node capabilities snapshot at registration time
         ack_deadline: Deadline for node acknowledgment (nullable)
         liveness_deadline: Deadline for next heartbeat (nullable)
-        last_heartbeat_at: Timestamp of last received heartbeat (None if never received, for liveness reporting)
+        last_heartbeat_at: Timestamp of last received heartbeat (nullable)
         ack_timeout_emitted_at: Marker for ack timeout event deduplication (C2)
         liveness_timeout_emitted_at: Marker for liveness timeout deduplication (C2)
         last_applied_event_id: message_id of last applied event (idempotency)
@@ -126,13 +141,98 @@ class ModelRegistrationProjection(BaseModel):
         ...,
         description="ONEX node type",
     )
-    node_version: str = Field(
-        default="1.0.0",
+    node_version: ModelSemVer = Field(
+        default_factory=lambda: ModelSemVer(major=1, minor=0, patch=0),
         description="Semantic version of the registered node",
     )
+
+    @field_validator("node_version", mode="before")
+    @classmethod
+    def parse_node_version(cls, v: ModelSemVer | str) -> ModelSemVer:
+        """Parse node_version from string or ModelSemVer.
+
+        Args:
+            v: Either a ModelSemVer instance or a semver string.
+
+        Returns:
+            Validated ModelSemVer instance.
+
+        Raises:
+            ValueError: If the string is not a valid semantic version.
+        """
+        if isinstance(v, str):
+            try:
+                return ModelSemVer.parse(v)
+            except Exception as e:
+                raise ValueError(f"node_version: {e!s}") from e
+        return v
+
     capabilities: ModelNodeCapabilities = Field(
         default_factory=ModelNodeCapabilities,
         description="Node capabilities snapshot at registration",
+    )
+
+    # Capability fields for fast discovery queries (OMN-1134)
+    # These are denormalized from capabilities for GIN-indexed queries
+    # Uses ContractTypeWithUnknown to allow 'unknown' for backfill scenarios.
+    # The 'unknown' value is accepted here but rejected at persistence layer
+    # unless allow_unknown_backfill=True is explicitly passed.
+    contract_type: ContractTypeWithUnknown | None = Field(
+        default=None,
+        description=(
+            "Contract type for the node. Valid values: 'effect', 'compute', "
+            "'reducer', 'orchestrator'. 'unknown' is allowed for backfill but "
+            "rejected at persistence unless explicitly permitted. None indicates "
+            "unspecified (never processed)."
+        ),
+    )
+
+    @field_validator("contract_type", mode="before")
+    @classmethod
+    def validate_contract_type(cls, v: str | None) -> str | None:
+        """Validate contract_type is a valid node contract type.
+
+        Args:
+            v: The contract_type value to validate
+
+        Returns:
+            The validated value (unchanged if valid)
+
+        Raises:
+            ValueError: If v is not None and not a valid contract type or 'unknown'
+
+        Note:
+            The 'unknown' value is accepted here to allow model construction for
+            backfill scenarios. However, `persist_state_transition()` will reject
+            'unknown' unless `allow_unknown_backfill=True` is explicitly passed.
+        """
+        if v is None:
+            return v
+        # Allow 'unknown' for backfill scenarios (validated at persistence layer)
+        if v == EnumContractType.UNKNOWN.value:
+            return v
+        if v not in EnumContractType.valid_type_values():
+            raise ValueError(
+                f"contract_type must be one of {EnumContractType.valid_type_values()}, "
+                f"got: {v!r}"
+            )
+        return v
+
+    intent_types: list[str] = Field(
+        default_factory=list,
+        description="Intent types this node handles",
+    )
+    protocols: list[str] = Field(
+        default_factory=list,
+        description="Protocols this node implements",
+    )
+    capability_tags: list[str] = Field(
+        default_factory=list,
+        description="Capability tags for discovery",
+    )
+    contract_version: str | None = Field(
+        default=None,
+        description="Contract version string",
     )
 
     # Timeout Deadlines (for C2 durable timeout handling)
@@ -146,7 +246,7 @@ class ModelRegistrationProjection(BaseModel):
     )
     last_heartbeat_at: datetime | None = Field(
         default=None,
-        description="Timestamp of last received heartbeat (None if never received, for liveness reporting)",
+        description="Timestamp of last received heartbeat (nullable)",
     )
 
     # Timeout Emission Markers (for C2 deduplication)
@@ -342,4 +442,9 @@ class ModelRegistrationProjection(BaseModel):
         return self.current_state.is_active()
 
 
-__all__: list[str] = ["ModelRegistrationProjection"]
+__all__: list[str] = [
+    "ContractType",
+    "ContractTypeWithUnknown",
+    "ModelRegistrationProjection",
+    "VALID_CONTRACT_TYPES",
+]

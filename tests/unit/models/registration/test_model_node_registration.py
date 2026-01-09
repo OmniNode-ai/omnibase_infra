@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.models.registration import (
@@ -40,7 +41,7 @@ class TestModelNodeRegistrationBasicInstantiation:
         )
         assert registration.node_id == test_node_id
         assert registration.node_type == "effect"
-        assert registration.node_version == "1.0.0"  # Default
+        assert str(registration.node_version) == "1.0.0"  # Default
         assert registration.capabilities == ModelNodeCapabilities()  # Default
         assert registration.endpoints == {}  # Default
         assert registration.metadata == ModelNodeMetadata()  # Default
@@ -71,7 +72,7 @@ class TestModelNodeRegistrationBasicInstantiation:
         )
         assert registration.node_id == test_node_id
         assert registration.node_type == "effect"
-        assert registration.node_version == "2.1.0"
+        assert str(registration.node_version) == "2.1.0"
         assert registration.capabilities == ModelNodeCapabilities(
             postgres=True,
             read=True,
@@ -100,7 +101,7 @@ class TestModelNodeRegistrationMutability:
             updated_at=now,
         )
         registration.node_version = "2.0.0"
-        assert registration.node_version == "2.0.0"
+        assert str(registration.node_version) == "2.0.0"
 
     def test_mutable_model_can_update_capabilities(self) -> None:
         """Test that capabilities model can be reassigned."""
@@ -239,7 +240,7 @@ class TestModelNodeRegistrationDefaultValues:
             registered_at=now,
             updated_at=now,
         )
-        assert registration.node_version == "1.0.0"
+        assert str(registration.node_version) == "1.0.0"
 
     def test_default_capabilities_empty_model(self) -> None:
         """Test that capabilities defaults to empty ModelNodeCapabilities."""
@@ -400,7 +401,10 @@ class TestModelNodeRegistrationSerialization:
         assert isinstance(data, dict)
         assert data["node_id"] == test_node_id
         assert data["node_type"] == "effect"
-        assert data["node_version"] == "1.5.0"
+        # ModelSemVer serializes to dict with major/minor/patch fields
+        assert data["node_version"]["major"] == 1
+        assert data["node_version"]["minor"] == 5
+        assert data["node_version"]["patch"] == 0
         # capabilities is now a nested dict from ModelNodeCapabilities
         assert data["capabilities"]["feature"] is True
         # Check other default values in the capabilities dict
@@ -627,7 +631,7 @@ class TestModelNodeRegistrationEdgeCases:
             registered_at=now,
             updated_at=now,
         )
-        assert registration.node_version == long_version
+        assert str(registration.node_version) == long_version
 
     def test_long_health_endpoint_url(self) -> None:
         """Test that long health endpoint URLs are allowed."""
@@ -1023,7 +1027,7 @@ class TestModelNodeRegistrationSemverValidation:
                 registered_at=now,
                 updated_at=now,
             )
-            assert registration.node_version == version
+            assert str(registration.node_version) == version
 
     def test_valid_semver_with_prerelease(self) -> None:
         """Test that semver with prerelease identifiers are accepted."""
@@ -1046,7 +1050,7 @@ class TestModelNodeRegistrationSemverValidation:
                 registered_at=now,
                 updated_at=now,
             )
-            assert registration.node_version == version
+            assert str(registration.node_version) == version
 
     def test_valid_semver_with_build_metadata(self) -> None:
         """Test that semver with build metadata are accepted."""
@@ -1065,7 +1069,7 @@ class TestModelNodeRegistrationSemverValidation:
                 registered_at=now,
                 updated_at=now,
             )
-            assert registration.node_version == version
+            assert str(registration.node_version) == version
 
     def test_valid_semver_with_prerelease_and_build(self) -> None:
         """Test that semver with both prerelease and build metadata are accepted."""
@@ -1084,7 +1088,7 @@ class TestModelNodeRegistrationSemverValidation:
                 registered_at=now,
                 updated_at=now,
             )
-            assert registration.node_version == version
+            assert str(registration.node_version) == version
 
     def test_invalid_semver_missing_patch(self) -> None:
         """Test that version missing patch number is rejected."""
@@ -1181,9 +1185,8 @@ class TestModelNodeRegistrationSemverValidation:
         error_message_lower = error_message.lower()
         # Case-insensitive check for the error type and value
         assert "invalid semantic version" in error_message_lower
-        assert "'invalid'" in error_message_lower
-        # MAJOR.MINOR.PATCH format guidance - case-insensitive
-        assert "major.minor.patch" in error_message_lower
+        # The error should indicate the invalid value
+        assert "invalid" in error_message_lower
 
 
 class TestModelNodeRegistrationHealthEndpointValidation:

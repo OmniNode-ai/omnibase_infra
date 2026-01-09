@@ -37,12 +37,10 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 # Fixed timestamp for deterministic tests
 TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
@@ -1087,8 +1085,7 @@ class TestWorkflowExecutionWithMocks:
         return ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type="effect",
-            node_version="1.0.0",
-            capabilities={},
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
             timestamp=TEST_TIMESTAMP,
@@ -1169,7 +1166,8 @@ class TestWorkflowExecutionWithMocks:
                         correlation_id=self._correlation_id,
                         payload=ModelPostgresIntentPayload(
                             node_id=self._node_id,
-                            node_type=event.node_type,
+                            # Convert Literal string to EnumNodeKind for strict model
+                            node_type=EnumNodeKind(event.node_type),
                             correlation_id=self._correlation_id,
                             timestamp=event.timestamp.isoformat(),
                         ),
@@ -1472,7 +1470,7 @@ class TestWorkflowExecutionWithMocks:
             correlation_id=correlation_id,
             payload=ModelPostgresIntentPayload(
                 node_id=node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 correlation_id=correlation_id,
                 timestamp="2025-01-01T00:00:00Z",
             ),

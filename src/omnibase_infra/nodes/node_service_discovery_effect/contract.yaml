@@ -1,0 +1,246 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract - Service Discovery Effect Node
+#
+# Capability-Oriented Design: "I'm interested in what you do, not what you are"
+# This node is named by capability (service.discovery) not vendor (consul/k8s/etcd).
+# Supports pluggable backends through ProtocolServiceDiscoveryHandler.
+#
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+name: "node_service_discovery_effect"
+node_type: "EFFECT"
+description: >
+  Effect node for service discovery operations. Provides capability-oriented service registration, deregistration, and discovery with pluggable backend support (Consul, Kubernetes, Etcd). Named by capability, not vendor.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelServiceRegistration"
+  module: "omnibase_infra.nodes.node_service_discovery_effect.models"
+  description: "Input model for service registration operations."
+output_model:
+  name: "ModelDiscoveryResult"
+  module: "omnibase_infra.nodes.node_service_discovery_effect.models"
+  description: "Output model for service discovery query results."
+# Capability declaration - what this node CAN DO
+capabilities:
+  - name: "service.discovery"
+    description: >
+      Discover services by name, tags, or health status. Provides a unified interface for querying service locations across different backends.
+
+  - name: "service.registration"
+    description: >
+      Register services with service discovery backends. Supports health check configuration and metadata attachment.
+
+  - name: "service.deregistration"
+    description: >
+      Deregister services from service discovery backends. Handles cleanup and graceful removal.
+
+  - name: "service.health_check"
+    description: >
+      Health check operations for service discovery backend connectivity and availability verification.
+
+# IO operations (EFFECT node specific)
+io_operations:
+  - operation: "register_service"
+    description: "Register a service with the configured backend"
+    input_fields:
+      - service_id
+      - service_name
+      - address
+      - port
+      - tags
+      - metadata
+      - health_check
+    output_fields:
+      - success
+      - service_id
+      - error
+  - operation: "deregister_service"
+    description: "Deregister a service from the configured backend"
+    input_fields:
+      - service_id
+    output_fields:
+      - success
+      - error
+  - operation: "discover_services"
+    description: "Discover services matching query criteria"
+    input_fields:
+      - service_name
+      - tags
+      - health_filter
+    output_fields:
+      - services
+      - query_metadata
+  - operation: "health_check"
+    description: "Check health of the service discovery backend"
+    input_fields: []
+    output_fields:
+      - status
+      - backend_type
+      - details
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "service_discovery_handler"
+    type: "protocol"
+    class_name: "ProtocolServiceDiscoveryHandler"
+    module: "omnibase_infra.nodes.node_service_discovery_effect.protocols"
+    description: >
+      Protocol for pluggable service discovery backends. Implementations include Consul, Kubernetes, and Etcd handlers.
+
+# Error handling configuration
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+  error_types:
+    - name: "ServiceRegistrationError"
+      description: "Error during service registration"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "ServiceDiscoveryError"
+      description: "Error during service discovery query"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "BackendUnavailableError"
+      description: "Service discovery backend is unavailable"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+# Model definitions for contract documentation
+definitions:
+  ModelServiceRegistration:
+    type: object
+    description: "Input model for service registration"
+    properties:
+      service_id:
+        type: string
+        description: "Unique identifier for the service instance"
+      service_name:
+        type: string
+        description: "Logical name of the service (e.g., 'user-service')"
+      address:
+        type: string
+        description: "Network address where service is accessible"
+      port:
+        type: integer
+        description: "Port number for the service"
+      tags:
+        type: array
+        items:
+          type: string
+        description: "Tags for service categorization and filtering"
+      metadata:
+        type: object
+        description: "Additional key-value metadata for the service"
+      health_check:
+        type: object
+        description: "Health check configuration"
+    required:
+      - service_id
+      - service_name
+  ModelServiceInfo:
+    type: object
+    description: "Information about a discovered service"
+    properties:
+      service_id:
+        type: string
+        description: "Unique identifier for the service instance"
+      service_name:
+        type: string
+        description: "Logical name of the service"
+      address:
+        type: string
+        description: "Network address of the service"
+      port:
+        type: integer
+        description: "Port number of the service"
+      tags:
+        type: array
+        items:
+          type: string
+        description: "Tags associated with the service"
+      health_status:
+        type: string
+        description: "Current health status (healthy, unhealthy, unknown)"
+      metadata:
+        type: object
+        description: "Service metadata"
+    required:
+      - service_id
+      - service_name
+      - health_status
+  ModelDiscoveryQuery:
+    type: object
+    description: "Query parameters for service discovery"
+    properties:
+      service_name:
+        type: string
+        description: "Service name to search for (optional)"
+      tags:
+        type: array
+        items:
+          type: string
+        description: "Tags to filter by (optional)"
+      health_filter:
+        type: string
+        description: "Health status filter (all, healthy, unhealthy)"
+  ModelDiscoveryResult:
+    type: object
+    description: "Result of service discovery query"
+    properties:
+      services:
+        type: array
+        items:
+          $ref: "#/definitions/ModelServiceInfo"
+        description: "List of discovered services"
+      query_metadata:
+        type: object
+        description: "Metadata about the query execution"
+    required:
+      - services
+  ModelRegistrationResult:
+    type: object
+    description: "Result of service registration operation"
+    properties:
+      success:
+        type: boolean
+        description: "Whether registration succeeded"
+      service_id:
+        type: string
+        description: "ID of the registered service"
+      error:
+        type: string
+        description: "Error message if registration failed"
+    required:
+      - success
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2025-01-06"
+  tags:
+    - effect
+    - service-discovery
+    - capability-oriented
+    - consul
+    - kubernetes
+    - etcd
+    - pluggable

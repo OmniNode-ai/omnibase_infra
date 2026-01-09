@@ -6,6 +6,7 @@ This module provides protocol definitions (duck-typed interfaces) for infrastruc
 components in the ONEX ecosystem.
 
 Protocols:
+    - ProtocolCapabilityProjection: Interface for capability-based projection queries
     - ProtocolEventBusLike: Interface for event bus abstraction (used by introspection)
     - ProtocolIdempotencyStore: Interface for idempotency checking and deduplication
     - ProtocolMessageDispatcher: Interface for message dispatchers
@@ -53,6 +54,9 @@ See Also:
     - OMN-947 (F2) for snapshot publishing design
 """
 
+from omnibase_infra.protocols.protocol_capability_projection import (
+    ProtocolCapabilityProjection,
+)
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.protocols.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
@@ -70,6 +74,7 @@ from omnibase_infra.protocols.protocol_snapshot_publisher import (
 )
 
 __all__: list[str] = [
+    "ProtocolCapabilityProjection",
     "ProtocolEventBusLike",
     "ProtocolIdempotencyStore",
     "ProtocolMessageDispatcher",

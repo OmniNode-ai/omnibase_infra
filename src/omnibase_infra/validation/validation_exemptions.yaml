@@ -933,29 +933,6 @@ pattern_exemptions:
       - docs/architecture/REGISTRATION_REDUCER.md
     ticket: OMN-1004
   # ==========================================================================
-  # Architecture Violation Model Exemptions (OMN-1099)
-  # ==========================================================================
-  # rule_id in ModelArchitectureViolation is a human-readable semantic identifier
-  # (e.g., "ARCH-001", "ARCH-002"), NOT a UUID. This follows the same pattern as
-  # policy_id, dispatcher_id, scheduler_id, and plugin_id.
-  - file_pattern: 'model_architecture_violation\.py'
-    violation_pattern: "Field 'rule_id' should use UUID"
-    reason: >
-      rule_id is a human-readable semantic identifier (e.g., "ARCH-001", "ARCH-002") for architecture validation rules. This follows the same pattern as policy_id, dispatcher_id, scheduler_id, and plugin_id - all are semantic identifiers, not UUIDs.
-
-    documentation:
-      - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
-      - docs/validation/validator_reference.md
-    ticket: OMN-1099
-  - file_pattern: 'model_architecture_violation\.py'
-    violation_pattern: "Field 'rule_name' might reference an entity"
-    reason: >
-      rule_name is a display name for the architecture rule (e.g., "No Any Types", "No Handler Publishing"). It is NOT an entity reference but a human-readable label paired with rule_id as the semantic identifier.
-
-    documentation:
-      - CLAUDE.md (Registry Naming Conventions)
-    ticket: OMN-1099
-  # ==========================================================================
   # Handler Validation Error Model Exemptions (OMN-1091)
   # ==========================================================================
   # Handler validation error types are explicitly named per ticket requirements.
@@ -1071,6 +1048,157 @@ pattern_exemptions:
       - docs/patterns/security_patterns.md
     ticket: OMN-1091
   # ==========================================================================
+  # Service Discovery Node Exemptions (OMN-1131)
+  # ==========================================================================
+  # The service discovery node is a domain-specific infrastructure component that
+  # integrates with external service discovery systems (Consul, Kubernetes).
+  # The term "Service" is fundamental to the service discovery domain and cannot
+  # be replaced with alternative terminology without losing semantic clarity.
+  # HashiCorp Consul, Kubernetes, and all major service discovery systems use
+  # "service" as the canonical term for discoverable network endpoints.
+  - file_pattern: 'node_service_discovery_effect/node\.py'
+    class_pattern: "Class name 'NodeServiceDiscoveryEffect'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      NodeServiceDiscoveryEffect is the ONEX node for service discovery operations. "Service" is the canonical domain term from HashiCorp Consul and Kubernetes service discovery APIs.
+
+    documentation:
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
+      - Kubernetes Service Discovery (https://kubernetes.io/docs/concepts/services-networking/service/)
+    ticket: OMN-1131
+  - file_pattern: 'node_service_discovery_effect/models/model_service_info\.py'
+    class_pattern: "Class name 'ModelServiceInfo'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      ModelServiceInfo represents service metadata from discovery systems. "Service" is the canonical domain term.
+
+    ticket: OMN-1131
+  - file_pattern: 'node_service_discovery_effect/models/model_service_info\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name is the canonical Consul/K8s service identifier. This is infrastructure configuration, not an entity reference.
+
+    ticket: OMN-1131
+  - file_pattern: 'node_service_discovery_effect/models/enum_service_discovery_operation\.py'
+    class_pattern: "Class name 'EnumServiceDiscoveryOperation'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      EnumServiceDiscoveryOperation defines operations for service discovery (REGISTER, DEREGISTER, DISCOVER). "Service" is the canonical domain term.
+
+    ticket: OMN-1131
+  - file_pattern: 'node_service_discovery_effect/models/model_service_discovery_health_check_details\.py'
+    class_pattern: "Class name 'ModelServiceDiscoveryHealthCheckDetails'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      ModelServiceDiscoveryHealthCheckDetails contains health check configuration for service discovery. "Service" is the canonical domain term.
+
+    ticket: OMN-1131
+  - file_pattern: 'node_service_discovery_effect/models/model_service_registration\.py'
+    class_pattern: "Class name 'ModelServiceRegistration'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      ModelServiceRegistration is the input model for registering services in discovery systems. "Service" is the canonical domain term.
+
+    ticket: OMN-1131
+  - file_pattern: 'node_service_discovery_effect/models/model_service_registration\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name is the canonical Consul/K8s service identifier. This is infrastructure configuration, not an entity reference.
+
+    ticket: OMN-1131
+  - file_pattern: 'node_service_discovery_effect/models/model_service_discovery_health_check_result\.py'
+    class_pattern: "Class name 'ModelServiceDiscoveryHealthCheckResult'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      ModelServiceDiscoveryHealthCheckResult contains health check results from service discovery. "Service" is the canonical domain term.
+
+    ticket: OMN-1131
+  - file_pattern: 'node_service_discovery_effect/registry/registry_infra_service_discovery\.py'
+    class_pattern: "Class name 'RegistryInfraServiceDiscovery'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      RegistryInfraServiceDiscovery is the DI registry for service discovery handlers. "Service" is the canonical domain term.
+
+    ticket: OMN-1131
+  - file_pattern: 'node_service_discovery_effect/protocols/protocol_service_discovery_handler\.py'
+    class_pattern: "Class name 'ProtocolServiceDiscoveryHandler'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ProtocolServiceDiscoveryHandler defines the handler protocol for service discovery backends. "Handler" describes the protocol role in the pluggable handler architecture.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1131
+  - file_pattern: 'node_service_discovery_effect/protocols/protocol_service_discovery_handler\.py'
+    class_pattern: "Class name 'ProtocolServiceDiscoveryHandler'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      ProtocolServiceDiscoveryHandler defines the protocol for service discovery backends. "Service" is the canonical domain term.
+
+    ticket: OMN-1131
+  - file_pattern: 'node_registration_storage_effect/protocols/protocol_registration_storage_handler\.py'
+    class_pattern: "Class name 'ProtocolRegistrationStorageHandler'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ProtocolRegistrationStorageHandler defines the handler protocol for registration storage backends (PostgreSQL, Mock). "Handler" describes the protocol role in the pluggable handler architecture.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1131
+  - file_pattern: 'handlers/registration_storage/handler_postgres_registration_storage\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      PostgreSQL handler requires multiple configuration parameters: pool, host, port, database, user, password, min_size, max_size, timeout, circuit_breaker_config. These are standard database connection parameters.
+
+    documentation:
+      - asyncpg Pool Configuration (https://magicstack.github.io/asyncpg/current/api/index.html#connection-pools)
+    ticket: OMN-1131
+  - file_pattern: 'handlers/service_discovery/handler_consul_service_discovery\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Consul handler requires multiple configuration parameters: consul_client, token, scheme, host, port, dc, circuit_breaker_config. These are standard Consul connection parameters.
+
+    documentation:
+      - HashiCorp Consul API Configuration (https://developer.hashicorp.com/consul/api-docs)
+    ticket: OMN-1131
+  - file_pattern: 'handlers/service_discovery/models/model_service_info\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name is the canonical Consul/K8s service identifier. This is infrastructure configuration, not an entity reference.
+
+    ticket: OMN-1131
+  # ==========================================================================
+  # Architecture Validator AST Exemptions (OMN-1099)
+  # ==========================================================================
+  # Python ast.NodeVisitor convention uses visit_ClassDef, visit_Call, visit_Name, etc.
+  # These method names are REQUIRED by the ast module - they cannot be renamed.
+  # Reference: https://docs.python.org/3/library/ast.html#ast.NodeVisitor
+  #
+  # This is a GENERAL exemption for ALL visit_* methods in ANY Python file,
+  # as AST visitor patterns are used throughout the codebase for static analysis.
+  - file_pattern: '.*\.py'
+    violation_pattern: "Function name 'visit_\\w+' should use snake_case"
+    reason: >
+      Python ast.NodeVisitor convention. visit_* methods (visit_ClassDef, visit_Call, visit_Name, etc.) are standard AST visitor method names that the ast module dispatches to. They cannot be renamed without breaking the visitor pattern.
+
+    documentation:
+      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
+      - PEP 8 - Exception for stdlib compatibility
+    ticket: OMN-1099
+  # HandlerPublishingVisitor is a class that validates handler publishing constraints.
+  # The "Handler" name is appropriate because it IS validating handler behavior.
+  - file_pattern: 'validator_no_handler_publishing\.py'
+    violation_pattern: "Class name .* contains anti-pattern 'Handler'"
+    reason: >
+      HandlerPublishingVisitor is an AST visitor class that validates handler publishing constraints. The "Handler" name is intentional and appropriate because it validates that handlers do NOT have direct event bus access. This is a validator class, not a handler implementation.
+
+    documentation:
+      - CLAUDE.md (Handler No-Publish Constraint)
+      - docs/patterns/security_patterns.md
+    ticket: OMN-1099
+  # ==========================================================================
   # Validation Result Model Exemptions (OMN-1104)
   # ==========================================================================
   # field_name in ModelValidationResult is a validation field path identifier,
@@ -1165,29 +1293,6 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (ONEX Architecture - Handler Validation)
     ticket: OMN-1263
-  # ==========================================================================
-  # Architecture Validator OMN-1099 Exemptions (AST Visitor Pattern)
-  # ==========================================================================
-  # OMN-1099 validators (no-direct-dispatch, no-handler-publishing, no-orchestrator-fsm)
-  # use Python AST visitor pattern which requires visit_* method names per Python stdlib.
-  # NOTE: model_architecture_violation.py exemptions for rule_id/rule_name are defined earlier
-  # in the "Architecture Violation Model Exemptions (OMN-1099)" section.
-  - file_pattern: 'validator_no_handler_publishing\.py'
-    violation_pattern: "Class name .* contains anti-pattern 'Handler'"
-    reason: >
-      HandlerPublishingVisitor is an AST visitor class that detects handler publishing patterns. The name correctly describes its purpose: visiting AST nodes to find handlers that incorrectly publish events.
-
-    documentation:
-      - Python ast module (NodeVisitor pattern)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_.*\.py'
-    violation_pattern: "Function name 'visit_.*' should use snake_case"
-    reason: >
-      AST visitor methods must follow Python's ast.NodeVisitor naming convention. visit_ClassDef, visit_FunctionDef, etc. are required method names for the AST visitor pattern from Python stdlib.
-
-    documentation:
-      - Python ast module documentation (NodeVisitor.visit_* methods)
-    ticket: OMN-1099
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

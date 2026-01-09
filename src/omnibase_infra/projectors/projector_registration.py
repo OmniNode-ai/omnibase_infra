@@ -28,8 +28,13 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import asyncpg
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
-from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
+from omnibase_infra.enums import (
+    EnumContractType,
+    EnumInfraTransportType,
+    EnumRegistrationState,
+)
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -38,6 +43,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.projection import (
+    ModelCapabilityFields,
     ModelRegistrationProjection,
     ModelSequenceInfo,
 )
@@ -264,13 +270,16 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         upsert_sql = """
             INSERT INTO registration_projections (
                 entity_id, domain, current_state, node_type, node_version,
-                capabilities, ack_deadline, liveness_deadline, last_heartbeat_at,
+                capabilities, contract_type, intent_types, protocols,
+                capability_tags, contract_version,
+                ack_deadline, liveness_deadline, last_heartbeat_at,
                 ack_timeout_emitted_at, liveness_timeout_emitted_at,
                 last_applied_event_id, last_applied_offset,
                 last_applied_sequence, last_applied_partition,
                 registered_at, updated_at, correlation_id
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                $15, $16, $17, $18, $19, $20, $21, $22, $23
             )
             ON CONFLICT (entity_id, domain) DO UPDATE SET
                 -- EXCLUDED.* refers to values from the INSERT that triggered conflict
@@ -278,6 +287,11 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                 node_type = EXCLUDED.node_type,
                 node_version = EXCLUDED.node_version,
                 capabilities = EXCLUDED.capabilities,
+                contract_type = EXCLUDED.contract_type,
+                intent_types = EXCLUDED.intent_types,
+                protocols = EXCLUDED.protocols,
+                capability_tags = EXCLUDED.capability_tags,
+                contract_version = EXCLUDED.contract_version,
                 ack_deadline = EXCLUDED.ack_deadline,
                 liveness_deadline = EXCLUDED.liveness_deadline,
                 last_heartbeat_at = EXCLUDED.last_heartbeat_at,
@@ -320,8 +334,15 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             domain,
             projection.current_state.value,  # Convert enum to string
             projection.node_type,
-            projection.node_version,
+            str(
+                projection.node_version
+            ),  # ModelSemVer -> string for asyncpg (see util_semver.py)
             projection.capabilities.model_dump_json(),  # JSONB as JSON string
+            projection.contract_type,  # Capability fields (OMN-1134)
+            projection.intent_types,  # TEXT[]
+            projection.protocols,  # TEXT[]
+            projection.capability_tags,  # TEXT[]
+            projection.contract_version,
             projection.ack_deadline,
             projection.liveness_deadline,
             projection.last_heartbeat_at,
@@ -850,13 +871,16 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         domain: str,
         new_state: EnumRegistrationState,
         node_type: str,
-        node_version: str,
+        node_version: ModelSemVer,
         capabilities: ModelNodeCapabilities,
         event_id: UUID,
         now: datetime,
         ack_deadline: datetime | None = None,
         liveness_deadline: datetime | None = None,
         correlation_id: UUID | None = None,
+        capability_fields: ModelCapabilityFields | None = None,
+        *,
+        allow_unknown_backfill: bool = False,
     ) -> bool:
         """Persist a state transition for a registration entity.
 
@@ -876,6 +900,68 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         For full projection persistence with ordering guarantees (e.g., during
         event replay), use persist() instead.
 
+        Warning:
+            This method does NOT check sequence ordering. If called concurrently
+            or during replay, older events may overwrite newer capability data.
+            Use persist() for replay scenarios where ordering matters.
+
+        Capability Fields Behavior:
+            The ``capability_fields`` parameter controls how capability metadata is
+            persisted. Understanding the semantics is important for queries and
+            backfill operations.
+
+            When ``capability_fields`` is None (default):
+                - A default ``ModelCapabilityFields()`` is created internally
+                - ``contract_type`` becomes NULL in database (never processed)
+                - ``contract_version`` becomes NULL in database
+                - ``intent_types``, ``protocols``, ``capability_tags`` become empty
+                  arrays ``[]`` (not NULL, due to ``or []`` coercion)
+
+            When ``capability_fields`` is provided:
+                - String fields (``contract_type``, ``contract_version``) are
+                  persisted as-is (None becomes NULL)
+                - Array fields are coerced: None becomes ``[]``, otherwise value
+                  is used
+
+        Three-State Semantics for contract_type:
+            The ``contract_type`` column follows a three-state semantic model that
+            distinguishes between different processing states:
+
+            1. **NULL** (database NULL):
+               Record has never been processed by capability extraction. This is
+               the initial state for new registrations when ``capability_fields``
+               is not provided or when ``contract_type=None`` is explicitly set.
+
+               Query: ``WHERE contract_type IS NULL``
+
+            2. **'unknown'** (EnumContractType.UNKNOWN):
+               Record WAS processed by capability extraction, but the contract
+               type could not be determined from available metadata. This value
+               should ONLY be set by backfill/migration scripts, never by normal
+               application flow.
+
+               Query: ``WHERE contract_type = 'unknown'``
+
+               See: ``EnumContractType.UNKNOWN`` documentation
+
+            3. **Valid types** ('effect', 'compute', 'reducer', 'orchestrator'):
+               Record was successfully processed and the contract type was
+               determined. These are the only valid types for new node
+               registrations.
+
+               Query: ``WHERE contract_type IN ('effect', 'compute', ...)``
+
+        Array Field Semantics:
+            Unlike ``contract_type``, array fields (``intent_types``, ``protocols``,
+            ``capability_tags``) are coerced from None to empty arrays ``[]``. This
+            means there is no NULL state for these fields in practice:
+
+            - ``[]`` (empty array): Processed but has no values
+            - Non-empty array: Has specific values
+
+            This coercion happens at persistence time (lines 996-998), not in
+            ``ModelCapabilityFields`` itself, which uses None as the default.
+
         Args:
             entity_id: Node UUID (partition key)
             domain: Domain namespace (default: "registration")
@@ -888,26 +974,55 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             ack_deadline: Optional deadline for acknowledgment
             liveness_deadline: Optional deadline for heartbeat
             correlation_id: Optional correlation ID for tracing
+            capability_fields: Optional capability fields for GIN-indexed queries.
+                When None, defaults to ``ModelCapabilityFields()`` which sets
+                ``contract_type`` and ``contract_version`` to NULL and array
+                fields to empty arrays.
+            allow_unknown_backfill: If True, allows persisting 'unknown' as the
+                contract_type value. By default (False), attempting to persist
+                'unknown' raises ValueError. This flag should ONLY be used by
+                backfill/migration scripts when the contract type cannot be
+                determined from available metadata.
 
         Returns:
             True if the transition was persisted successfully
 
         Raises:
+            ValueError: If contract_type is 'unknown' and allow_unknown_backfill
+                is False. The 'unknown' type is reserved for backfill operations.
             InfraConnectionError: If database connection fails
             InfraTimeoutError: If operation times out
             RuntimeHostError: For other database errors
 
         Example:
+            >>> from omnibase_infra.models.projection import ModelCapabilityFields
+            >>> fields = ModelCapabilityFields(
+            ...     contract_type="effect",
+            ...     intent_types=["postgres.upsert"],
+            ... )
             >>> await projector.persist_state_transition(
             ...     entity_id=node_id,
             ...     domain="registration",
             ...     new_state=EnumRegistrationState.PENDING_REGISTRATION,
             ...     node_type="effect",
-            ...     node_version="1.0.0",
+            ...     node_version=ModelSemVer(major=1, minor=0, patch=0),
             ...     capabilities=ModelNodeCapabilities(),
             ...     event_id=correlation_id,
             ...     now=datetime.now(UTC),
+            ...     capability_fields=fields,
             ... )
+
+        Example (backfill with unknown type):
+            >>> # Only for backfill scripts when type cannot be determined
+            >>> from omnibase_infra.enums import EnumContractType
+            >>> fields = ModelCapabilityFields(
+            ...     contract_type=EnumContractType.UNKNOWN.value,
+            ... )
+
+        Related:
+            - ``ModelCapabilityFields``: Container for capability field values
+            - ``EnumContractType``: Valid contract type enumeration
+            - ``EnumContractType.UNKNOWN``: Backfill-only fallback type
         """
         corr_id = correlation_id or uuid4()
         ctx = ModelInfraErrorContext(
@@ -926,17 +1041,24 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         upsert_sql = """
             INSERT INTO registration_projections (
                 entity_id, domain, current_state, node_type, node_version,
-                capabilities, ack_deadline, liveness_deadline,
+                capabilities, contract_type, intent_types, protocols,
+                capability_tags, contract_version,
+                ack_deadline, liveness_deadline,
                 last_applied_event_id, last_applied_offset,
                 registered_at, updated_at, correlation_id
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, 0, $10, $10, $11
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, $15, $16
             )
             ON CONFLICT (entity_id, domain) DO UPDATE SET
                 current_state = EXCLUDED.current_state,
                 node_type = EXCLUDED.node_type,
                 node_version = EXCLUDED.node_version,
                 capabilities = EXCLUDED.capabilities,
+                contract_type = EXCLUDED.contract_type,
+                intent_types = EXCLUDED.intent_types,
+                protocols = EXCLUDED.protocols,
+                capability_tags = EXCLUDED.capability_tags,
+                contract_version = EXCLUDED.contract_version,
                 ack_deadline = EXCLUDED.ack_deadline,
                 liveness_deadline = EXCLUDED.liveness_deadline,
                 last_applied_event_id = EXCLUDED.last_applied_event_id,
@@ -948,13 +1070,72 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         # Serialize capabilities to JSON for JSONB column
         capabilities_json = capabilities.model_dump_json()
 
+        # ==========================================================================
+        # CAPABILITY FIELDS: THREE-STATE SEMANTIC MODEL
+        # ==========================================================================
+        # When capability_fields is None, we create a default ModelCapabilityFields()
+        # which has all fields set to None. The resulting database state:
+        #
+        #   - contract_type: NULL (record never processed by capability extraction)
+        #   - contract_version: NULL (never processed)
+        #   - intent_types: [] (coerced from None via "or []" below)
+        #   - protocols: [] (coerced from None via "or []" below)
+        #   - capability_tags: [] (coerced from None via "or []" below)
+        #
+        # This distinguishes from the 'unknown' contract_type which indicates
+        # "processed but type undeterminable" (used by backfill scripts only).
+        # See: EnumContractType.UNKNOWN and docstring above for full semantics.
+        # ==========================================================================
+        cap = capability_fields or ModelCapabilityFields()
+
+        # ==========================================================================
+        # CONTRACT TYPE VALIDATION: Reject 'unknown' unless explicitly allowed
+        # ==========================================================================
+        # The 'unknown' contract type is reserved for backfill/migration scripts
+        # where the actual type cannot be determined from available metadata.
+        # Normal application code should NEVER set 'unknown' - it should either
+        # provide a valid type or leave it as None (NULL in database).
+        #
+        # This validation provides defense-in-depth at the persistence layer,
+        # complementing the model-level validators which also allow 'unknown'
+        # construction but document it as backfill-only.
+        # ==========================================================================
+        if cap.contract_type == EnumContractType.UNKNOWN.value:
+            if not allow_unknown_backfill:
+                raise ValueError(
+                    f"Contract type '{EnumContractType.UNKNOWN.value}' is reserved "
+                    "for backfill/migration operations where the actual contract type "
+                    "cannot be determined. For normal operations, provide a valid "
+                    f"contract type ({', '.join(EnumContractType.valid_type_values())}) "
+                    "or leave it as None. To use 'unknown' in backfill scripts, "
+                    "pass allow_unknown_backfill=True."
+                )
+            logger.warning(
+                "Persisting 'unknown' contract type (backfill mode)",
+                extra={
+                    "entity_id": str(entity_id),
+                    "domain": domain,
+                    "correlation_id": str(corr_id),
+                },
+            )
+
         params = (
             entity_id,
             domain,
             new_state.value,  # Convert enum to string
             node_type,
-            node_version,
+            str(node_version),  # ModelSemVer -> string for asyncpg (see util_semver.py)
             capabilities_json,
+            # Capability fields (OMN-1134) - order must match SQL column order:
+            # contract_type: None becomes NULL (never processed state)
+            cap.contract_type,
+            # Array fields: None is coerced to [] (no NULL state for arrays)
+            # This means [] indicates "processed but empty", not "never processed"
+            cap.intent_types or [],  # TEXT[]
+            cap.protocols or [],  # TEXT[]
+            cap.capability_tags or [],  # TEXT[]
+            # contract_version: None becomes NULL (never processed state)
+            cap.contract_version,
             ack_deadline,
             liveness_deadline,
             event_id,
