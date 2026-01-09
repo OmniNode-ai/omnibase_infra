@@ -39,20 +39,18 @@ class TestHandlerPluginLoaderFileSizeLimit:
             )
         )
 
-        # Create mock stat result with oversized file size
-        mock_stat_result = MagicMock()
-        mock_stat_result.st_size = MAX_CONTRACT_SIZE + 1
-        mock_stat_result.st_mode = 0o100644  # Regular file mode for is_file() check
+        # Mock stat to report file size exceeding limit
+        mock_stat = MagicMock(st_size=MAX_CONTRACT_SIZE + 1, st_mode=0o100644)
 
         loader = HandlerPluginLoader()
 
-        with patch.object(Path, "stat", return_value=mock_stat_result):
+        with patch.object(Path, "stat", return_value=mock_stat):
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 loader.load_from_contract(contract_file)
 
-        # Verify error message indicates size limit exceeded
-        error_msg = str(exc_info.value).lower()
-        assert "size" in error_msg or "limit" in error_msg or "exceeds" in error_msg
+        assert any(
+            term in str(exc_info.value).lower() for term in ("size", "limit", "exceeds")
+        )
 
     def test_accepts_file_under_10mb_limit(self, tmp_path: Path) -> None:
         """Test that files under MAX_CONTRACT_SIZE are accepted."""

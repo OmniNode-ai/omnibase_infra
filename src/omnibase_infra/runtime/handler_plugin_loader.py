@@ -898,7 +898,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         if isinstance(tags, list):
             # Filter to only string tags, skip invalid types silently
-            return [str(tag) for tag in tags if isinstance(tag, str)]
+            return [tag for tag in tags if isinstance(tag, str)]
 
         # Single tag as string
         if isinstance(tags, str):

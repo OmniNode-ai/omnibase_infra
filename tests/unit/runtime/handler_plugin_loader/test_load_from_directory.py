@@ -128,8 +128,6 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         """
         from uuid import UUID
 
-        import pytest
-
         from omnibase_infra.errors import ProtocolConfigurationError
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
@@ -169,8 +167,6 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         incoming requests; include in all error context."
         """
         from uuid import UUID
-
-        import pytest
 
         from omnibase_infra.errors import ProtocolConfigurationError
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
@@ -241,8 +237,6 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         Triggers an import error by specifying a non-existent module.
         """
         from uuid import UUID
-
-        import pytest
 
         from omnibase_infra.errors import InfraConnectionError
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
