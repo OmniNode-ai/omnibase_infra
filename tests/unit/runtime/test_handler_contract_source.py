@@ -28,45 +28,21 @@ Expected Behavior:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, runtime_checkable
 
 import pytest
 
-# Protocol imports with fallback for compatibility
-# The protocols may be in different locations depending on omnibase_spi version
-try:
-    from omnibase_spi.protocols.handlers.protocol_handler_source import (
-        ProtocolHandlerSource,
-    )
-except ImportError:
-    # Fallback: define minimal protocol stub for testing
-    # This allows the test to run and fail on HandlerContractSource import
+from omnibase_infra.runtime.protocol_contract_descriptor import (
+    ProtocolContractDescriptor,
+)
 
-    @runtime_checkable
-    class ProtocolHandlerSource(Protocol):
-        """Fallback protocol definition for testing."""
+# Protocol imports - use local protocols that HandlerContractSource implements
+# These protocols define the interface used by HandlerContractSource, not the
+# different ProtocolHandlerSource from omnibase_spi (which has list_handler_descriptors).
+from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
-        @property
-        def source_type(self) -> str:
-            """The type of handler source."""
-            ...
-
-        async def discover_handlers(self) -> list:
-            """Discover and return all handlers from this source."""
-            ...
-
-
-try:
-    from omnibase_spi.protocols.handlers.types import ProtocolHandlerDescriptor
-except ImportError:
-    # Fallback: import from our local protocol definition when omnibase_spi
-    # does not export ProtocolHandlerDescriptor. This is intentional for:
-    # 1. Backwards compatibility with older omnibase_spi versions
-    # 2. Running tests in isolation without full SPI installation
-    # The alias ensures the rest of the test file uses a consistent name.
-    from omnibase_infra.runtime.protocol_contract_descriptor import (
-        ProtocolContractDescriptor as ProtocolHandlerDescriptor,
-    )
+# Alias for test readability - HandlerContractSource implements ProtocolContractSource
+ProtocolHandlerSource = ProtocolContractSource
+ProtocolHandlerDescriptor = ProtocolContractDescriptor
 
 
 # =============================================================================
