@@ -47,6 +47,9 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.handlers.registration_storage.handler_mock_registration_storage import (
     MockRegistrationStorageHandler,
 )
+from omnibase_infra.handlers.registration_storage.models import (
+    ModelDeleteRegistrationRequest,
+)
 from omnibase_infra.handlers.registration_storage.protocol_registration_storage_handler import (
     ProtocolRegistrationStorageHandler,
 )
@@ -212,8 +215,10 @@ class BaseHandlerSwappingTests:
 
         # Delete the record
         delete_result = await handler.delete_registration(
-            node_id=sample_registration_record.node_id,
-            correlation_id=correlation_id,
+            ModelDeleteRegistrationRequest(
+                node_id=sample_registration_record.node_id,
+                correlation_id=correlation_id,
+            )
         )
 
         assert isinstance(delete_result, ModelDeleteResult), (
@@ -223,8 +228,10 @@ class BaseHandlerSwappingTests:
 
         # Verify record is gone - delete again should return deleted=False
         delete_result_again = await handler.delete_registration(
-            node_id=sample_registration_record.node_id,
-            correlation_id=correlation_id,
+            ModelDeleteRegistrationRequest(
+                node_id=sample_registration_record.node_id,
+                correlation_id=correlation_id,
+            )
         )
 
         assert delete_result_again.success, "Delete operation should succeed"
@@ -604,7 +611,10 @@ class TestRuntimeHandlerSwapping:
 
             # Delete
             delete_result = await handler.delete_registration(
-                record.node_id, correlation_id
+                ModelDeleteRegistrationRequest(
+                    node_id=record.node_id,
+                    correlation_id=correlation_id,
+                )
             )
 
             return (
