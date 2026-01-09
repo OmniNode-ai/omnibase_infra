@@ -181,7 +181,7 @@ class ProtocolBindingRegistry:
 
         Raises:
             RegistryError: If handler_cls does not implement the ProtocolHandler protocol
-                          (missing or non-callable handle() method).
+                          (missing or non-callable execute() method).
 
         Example:
             >>> registry = ProtocolBindingRegistry()
@@ -189,21 +189,21 @@ class ProtocolBindingRegistry:
             >>> registry.register(HANDLER_TYPE_DATABASE, PostgresHandler)
         """
         # Runtime type validation: Ensure handler_cls implements ProtocolHandler protocol
-        # Check if handle() method exists and is callable
-        handle_attr = getattr(handler_cls, "handle", None)
+        # Check if execute() method exists and is callable
+        execute_attr = getattr(handler_cls, "execute", None)
 
-        if handle_attr is None:
+        if execute_attr is None:
             raise RegistryError(
                 f"Handler class {handler_cls.__name__!r} does not implement "
-                f"ProtocolHandler protocol: missing 'handle()' method",
+                f"ProtocolHandler protocol: missing 'execute()' method",
                 protocol_type=protocol_type,
                 handler_class=handler_cls.__name__,
             )
 
-        if not callable(handle_attr):
+        if not callable(execute_attr):
             raise RegistryError(
                 f"Handler class {handler_cls.__name__!r} does not implement "
-                f"ProtocolHandler protocol: handle() method (not callable)",
+                f"ProtocolHandler protocol: execute() method (not callable)",
                 protocol_type=protocol_type,
                 handler_class=handler_cls.__name__,
             )

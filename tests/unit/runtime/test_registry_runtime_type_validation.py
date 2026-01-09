@@ -36,13 +36,13 @@ from omnibase_infra.runtime.registry_compute import RegistryCompute
 
 
 class InvalidHandler:
-    """Invalid handler class - missing handle() method."""
+    """Invalid handler class - missing execute() method."""
 
 
 class InvalidHandlerNonCallable:
-    """Invalid handler class - handle is not callable."""
+    """Invalid handler class - execute is not callable."""
 
-    handle = "not_callable"  # type: ignore[assignment]
+    execute = "not_callable"  # type: ignore[assignment]
 
 
 class InvalidEventBus:
@@ -101,9 +101,9 @@ class InvalidComputePluginNonCallable:
 
 
 class ValidHandler:
-    """Valid handler class with handle() method."""
+    """Valid handler class with execute() method."""
 
-    def handle(self, request: object) -> object:
+    def execute(self, request: object) -> object:
         return {"status": "ok"}
 
 
@@ -155,17 +155,17 @@ class TestProtocolBindingRegistryValidation:
     """Test runtime type validation in ProtocolBindingRegistry."""
 
     def test_register_invalid_handler_missing_handle(self) -> None:
-        """Test that registering handler without handle() method raises error."""
+        """Test that registering handler without execute() method raises error."""
         registry = ProtocolBindingRegistry()
 
         with pytest.raises(RegistryError) as exc_info:
             registry.register("test", InvalidHandler)
 
-        assert "missing 'handle()' method" in str(exc_info.value)
+        assert "missing 'execute()' method" in str(exc_info.value)
         assert "InvalidHandler" in str(exc_info.value)
 
     def test_register_invalid_handler_non_callable_handle(self) -> None:
-        """Test that registering handler with non-callable handle raises error."""
+        """Test that registering handler with non-callable execute raises error."""
         registry = ProtocolBindingRegistry()
 
         with pytest.raises(RegistryError) as exc_info:

@@ -71,8 +71,8 @@ class MockSyncPolicyV2:
 class MockHandler:
     """Generic mock handler for testing."""
 
-    def handle(self) -> None:
-        """Mock handle method for ProtocolHandler compliance."""
+    def execute(self) -> None:
+        """Mock execute method for ProtocolHandler compliance."""
 
 
 class MockEventBus:
