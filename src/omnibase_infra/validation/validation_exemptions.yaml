@@ -736,6 +736,34 @@ pattern_exemptions:
       - CLAUDE.md (Infrastructure Error Patterns)
     ticket: OMN-811
   # ==========================================================================
+  # EventBusRegistryError Exemptions (OMN-1276)
+  # ==========================================================================
+  # Error classes require multiple context parameters for comprehensive error reporting.
+  - file_pattern: 'error_event_bus_registry\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Error class requires multiple contextual parameters for debugging: message, bus_kind, bus_class, available_kinds, existing_class, context, and **extra_context. These are distinct error context fields needed for comprehensive error reporting.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+      - CLAUDE.md (Infrastructure Error Patterns)
+    ticket: OMN-1276
+  # ==========================================================================
+  # MessageTypeRegistryError Exemptions (OMN-983)
+  # ==========================================================================
+  # Error classes require multiple context parameters for comprehensive error reporting.
+  - file_pattern: 'registry_message_type\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Error class requires multiple contextual parameters for debugging: message, message_type, domain, category, context, and **extra_context. These are distinct error context fields needed for comprehensive error reporting.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+      - CLAUDE.md (Infrastructure Error Patterns)
+    ticket: OMN-983
+  # ==========================================================================
   # Compute Plugin ID Exemptions (OMN-811)
   # ==========================================================================
   # plugin_id is a semantic identifier (e.g., 'json_normalizer'), NOT a UUID.
