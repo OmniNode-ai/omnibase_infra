@@ -12,6 +12,27 @@ descriptor:
   # Individual operations (write w/ overwrite, mkdir w/ exist_ok) can be
   # idempotent, but the handler as a whole supports non-idempotent semantics.
   idempotent: false
+  # TIMEOUT CONFIGURATION (30 seconds)
+  # ---------------------------------
+  # While typical local filesystem I/O completes in milliseconds, 30 seconds
+  # accommodates these legitimate scenarios:
+  #
+  # 1. Network-mounted filesystems (NFS, CIFS, SSHFS) with latency up to seconds
+  # 2. Large file operations: max_file_size_bytes (10MB) on slow storage
+  # 3. Container volume mounts with additional abstraction overhead
+  # 4. High disk I/O contention in shared infrastructure environments
+  # 5. Spinning disk storage (HDDs) vs SSDs in mixed deployments
+  #
+  # OVERRIDE GUIDANCE:
+  # - Reduce to 5000ms for latency-sensitive, local-only deployments
+  # - Increase to 60000ms for known slow NAS/SAN storage
+  # - Consider per-operation timeouts in handler implementation for fine-grained control
+  #
+  # CIRCUIT BREAKER RELATIONSHIP:
+  # Circuit breaker timeout (60000ms) is intentionally 2x handler timeout to ensure:
+  # - Individual operations timeout before circuit evaluation
+  # - Circuit tracks failure patterns, not just slow operations
+  # - Proper failure sequence: timeout → retry exhaustion → circuit threshold
   timeout_ms: 30000
   retry_policy:
     enabled: true
@@ -22,6 +43,9 @@ descriptor:
   circuit_breaker:
     enabled: true
     failure_threshold: 5
+    # Reset timeout: 60s = 2x handler timeout_ms (30s). This ensures the circuit
+    # stays open long enough for transient issues to resolve while allowing
+    # recovery attempts. See timeout_ms comment above for relationship details.
     timeout_ms: 60000
   # Serialized: Prevents race conditions for write operations to same file.
   # Read-only operations could use concurrent policy, but handler scope
@@ -49,11 +73,189 @@ metadata:
   author: OmniNode Team
   ticket: OMN-1160
   security:
+    # =========================================================================
+    # SECURITY CONFIGURATION
+    # =========================================================================
+    # This section defines comprehensive security constraints for filesystem
+    # operations. Implementers MUST enforce all constraints documented here.
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # PATH RESTRICTIONS
+    # -------------------------------------------------------------------------
     # SECURITY: Handler implementation MUST enforce these constraints:
     # - Validate all paths are within allowed_paths before operations
     # - Use Path.resolve() to canonicalize paths and prevent ../ attacks
-    # - Check symlinks don't point outside allowed paths
+    # - Check symlinks don't point outside allowed paths (TOCTOU mitigation)
     # - Reject absolute paths that escape the workspace
     allowed_paths:
       - "${WORKSPACE_ROOT}"
+    # -------------------------------------------------------------------------
+    # FILE SIZE LIMITS
+    # -------------------------------------------------------------------------
+    # Maximum file size for read/write operations (10 MB default).
+    # Prevents memory exhaustion attacks and limits blast radius.
     max_file_size_bytes: 10485760
+    # -------------------------------------------------------------------------
+    # CONFIGURATION REQUIREMENTS
+    # -------------------------------------------------------------------------
+    # Documents required environment variables and initialization behavior.
+    configuration_requirements:
+      environment_variables:
+        WORKSPACE_ROOT:
+          required: true
+          description: >
+            Base directory for all filesystem operations. All paths are validated to be within this directory tree.
+
+          # CRITICAL: Handler MUST fail initialization if not set.
+          # This prevents accidental access to system files when misconfigured.
+          # Do NOT fall back to "/" or "." as this would expose the entire
+          # filesystem or current working directory.
+          missing_behavior: fail_initialization
+          validation:
+            - must_be_absolute_path
+            - must_exist
+            - must_be_directory
+      # Handler initialization MUST verify all required env vars before
+      # accepting any requests. Fail-fast prevents security misconfigurations.
+      initialization_policy: fail_fast_on_missing_config
+    # -------------------------------------------------------------------------
+    # FILE PERMISSION HANDLING
+    # -------------------------------------------------------------------------
+    # Strategy for handling file permissions during create/write operations.
+    file_permissions:
+      # Default permissions for newly created files (octal notation).
+      # 0o644 = owner read/write, group/other read-only.
+      default_file_mode: "0644"
+      # Default permissions for newly created directories.
+      # 0o755 = owner full access, group/other read/execute.
+      default_directory_mode: "0755"
+      # Whether to preserve existing permissions on overwrite.
+      # true = keep existing permissions, false = apply defaults.
+      preserve_on_overwrite: true
+      # SECURITY: Handler runs with process permissions. It cannot grant
+      # permissions beyond what the process user has. Operations that would
+      # require elevated privileges MUST fail with PermissionError.
+      # Do NOT attempt to use sudo or privilege escalation.
+      privilege_escalation: forbidden
+    # -------------------------------------------------------------------------
+    # RATE LIMITING
+    # -------------------------------------------------------------------------
+    # Rate limiting strategy for filesystem operations.
+    rate_limiting:
+      # NOTE: Rate limiting is DEFERRED to the orchestration layer.
+      # Rationale: The handler is a low-level effect that processes one
+      # request at a time (serialized concurrency). Rate limiting is more
+      # effectively implemented at:
+      # - API gateway level (request rate per client)
+      # - Orchestrator level (workflow-aware throttling)
+      # - Resource manager level (system-wide I/O limits)
+      #
+      # If handler-level rate limiting becomes necessary, implement using:
+      # - Token bucket algorithm for burst tolerance
+      # - Separate limits for read vs write operations
+      # - Correlation ID tracking to prevent single-client abuse
+      enabled: false
+      deferred_to: orchestration_layer
+      # Future implementation considerations:
+      future_considerations:
+        - per_operation_limits: "Different limits for read (high) vs write (low)"
+        - burst_allowance: "Token bucket with 10-request burst"
+        - backpressure_signal: "Return 429 with Retry-After header"
+    # -------------------------------------------------------------------------
+    # TOCTOU (Time-of-Check-Time-of-Use) MITIGATION
+    # -------------------------------------------------------------------------
+    # Strategies to mitigate race conditions between path validation and use.
+    toctou_mitigation:
+      # SECURITY: TOCTOU vulnerabilities occur when an attacker modifies the
+      # filesystem between our security check and the actual operation.
+      # Example attack: symlink is validated as safe, then replaced with a
+      # symlink to /etc/passwd before the read operation.
+      strategies:
+        # 1. Open file handles immediately after validation
+        # Use os.open() with O_NOFOLLOW to prevent symlink races, then
+        # perform operations on the file descriptor, not the path.
+        - strategy: use_file_descriptors
+          description: >
+            Open files immediately after path validation and operate on file descriptors rather than paths. This binds the operation to the specific inode, not the path.
+
+          implementation_note: >
+            Use os.open(path, os.O_RDONLY | os.O_NOFOLLOW) for reads. For writes, use O_CREAT | O_EXCL for new files to prevent symlink-based attacks.
+
+        # 2. Atomic operations where possible
+        # Use rename() for atomic file replacement, mkdir() with exist_ok=False
+        # to detect races.
+        - strategy: atomic_operations
+          description: >
+            Use atomic filesystem operations. Write to temp file then rename() for atomic replacement. Use O_EXCL flag to fail if file already exists (detects races).
+
+          implementation_note: >
+            tempfile.NamedTemporaryFile with delete=False, write content, then os.rename() to target. Rename is atomic on POSIX.
+
+        # 3. Re-validate after open
+        # After opening, verify the file descriptor points to expected location.
+        - strategy: post_open_validation
+          description: >
+            After opening a file handle, verify it still points to the expected location using os.fstat() and comparing device/inode.
+
+          implementation_note: >
+            Store (st_dev, st_ino) from os.stat() before open, compare with os.fstat(fd) after open. Mismatch indicates race.
+
+        # 4. Serialized concurrency (already configured)
+        # The serialized concurrency_policy in descriptor prevents parallel
+        # operations that could race with each other.
+        - strategy: serialized_operations
+          description: >
+            Handler uses serialized concurrency policy, preventing parallel handler invocations that could race.
+
+          note: Already configured in descriptor.concurrency_policy
+      # SECURITY: Symlink handling is critical for TOCTOU mitigation.
+      # Symlinks can be weaponized to escape allowed_paths.
+      symlink_policy:
+        # Whether to follow symlinks during path resolution.
+        # false = safer, prevents symlink-based escapes
+        # true = more flexible, but requires careful validation
+        follow_symlinks: false
+        # When follow_symlinks is true, validate that the resolved path
+        # is still within allowed_paths AFTER following all symlinks.
+        validate_resolved_path: true
+        # Maximum symlink depth to follow (prevents infinite loops).
+        max_symlink_depth: 10
+        # Reject symlinks that point outside allowed_paths.
+        reject_external_targets: true
+    # -------------------------------------------------------------------------
+    # INPUT VALIDATION
+    # -------------------------------------------------------------------------
+    # All inputs MUST be validated before use.
+    input_validation:
+      # Path validation requirements
+      path_validation:
+        - reject_null_bytes: true # Prevents null byte injection
+        - reject_control_chars: true # Prevents terminal injection
+        - max_path_length: 4096 # Prevents buffer overflow attacks
+        - max_filename_length: 255 # Filesystem limit
+        - reject_reserved_names: true # CON, PRN, etc. on Windows
+      # Content validation for write operations
+      content_validation:
+        - enforce_max_file_size: true # See max_file_size_bytes
+        - encoding_validation: optional # UTF-8 validation when applicable
+    # -------------------------------------------------------------------------
+    # AUDIT AND LOGGING
+    # -------------------------------------------------------------------------
+    # Security-relevant events that MUST be logged.
+    audit_logging:
+      # Events that MUST be logged for security audit trail
+      required_events:
+        - path_validation_failure # Attempted access outside allowed_paths
+        - symlink_escape_attempt # Symlink pointed outside allowed_paths
+        - permission_denied # OS-level permission failure
+        - file_size_exceeded # Attempted to read/write oversized file
+        - initialization_failure # Handler failed to initialize (missing env)
+      # Log level for security events
+      security_event_level: warning
+      # Include correlation_id in all logs for request tracing
+      include_correlation_id: true
+      # SECURITY: Never log file contents - only metadata
+      never_log:
+        - file_contents
+        - binary_data

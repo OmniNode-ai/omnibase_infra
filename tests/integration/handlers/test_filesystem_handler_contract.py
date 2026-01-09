@@ -23,12 +23,37 @@ from omnibase_core.models.contracts.model_handler_contract import ModelHandlerCo
 
 from omnibase_infra.runtime.handler_contract_source import HandlerContractSource
 
-# Path to contracts directory (relative to this test file)
-# tests/integration/handlers/test_filesystem_handler_contract.py
-# -> src/omnibase_infra/contracts/handlers
-CONTRACTS_DIR = (
-    Path(__file__).parents[3] / "src" / "omnibase_infra" / "contracts" / "handlers"
-)
+
+def _find_project_root() -> Path:
+    """Find project root by walking up directories until finding pyproject.toml.
+
+    This approach is robust to test file relocation since it doesn't depend on
+    a specific directory depth (e.g., .parents[3]). Instead, it walks up the
+    directory tree looking for a reliable project marker.
+
+    Returns:
+        Path to the project root directory containing pyproject.toml.
+
+    Raises:
+        RuntimeError: If project root cannot be found (no pyproject.toml marker).
+    """
+    current = Path(__file__).resolve()
+    project_root = current.parent
+    while project_root != project_root.parent:
+        if (project_root / "pyproject.toml").exists():
+            return project_root
+        project_root = project_root.parent
+
+    raise RuntimeError(
+        f"Could not find project root from {Path(__file__)}. "
+        "Expected pyproject.toml marker in an ancestor directory."
+    )
+
+
+# Path to contracts directory - uses robust project root discovery
+# that works regardless of test file location depth.
+PROJECT_ROOT = _find_project_root()
+CONTRACTS_DIR = PROJECT_ROOT / "src" / "omnibase_infra" / "contracts" / "handlers"
 
 # Path to the specific filesystem handler contract
 FILESYSTEM_CONTRACT_PATH = CONTRACTS_DIR / "filesystem" / "handler_contract.yaml"
