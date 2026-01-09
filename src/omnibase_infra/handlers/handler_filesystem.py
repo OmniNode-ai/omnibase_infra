@@ -271,9 +271,12 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 context=ctx,
             )
 
-        if not isinstance(allowed_paths_raw, list) or len(allowed_paths_raw) == 0:
+        if (
+            not isinstance(allowed_paths_raw, (list, tuple))
+            or len(allowed_paths_raw) == 0
+        ):
             raise ProtocolConfigurationError(
-                "Configuration 'allowed_paths' must be a non-empty list of directory paths",
+                "Configuration 'allowed_paths' must be a non-empty list or tuple of directory paths",
                 context=ctx,
             )
 
@@ -570,7 +573,7 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         Raises:
             InfraConnectionError: If file not found or read fails
-            InfraUnavailableError: If file size exceeds limit
+            InfraUnavailableError: If file size exceeds limit or circuit breaker is open
         """
         operation = "filesystem.read_file"
 
@@ -627,79 +630,94 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             correlation_id=correlation_id,
         )
 
-        # Check file exists
-        if not resolved_path.exists():
-            raise InfraConnectionError(
-                f"File not found: {resolved_path.name}",
-                context=ctx,
-            )
+        # Check circuit breaker before I/O operation
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(operation, correlation_id)
 
-        if not resolved_path.is_file():
-            raise InfraConnectionError(
-                f"Path is not a file: {resolved_path.name}",
-                context=ctx,
-            )
-
-        # Check file size before reading
         try:
-            file_size = resolved_path.stat().st_size
-        except OSError as e:
-            raise InfraConnectionError(
-                f"Cannot stat file: {e}",
-                context=ctx,
-            ) from e
+            # Check file exists
+            if not resolved_path.exists():
+                raise InfraConnectionError(
+                    f"File not found: {resolved_path.name}",
+                    context=ctx,
+                )
 
-        if file_size > self._max_read_size:
-            raise InfraUnavailableError(
-                f"File size ({_categorize_size(file_size)}) exceeds configured read limit",
-                context=ctx,
-            )
+            if not resolved_path.is_file():
+                raise InfraConnectionError(
+                    f"Path is not a file: {resolved_path.name}",
+                    context=ctx,
+                )
 
-        # Read file content
-        content: str
-        try:
-            if binary:
-                raw_bytes = resolved_path.read_bytes()
-                # Encode bytes as base64 string for JSON safety
-                content = base64.b64encode(raw_bytes).decode("ascii")
-            else:
-                content = resolved_path.read_text(encoding=encoding)
-        except OSError as e:
-            raise InfraConnectionError(
-                f"Failed to read file: {e}",
-                context=ctx,
-            ) from e
-        except UnicodeDecodeError as e:
-            raise InfraConnectionError(
-                f"Failed to decode file with encoding '{encoding}': {e}",
-                context=ctx,
-            ) from e
+            # Check file size before reading
+            try:
+                file_size = resolved_path.stat().st_size
+            except OSError as e:
+                raise InfraConnectionError(
+                    f"Cannot stat file: {e}",
+                    context=ctx,
+                ) from e
 
-        logger.debug(
-            "File read successfully",
-            extra={
-                "path": str(resolved_path),
-                "size_category": _categorize_size(file_size),
-                "binary": binary,
-                "correlation_id": str(correlation_id),
-            },
-        )
+            if file_size > self._max_read_size:
+                raise InfraUnavailableError(
+                    f"File size ({_categorize_size(file_size)}) exceeds configured read limit",
+                    context=ctx,
+                )
 
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_FILESYSTEM,
-            result={
-                "status": "success",
-                "payload": {
-                    "content": content,
-                    "size": file_size,
+            # Read file content
+            content: str
+            try:
+                if binary:
+                    raw_bytes = resolved_path.read_bytes()
+                    # Encode bytes as base64 string for JSON safety
+                    content = base64.b64encode(raw_bytes).decode("ascii")
+                else:
+                    content = resolved_path.read_text(encoding=encoding)
+            except OSError as e:
+                raise InfraConnectionError(
+                    f"Failed to read file: {e}",
+                    context=ctx,
+                ) from e
+            except UnicodeDecodeError as e:
+                raise InfraConnectionError(
+                    f"Failed to decode file with encoding '{encoding}': {e}",
+                    context=ctx,
+                ) from e
+
+            # Reset circuit breaker on success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            logger.debug(
+                "File read successfully",
+                extra={
                     "path": str(resolved_path),
+                    "size_category": _categorize_size(file_size),
                     "binary": binary,
+                    "correlation_id": str(correlation_id),
                 },
-                "correlation_id": str(correlation_id),
-            },
-        )
+            )
+
+            return ModelHandlerOutput.for_compute(
+                input_envelope_id=input_envelope_id,
+                correlation_id=correlation_id,
+                handler_id=HANDLER_ID_FILESYSTEM,
+                result={
+                    "status": "success",
+                    "payload": {
+                        "content": content,
+                        "size": file_size,
+                        "path": str(resolved_path),
+                        "binary": binary,
+                    },
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        except (InfraConnectionError, InfraUnavailableError):
+            # Record failure for circuit breaker (infra-level failures only)
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(operation, correlation_id)
+            raise
 
     async def _execute_write_file(
         self,
@@ -721,7 +739,7 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         Raises:
             InfraConnectionError: If write fails
-            InfraUnavailableError: If content size exceeds limit
+            InfraUnavailableError: If content size exceeds limit or circuit breaker is open
             ProtocolConfigurationError: If base64 decoding fails for binary mode
         """
         operation = "filesystem.write_file"
@@ -781,7 +799,7 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             # Binary mode: expect base64-encoded string or raw bytes
             if isinstance(content_raw, str):
                 try:
-                    content_bytes = base64.b64decode(content_raw)
+                    content_bytes = base64.b64decode(content_raw, validate=True)
                 except binascii.Error as e:
                     raise ProtocolConfigurationError(
                         f"Invalid base64 content for binary mode: {e}",
@@ -800,20 +818,19 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             if isinstance(content_raw, str):
                 content_str = content_raw
             elif isinstance(content_raw, bytes):
-                content_str = content_raw.decode("utf-8")
+                try:
+                    content_str = content_raw.decode("utf-8")
+                except UnicodeDecodeError as e:
+                    raise ProtocolConfigurationError(
+                        "Invalid UTF-8 bytes for text content",
+                        context=ctx,
+                    ) from e
             else:
                 raise ProtocolConfigurationError(
                     f"Invalid content type: expected str or bytes, got {type(content_raw).__name__}",
                     context=ctx,
                 )
             content_size = len(content_str.encode("utf-8"))
-
-        # Check content size
-        if content_size > self._max_write_size:
-            raise InfraUnavailableError(
-                f"Content size ({_categorize_size(content_size)}) exceeds configured write limit",
-                context=ctx,
-            )
 
         create_dirs = payload.get("create_dirs", False)
         if not isinstance(create_dirs, bool):
@@ -844,59 +861,81 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             path.resolve() if path.exists() else path.parent.resolve() / path.name
         )
 
-        # Check if file exists (for return value)
-        file_existed = resolved_path.exists()
+        # Check circuit breaker before I/O operation
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(operation, correlation_id)
 
-        # Create parent directories if requested
-        if create_dirs and not resolved_path.parent.exists():
+        try:
+            # Check content size
+            if content_size > self._max_write_size:
+                raise InfraUnavailableError(
+                    f"Content size ({_categorize_size(content_size)}) exceeds configured write limit",
+                    context=ctx,
+                )
+
+            # Check if file exists (for return value)
+            file_existed = resolved_path.exists()
+
+            # Create parent directories if requested
+            if create_dirs and not resolved_path.parent.exists():
+                try:
+                    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    raise InfraConnectionError(
+                        f"Failed to create parent directories: {e}",
+                        context=ctx,
+                    ) from e
+
+            # Check if symlink exists and validate target
+            if resolved_path.exists():
+                self._validate_symlink_target(resolved_path, correlation_id, operation)
+
+            # Write file content
             try:
-                resolved_path.parent.mkdir(parents=True, exist_ok=True)
+                if binary:
+                    resolved_path.write_bytes(content_bytes)
+                else:
+                    resolved_path.write_text(content_str)
             except OSError as e:
                 raise InfraConnectionError(
-                    f"Failed to create parent directories: {e}",
+                    f"Failed to write file: {e}",
                     context=ctx,
                 ) from e
 
-        # Check if symlink exists and validate target
-        if resolved_path.exists():
-            self._validate_symlink_target(resolved_path, correlation_id, operation)
+            # Reset circuit breaker on success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
 
-        # Write file content
-        try:
-            if binary:
-                resolved_path.write_bytes(content_bytes)
-            else:
-                resolved_path.write_text(content_str)
-        except OSError as e:
-            raise InfraConnectionError(
-                f"Failed to write file: {e}",
-                context=ctx,
-            ) from e
-
-        logger.debug(
-            "File written successfully",
-            extra={
-                "path": str(resolved_path),
-                "size_category": _categorize_size(content_size),
-                "file_created": not file_existed,
-                "correlation_id": str(correlation_id),
-            },
-        )
-
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_FILESYSTEM,
-            result={
-                "status": "success",
-                "payload": {
+            logger.debug(
+                "File written successfully",
+                extra={
                     "path": str(resolved_path),
-                    "bytes_written": content_size,
-                    "created": not file_existed,
+                    "size_category": _categorize_size(content_size),
+                    "file_created": not file_existed,
+                    "correlation_id": str(correlation_id),
                 },
-                "correlation_id": str(correlation_id),
-            },
-        )
+            )
+
+            return ModelHandlerOutput.for_compute(
+                input_envelope_id=input_envelope_id,
+                correlation_id=correlation_id,
+                handler_id=HANDLER_ID_FILESYSTEM,
+                result={
+                    "status": "success",
+                    "payload": {
+                        "path": str(resolved_path),
+                        "bytes_written": content_size,
+                        "created": not file_existed,
+                    },
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        except (InfraConnectionError, InfraUnavailableError):
+            # Record failure for circuit breaker (infra-level failures only)
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(operation, correlation_id)
+            raise
 
     async def _execute_list_directory(
         self,
@@ -916,6 +955,7 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         Raises:
             InfraConnectionError: If directory not found or list fails
+            InfraUnavailableError: If circuit breaker is open
         """
         operation = "filesystem.list_directory"
 
@@ -945,19 +985,6 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             correlation_id=correlation_id,
         )
 
-        # Check directory exists
-        if not resolved_path.exists():
-            raise InfraConnectionError(
-                f"Directory not found: {resolved_path.name}",
-                context=ctx,
-            )
-
-        if not resolved_path.is_dir():
-            raise InfraConnectionError(
-                f"Path is not a directory: {resolved_path.name}",
-                context=ctx,
-            )
-
         # Extract options
         recursive = payload.get("recursive", False)
         if not isinstance(recursive, bool):
@@ -967,67 +994,125 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         if pattern is not None and not isinstance(pattern, str):
             pattern = None
 
-        # List directory contents
-        entries: list[dict[str, object]] = []
+        # Check circuit breaker before I/O operation
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(operation, correlation_id)
+
         try:
-            if recursive:
-                iterator = resolved_path.rglob("*")
-            else:
-                iterator = resolved_path.iterdir()
+            # Check directory exists
+            if not resolved_path.exists():
+                raise InfraConnectionError(
+                    f"Directory not found: {resolved_path.name}",
+                    context=ctx,
+                )
 
-            for entry in iterator:
-                # Apply pattern filter if specified
-                if pattern and not fnmatch.fnmatch(entry.name, pattern):
-                    continue
+            if not resolved_path.is_dir():
+                raise InfraConnectionError(
+                    f"Path is not a directory: {resolved_path.name}",
+                    context=ctx,
+                )
 
-                # Get entry metadata
-                try:
-                    stat_info = entry.stat()
-                    entry_data: dict[str, object] = {
-                        "name": entry.name,
-                        "path": str(entry),
-                        "is_file": entry.is_file(),
-                        "is_dir": entry.is_dir(),
-                        "is_symlink": entry.is_symlink(),
-                        "size": stat_info.st_size if entry.is_file() else 0,
-                        "modified": stat_info.st_mtime,
-                    }
-                    entries.append(entry_data)
-                except OSError:
-                    # Skip entries we can't stat
-                    continue
+            # List directory contents
+            entries: list[dict[str, object]] = []
+            try:
+                if recursive:
+                    iterator = resolved_path.rglob("*")
+                else:
+                    iterator = resolved_path.iterdir()
 
-        except OSError as e:
-            raise InfraConnectionError(
-                f"Failed to list directory: {e}",
-                context=ctx,
-            ) from e
+                for entry in iterator:
+                    # Apply pattern filter if specified
+                    if pattern and not fnmatch.fnmatch(entry.name, pattern):
+                        continue
 
-        logger.debug(
-            "Directory listed successfully",
-            extra={
-                "path": str(resolved_path),
-                "entry_count": len(entries),
-                "recursive": recursive,
-                "pattern": pattern,
-                "correlation_id": str(correlation_id),
-            },
-        )
+                    # Get entry metadata - use lstat() to not follow symlinks
+                    # This prevents exposing metadata from files outside the whitelist
+                    try:
+                        is_symlink = entry.is_symlink()
 
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_FILESYSTEM,
-            result={
-                "status": "success",
-                "payload": {
-                    "entries": entries,
-                    "count": len(entries),
+                        # For symlinks, check if target is within allowed paths
+                        # Skip symlinks pointing outside allowed directories to prevent
+                        # information disclosure about files outside the whitelist
+                        if is_symlink:
+                            try:
+                                resolved_target = entry.resolve()
+                                # Check if target is within any allowed directory
+                                target_allowed = False
+                                for allowed in self._allowed_paths:
+                                    try:
+                                        resolved_target.relative_to(allowed)
+                                        target_allowed = True
+                                        break
+                                    except ValueError:
+                                        continue
+                                if not target_allowed:
+                                    # Skip symlinks pointing outside allowed paths
+                                    continue
+                            except OSError:
+                                # Skip broken or unresolvable symlinks
+                                continue
+
+                        # Use lstat() to get symlink's own metadata, not target's
+                        stat_info = entry.lstat()
+
+                        # For is_file/is_dir, report the actual entry type
+                        # If it's a symlink, is_file()/is_dir() follow the link,
+                        # so we report based on the symlink itself
+                        entry_data: dict[str, object] = {
+                            "name": entry.name,
+                            "path": str(entry),
+                            "is_file": entry.is_file() and not is_symlink,
+                            "is_dir": entry.is_dir() and not is_symlink,
+                            "is_symlink": is_symlink,
+                            "size": stat_info.st_size,
+                            "modified": stat_info.st_mtime,
+                        }
+                        entries.append(entry_data)
+                    except OSError:
+                        # Skip entries we can't stat
+                        continue
+
+            except OSError as e:
+                raise InfraConnectionError(
+                    f"Failed to list directory: {e}",
+                    context=ctx,
+                ) from e
+
+            # Reset circuit breaker on success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            logger.debug(
+                "Directory listed successfully",
+                extra={
                     "path": str(resolved_path),
+                    "entry_count": len(entries),
+                    "recursive": recursive,
+                    "pattern": pattern,
+                    "correlation_id": str(correlation_id),
                 },
-                "correlation_id": str(correlation_id),
-            },
-        )
+            )
+
+            return ModelHandlerOutput.for_compute(
+                input_envelope_id=input_envelope_id,
+                correlation_id=correlation_id,
+                handler_id=HANDLER_ID_FILESYSTEM,
+                result={
+                    "status": "success",
+                    "payload": {
+                        "entries": entries,
+                        "count": len(entries),
+                        "path": str(resolved_path),
+                    },
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        except (InfraConnectionError, InfraUnavailableError):
+            # Record failure for circuit breaker (infra-level failures only)
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(operation, correlation_id)
+            raise
 
     async def _execute_ensure_directory(
         self,
@@ -1046,6 +1131,7 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         Raises:
             InfraConnectionError: If directory creation fails
+            InfraUnavailableError: If circuit breaker is open
         """
         operation = "filesystem.ensure_directory"
 
@@ -1064,26 +1150,9 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         path = Path(path_raw)
 
-        # For ensure_directory, validate the path structure is within allowed dirs
-        # Find the first existing ancestor and validate from there
-        current = path
-        while not current.exists() and current != current.parent:
-            current = current.parent
-
-        if current.exists():
-            self._validate_path_in_whitelist(current, correlation_id, operation)
-        else:
-            # This shouldn't happen as root always exists, but handle defensively
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.FILESYSTEM,
-                operation=operation,
-                target_name=str(path),
-                correlation_id=correlation_id,
-            )
-            raise ProtocolConfigurationError(
-                f"Path '{path}' is outside allowed directories - access denied",
-                context=ctx,
-            )
+        # Validate the target path is within allowed directories
+        # _validate_path_in_whitelist handles non-existent paths via resolve()
+        self._validate_path_in_whitelist(path, correlation_id, operation)
 
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.FILESYSTEM,
@@ -1097,67 +1166,82 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         if not isinstance(exist_ok, bool):
             exist_ok = True
 
-        # Check if already exists
-        already_existed = path.exists()
+        # Check circuit breaker before I/O operation
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(operation, correlation_id)
 
-        if already_existed and not path.is_dir():
-            raise InfraConnectionError(
-                f"Path exists but is not a directory: {path.name}",
-                context=ctx,
-            )
+        try:
+            # Check if already exists
+            already_existed = path.exists()
 
-        # If directory exists and exist_ok=False, raise error
-        if already_existed and not exist_ok:
-            raise InfraConnectionError(
-                f"Directory already exists: {path.name}",
-                context=ctx,
-            )
+            if already_existed and not path.is_dir():
+                raise InfraConnectionError(
+                    f"Path exists but is not a directory: {path.name}",
+                    context=ctx,
+                )
 
-        # Create directory
-        created = False
-        if not already_existed:
-            try:
-                path.mkdir(parents=True, exist_ok=exist_ok)
-                created = True
-            except FileExistsError:
-                # FileExistsError is only raised when exist_ok=False
-                # (when exist_ok=True, mkdir() silently succeeds)
+            # If directory exists and exist_ok=False, raise error
+            if already_existed and not exist_ok:
                 raise InfraConnectionError(
                     f"Directory already exists: {path.name}",
                     context=ctx,
-                ) from None
-            except OSError as e:
-                raise InfraConnectionError(
-                    f"Failed to create directory: {e}",
-                    context=ctx,
-                ) from e
+                )
 
-        resolved_path = path.resolve()
+            # Create directory
+            created = False
+            if not already_existed:
+                try:
+                    path.mkdir(parents=True, exist_ok=exist_ok)
+                    created = True
+                except FileExistsError:
+                    # FileExistsError is only raised when exist_ok=False
+                    # (when exist_ok=True, mkdir() silently succeeds)
+                    raise InfraConnectionError(
+                        f"Directory already exists: {path.name}",
+                        context=ctx,
+                    ) from None
+                except OSError as e:
+                    raise InfraConnectionError(
+                        f"Failed to create directory: {e}",
+                        context=ctx,
+                    ) from e
 
-        logger.debug(
-            "Directory ensured",
-            extra={
-                "path": str(resolved_path),
-                "dir_created": created,
-                "already_existed": already_existed,
-                "correlation_id": str(correlation_id),
-            },
-        )
+            resolved_path = path.resolve()
 
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_FILESYSTEM,
-            result={
-                "status": "success",
-                "payload": {
+            # Reset circuit breaker on success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            logger.debug(
+                "Directory ensured",
+                extra={
                     "path": str(resolved_path),
-                    "created": created,
+                    "dir_created": created,
                     "already_existed": already_existed,
+                    "correlation_id": str(correlation_id),
                 },
-                "correlation_id": str(correlation_id),
-            },
-        )
+            )
+
+            return ModelHandlerOutput.for_compute(
+                input_envelope_id=input_envelope_id,
+                correlation_id=correlation_id,
+                handler_id=HANDLER_ID_FILESYSTEM,
+                result={
+                    "status": "success",
+                    "payload": {
+                        "path": str(resolved_path),
+                        "created": created,
+                        "already_existed": already_existed,
+                    },
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        except (InfraConnectionError, InfraUnavailableError):
+            # Record failure for circuit breaker (infra-level failures only)
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(operation, correlation_id)
+            raise
 
     async def _execute_delete_file(
         self,
@@ -1176,6 +1260,7 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         Raises:
             InfraConnectionError: If delete fails or file not found (when missing_ok=False)
+            InfraUnavailableError: If circuit breaker is open
         """
         operation = "filesystem.delete_file"
 
@@ -1221,64 +1306,79 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         if not isinstance(missing_ok, bool):
             missing_ok = False
 
-        # Check if file exists
-        was_missing = not path.exists()
+        # Check circuit breaker before I/O operation
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(operation, correlation_id)
 
-        if was_missing:
-            if not missing_ok:
-                raise InfraConnectionError(
-                    f"File not found: {path.name}",
-                    context=ctx,
+        try:
+            # Check if file exists
+            was_missing = not path.exists()
+
+            if was_missing:
+                if not missing_ok:
+                    raise InfraConnectionError(
+                        f"File not found: {path.name}",
+                        context=ctx,
+                    )
+                resolved_path = path.parent.resolve() / path.name
+                deleted = False
+            else:
+                # Validate full path and symlink
+                resolved_path = self._validate_path_in_whitelist(
+                    path, correlation_id, operation
                 )
-            resolved_path = path.parent.resolve() / path.name
-            deleted = False
-        else:
-            # Validate full path and symlink
-            resolved_path = self._validate_path_in_whitelist(
-                path, correlation_id, operation
-            )
-            self._validate_symlink_target(resolved_path, correlation_id, operation)
+                self._validate_symlink_target(resolved_path, correlation_id, operation)
 
-            if resolved_path.is_dir():
-                raise InfraConnectionError(
-                    f"Path is a directory, use rmdir for directories: {path.name}",
-                    context=ctx,
-                )
+                if resolved_path.is_dir():
+                    raise InfraConnectionError(
+                        f"Path is a directory, use rmdir for directories: {path.name}",
+                        context=ctx,
+                    )
 
-            # Delete file
-            try:
-                resolved_path.unlink()
-                deleted = True
-            except OSError as e:
-                raise InfraConnectionError(
-                    f"Failed to delete file: {e}",
-                    context=ctx,
-                ) from e
+                # Delete file
+                try:
+                    resolved_path.unlink()
+                    deleted = True
+                except OSError as e:
+                    raise InfraConnectionError(
+                        f"Failed to delete file: {e}",
+                        context=ctx,
+                    ) from e
 
-        logger.debug(
-            "File delete operation completed",
-            extra={
-                "path": str(resolved_path),
-                "deleted": deleted if not was_missing else False,
-                "was_missing": was_missing,
-                "correlation_id": str(correlation_id),
-            },
-        )
+            # Reset circuit breaker on success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
 
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_FILESYSTEM,
-            result={
-                "status": "success",
-                "payload": {
+            logger.debug(
+                "File delete operation completed",
+                extra={
                     "path": str(resolved_path),
                     "deleted": deleted if not was_missing else False,
                     "was_missing": was_missing,
+                    "correlation_id": str(correlation_id),
                 },
-                "correlation_id": str(correlation_id),
-            },
-        )
+            )
+
+            return ModelHandlerOutput.for_compute(
+                input_envelope_id=input_envelope_id,
+                correlation_id=correlation_id,
+                handler_id=HANDLER_ID_FILESYSTEM,
+                result={
+                    "status": "success",
+                    "payload": {
+                        "path": str(resolved_path),
+                        "deleted": deleted if not was_missing else False,
+                        "was_missing": was_missing,
+                    },
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        except (InfraConnectionError, InfraUnavailableError):
+            # Record failure for circuit breaker (infra-level failures only)
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(operation, correlation_id)
+            raise
 
     def describe(self) -> dict[str, object]:
         """Return handler metadata and capabilities for introspection.
