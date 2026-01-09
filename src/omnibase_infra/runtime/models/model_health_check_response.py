@@ -34,8 +34,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-# NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
+from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -80,7 +79,7 @@ class ModelHealthCheckResponse(BaseModel):
         ...,
         description="Runtime version string",
     )
-    details: dict[str, object] | None = Field(
+    details: dict[str, JsonType] | None = Field(
         default=None,
         description="Full health check data from RuntimeHostProcess",
     )
@@ -102,7 +101,7 @@ class ModelHealthCheckResponse(BaseModel):
         cls,
         status: Literal["healthy", "degraded", "unhealthy"],
         version: str,
-        details: dict[str, object],
+        details: dict[str, JsonType],
     ) -> ModelHealthCheckResponse:
         """Create a successful health check response.
 

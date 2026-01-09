@@ -37,9 +37,6 @@ from omnibase_infra.handlers.models.model_consul_handler_response import (
 if TYPE_CHECKING:
     import consul as consul_lib
 
-# ONEX: Using object instead of Any per ADR guidelines. JsonType from omnibase_core
-# would cause Pydantic 2.x recursion issues with recursive type aliases.
-
 
 class ProtocolConsulServiceDependencies(Protocol):
     """Protocol defining required dependencies for service operations.
