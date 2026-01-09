@@ -14,12 +14,14 @@ Supported transport types:
     - VALKEY: Valkey (Redis-compatible) cache/messaging
     - GRPC: gRPC protocol
     - RUNTIME: Runtime host internal transport
+    - MCP: Model Context Protocol (AI agent tool interface)
 
 Each transport type has a corresponding handler implementation:
     - HandlerConsul: Service registration, health checks, KV store operations
     - HandlerVault: Secret retrieval, token management, lease renewal
     - KafkaEventBus: Event publishing/subscription, consumer groups
     - PostgresConnectionManager: Connection pooling, query execution
+    - HandlerMCP: MCP server for exposing ONEX nodes as AI agent tools
 """
 
 from enum import Enum
@@ -40,6 +42,7 @@ class EnumInfraTransportType(str, Enum):
         VALKEY: Valkey (Redis-compatible) cache/message transport
         GRPC: gRPC protocol transport
         RUNTIME: Runtime host process internal transport
+        MCP: Model Context Protocol transport for AI agent integration
     """
 
     HTTP = "http"
@@ -50,6 +53,7 @@ class EnumInfraTransportType(str, Enum):
     VALKEY = "valkey"
     GRPC = "grpc"
     RUNTIME = "runtime"
+    MCP = "mcp"
 
 
 __all__ = ["EnumInfraTransportType"]

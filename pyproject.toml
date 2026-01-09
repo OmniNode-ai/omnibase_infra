@@ -92,6 +92,9 @@ opentelemetry-instrumentation-aiohttp-client = "^0.48b0"  # AIOHTTP tracing
 opentelemetry-instrumentation-kafka-python = "^0.48b0"  # Kafka tracing
 opentelemetry-instrumentation-redis = "^0.48b0"  # Redis tracing
 
+# MCP (Model Context Protocol) integration
+mcp = "^1.25.0"  # Anthropic MCP SDK for streamable HTTP transport
+
 # Additional infrastructure dependencies
 httpx = "^0.25.2"  # Modern HTTP client
 tenacity = "^9.0.0"  # Retry and resilience patterns
