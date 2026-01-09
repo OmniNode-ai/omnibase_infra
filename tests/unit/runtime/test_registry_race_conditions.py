@@ -944,7 +944,7 @@ class TestEventBusRegistryConcurrentOperations:
 
         # Exactly one registration should succeed
         assert success_count == 1, f"Expected 1 success, got {success_count}"
-        # Remaining should have raised RuntimeHostError
+        # Remaining should have raised EventBusRegistryError
         assert len(errors) == num_threads - 1
 
     def test_concurrent_is_registered_during_registration(

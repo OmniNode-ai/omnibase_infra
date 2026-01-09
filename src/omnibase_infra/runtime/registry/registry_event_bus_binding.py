@@ -36,7 +36,7 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.errors import EventBusRegistryError, ModelInfraErrorContext
 
 if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
@@ -90,13 +90,53 @@ class EventBusBindingRegistry:
         Associates a bus_kind identifier with an event bus class that
         implements ProtocolEventBus.
 
+        Validation Order:
+            Validations are performed in fail-fast order with cheap checks first:
+
+            1. **Protocol method existence** (O(1) hasattr checks):
+               Verifies bus_cls has either ``publish_envelope()`` or ``publish()``
+               method. This is the cheapest check - just attribute lookup.
+
+            2. **Method callability** (O(1) callable checks):
+               If a publish method exists, verifies it is actually callable
+               (not a non-callable attribute). Slightly more expensive than
+               existence check but still O(1).
+
+            3. **Duplicate registration** (O(1) dict lookup, under lock):
+               Checks if bus_kind is already registered. This validation is
+               performed last and under lock because:
+
+               - It requires lock acquisition (more expensive than attribute checks)
+               - We want to validate the class is well-formed before checking
+                 if it can be registered, so error messages are accurate
+               - Duplicate registration errors are more common during development
+                 but protocol errors indicate deeper issues
+
+        Pydantic vs Registry Validation:
+            This registry uses **runtime duck typing** for protocol validation,
+            not Pydantic models. The validation checks:
+
+            - Method existence via ``hasattr()``
+            - Method callability via ``callable()``
+
+            This approach allows any class implementing the required methods to
+            be registered, regardless of inheritance hierarchy. Pydantic is not
+            involved in the registration validation process.
+
+        Thread Safety:
+            The duplicate registration check is performed under lock to ensure
+            thread-safe concurrent registration. Protocol validation is performed
+            outside the lock since it only inspects the class (immutable) and
+            does not access shared state.
+
         Args:
             bus_kind: Unique identifier for the bus type (e.g., "inmemory", "kafka").
             bus_cls: Event bus class implementing ProtocolEventBus protocol.
 
         Raises:
-            RuntimeHostError: If bus_kind is already registered or if bus_cls
-                does not implement required ProtocolEventBus methods.
+            EventBusRegistryError: If bus_cls does not implement required ProtocolEventBus
+                methods (missing ``publish_envelope()`` or ``publish()``, or methods
+                are not callable). Also raised if bus_kind is already registered.
 
         Example:
             ```python
@@ -109,36 +149,51 @@ class EventBusBindingRegistry:
         has_publish = hasattr(bus_cls, "publish")
 
         if not has_publish_envelope and not has_publish:
-            raise RuntimeHostError(
+            raise EventBusRegistryError(
                 f"Event bus class {bus_cls.__name__} is missing "
                 f"'publish_envelope()' or 'publish()' method from "
                 f"ProtocolEventBus protocol",
+                bus_kind=bus_kind,
                 bus_class=bus_cls.__name__,
+                context=ModelInfraErrorContext.with_correlation(
+                    operation="register",
+                ),
             )
 
         # Check that at least one publish method is callable
         if has_publish_envelope:
             if not callable(getattr(bus_cls, "publish_envelope", None)):
-                raise RuntimeHostError(
+                raise EventBusRegistryError(
                     f"Event bus class {bus_cls.__name__} has "
                     f"'publish_envelope' attribute but it is not callable",
+                    bus_kind=bus_kind,
                     bus_class=bus_cls.__name__,
+                    context=ModelInfraErrorContext.with_correlation(
+                        operation="register",
+                    ),
                 )
 
         if has_publish:
             if not callable(getattr(bus_cls, "publish", None)):
-                raise RuntimeHostError(
+                raise EventBusRegistryError(
                     f"Event bus class {bus_cls.__name__} has "
                     f"'publish' attribute but it is not callable",
+                    bus_kind=bus_kind,
                     bus_class=bus_cls.__name__,
+                    context=ModelInfraErrorContext.with_correlation(
+                        operation="register",
+                    ),
                 )
 
         with self._lock:
             if bus_kind in self._registry:
-                raise RuntimeHostError(
+                raise EventBusRegistryError(
                     f"Event bus kind '{bus_kind}' is already registered",
                     bus_kind=bus_kind,
                     existing_class=self._registry[bus_kind].__name__,
+                    context=ModelInfraErrorContext.with_correlation(
+                        operation="register",
+                    ),
                 )
             self._registry[bus_kind] = bus_cls
 
@@ -152,7 +207,7 @@ class EventBusBindingRegistry:
             The event bus class registered for the given bus_kind.
 
         Raises:
-            RuntimeHostError: If bus_kind is not registered.
+            EventBusRegistryError: If bus_kind is not registered.
 
         Example:
             ```python
@@ -163,10 +218,13 @@ class EventBusBindingRegistry:
         with self._lock:
             if bus_kind not in self._registry:
                 available = list(self._registry.keys())
-                raise RuntimeHostError(
+                raise EventBusRegistryError(
                     f"Event bus kind '{bus_kind}' is not registered",
                     bus_kind=bus_kind,
                     available_kinds=available,
+                    context=ModelInfraErrorContext.with_correlation(
+                        operation="get",
+                    ),
                 )
             return self._registry[bus_kind]
 

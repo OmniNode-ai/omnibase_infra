@@ -263,20 +263,22 @@ def register_handlers_from_config(
         >>> register_handlers_from_config(runtime, protocol_configs)
 
     Note:
-        This is a placeholder implementation. Full protocol class resolution
-        will be implemented when BaseRuntimeHostProcess is available.
+        **Placeholder implementation** - only validates config structure.
+
+        TODO(OMN-41): Implement full handler resolution:
+        1. Use importlib to resolve protocol_class string to actual class
+        2. Validate class implements ProtocolHandler protocol
+        3. Register handler with runtime via get_handler_registry()
+        4. Support handler instantiation options from config.options
     """
-    # NOTE: Registry access (get_handler_registry()) will be needed when
-    # TODO(OMN-41) is implemented to resolve and register handler classes.
+    # Placeholder: validate config structure only, defer registration to OMN-41
     for config in protocol_configs:
         if not config.enabled:
             continue
 
         if config.type and config.protocol_class:
-            # TODO(OMN-41): Resolve handler class from name using importlib
-            # For now, just validate config structure is correct
-            # The actual handler instantiation will be done by RuntimeHostProcess
-            pass  # Validation passed; handler resolution deferred to OMN-41
+            # Config structure is valid - actual resolution deferred to OMN-41
+            _ = config  # Explicit acknowledgment that config is intentionally unused
 
 
 # =============================================================================

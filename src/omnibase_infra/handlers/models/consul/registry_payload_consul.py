@@ -24,13 +24,18 @@ Related:
 
 from __future__ import annotations
 
+import threading
+import warnings
 from collections.abc import Callable
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers.models.consul.model_payload_consul import (
         ModelPayloadConsul,
     )
+
+# TypeVar bound to ModelPayloadConsul to preserve subclass type through decorator
+_ConsulPayloadT = TypeVar("_ConsulPayloadT", bound="ModelPayloadConsul")
 
 
 class RegistryPayloadConsul:
@@ -50,16 +55,20 @@ class RegistryPayloadConsul:
         payload = payload_cls.model_validate(data)
 
     Thread Safety:
-        The registry is populated at module import time (class definition).
-        After startup, it is read-only and thread-safe for concurrent access.
+        All registration and mutation operations are protected by a class-level
+        threading.Lock to ensure thread-safe access. Read operations (get_type,
+        get_all_types, is_registered) are atomic dictionary operations and safe
+        for concurrent access. The lock ensures that check-and-set operations
+        in register() are atomic, preventing race conditions.
     """
 
     _types: ClassVar[dict[str, type[ModelPayloadConsul]]] = {}
+    _lock: ClassVar[threading.Lock] = threading.Lock()
 
     @classmethod
     def register(
         cls, operation_type: str
-    ) -> Callable[[type[ModelPayloadConsul]], type[ModelPayloadConsul]]:
+    ) -> Callable[[type[_ConsulPayloadT]], type[_ConsulPayloadT]]:
         """Decorator to register a Consul payload model type.
 
         Args:
@@ -83,9 +92,9 @@ class RegistryPayloadConsul:
         """
 
         def decorator(
-            payload_cls: type[ModelPayloadConsul],
-        ) -> type[ModelPayloadConsul]:
-            # Runtime type validation
+            payload_cls: type[_ConsulPayloadT],
+        ) -> type[_ConsulPayloadT]:
+            # Runtime type validation (outside lock - class inspection is read-only)
             from omnibase_infra.handlers.models.consul.model_payload_consul import (
                 ModelPayloadConsul,
             )
@@ -96,13 +105,15 @@ class RegistryPayloadConsul:
                     f"of ModelPayloadConsul, got {payload_cls.__mro__}"
                 )
 
-            if operation_type in cls._types:
-                raise ValueError(
-                    f"Consul payload operation_type '{operation_type}' already registered "
-                    f"to {cls._types[operation_type].__name__}. "
-                    f"Cannot register {payload_cls.__name__}."
-                )
-            cls._types[operation_type] = payload_cls
+            # Thread-safe registration with atomic check-and-set
+            with cls._lock:
+                if operation_type in cls._types:
+                    raise ValueError(
+                        f"Consul payload operation_type '{operation_type}' already registered "
+                        f"to {cls._types[operation_type].__name__}. "
+                        f"Cannot register {payload_cls.__name__}."
+                    )
+                cls._types[operation_type] = payload_cls
             return payload_cls
 
         return decorator
@@ -167,13 +178,24 @@ class RegistryPayloadConsul:
         """Clear all registered types.
 
         Warning:
-            This method is intended for testing purposes only.
-            Do not use in production code as it breaks the immutability
-            guarantee after startup.
+            This method is intended for **testing purposes only**.
+            Calling it in production code will emit a warning.
+            It breaks the immutability guarantee after startup.
+
+        Thread Safety:
+            This method is protected by the class-level lock to ensure
+            thread-safe clearing of the registry.
         """
-        cls._types.clear()
+        warnings.warn(
+            "RegistryPayloadConsul.clear() is intended for testing only. "
+            "Do not use in production code.",
+            UserWarning,
+            stacklevel=2,
+        )
+        with cls._lock:
+            cls._types.clear()
 
 
 __all__: list[str] = [
-    "RegistryPayloadConsul",
+    "RegistryPayloadConsul",  # Consul payload registry
 ]

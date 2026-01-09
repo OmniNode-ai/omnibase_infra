@@ -64,7 +64,9 @@ Integration Points:
 from __future__ import annotations
 
 import threading
+import warnings
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 
@@ -174,6 +176,29 @@ class ProtocolBindingRegistry:
         Associates a protocol type identifier with a handler class. If the protocol
         type is already registered, the existing registration is overwritten.
 
+        Validation Order:
+            Validations are performed in fail-fast order with cheap checks first:
+
+            1. **Protocol method existence** (O(1) hasattr checks):
+               Verifies handler_cls has either ``execute()`` or ``handle()``
+               method. This is the cheapest check - just attribute lookup.
+
+            2. **Method callability** (O(1) callable checks):
+               If a handler method exists, verifies it is actually callable
+               (not a non-callable attribute). Slightly more expensive than
+               existence check but still O(1).
+
+        Pydantic vs Registry Validation:
+            This registry uses **runtime duck typing** for protocol validation,
+            not Pydantic models. The validation checks:
+
+            - Method existence via ``hasattr()``
+            - Method callability via ``callable()``
+
+            This approach allows any class implementing the required methods to
+            be registered, regardless of inheritance hierarchy. Pydantic is not
+            involved in the registration validation process.
+
         Args:
             protocol_type: Protocol type identifier (e.g., 'http', 'db', 'kafka').
                           Should be one of the HANDLER_TYPE_* constants.
@@ -181,7 +206,7 @@ class ProtocolBindingRegistry:
 
         Raises:
             RegistryError: If handler_cls does not implement the ProtocolHandler protocol
-                          (missing or non-callable execute() method).
+                          (missing or non-callable execute()/handle() method).
 
         Example:
             >>> registry = ProtocolBindingRegistry()
@@ -189,24 +214,47 @@ class ProtocolBindingRegistry:
             >>> registry.register(HANDLER_TYPE_DATABASE, PostgresHandler)
         """
         # Runtime type validation: Ensure handler_cls implements ProtocolHandler protocol
-        # Check if execute() method exists and is callable
-        execute_attr = getattr(handler_cls, "execute", None)
+        # Check if execute() or handle() method exists and is callable
+        # Following EventBusBindingRegistry pattern of supporting alternative methods
+        has_execute = hasattr(handler_cls, "execute")
+        has_handle = hasattr(handler_cls, "handle")
 
-        if execute_attr is None:
+        if not has_execute and not has_handle:
             raise RegistryError(
-                f"Handler class {handler_cls.__name__!r} does not implement "
-                f"ProtocolHandler protocol: missing 'execute()' method",
+                f"Handler class {handler_cls.__name__!r} for protocol type "
+                f"{protocol_type!r} is missing 'execute()' or 'handle()' method "
+                f"from ProtocolHandler protocol",
                 protocol_type=protocol_type,
+                context=ModelInfraErrorContext.with_correlation(
+                    operation="register",
+                ),
                 handler_class=handler_cls.__name__,
             )
 
-        if not callable(execute_attr):
-            raise RegistryError(
-                f"Handler class {handler_cls.__name__!r} does not implement "
-                f"ProtocolHandler protocol: execute() method (not callable)",
-                protocol_type=protocol_type,
-                handler_class=handler_cls.__name__,
-            )
+        # Check that at least one handler method is callable
+        if has_execute:
+            if not callable(getattr(handler_cls, "execute", None)):
+                raise RegistryError(
+                    f"Handler class {handler_cls.__name__!r} for protocol type "
+                    f"{protocol_type!r} has 'execute' attribute but it is not callable",
+                    protocol_type=protocol_type,
+                    context=ModelInfraErrorContext.with_correlation(
+                        operation="register",
+                    ),
+                    handler_class=handler_cls.__name__,
+                )
+
+        if has_handle:
+            if not callable(getattr(handler_cls, "handle", None)):
+                raise RegistryError(
+                    f"Handler class {handler_cls.__name__!r} for protocol type "
+                    f"{protocol_type!r} has 'handle' attribute but it is not callable",
+                    protocol_type=protocol_type,
+                    context=ModelInfraErrorContext.with_correlation(
+                        operation="register",
+                    ),
+                    handler_class=handler_cls.__name__,
+                )
 
         with self._lock:
             self._registry[protocol_type] = handler_cls
@@ -242,6 +290,9 @@ class ProtocolBindingRegistry:
                     f"No handler registered for protocol type: {protocol_type!r}. "
                     f"Registered protocols: {registered}",
                     protocol_type=protocol_type,
+                    context=ModelInfraErrorContext.with_correlation(
+                        operation="get",
+                    ),
                     registered_protocols=registered,
                 )
             return handler_cls
@@ -312,7 +363,11 @@ class ProtocolBindingRegistry:
         """Clear all handler registrations.
 
         Removes all registered handlers from the registry.
-        This is useful for testing scenarios.
+
+        Warning:
+            This method is intended for **testing purposes only**.
+            Calling it in production code will emit a warning.
+            It breaks the immutability guarantee after startup.
 
         Example:
             >>> registry = ProtocolBindingRegistry()
@@ -321,6 +376,12 @@ class ProtocolBindingRegistry:
             >>> registry.list_protocols()
             []
         """
+        warnings.warn(
+            "ProtocolBindingRegistry.clear() is intended for testing only. "
+            "Do not use in production code.",
+            UserWarning,
+            stacklevel=2,
+        )
         with self._lock:
             self._registry.clear()
 

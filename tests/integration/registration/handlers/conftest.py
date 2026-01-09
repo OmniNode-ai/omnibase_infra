@@ -34,7 +34,29 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
     DEFAULT_LIVENESS_WINDOW_SECONDS,
 )
 
-# Import fixtures from projectors conftest (re-export for pytest discovery)
+# =============================================================================
+# Cross-Module Fixture Imports
+# =============================================================================
+# These fixtures are imported from tests/integration/projectors/conftest.py
+# to provide shared PostgreSQL testcontainer infrastructure for handler tests.
+#
+# Why imported:
+#   - Reuses expensive PostgreSQL container setup (session-scoped)
+#   - Ensures consistent schema initialization across projector and handler tests
+#   - Provides test isolation via TRUNCATE in pg_pool fixture teardown
+#
+# Imported fixtures:
+#   - DOCKER_AVAILABLE: Module constant - True if Docker is running
+#   - SCHEMA_FILE: Path to registration_projections schema SQL
+#   - docker_available: Session fixture - Docker availability check
+#   - event_loop_policy: Session fixture - asyncio event loop policy
+#   - postgres_container: Session fixture - PostgreSQL testcontainer (expensive)
+#   - pg_pool: Function fixture - Fresh asyncpg pool per test (isolated)
+#   - projector: Function fixture - ProjectorRegistration instance
+#   - reader: Function fixture - ProjectionReaderRegistration instance
+#
+# These are re-exported in __all__ for pytest discovery.
+# =============================================================================
 from tests.integration.projectors.conftest import (
     DOCKER_AVAILABLE,
     SCHEMA_FILE,

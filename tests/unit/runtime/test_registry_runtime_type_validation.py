@@ -13,8 +13,8 @@ import pytest
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import (
     ComputeRegistryError,
+    EventBusRegistryError,
     PolicyRegistryError,
-    RuntimeHostError,
 )
 from omnibase_infra.runtime.models import (
     ModelComputeRegistration,
@@ -36,13 +36,26 @@ from omnibase_infra.runtime.registry_compute import RegistryCompute
 
 
 class InvalidHandler:
-    """Invalid handler class - missing execute() method."""
+    """Invalid handler class - missing both execute() and handle() methods."""
 
 
-class InvalidHandlerNonCallable:
+class InvalidHandlerExecuteNonCallable:
     """Invalid handler class - execute is not callable."""
 
     execute = "not_callable"  # type: ignore[assignment]
+
+
+class InvalidHandlerHandleNonCallable:
+    """Invalid handler class - handle is not callable."""
+
+    handle = "not_callable"  # type: ignore[assignment]
+
+
+class InvalidHandlerBothNonCallable:
+    """Invalid handler class - both execute and handle are not callable."""
+
+    execute = "not_callable"  # type: ignore[assignment]
+    handle = "not_callable"  # type: ignore[assignment]
 
 
 class InvalidEventBus:
@@ -53,6 +66,12 @@ class InvalidEventBusNonCallable:
     """Invalid event bus class - publish_envelope is not callable."""
 
     publish_envelope = "not_callable"  # type: ignore[assignment]
+
+
+class InvalidEventBusPublishNonCallable:
+    """Invalid event bus class - publish is not callable."""
+
+    publish = "not_callable"  # type: ignore[assignment]
 
 
 class InvalidPolicy:
@@ -107,6 +126,23 @@ class ValidHandler:
         return {"status": "ok"}
 
 
+class ValidHandlerWithHandle:
+    """Valid handler class with handle() method."""
+
+    async def handle(self, envelope: object) -> object:
+        return {"status": "ok"}
+
+
+class ValidHandlerWithBoth:
+    """Valid handler class with both execute() and handle() methods."""
+
+    def execute(self, request: object) -> object:
+        return {"status": "ok"}
+
+    async def handle(self, envelope: object) -> object:
+        return {"status": "ok"}
+
+
 class ValidEventBus:
     """Valid event bus class with publish_envelope() method."""
 
@@ -152,30 +188,59 @@ class ValidComputePlugin:
 
 
 class TestProtocolBindingRegistryValidation:
-    """Test runtime type validation in ProtocolBindingRegistry."""
+    """Test runtime type validation in ProtocolBindingRegistry.
 
-    def test_register_invalid_handler_missing_handle(self) -> None:
-        """Test that registering handler without execute() method raises error."""
+    This test class validates that ProtocolBindingRegistry.register() performs
+    proper runtime type checking following the EventBusBindingRegistry pattern:
+    - Handler must have either execute() or handle() method (or both)
+    - At least one handler method must be callable
+    """
+
+    def test_register_invalid_handler_missing_both_methods(self) -> None:
+        """Test that registering handler without execute() or handle() raises error."""
         registry = ProtocolBindingRegistry()
 
         with pytest.raises(RegistryError) as exc_info:
             registry.register("test", InvalidHandler)
 
-        assert "missing 'execute()' method" in str(exc_info.value)
+        assert "missing 'execute()' or 'handle()' method" in str(exc_info.value)
         assert "InvalidHandler" in str(exc_info.value)
 
-    def test_register_invalid_handler_non_callable_handle(self) -> None:
+    def test_register_invalid_handler_non_callable_execute(self) -> None:
         """Test that registering handler with non-callable execute raises error."""
         registry = ProtocolBindingRegistry()
 
         with pytest.raises(RegistryError) as exc_info:
-            registry.register("test", InvalidHandlerNonCallable)
+            registry.register("test", InvalidHandlerExecuteNonCallable)
 
         assert "not callable" in str(exc_info.value)
-        assert "InvalidHandlerNonCallable" in str(exc_info.value)
+        assert "'execute'" in str(exc_info.value)
+        assert "InvalidHandlerExecuteNonCallable" in str(exc_info.value)
 
-    def test_register_valid_handler_succeeds(self) -> None:
-        """Test that registering valid handler succeeds."""
+    def test_register_invalid_handler_non_callable_handle(self) -> None:
+        """Test that registering handler with non-callable handle raises error."""
+        registry = ProtocolBindingRegistry()
+
+        with pytest.raises(RegistryError) as exc_info:
+            registry.register("test", InvalidHandlerHandleNonCallable)
+
+        assert "not callable" in str(exc_info.value)
+        assert "'handle'" in str(exc_info.value)
+        assert "InvalidHandlerHandleNonCallable" in str(exc_info.value)
+
+    def test_register_invalid_handler_both_non_callable(self) -> None:
+        """Test that registering handler with both non-callable methods raises error."""
+        registry = ProtocolBindingRegistry()
+
+        with pytest.raises(RegistryError) as exc_info:
+            registry.register("test", InvalidHandlerBothNonCallable)
+
+        # Should fail on first non-callable check (execute)
+        assert "not callable" in str(exc_info.value)
+        assert "InvalidHandlerBothNonCallable" in str(exc_info.value)
+
+    def test_register_valid_handler_with_execute_succeeds(self) -> None:
+        """Test that registering handler with execute() method succeeds."""
         registry = ProtocolBindingRegistry()
 
         # Should not raise
@@ -185,6 +250,50 @@ class TestProtocolBindingRegistryValidation:
         assert registry.is_registered("test")
         handler_cls = registry.get("test")
         assert handler_cls is ValidHandler
+
+    def test_register_valid_handler_with_handle_succeeds(self) -> None:
+        """Test that registering handler with only handle() method succeeds."""
+        registry = ProtocolBindingRegistry()
+
+        # Should not raise - handle() alone is sufficient
+        registry.register("test", ValidHandlerWithHandle)
+
+        # Verify registration
+        assert registry.is_registered("test")
+        handler_cls = registry.get("test")
+        assert handler_cls is ValidHandlerWithHandle
+
+    def test_register_valid_handler_with_both_methods_succeeds(self) -> None:
+        """Test that registering handler with both execute() and handle() succeeds."""
+        registry = ProtocolBindingRegistry()
+
+        # Should not raise
+        registry.register("test", ValidHandlerWithBoth)
+
+        # Verify registration
+        assert registry.is_registered("test")
+        handler_cls = registry.get("test")
+        assert handler_cls is ValidHandlerWithBoth
+
+    def test_error_message_includes_protocol_type(self) -> None:
+        """Test that error message includes the protocol type being registered."""
+        registry = ProtocolBindingRegistry()
+
+        with pytest.raises(RegistryError) as exc_info:
+            registry.register("custom-protocol", InvalidHandler)
+
+        # Verify error context includes protocol type
+        error = exc_info.value
+        assert hasattr(error, "protocol_type") or "custom-protocol" in str(error)
+
+    def test_error_message_includes_handler_class_name(self) -> None:
+        """Test that error message includes the handler class name."""
+        registry = ProtocolBindingRegistry()
+
+        with pytest.raises(RegistryError) as exc_info:
+            registry.register("test", InvalidHandler)
+
+        assert "InvalidHandler" in str(exc_info.value)
 
 
 # =============================================================================
@@ -199,7 +308,7 @@ class TestEventBusBindingRegistryValidation:
         """Test that registering event bus without publish methods raises error."""
         registry = EventBusBindingRegistry()
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(EventBusRegistryError) as exc_info:
             registry.register("test", InvalidEventBus)
 
         assert "missing 'publish_envelope()' or 'publish()' method" in str(
@@ -208,14 +317,24 @@ class TestEventBusBindingRegistryValidation:
         assert "InvalidEventBus" in str(exc_info.value)
 
     def test_register_invalid_event_bus_non_callable(self) -> None:
-        """Test that registering event bus with non-callable publish raises error."""
+        """Test that registering event bus with non-callable publish_envelope raises error."""
         registry = EventBusBindingRegistry()
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(EventBusRegistryError) as exc_info:
             registry.register("test", InvalidEventBusNonCallable)
 
         assert "not callable" in str(exc_info.value)
         assert "InvalidEventBusNonCallable" in str(exc_info.value)
+
+    def test_register_invalid_event_bus_publish_non_callable(self) -> None:
+        """Test that registering event bus with non-callable publish raises error."""
+        registry = EventBusBindingRegistry()
+
+        with pytest.raises(EventBusRegistryError) as exc_info:
+            registry.register("test", InvalidEventBusPublishNonCallable)
+
+        assert "not callable" in str(exc_info.value)
+        assert "InvalidEventBusPublishNonCallable" in str(exc_info.value)
 
     def test_register_valid_event_bus_with_publish_envelope(self) -> None:
         """Test that registering valid event bus with publish_envelope succeeds."""

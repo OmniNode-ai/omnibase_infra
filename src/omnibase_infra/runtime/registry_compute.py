@@ -80,10 +80,15 @@ import logging
 import os
 import threading
 import time
+import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from omnibase_infra.errors import ComputeRegistryError, ProtocolConfigurationError
+from omnibase_infra.errors import (
+    ComputeRegistryError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
 from omnibase_infra.runtime.models import ModelComputeRegistration
 from omnibase_infra.runtime.models.model_compute_key import ModelComputeKey
 
@@ -411,6 +416,9 @@ class RegistryCompute:
                         f"deterministic_async=True not specified. "
                         f"Compute plugins must be synchronous by default.",
                         plugin_id=plugin_id,
+                        context=ModelInfraErrorContext.with_correlation(
+                            operation="validate_sync_enforcement",
+                        ),
                         async_method="execute",
                     )
 
@@ -430,6 +438,9 @@ class RegistryCompute:
                         f"deterministic_async=True not specified. "
                         f"Compute plugins must be synchronous by default.",
                         plugin_id=plugin_id,
+                        context=ModelInfraErrorContext.with_correlation(
+                            operation="validate_sync_enforcement",
+                        ),
                         async_method=name,
                     )
 
@@ -450,7 +461,8 @@ class RegistryCompute:
 
         Raises:
             ComputeRegistryError: If plugin has async methods and
-                               deterministic_async=False
+                               deterministic_async=False, or if plugin_class
+                               does not implement ProtocolPluginCompute
             ProtocolConfigurationError: If version format is invalid
 
         Example:
@@ -468,6 +480,32 @@ class RegistryCompute:
         plugin_class = registration.plugin_class
         version = registration.version
         deterministic_async = registration.deterministic_async
+
+        # Runtime type validation: Ensure plugin_class implements ProtocolPluginCompute protocol
+        # Check if execute() method exists and is callable
+        execute_attr = getattr(plugin_class, "execute", None)
+
+        if execute_attr is None:
+            raise ComputeRegistryError(
+                f"Plugin class {plugin_class.__name__!r} does not implement "
+                f"ProtocolPluginCompute protocol: missing 'execute()' method",
+                plugin_id=plugin_id,
+                context=ModelInfraErrorContext.with_correlation(
+                    operation="register",
+                ),
+                plugin_class=plugin_class.__name__,
+            )
+
+        if not callable(execute_attr):
+            raise ComputeRegistryError(
+                f"Plugin class {plugin_class.__name__!r} does not implement "
+                f"ProtocolPluginCompute protocol: 'execute' attribute is not callable",
+                plugin_id=plugin_id,
+                context=ModelInfraErrorContext.with_correlation(
+                    operation="register",
+                ),
+                plugin_class=plugin_class.__name__,
+            )
 
         # Validate sync enforcement
         self._validate_sync_enforcement(plugin_id, plugin_class, deterministic_async)
@@ -596,13 +634,17 @@ class RegistryCompute:
                                     exc_info=True,
                                     extra={"plugin_id": plugin_id},
                                 )
-                        # Defer expensive list computation until actually raising error
-                        registered: list[str] = [k.plugin_id for k in self._registry]
+                        # Get unique, sorted list of registered plugin IDs for error context
+                        # Uses secondary index for O(m) where m=unique plugins vs O(n) scan
+                        registered: list[str] = sorted(self._plugin_id_index.keys())
                         raise ComputeRegistryError(
                             f"No compute plugin registered with id={plugin_id!r}. "
                             f"Registered plugins: {registered}",
                             plugin_id=plugin_id,
                             registered_plugins=registered,
+                            context=ModelInfraErrorContext.with_correlation(
+                                operation="get",
+                            ),
                             version=version,
                         )
 
@@ -634,6 +676,9 @@ class RegistryCompute:
                             f"Compute plugin {plugin_id!r} version {version!r} "
                             f"not found. Available versions: {available_versions}",
                             plugin_id=plugin_id,
+                            context=ModelInfraErrorContext.with_correlation(
+                                operation="get",
+                            ),
                             version=version,
                         )
 
@@ -809,7 +854,11 @@ class RegistryCompute:
         """Clear all plugin registrations.
 
         Removes all registered plugins from the registry.
-        This is useful for testing scenarios.
+
+        Warning:
+            This method is intended for **testing purposes only**.
+            Calling it in production code will emit a warning.
+            It breaks the immutability guarantee after startup.
 
         Example:
             >>> registry = RegistryCompute()
@@ -818,6 +867,12 @@ class RegistryCompute:
             >>> registry.list_keys()
             []
         """
+        warnings.warn(
+            "RegistryCompute.clear() is intended for testing only. "
+            "Do not use in production code.",
+            UserWarning,
+            stacklevel=2,
+        )
         with self._lock:
             self._registry.clear()
             self._plugin_id_index.clear()
@@ -912,6 +967,9 @@ class RegistryCompute:
                 if not version or not version.strip():
                     raise ProtocolConfigurationError(
                         "Invalid semantic version format: empty version string",
+                        context=ModelInfraErrorContext.with_correlation(
+                            operation="parse_semver",
+                        ),
                         version=version,
                     )
 
@@ -926,6 +984,9 @@ class RegistryCompute:
                         raise ProtocolConfigurationError(
                             f"Invalid semantic version format: '{version}'. "
                             f"Prerelease suffix cannot be empty when '-' is specified.",
+                            context=ModelInfraErrorContext.with_correlation(
+                                operation="parse_semver",
+                            ),
                             version=version,
                         )
                 else:
@@ -934,14 +995,15 @@ class RegistryCompute:
                 # Parse major.minor.patch
                 parts = version_part.split(".")
 
-                # Validate version format (must have 1-3 parts, no empty parts)
-                if (
-                    len(parts) < 1
-                    or len(parts) > 3
-                    or any(not p.strip() for p in parts)
-                ):
+                # Validate version format (max 3 parts, no empty parts)
+                # Note: len(parts) >= 1 is guaranteed since split(".") always returns
+                # at least one element, so we only need to check the upper bound
+                if len(parts) > 3 or any(not p.strip() for p in parts):
                     raise ProtocolConfigurationError(
                         f"Invalid semantic version format: '{version}'",
+                        context=ModelInfraErrorContext.with_correlation(
+                            operation="parse_semver",
+                        ),
                         version=version,
                     )
 
@@ -952,6 +1014,9 @@ class RegistryCompute:
                 except (ValueError, IndexError) as e:
                     raise ProtocolConfigurationError(
                         f"Invalid semantic version format: '{version}'",
+                        context=ModelInfraErrorContext.with_correlation(
+                            operation="parse_semver",
+                        ),
                         version=version,
                     ) from e
 
@@ -959,6 +1024,9 @@ class RegistryCompute:
                 if major < 0 or minor < 0 or patch < 0:
                     raise ProtocolConfigurationError(
                         f"Invalid semantic version: negative component in '{version}'",
+                        context=ModelInfraErrorContext.with_correlation(
+                            operation="parse_semver",
+                        ),
                         version=version,
                     )
 
@@ -1068,11 +1136,8 @@ class RegistryCompute:
 # =============================================================================
 
 __all__: list[str] = [
-    # Environment variable constants
-    "ENV_COMPUTE_REGISTRY_CACHE_SIZE",
-    # Re-export models for convenience
-    "ModelComputeKey",
-    "ModelComputeRegistration",
-    # Registry class
-    "RegistryCompute",
+    "ENV_COMPUTE_REGISTRY_CACHE_SIZE",  # Environment variable constant
+    "ModelComputeKey",  # Re-export for convenience
+    "ModelComputeRegistration",  # Re-export for convenience
+    "RegistryCompute",  # Registry class
 ]

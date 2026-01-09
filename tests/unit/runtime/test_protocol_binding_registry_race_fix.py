@@ -55,13 +55,14 @@ class TestProtocolBindingRegistryGetRaceConditionFix:
         registration_time: list[float] = []
         error_time: list[float] = []
         lock = threading.Lock()
+        # Use barrier for synchronization instead of time.sleep()
+        barrier = threading.Barrier(2)
 
-        def getter_thread() -> None:
+        def getter_thread(proto: str, sync_barrier: threading.Barrier) -> None:
             """Thread that tries to get non-existent protocol."""
             try:
-                # Small delay to ensure registration thread is ready
-                time.sleep(0.001)
-                registry.get(protocol_type)
+                sync_barrier.wait()  # Synchronize with register_thread
+                registry.get(proto)
             except RegistryError as e:
                 # Record when the error was raised
                 with lock:
@@ -70,20 +71,21 @@ class TestProtocolBindingRegistryGetRaceConditionFix:
             except Exception as e:
                 errors.append(e)
 
-        def register_thread() -> None:
+        def register_thread(proto: str, sync_barrier: threading.Barrier) -> None:
             """Thread that registers the protocol after getter starts."""
             try:
-                # Wait a tiny bit to let getter start checking
-                time.sleep(0.0015)
-                registry.register(protocol_type, MockHandler)  # type: ignore[arg-type]
+                sync_barrier.wait()  # Synchronize with getter_thread
+                registry.register(proto, MockHandler)  # type: ignore[arg-type]
                 # Record when registration completed
                 with lock:
                     registration_time.append(time.time())
             except Exception as e:
                 errors.append(e)
 
-        getter = threading.Thread(target=getter_thread)
-        registerer = threading.Thread(target=register_thread)
+        getter = threading.Thread(target=getter_thread, args=(protocol_type, barrier))
+        registerer = threading.Thread(
+            target=register_thread, args=(protocol_type, barrier)
+        )
 
         getter.start()
         registerer.start()
@@ -134,15 +136,18 @@ class TestProtocolBindingRegistryGetRaceConditionFix:
             protocol_type = f"protocol-{i}"
             iteration_errors: list[RegistryError] = []
             iteration_success = False
+            # Use barrier for synchronization instead of time.sleep()
+            iteration_barrier = threading.Barrier(2)
 
             def getter_thread(
-                proto: str = protocol_type,
-                errors: list[RegistryError] = iteration_errors,
+                proto: str,
+                errors_list: list[RegistryError],
+                barrier: threading.Barrier,
             ) -> None:
                 """Try to get the protocol."""
                 nonlocal iteration_success
                 try:
-                    time.sleep(0.0001)
+                    barrier.wait()  # Synchronize with register_thread
                     result = registry.get(proto)
                     # If we get here, registration won the race
                     assert result is MockHandler
@@ -151,18 +156,27 @@ class TestProtocolBindingRegistryGetRaceConditionFix:
                 except RegistryError as e:
                     # Getter won the race - record the error
                     with lock:
-                        errors.append(e)
+                        errors_list.append(e)
 
-            def register_thread(proto: str = protocol_type) -> None:
+            def register_thread(
+                proto: str,
+                barrier: threading.Barrier,
+            ) -> None:
                 """Register the protocol."""
                 try:
-                    time.sleep(0.00015)
+                    barrier.wait()  # Synchronize with getter_thread
                     registry.register(proto, MockHandler)  # type: ignore[arg-type]
                 except Exception as e:
                     pytest.fail(f"Registration failed unexpectedly: {e}")
 
-            getter = threading.Thread(target=getter_thread)
-            registerer = threading.Thread(target=register_thread)
+            getter = threading.Thread(
+                target=getter_thread,
+                args=(protocol_type, iteration_errors, iteration_barrier),
+            )
+            registerer = threading.Thread(
+                target=register_thread,
+                args=(protocol_type, iteration_barrier),
+            )
 
             getter.start()
             registerer.start()

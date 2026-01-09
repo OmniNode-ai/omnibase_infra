@@ -31,16 +31,11 @@ Edge Case Behavior:
     - Tuple: Passed through as-is
     - Non-empty Mapping: Converted to tuple of (key, value) pairs
     - Non-string keys/values: Raises ValueError (strict mode)
-
-    Empty Mapping coercion is logged as a warning to help detect cases where
-    endpoints were expected but not populated. If this is intentional, the
-    warning can be safely ignored.
 """
 
 from __future__ import annotations
 
 import logging
-import warnings
 from collections.abc import Mapping
 from types import MappingProxyType
 from uuid import UUID
@@ -155,11 +150,6 @@ class ModelPostgresIntentPayload(BaseModel):
                 any key/value is not a string. This ensures invalid input types
                 are explicitly rejected rather than silently coerced.
 
-        Warns:
-            UserWarning: When an empty Mapping is coerced to empty tuple.
-                This warning helps detect cases where endpoints were expected
-                but not populated. If intentional, the warning can be ignored.
-
         Edge Cases:
             - ``None``: Raises ValueError (explicit rejection)
             - Empty Mapping ``{}``: Logs warning, returns empty tuple
@@ -204,12 +194,10 @@ class ModelPostgresIntentPayload(BaseModel):
                 # Log warning for empty Mapping to help detect potentially missing data.
                 # This is different from the default empty tuple - it's an explicit
                 # empty Mapping input that gets coerced.
-                msg = (
+                logger.warning(
                     "Empty Mapping provided for endpoints, coercing to empty tuple. "
                     "If this is intentional, consider using default=() instead."
                 )
-                warnings.warn(msg, UserWarning, stacklevel=2)
-                logger.warning(msg)
                 return ()
             # Validate and convert to tuple - strict mode requires string keys/values
             result: list[tuple[str, str]] = []

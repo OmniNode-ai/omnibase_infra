@@ -39,6 +39,8 @@ Related:
 
 from __future__ import annotations
 
+import threading
+import warnings
 from collections.abc import Callable
 from typing import ClassVar
 from uuid import UUID
@@ -63,11 +65,15 @@ class RegistryIntent:
         intent = intent_cls.model_validate(data)
 
     Thread Safety:
-        The registry is populated at module import time (class definition).
-        After startup, it is read-only and thread-safe for concurrent access.
+        All registration and mutation operations are protected by a class-level
+        threading.Lock to ensure thread-safe access. Read operations (get_type,
+        get_all_types, is_registered) are atomic dictionary operations and safe
+        for concurrent access. The lock ensures that check-and-set operations
+        in register() are atomic, preventing race conditions.
     """
 
     _types: ClassVar[dict[str, type[ModelRegistryIntent]]] = {}
+    _lock: ClassVar[threading.Lock] = threading.Lock()
 
     @classmethod
     def register(cls, kind: str) -> Callable[[type], type]:
@@ -92,12 +98,14 @@ class RegistryIntent:
         """
 
         def decorator(intent_cls: type) -> type:
-            if kind in cls._types:
-                raise ValueError(
-                    f"Intent kind '{kind}' already registered to {cls._types[kind].__name__}. "
-                    f"Cannot register {intent_cls.__name__}."
-                )
-            cls._types[kind] = intent_cls
+            # Thread-safe registration with atomic check-and-set
+            with cls._lock:
+                if kind in cls._types:
+                    raise ValueError(
+                        f"Intent kind '{kind}' already registered to {cls._types[kind].__name__}. "
+                        f"Cannot register {intent_cls.__name__}."
+                    )
+                cls._types[kind] = intent_cls
             return intent_cls
 
         return decorator
@@ -161,11 +169,22 @@ class RegistryIntent:
         """Clear all registered types.
 
         Warning:
-            This method is intended for testing purposes only.
-            Do not use in production code as it breaks the immutability
-            guarantee after startup.
+            This method is intended for **testing purposes only**.
+            Calling it in production code will emit a warning.
+            It breaks the immutability guarantee after startup.
+
+        Thread Safety:
+            This method is protected by the class-level lock to ensure
+            thread-safe clearing of the registry.
         """
-        cls._types.clear()
+        warnings.warn(
+            "RegistryIntent.clear() is intended for testing only. "
+            "Do not use in production code.",
+            UserWarning,
+            stacklevel=2,
+        )
+        with cls._lock:
+            cls._types.clear()
 
 
 class ModelRegistryIntent(BaseModel):
