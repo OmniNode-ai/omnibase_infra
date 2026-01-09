@@ -398,7 +398,7 @@ class TestHandlerFileSystemWriteFile:
             "payload": {
                 "path": str(test_file),
                 "content": base64_content,  # Base64-encoded string
-                "binary": True,  # Use binary flag (handler decodes base64)
+                "binary": True,  # Binary mode - handler decodes base64
             },
             "correlation_id": str(uuid4()),
         }
@@ -1235,18 +1235,3 @@ class TestHandlerFileSystemOperationValidation:
             await initialized_handler.execute(envelope)
 
         assert "path" in str(exc_info.value).lower()
-
-
-__all__ = [
-    "TestHandlerFileSystemInitialization",
-    "TestHandlerFileSystemReadFile",
-    "TestHandlerFileSystemWriteFile",
-    "TestHandlerFileSystemListDirectory",
-    "TestHandlerFileSystemEnsureDirectory",
-    "TestHandlerFileSystemDeleteFile",
-    "TestHandlerFileSystemDescribe",
-    "TestHandlerFileSystemSecurityValidation",
-    "TestHandlerFileSystemLifecycle",
-    "TestHandlerFileSystemCorrelationId",
-    "TestHandlerFileSystemOperationValidation",
-]

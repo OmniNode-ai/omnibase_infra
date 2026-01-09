@@ -31,6 +31,7 @@ Note:
 from __future__ import annotations
 
 import base64
+import binascii
 import fnmatch
 import logging
 from pathlib import Path
@@ -754,7 +755,7 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             if isinstance(content_raw, str):
                 try:
                     content_bytes = base64.b64decode(content_raw)
-                except Exception as e:
+                except binascii.Error as e:
                     raise ProtocolConfigurationError(
                         f"Invalid base64 content for binary mode: {e}",
                         context=ctx,
@@ -1085,12 +1086,12 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 path.mkdir(parents=True, exist_ok=exist_ok)
                 created = True
             except FileExistsError:
-                if not exist_ok:
-                    raise InfraConnectionError(
-                        f"Directory already exists: {path.name}",
-                        context=ctx,
-                    )
-                already_existed = True
+                # FileExistsError is only raised when exist_ok=False
+                # (when exist_ok=True, mkdir() silently succeeds)
+                raise InfraConnectionError(
+                    f"Directory already exists: {path.name}",
+                    context=ctx,
+                )
             except OSError as e:
                 raise InfraConnectionError(
                     f"Failed to create directory: {e}",
