@@ -143,6 +143,7 @@ class ModelFileSystemRequest(BaseModel):
             return value; normalization is only used for validation logic.
 
         Validations (in order):
+            - No empty or whitespace-only paths
             - No parent directory traversal (..) - prevents sandbox escape
             - No absolute paths (/ or drive letters like C:) - enforces relative paths
             - No null bytes (prevents injection attacks)
@@ -150,6 +151,8 @@ class ModelFileSystemRequest(BaseModel):
             - Max path length 4096 characters
             - Max filename length 255 characters
             - No reserved Windows device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+              Trailing dots and spaces are stripped before checking, matching
+              Windows filesystem behavior (e.g., "CON ", "CON.", "CON. " are all invalid)
 
         Args:
             v: The path string to validate.
@@ -159,6 +162,7 @@ class ModelFileSystemRequest(BaseModel):
 
         Raises:
             ValueError: If any security validation fails, including:
+                - Path cannot be empty or whitespace-only
                 - Path contains parent directory traversal (..)
                 - Absolute paths are not allowed
                 - Path contains null bytes
@@ -167,6 +171,10 @@ class ModelFileSystemRequest(BaseModel):
                 - Filename exceeds maximum length
                 - Path contains reserved Windows device name
         """
+        # Check for empty or whitespace-only paths
+        if not v or not v.strip():
+            raise ValueError("Path cannot be empty or whitespace-only")
+
         # Normalize path separators for security checks (fail fast on traversal)
         normalized = v.replace("\\", "/")
 
@@ -208,7 +216,9 @@ class ModelFileSystemRequest(BaseModel):
 
         # Check for reserved Windows device names
         # Check both filename and filename without extension
-        filename_upper = filename.upper()
+        # Strip trailing dots and spaces before checking reserved names
+        # Windows treats "CON ", "CON.", "CON. " identically to "CON"
+        filename_upper = filename.upper().rstrip(". ")
         filename_base = (
             filename_upper.split(".")[0] if "." in filename_upper else filename_upper
         )
@@ -218,6 +228,41 @@ class ModelFileSystemRequest(BaseModel):
         ):
             raise ValueError(f"Path contains reserved Windows device name: {filename}")
 
+        return v
+
+    @field_validator("content")
+    @classmethod
+    def validate_content_byte_size(cls, v: str | None) -> str | None:
+        """Validate content size in bytes to prevent memory exhaustion attacks.
+
+        Pydantic's max_length validates character count, not byte size.
+        Multi-byte UTF-8 characters (like emoji) can bypass the character limit
+        while exceeding memory constraints. This validator ensures the actual
+        byte size does not exceed 10MB.
+
+        Security Rationale:
+            A string of 10 million emoji characters passes Pydantic's max_length
+            validation (10M chars <= 10M limit) but encodes to approximately
+            40MB in UTF-8 (4 bytes per emoji). This enables memory exhaustion
+            attacks that bypass the intended 10MB security limit.
+
+        Args:
+            v: The content string to validate, or None.
+
+        Returns:
+            The validated content string, or None.
+
+        Raises:
+            ValueError: If content exceeds 10MB in UTF-8 encoding.
+        """
+        if v is None:
+            return v
+        byte_size = len(v.encode("utf-8"))
+        if byte_size > 10485760:
+            raise ValueError(
+                f"Content exceeds 10MB byte limit: {byte_size} bytes "
+                f"(max: 10485760 bytes)"
+            )
         return v
 
     @model_validator(mode="after")
