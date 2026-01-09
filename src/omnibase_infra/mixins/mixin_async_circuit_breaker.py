@@ -124,11 +124,10 @@ class MixinAsyncCircuitBreaker:
         _circuit_breaker_open_until: Timestamp for automatic reset
         _circuit_breaker_lock: asyncio.Lock for coroutine-safe access
 
-    Configuration Variables:
+    Configuration Variables (public attributes set by _init_circuit_breaker):
         circuit_breaker_threshold: Max failures before opening (default: 5)
         circuit_breaker_reset_timeout: Auto-reset timeout in seconds (default: 60.0)
         service_name: Service identifier for error context
-        transport_type: Transport type for error context (default: HTTP)
 
     Concurrency Safety:
         All circuit breaker methods MUST be called while holding

@@ -8,7 +8,7 @@ result, replacing untyped dict[str, object] patterns.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ModelDeleteFileResult(BaseModel):
@@ -55,6 +55,23 @@ class ModelDeleteFileResult(BaseModel):
     was_missing: bool = Field(
         description="True if the file was already missing.",
     )
+
+    @model_validator(mode="after")
+    def _validate_flags(self) -> ModelDeleteFileResult:
+        """Validate that deleted and was_missing cannot both be True.
+
+        A file cannot have been deleted by this operation if it was already
+        missing when the operation was called.
+
+        Returns:
+            Self if validation passes.
+
+        Raises:
+            ValueError: If both deleted and was_missing are True.
+        """
+        if self.deleted and self.was_missing:
+            raise ValueError("deleted and was_missing cannot both be True")
+        return self
 
 
 __all__: list[str] = ["ModelDeleteFileResult"]

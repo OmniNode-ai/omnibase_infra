@@ -701,6 +701,27 @@ class TestHandlerFileSystemEnsureDirectory:
         assert result.result["payload"]["already_existed"] is True
 
     @pytest.mark.asyncio
+    async def test_ensure_directory_with_exist_ok_false_raises_for_existing(
+        self, initialized_handler, temp_dir: Path
+    ) -> None:
+        """Test ensure_directory with exist_ok=False raises for existing directory."""
+        existing_dir = temp_dir / "already_exists"
+        existing_dir.mkdir()
+
+        envelope: dict[str, object] = {
+            "operation": "filesystem.ensure_directory",
+            "payload": {"path": str(existing_dir), "exist_ok": False},
+            "correlation_id": str(uuid4()),
+        }
+
+        # Act - should raise error for existing directory
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await initialized_handler.execute(envelope)
+
+        # Assert
+        assert "exists" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
     async def test_ensure_directory_raises_error_for_path_outside_whitelist(
         self, initialized_handler
     ) -> None:

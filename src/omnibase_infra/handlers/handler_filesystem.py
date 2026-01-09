@@ -596,10 +596,28 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         # Extract options
         binary = payload.get("binary", False)
         if not isinstance(binary, bool):
+            logger.warning(
+                "Invalid binary parameter type ignored, using default",
+                extra={
+                    "provided_value": binary,
+                    "provided_type": type(binary).__name__,
+                    "default_value": False,
+                    "correlation_id": str(correlation_id),
+                },
+            )
             binary = False
 
         encoding = payload.get("encoding", "utf-8")
         if not isinstance(encoding, str):
+            logger.warning(
+                "Invalid encoding parameter type ignored, using default",
+                extra={
+                    "provided_value": encoding,
+                    "provided_type": type(encoding).__name__,
+                    "default_value": "utf-8",
+                    "correlation_id": str(correlation_id),
+                },
+            )
             encoding = "utf-8"
 
         ctx = ModelInfraErrorContext(
@@ -737,6 +755,15 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         # Extract binary flag (consistent with read_file API)
         binary = payload.get("binary", False)
         if not isinstance(binary, bool):
+            logger.warning(
+                "Invalid binary parameter type ignored, using default",
+                extra={
+                    "provided_value": binary,
+                    "provided_type": type(binary).__name__,
+                    "default_value": False,
+                    "correlation_id": str(correlation_id),
+                },
+            )
             binary = False
 
         ctx = ModelInfraErrorContext(
@@ -1076,6 +1103,13 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         if already_existed and not path.is_dir():
             raise InfraConnectionError(
                 f"Path exists but is not a directory: {path.name}",
+                context=ctx,
+            )
+
+        # If directory exists and exist_ok=False, raise error
+        if already_existed and not exist_ok:
+            raise InfraConnectionError(
+                f"Directory already exists: {path.name}",
                 context=ctx,
             )
 
