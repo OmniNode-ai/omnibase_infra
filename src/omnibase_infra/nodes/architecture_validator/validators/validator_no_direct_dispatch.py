@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+from omnibase_infra.nodes.architecture_validator.mixins import MixinFilePathRule
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
 )
@@ -320,7 +321,7 @@ def validate_no_direct_dispatch(file_path: str) -> ModelFileValidationResult:
     )
 
 
-class RuleNoDirectDispatch:
+class RuleNoDirectDispatch(MixinFilePathRule):
     """Protocol-compliant rule: No direct handler dispatch.
 
     This class wraps the file-based validator to implement ProtocolArchitectureRule,
@@ -365,7 +366,7 @@ class RuleNoDirectDispatch:
 
         Args:
             target: Target to validate. If a string, treated as file path.
-                   Other types return passed=True (graceful handling).
+                   Other types return skipped=True with reason.
 
         Returns:
             ModelRuleCheckResult indicating pass/fail with details.
@@ -380,14 +381,14 @@ class RuleNoDirectDispatch:
             ModelRuleCheckResult,
         )
 
-        # Duck typing: attempt to use target as a file path
-        try:
-            file_path = str(target)
-            # Skip object repr strings (e.g., "<object at 0x...>")
-            if not file_path or file_path.startswith("<"):
-                return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
-        except (TypeError, ValueError):
-            return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
+        file_path = self._extract_file_path(target)
+        if file_path is None:
+            return ModelRuleCheckResult(
+                passed=True,
+                rule_id=self.rule_id,
+                skipped=True,
+                reason="Target is not a valid file path",
+            )
 
         # Delegate to existing file-based validator
         result = validate_no_direct_dispatch(file_path)
