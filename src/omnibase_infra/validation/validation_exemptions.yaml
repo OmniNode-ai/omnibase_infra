@@ -1037,15 +1037,6 @@ pattern_exemptions:
       - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-1132
-  - file_pattern: 'handler_plugin_loader\.py'
-    class_pattern: "Class 'HandlerPluginLoader'"
-    violation_pattern: 'has \d+ methods'
-    reason: >
-      HandlerPluginLoader requires multiple methods to implement ProtocolHandlerPluginLoader (load_from_contract, load_from_directory, discover_and_load) plus private helper methods for extraction (_extract_handler_name, _extract_handler_class, _extract_handler_type, _extract_capability_tags), validation (_validate_handler_protocol), import (_import_handler_class), and file discovery (_find_contract_files). This is a cohesive plugin loader pattern where all methods work together for contract-based handler loading.
-
-    documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
-    ticket: OMN-1132
   - file_pattern: 'protocol_handler_plugin_loader\.py'
     class_pattern: "Class name 'ProtocolHandlerPluginLoader'"
     violation_pattern: "contains anti-pattern 'Handler'"
@@ -1063,6 +1054,23 @@ pattern_exemptions:
 
     documentation:
       - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1132
+  - file_pattern: 'model_handler_contract\.py'
+    class_pattern: "Class name 'ModelHandlerContract'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ModelHandlerContract is the Pydantic schema for handler contract YAML files. The "Handler" refers to ONEX handler contracts, consistent with HandlerPluginLoader and ModelLoadedHandler.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1132
+  - file_pattern: 'model_handler_contract\.py'
+    violation_pattern: "Field 'handler_name' might reference an entity"
+    reason: >
+      handler_name is a human-readable identifier from the contract YAML (e.g., "auth-handler"). It's a semantic identifier, not an entity reference. Consistent with ModelLoadedHandler.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers)
     ticket: OMN-1132
   - file_pattern: 'model_loaded_handler\.py'
     violation_pattern: "Field 'handler_name' might reference an entity"

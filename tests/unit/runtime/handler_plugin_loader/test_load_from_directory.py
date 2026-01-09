@@ -155,13 +155,15 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         # Verify the correlation_id was propagated to the error
         assert exc_info.value.model.correlation_id == test_correlation_id
 
-    def test_correlation_id_propagated_to_helper_methods(self, tmp_path: Path) -> None:
-        """Test that correlation_id is propagated to internal helper methods.
+    def test_correlation_id_propagated_to_contract_validation(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that correlation_id is propagated to contract validation errors.
 
-        Verifies correlation_id propagation for:
-        - _extract_handler_name (via missing handler_name)
-        - _extract_handler_class (via missing handler_class)
-        - _extract_handler_type (via missing handler_type)
+        Verifies correlation_id propagation for contract validation errors:
+        - Missing handler_name field
+        - Missing handler_class field
+        - Missing handler_type field
 
         Per ONEX coding guidelines: "Always propagate correlation_id from
         incoming requests; include in all error context."
@@ -182,8 +184,9 @@ class TestHandlerPluginLoaderLoadFromDirectory:
 
         loader = HandlerPluginLoader()
 
-        # Test 1: Verify correlation_id propagated to _extract_handler_name
+        # Test 1: Verify correlation_id propagated for missing handler_name
         # Error triggered by missing handler_name field in contract
+        # Note: Pydantic uses validation_alias "name" in error messages
         handler_dir = tmp_path / "missing_name"
         handler_dir.mkdir()
         contract_path = handler_dir / "handler_contract.yaml"
@@ -193,10 +196,11 @@ class TestHandlerPluginLoaderLoadFromDirectory:
             loader.load_from_contract(contract_path, correlation_id=correlation_id_str)
 
         assert exc_info.value.model.correlation_id == test_correlation_id
-        # Verify error is about missing handler_name (from _extract_handler_name)
-        assert "handler_name" in str(exc_info.value).lower()
+        # Verify error is about missing name field (Pydantic uses alias "name")
+        error_msg = str(exc_info.value).lower()
+        assert "name" in error_msg and "required" in error_msg
 
-        # Test 2: Verify correlation_id propagated to _extract_handler_class
+        # Test 2: Verify correlation_id propagated for missing handler_class
         # Error triggered by missing handler_class field in contract
         handler_dir = tmp_path / "missing_class"
         handler_dir.mkdir()
@@ -207,10 +211,10 @@ class TestHandlerPluginLoaderLoadFromDirectory:
             loader.load_from_contract(contract_path, correlation_id=correlation_id_str)
 
         assert exc_info.value.model.correlation_id == test_correlation_id
-        # Verify error is about missing handler_class (from _extract_handler_class)
+        # Verify error is about missing handler_class
         assert "handler_class" in str(exc_info.value).lower()
 
-        # Test 3: Verify correlation_id propagated to _extract_handler_type
+        # Test 3: Verify correlation_id propagated for missing handler_type
         # Error triggered by missing handler_type field in contract
         handler_dir = tmp_path / "missing_type"
         handler_dir.mkdir()
@@ -226,7 +230,7 @@ class TestHandlerPluginLoaderLoadFromDirectory:
             loader.load_from_contract(contract_path, correlation_id=correlation_id_str)
 
         assert exc_info.value.model.correlation_id == test_correlation_id
-        # Verify error is about missing handler_type (from _extract_handler_type)
+        # Verify error is about missing handler_type
         assert "handler_type" in str(exc_info.value).lower()
 
     def test_correlation_id_propagated_to_import_handler_class(

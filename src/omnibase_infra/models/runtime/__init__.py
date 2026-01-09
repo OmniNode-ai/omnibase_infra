@@ -9,8 +9,10 @@ and related runtime components.
     Created as part of OMN-1132 Handler Plugin Loader implementation.
 """
 
+from omnibase_infra.models.runtime.model_handler_contract import ModelHandlerContract
 from omnibase_infra.models.runtime.model_loaded_handler import ModelLoadedHandler
 
 __all__ = [
+    "ModelHandlerContract",
     "ModelLoadedHandler",
 ]

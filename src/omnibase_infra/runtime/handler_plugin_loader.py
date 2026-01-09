@@ -43,11 +43,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
+from pydantic import ValidationError
 
-from omnibase_infra.enums import EnumHandlerTypeCategory, EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ProtocolConfigurationError
 from omnibase_infra.models.errors import ModelInfraErrorContext
-from omnibase_infra.models.runtime import ModelLoadedHandler
+from omnibase_infra.models.runtime import ModelHandlerContract, ModelLoadedHandler
 from omnibase_infra.runtime.protocol_handler_plugin_loader import (
     ProtocolHandlerPluginLoader,
 )
@@ -63,13 +64,6 @@ CONTRACT_YAML_FILENAME = "contract.yaml"
 
 # Maximum contract file size (10MB) to prevent memory exhaustion
 MAX_CONTRACT_SIZE = 10 * 1024 * 1024
-
-# Handler type category mapping from contract strings to enum
-_HANDLER_TYPE_CATEGORY_MAP: dict[str, EnumHandlerTypeCategory] = {
-    "compute": EnumHandlerTypeCategory.COMPUTE,
-    "effect": EnumHandlerTypeCategory.EFFECT,
-    "nondeterministic_compute": EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE,
-}
 
 
 class HandlerPluginLoader(ProtocolHandlerPluginLoader):
@@ -261,17 +255,35 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 contract_path=str(contract_path),
             )
 
-        # Extract required fields from contract
-        handler_name = self._extract_handler_name(
-            raw_data, contract_path, correlation_id
-        )
-        handler_class_path = self._extract_handler_class(
-            raw_data, contract_path, correlation_id
-        )
-        handler_type = self._extract_handler_type(
-            raw_data, contract_path, correlation_id
-        )
-        capability_tags = self._extract_capability_tags(raw_data)
+        # Validate contract using Pydantic model
+        try:
+            contract = ModelHandlerContract.model_validate(raw_data)
+        except ValidationError as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_from_contract",
+                correlation_id=correlation_id,
+            )
+            # Convert validation errors to readable message
+            error_details = "; ".join(
+                f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}"
+                for err in e.errors()
+            )
+            raise ProtocolConfigurationError(
+                f"Contract validation failed: {error_details}",
+                context=context,
+                loader_error="HANDLER_LOADER_003",
+                contract_path=str(contract_path),
+                validation_errors=[
+                    {"loc": err["loc"], "msg": err["msg"], "type": err["type"]}
+                    for err in e.errors()
+                ],
+            ) from e
+
+        handler_name = contract.handler_name
+        handler_class_path = contract.handler_class
+        handler_type = contract.handler_type
+        capability_tags = contract.capability_tags
 
         # Import and validate handler class
         handler_class = self._import_handler_class(
@@ -705,206 +717,6 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 deduplicated.append(path)
 
         return deduplicated
-
-    def _extract_handler_name(
-        self,
-        raw_data: dict[str, object],
-        contract_path: Path,
-        correlation_id: str | None = None,
-    ) -> str:
-        """Extract handler name from contract data.
-
-        Args:
-            raw_data: Parsed YAML contract data.
-            contract_path: Path to contract file (for error context).
-            correlation_id: Optional correlation ID for error traceability.
-
-        Returns:
-            Handler name string.
-
-        Raises:
-            ProtocolConfigurationError: If handler_name/name is missing or invalid.
-        """
-        # Try handler_name first, then name
-        handler_name = raw_data.get("handler_name") or raw_data.get("name")
-
-        if handler_name is None:
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="extract_handler_name",
-                correlation_id=correlation_id,
-            )
-            raise ProtocolConfigurationError(
-                "Contract missing required field: 'handler_name' or 'name'",
-                context=context,
-                loader_error="HANDLER_LOADER_004",
-                contract_path=str(contract_path),
-            )
-
-        if not isinstance(handler_name, str) or not handler_name.strip():
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="extract_handler_name",
-                correlation_id=correlation_id,
-            )
-            raise ProtocolConfigurationError(
-                "Contract field 'handler_name' must be a non-empty string",
-                context=context,
-                loader_error="HANDLER_LOADER_004",
-                contract_path=str(contract_path),
-            )
-
-        return handler_name.strip()
-
-    def _extract_handler_class(
-        self,
-        raw_data: dict[str, object],
-        contract_path: Path,
-        correlation_id: str | None = None,
-    ) -> str:
-        """Extract handler class path from contract data.
-
-        Args:
-            raw_data: Parsed YAML contract data.
-            contract_path: Path to contract file (for error context).
-            correlation_id: Optional correlation ID for error traceability.
-
-        Returns:
-            Fully qualified handler class path.
-
-        Raises:
-            ProtocolConfigurationError: If handler_class is missing or invalid.
-        """
-        handler_class = raw_data.get("handler_class")
-
-        if handler_class is None:
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="extract_handler_class",
-                correlation_id=correlation_id,
-            )
-            raise ProtocolConfigurationError(
-                "Contract missing required field: 'handler_class'",
-                context=context,
-                loader_error="HANDLER_LOADER_004",
-                contract_path=str(contract_path),
-            )
-
-        if not isinstance(handler_class, str) or not handler_class.strip():
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="extract_handler_class",
-                correlation_id=correlation_id,
-            )
-            raise ProtocolConfigurationError(
-                "Contract field 'handler_class' must be a non-empty string",
-                context=context,
-                loader_error="HANDLER_LOADER_004",
-                contract_path=str(contract_path),
-            )
-
-        return handler_class.strip()
-
-    def _extract_handler_type(
-        self,
-        raw_data: dict[str, object],
-        contract_path: Path,
-        correlation_id: str | None = None,
-    ) -> EnumHandlerTypeCategory:
-        """Extract handler type category from contract data.
-
-        Args:
-            raw_data: Parsed YAML contract data.
-            contract_path: Path to contract file (for error context).
-            correlation_id: Optional correlation ID for error traceability.
-
-        Returns:
-            Handler type category enum value.
-
-        Raises:
-            ProtocolConfigurationError: If handler_type is missing or invalid.
-        """
-        handler_type = raw_data.get("handler_type")
-
-        if handler_type is None:
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="extract_handler_type",
-                correlation_id=correlation_id,
-            )
-            raise ProtocolConfigurationError(
-                "Contract missing required field: 'handler_type'",
-                context=context,
-                loader_error="HANDLER_LOADER_004",
-                contract_path=str(contract_path),
-            )
-
-        if not isinstance(handler_type, str) or not handler_type.strip():
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="extract_handler_type",
-                correlation_id=correlation_id,
-            )
-            raise ProtocolConfigurationError(
-                "Contract field 'handler_type' must be a non-empty string",
-                context=context,
-                loader_error="HANDLER_LOADER_003",
-                contract_path=str(contract_path),
-            )
-
-        handler_type_lower = handler_type.lower().strip()
-
-        if handler_type_lower not in _HANDLER_TYPE_CATEGORY_MAP:
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="extract_handler_type",
-                correlation_id=correlation_id,
-            )
-            valid_types = ", ".join(_HANDLER_TYPE_CATEGORY_MAP.keys())
-            raise ProtocolConfigurationError(
-                f"Invalid handler_type '{handler_type}'. Valid types: {valid_types}",
-                context=context,
-                loader_error="HANDLER_LOADER_003",
-                contract_path=str(contract_path),
-                handler_type=handler_type,
-                valid_types=list(_HANDLER_TYPE_CATEGORY_MAP.keys()),
-            )
-
-        return _HANDLER_TYPE_CATEGORY_MAP[handler_type_lower]
-
-    def _extract_capability_tags(
-        self,
-        raw_data: dict[str, object],
-    ) -> list[str]:
-        """Extract capability tags from contract data.
-
-        Supports both ``capability_tags`` and ``tags`` field names for
-        backwards compatibility. If both are present, ``capability_tags``
-        takes precedence.
-
-        Args:
-            raw_data: Parsed YAML contract data.
-
-        Returns:
-            List of capability tag strings. Empty list if not specified.
-
-        Note:
-            Field naming precedence: ``capability_tags`` > ``tags``
-        """
-        tags = raw_data.get("capability_tags") or raw_data.get("tags")
-
-        if tags is None:
-            return []
-
-        if isinstance(tags, list):
-            # Filter to only string tags, skip invalid types silently
-            return [tag for tag in tags if isinstance(tag, str)]
-
-        # Single tag as string
-        if isinstance(tags, str):
-            return [tags]
-
-        return []
 
 
 __all__ = [

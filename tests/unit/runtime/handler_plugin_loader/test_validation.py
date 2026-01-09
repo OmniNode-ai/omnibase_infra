@@ -185,9 +185,10 @@ handler_type: "   "
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             loader.load_from_contract(contract_file)
 
-        # Verify error message indicates non-empty requirement
+        # Verify error message indicates invalid handler_type
+        # Pydantic validation produces "Invalid handler_type '   '. Valid types: ..."
         error_msg = str(exc_info.value).lower()
-        assert "non-empty" in error_msg
+        assert "invalid" in error_msg and "handler_type" in error_msg
 
     def test_empty_string_handler_type_raises_error(self, tmp_path: Path) -> None:
         """Test that empty string handler_type raises error."""
@@ -208,6 +209,7 @@ handler_type: ""
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             loader.load_from_contract(contract_file)
 
-        # Verify error message indicates non-empty requirement
+        # Verify error message indicates invalid handler_type
+        # Pydantic validation produces "Invalid handler_type ''. Valid types: ..."
         error_msg = str(exc_info.value).lower()
-        assert "non-empty" in error_msg
+        assert "invalid" in error_msg and "handler_type" in error_msg
