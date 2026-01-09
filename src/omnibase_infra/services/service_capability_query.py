@@ -493,7 +493,7 @@ class ServiceCapabilityQuery:
             EnumSelectionStrategy value.
         """
         try:
-            return EnumSelectionStrategy(strategy_str)
+            return EnumSelectionStrategy(strategy_str.lower())
         except ValueError:
             logger.warning(
                 "Unknown selection strategy, defaulting to FIRST",

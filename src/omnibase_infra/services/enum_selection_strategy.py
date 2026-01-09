@@ -15,11 +15,11 @@ Example:
     'round_robin'
 """
 
-from enum import StrEnum, unique
+from enum import Enum, unique
 
 
 @unique
-class EnumSelectionStrategy(StrEnum):
+class EnumSelectionStrategy(str, Enum):
     """Selection strategies for choosing among multiple capability matches.
 
     When capability-based discovery finds multiple nodes that match the
