@@ -7,15 +7,21 @@ use by orchestrators and runtime hosts. Services provide clean interfaces
 for common operations and encapsulate complexity.
 
 Exports:
+    EnumSelectionStrategy: Selection strategies for capability-based discovery
     ModelTimeoutEmissionConfig: Configuration for timeout emitter
     ModelTimeoutEmissionResult: Result model for timeout emission processing
     ModelTimeoutQueryResult: Result model for timeout queries
+    ServiceCapabilityQuery: Query nodes by capability, not by name
+    ServiceNodeSelector: Select nodes from candidates using various strategies
     ServiceTimeoutEmitter: Emitter for timeout events with markers
     ServiceTimeoutScanner: Scanner for querying overdue registration entities
     TimeoutEmitter: Alias for ServiceTimeoutEmitter
     TimeoutScanner: Alias for ServiceTimeoutScanner
 """
 
+from omnibase_infra.services.enum_selection_strategy import EnumSelectionStrategy
+from omnibase_infra.services.service_capability_query import ServiceCapabilityQuery
+from omnibase_infra.services.service_node_selector import ServiceNodeSelector
 from omnibase_infra.services.service_timeout_emitter import (
     ModelTimeoutEmissionConfig,
     ModelTimeoutEmissionResult,
@@ -31,9 +37,12 @@ TimeoutEmitter = ServiceTimeoutEmitter
 TimeoutScanner = ServiceTimeoutScanner
 
 __all__ = [
+    "EnumSelectionStrategy",
     "ModelTimeoutEmissionConfig",
     "ModelTimeoutEmissionResult",
     "ModelTimeoutQueryResult",
+    "ServiceCapabilityQuery",
+    "ServiceNodeSelector",
     "ServiceTimeoutEmitter",
     "ServiceTimeoutScanner",
     "TimeoutEmitter",
