@@ -6,13 +6,14 @@ Provides infrastructure-specific enumerations for transport types,
 protocol identification, policy classification, dispatch status,
 message categories, topic types, topic standards, chain validation,
 registration states, handler types, handler error types, handler source types,
-node archetypes, circuit breaker states, retry error categories,
+node archetypes, contract types, circuit breaker states, retry error categories,
 any type violations, and other infrastructure concerns.
 
 Exports:
     EnumAnyTypeViolation: Any type violation categories for strong typing validation
     EnumChainViolationType: Chain violation types for correlation/causation validation
     EnumCircuitState: Circuit breaker states (CLOSED, OPEN, HALF_OPEN)
+    EnumContractType: Contract types for ONEX nodes (effect, compute, reducer, orchestrator)
     EnumDispatchStatus: Dispatch operation status enumeration
     EnumHandlerErrorType: Handler error types for validation and lifecycle
     EnumHandlerSourceType: Handler validation error source types
@@ -35,6 +36,7 @@ from omnibase_core.enums import EnumTopicType
 from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.enums.enum_circuit_state import EnumCircuitState
+from omnibase_infra.enums.enum_contract_type import EnumContractType
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_handler_error_type import EnumHandlerErrorType
 from omnibase_infra.enums.enum_handler_source_type import EnumHandlerSourceType
@@ -56,6 +58,7 @@ __all__: list[str] = [
     "EnumAnyTypeViolation",
     "EnumChainViolationType",
     "EnumCircuitState",
+    "EnumContractType",
     "EnumDispatchStatus",
     "EnumHandlerErrorType",
     "EnumHandlerSourceType",
