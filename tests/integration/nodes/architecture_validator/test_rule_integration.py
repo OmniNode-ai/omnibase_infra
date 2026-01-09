@@ -375,9 +375,11 @@ class OrchestratorBad:
                     f"{rule.rule_id}: Result #{i} differs from first result"
                 )
                 assert result.rule_id == first_result.rule_id
-                # Message should be consistent (if present)
-                if first_result.message:
-                    assert result.message == first_result.message
+                # Message should be consistent across all runs
+                assert result.message == first_result.message, (
+                    f"{rule.rule_id}: Message inconsistent - "
+                    f"expected {first_result.message!r}, got {result.message!r}"
+                )
 
     def test_interleaved_checks_independent(
         self,
@@ -401,13 +403,13 @@ class Service:
         clean_file = create_temp_file("clean_interleaved.py", clean_code)
         violation_file = create_temp_file("violation_interleaved.py", violation_code)
 
-        rule = all_rules[0]  # RuleNoDirectDispatch
+        rule_no_direct_dispatch = all_rules[0]
 
         # Interleave checks
-        result_violation_1 = rule.check(str(violation_file))
-        result_clean_1 = rule.check(str(clean_file))
-        result_violation_2 = rule.check(str(violation_file))
-        result_clean_2 = rule.check(str(clean_file))
+        result_violation_1 = rule_no_direct_dispatch.check(str(violation_file))
+        result_clean_1 = rule_no_direct_dispatch.check(str(clean_file))
+        result_violation_2 = rule_no_direct_dispatch.check(str(violation_file))
+        result_clean_2 = rule_no_direct_dispatch.check(str(clean_file))
 
         # Results should be consistent
         assert result_violation_1.passed is False
@@ -689,14 +691,13 @@ class Handler{i}:
         result = validator.compute(request)
 
         assert result.valid is False
-        # With fail_fast, should have at least 1 violation and stop
-        # (may have multiple from the same file/validator call)
+        # With fail_fast, should have at least 1 violation
         assert len(result.violations) >= 1
-        # Should NOT have violations from all 5 files
-        # If it processed all files, we'd have at least 5+ violations (one per file)
-        # With fail_fast, we should have fewer than that
+        # Fail-fast limits violation collection, not necessarily file checking.
+        # With 5 files each having violations, non-fail_fast would collect 5+ violations.
+        # Fail-fast may stop early or just collect fewer violations per file.
         assert len(result.violations) < 10, (
-            f"Fail-fast should stop early, got {len(result.violations)} violations"
+            f"Fail-fast should limit violations, got {len(result.violations)}"
         )
 
     def test_non_fail_fast_collects_all(
