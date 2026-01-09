@@ -12,7 +12,7 @@ These models capture the results of handler security validation including:
 
 See Also:
     - ModelSecurityError: Individual validation error model
-    - HandlerSecurityValidator: The validator that produces these results
+    - SecurityMetadataValidator: The validator that produces these results
     - EnumSecurityRuleId: Security validation rule identifiers
 """
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.enums import EnumHandlerTypeCategory
+from omnibase_infra.enums import EnumHandlerTypeCategory, EnumValidationSeverity
 from omnibase_infra.models.security import (
     ModelSecurityError,
     ModelSecurityValidationResult,
@@ -40,7 +40,7 @@ def sample_error() -> ModelSecurityError:
         code="EFFECT_MISSING_SECURITY",
         field="security_policy",
         message="EFFECT handler must declare security metadata",
-        severity="error",
+        severity=EnumValidationSeverity.ERROR,
     )
 
 
@@ -69,23 +69,23 @@ class TestModelSecurityError:
             code="TEST_ERROR",
             field="test_field",
             message="Test error message",
-            severity="error",
+            severity=EnumValidationSeverity.ERROR,
         )
 
         assert error.code == "TEST_ERROR"
         assert error.field == "test_field"
         assert error.message == "Test error message"
-        assert error.severity == "error"
+        assert error.severity == EnumValidationSeverity.ERROR
 
     def test_error_default_severity(self) -> None:
-        """Security error defaults to 'error' severity."""
+        """Security error defaults to ERROR severity."""
         error = ModelSecurityError(
             code="TEST_ERROR",
             field="test_field",
             message="Test error message",
         )
 
-        assert error.severity == "error"
+        assert error.severity == EnumValidationSeverity.ERROR
 
     def test_error_is_frozen(self, sample_error: ModelSecurityError) -> None:
         """Security error should be immutable (frozen)."""
@@ -143,7 +143,7 @@ class TestModelSecurityValidationResult:
         """Valid result should have empty errors list."""
         result = ModelSecurityValidationResult(
             valid=True,
-            handler_name="test-handler",
+            subject="test-handler",
             handler_type=EnumHandlerTypeCategory.EFFECT,
             errors=(),
             warnings=(),
@@ -161,7 +161,7 @@ class TestModelSecurityValidationResult:
         """has_errors should return True when errors exist."""
         result = ModelSecurityValidationResult(
             valid=False,
-            handler_name="test-handler",
+            subject="test-handler",
             handler_type=EnumHandlerTypeCategory.EFFECT,
             errors=(sample_error,),
             warnings=(),
@@ -179,7 +179,7 @@ class TestModelSecurityValidationResult:
         """Result should track warnings separately from errors."""
         result = ModelSecurityValidationResult(
             valid=True,
-            handler_name="test-handler",
+            subject="test-handler",
             handler_type=EnumHandlerTypeCategory.EFFECT,
             errors=(),
             warnings=(sample_warning,),
@@ -196,7 +196,7 @@ class TestModelSecurityValidationResult:
         """error_count should return the number of errors."""
         result = ModelSecurityValidationResult(
             valid=False,
-            handler_name="test-handler",
+            subject="test-handler",
             handler_type=EnumHandlerTypeCategory.EFFECT,
             errors=(sample_error, sample_error),
             warnings=(),
@@ -211,7 +211,7 @@ class TestModelSecurityValidationResult:
         """warning_count should return the number of warnings."""
         result = ModelSecurityValidationResult(
             valid=True,
-            handler_name="test-handler",
+            subject="test-handler",
             handler_type=EnumHandlerTypeCategory.COMPUTE,
             errors=(),
             warnings=(sample_warning, sample_warning, sample_warning),
@@ -223,7 +223,7 @@ class TestModelSecurityValidationResult:
         """__bool__ should return the valid state."""
         valid_result = ModelSecurityValidationResult(
             valid=True,
-            handler_name="test",
+            subject="test",
             handler_type=EnumHandlerTypeCategory.COMPUTE,
             errors=(),
             warnings=(),
@@ -233,14 +233,14 @@ class TestModelSecurityValidationResult:
 
         invalid_result = ModelSecurityValidationResult(
             valid=False,
-            handler_name="test",
+            subject="test",
             handler_type=EnumHandlerTypeCategory.EFFECT,
             errors=(
                 ModelSecurityError(
                     code="TEST",
                     field="test",
                     message="test",
-                    severity="error",
+                    severity=EnumValidationSeverity.ERROR,
                 ),
             ),
             warnings=(),
@@ -256,13 +256,13 @@ class TestModelSecurityValidationResultFactoryMethods:
     def test_success_factory_method(self) -> None:
         """success() factory should create valid result."""
         result = ModelSecurityValidationResult.success(
-            handler_name="my_handler",
+            subject="my_handler",
             handler_type=EnumHandlerTypeCategory.COMPUTE,
         )
 
         assert result.valid
         assert not result.has_errors
-        assert result.handler_name == "my_handler"
+        assert result.subject == "my_handler"
         assert result.handler_type == EnumHandlerTypeCategory.COMPUTE
         assert len(result.errors) == 0
         assert len(result.warnings) == 0
@@ -273,7 +273,7 @@ class TestModelSecurityValidationResultFactoryMethods:
     ) -> None:
         """success() factory can include warnings."""
         result = ModelSecurityValidationResult.success(
-            handler_name="my_handler",
+            subject="my_handler",
             handler_type=EnumHandlerTypeCategory.EFFECT,
             warnings=(sample_warning,),
         )
@@ -289,14 +289,14 @@ class TestModelSecurityValidationResultFactoryMethods:
     ) -> None:
         """failure() factory should create invalid result."""
         result = ModelSecurityValidationResult.failure(
-            handler_name="bad_handler",
+            subject="bad_handler",
             handler_type=EnumHandlerTypeCategory.EFFECT,
             errors=(sample_error,),
         )
 
         assert not result.valid
         assert result.has_errors
-        assert result.handler_name == "bad_handler"
+        assert result.subject == "bad_handler"
         assert result.handler_type == EnumHandlerTypeCategory.EFFECT
         assert len(result.errors) == 1
 
@@ -304,7 +304,7 @@ class TestModelSecurityValidationResultFactoryMethods:
         """failure() factory should raise if errors is empty."""
         with pytest.raises(ValueError, match="errors must be non-empty"):
             ModelSecurityValidationResult.failure(
-                handler_name="bad_handler",
+                subject="bad_handler",
                 handler_type=EnumHandlerTypeCategory.EFFECT,
                 errors=(),
             )
@@ -316,7 +316,7 @@ class TestModelSecurityValidationResultFactoryMethods:
     ) -> None:
         """failure() factory can include warnings."""
         result = ModelSecurityValidationResult.failure(
-            handler_name="bad_handler",
+            subject="bad_handler",
             handler_type=EnumHandlerTypeCategory.EFFECT,
             errors=(sample_error,),
             warnings=(sample_warning,),
@@ -337,7 +337,7 @@ class TestModelSecurityValidationResultImmutability:
         """SecurityValidationResult should be immutable (frozen)."""
         result = ModelSecurityValidationResult(
             valid=True,
-            handler_name="test-handler",
+            subject="test-handler",
             handler_type=EnumHandlerTypeCategory.EFFECT,
             errors=(),
             warnings=(),
@@ -353,7 +353,7 @@ class TestModelSecurityValidationResultImmutability:
         """errors tuple should not be modifiable."""
         result = ModelSecurityValidationResult(
             valid=False,
-            handler_name="test-handler",
+            subject="test-handler",
             handler_type=EnumHandlerTypeCategory.EFFECT,
             errors=(sample_error,),
             warnings=(),
@@ -373,9 +373,9 @@ class TestModelSecurityValidationResultIntegration:
         from omnibase_core.enums import EnumDataClassification
 
         from omnibase_infra.models.security import ModelHandlerSecurityPolicy
-        from omnibase_infra.runtime import HandlerSecurityValidator
+        from omnibase_infra.runtime import SecurityMetadataValidator
 
-        validator = HandlerSecurityValidator()
+        validator = SecurityMetadataValidator()
         policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset({"database/readonly"}),
             allowed_domains=("api.example.com",),
@@ -394,7 +394,7 @@ class TestModelSecurityValidationResultIntegration:
         assert isinstance(result, ModelSecurityValidationResult)
         assert result.valid
         assert not result.has_errors
-        assert result.handler_name == "effect-handler"
+        assert result.subject == "effect-handler"
         assert result.handler_type == EnumHandlerTypeCategory.EFFECT
 
     def test_failed_result_from_validator(self) -> None:
@@ -402,9 +402,9 @@ class TestModelSecurityValidationResultIntegration:
         from omnibase_core.enums import EnumDataClassification
 
         from omnibase_infra.models.security import ModelHandlerSecurityPolicy
-        from omnibase_infra.runtime import HandlerSecurityValidator
+        from omnibase_infra.runtime import SecurityMetadataValidator
 
-        validator = HandlerSecurityValidator()
+        validator = SecurityMetadataValidator()
         # Empty policy for EFFECT handler should fail
         policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for HandlerSecurityValidator.
+"""Unit tests for SecurityMetadataValidator.
 
-Tests for HandlerSecurityValidator (OMN-1137).
+Tests for SecurityMetadataValidator (OMN-1137).
 This validator enforces security metadata requirements based on handler type:
 
 - EFFECT handlers: MUST have security metadata (they perform I/O)
@@ -12,6 +12,8 @@ This validator enforces security metadata requirements based on handler type:
 Security Metadata Validation:
     - Valid secret scopes (format, permissions)
     - Valid domain patterns (format, allowlist)
+    - Valid port ranges (1-65535)
+    - Valid DNS label lengths (max 63 characters)
     - Data classification levels
 
 See Also:
@@ -27,7 +29,7 @@ from omnibase_core.enums import EnumDataClassification
 
 from omnibase_infra.enums import EnumHandlerTypeCategory, EnumSecurityRuleId
 from omnibase_infra.models.security import ModelHandlerSecurityPolicy
-from omnibase_infra.runtime import HandlerSecurityValidator
+from omnibase_infra.runtime import SecurityMetadataValidator
 
 # =============================================================================
 # Test Fixtures
@@ -35,9 +37,9 @@ from omnibase_infra.runtime import HandlerSecurityValidator
 
 
 @pytest.fixture
-def validator() -> HandlerSecurityValidator:
-    """Create a HandlerSecurityValidator instance."""
-    return HandlerSecurityValidator()
+def validator() -> SecurityMetadataValidator:
+    """Create a SecurityMetadataValidator instance."""
+    return SecurityMetadataValidator()
 
 
 @pytest.fixture
@@ -89,13 +91,13 @@ def nondeterministic_compute_security_policy() -> ModelHandlerSecurityPolicy:
 
 
 # =============================================================================
-# Test Classes - HandlerSecurityValidator
+# Test Classes - SecurityMetadataValidator
 # =============================================================================
 
 
 @pytest.mark.unit
-class TestHandlerSecurityValidator:
-    """Unit tests for HandlerSecurityValidator.
+class TestSecurityMetadataValidator:
+    """Unit tests for SecurityMetadataValidator.
 
     Tests security validation rules based on handler type category.
 
@@ -107,7 +109,7 @@ class TestHandlerSecurityValidator:
 
     def test_effect_handler_without_security_returns_error(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
         empty_security_policy: ModelHandlerSecurityPolicy,
     ) -> None:
         """EFFECT handler without security metadata should fail.
@@ -136,7 +138,7 @@ class TestHandlerSecurityValidator:
 
     def test_compute_handler_with_security_returns_error(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
         compute_security_policy_with_secrets: ModelHandlerSecurityPolicy,
     ) -> None:
         """COMPUTE handler with security metadata should fail.
@@ -164,7 +166,7 @@ class TestHandlerSecurityValidator:
 
     def test_valid_effect_security_metadata_passes(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
         valid_effect_security_policy: ModelHandlerSecurityPolicy,
     ) -> None:
         """Valid security metadata should pass validation.
@@ -187,7 +189,7 @@ class TestHandlerSecurityValidator:
 
     def test_invalid_secret_scopes_returns_error(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
     ) -> None:
         """Invalid secret scopes should fail.
 
@@ -220,7 +222,7 @@ class TestHandlerSecurityValidator:
 
     def test_invalid_domains_returns_error(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
     ) -> None:
         """Invalid domain patterns should fail.
 
@@ -257,7 +259,7 @@ class TestHandlerSecurityValidator:
 
     def test_nondeterministic_compute_requires_security(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
         empty_security_policy: ModelHandlerSecurityPolicy,
     ) -> None:
         """NONDETERMINISTIC_COMPUTE without security should fail.
@@ -283,7 +285,7 @@ class TestHandlerSecurityValidator:
 
     def test_nondeterministic_compute_with_valid_security_passes(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
         nondeterministic_compute_security_policy: ModelHandlerSecurityPolicy,
     ) -> None:
         """NONDETERMINISTIC_COMPUTE with valid security metadata should pass."""
@@ -300,12 +302,12 @@ class TestHandlerSecurityValidator:
 
 
 @pytest.mark.unit
-class TestHandlerSecurityValidatorEdgeCases:
-    """Edge case tests for HandlerSecurityValidator."""
+class TestSecurityMetadataValidatorEdgeCases:
+    """Edge case tests for SecurityMetadataValidator."""
 
     def test_compute_handler_with_only_data_classification_passes(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
     ) -> None:
         """COMPUTE handler with only data classification should pass.
 
@@ -335,7 +337,7 @@ class TestHandlerSecurityValidatorEdgeCases:
 
     def test_wildcard_domain_validation(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
     ) -> None:
         """Wildcard domain '*' should be validated correctly.
 
@@ -363,7 +365,7 @@ class TestHandlerSecurityValidatorEdgeCases:
 
     def test_multiple_validation_errors_aggregated(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
     ) -> None:
         """Multiple validation errors should all be collected and returned.
 
@@ -393,7 +395,7 @@ class TestHandlerSecurityValidatorEdgeCases:
 
     def test_validate_secret_scopes_standalone(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
     ) -> None:
         """validate_secret_scopes can be used standalone."""
         # Act
@@ -409,7 +411,7 @@ class TestHandlerSecurityValidatorEdgeCases:
 
     def test_validate_domains_standalone(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
     ) -> None:
         """validate_domains can be used standalone."""
         # Act
@@ -425,7 +427,7 @@ class TestHandlerSecurityValidatorEdgeCases:
 
     def test_valid_domain_patterns(
         self,
-        validator: HandlerSecurityValidator,
+        validator: SecurityMetadataValidator,
     ) -> None:
         """Valid domain patterns should not produce errors."""
         # Arrange - All valid patterns
@@ -443,6 +445,236 @@ class TestHandlerSecurityValidatorEdgeCases:
 
         # Assert - No errors
         assert len(errors) == 0
+
+
+@pytest.mark.unit
+class TestSecurityMetadataValidatorPortValidation:
+    """Tests for port range validation in SecurityMetadataValidator."""
+
+    def test_valid_port_range_passes(
+        self,
+        validator: SecurityMetadataValidator,
+    ) -> None:
+        """Valid port numbers (1-65535) should pass validation."""
+        valid_domains_with_ports = [
+            "localhost:1",  # Minimum valid port
+            "localhost:80",
+            "localhost:443",
+            "localhost:3000",
+            "localhost:8080",
+            "localhost:65535",  # Maximum valid port
+            "api.example.com:8080",
+            "*.example.com:443",
+        ]
+
+        # Act
+        errors = validator.validate_domains(
+            valid_domains_with_ports, handler_name="test"
+        )
+
+        # Assert - No errors
+        assert len(errors) == 0
+
+    def test_port_below_minimum_fails(
+        self,
+        validator: SecurityMetadataValidator,
+    ) -> None:
+        """Port 0 should fail validation (must be 1-65535)."""
+        # Arrange
+        invalid_domains = ["localhost:0"]
+
+        # Act
+        errors = validator.validate_domains(invalid_domains, handler_name="test")
+
+        # Assert
+        assert len(errors) == 1
+        assert errors[0].code == EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value
+        assert "port 0" in errors[0].message.lower()
+        assert "out of valid range" in errors[0].message.lower()
+
+    def test_port_above_maximum_fails(
+        self,
+        validator: SecurityMetadataValidator,
+    ) -> None:
+        """Port above 65535 should fail validation."""
+        # Arrange
+        invalid_domains = ["localhost:70000"]
+
+        # Act
+        errors = validator.validate_domains(invalid_domains, handler_name="test")
+
+        # Assert
+        assert len(errors) == 1
+        assert errors[0].code == EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value
+        assert "70000" in errors[0].message
+        assert "out of valid range" in errors[0].message.lower()
+
+    def test_port_65536_fails(
+        self,
+        validator: SecurityMetadataValidator,
+    ) -> None:
+        """Port 65536 (just above max) should fail validation."""
+        # Arrange
+        invalid_domains = ["localhost:65536"]
+
+        # Act
+        errors = validator.validate_domains(invalid_domains, handler_name="test")
+
+        # Assert
+        assert len(errors) == 1
+        assert errors[0].code == EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value
+        assert "65536" in errors[0].message
+        assert "out of valid range" in errors[0].message.lower()
+
+    def test_full_validation_with_invalid_port(
+        self,
+        validator: SecurityMetadataValidator,
+    ) -> None:
+        """Full validation should catch invalid port in EFFECT handler."""
+        # Arrange
+        policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset({"database/readonly"}),
+            allowed_domains=("api.example.com:70000",),  # Invalid port
+            data_classification=EnumDataClassification.INTERNAL,
+            is_adapter=False,
+            handler_type_category=EnumHandlerTypeCategory.EFFECT,
+        )
+
+        # Act
+        result = validator.validate(
+            handler_name="effect-handler",
+            handler_type=EnumHandlerTypeCategory.EFFECT,
+            security_policy=policy,
+        )
+
+        # Assert
+        assert result.has_errors
+        assert len(result.errors) == 1
+        assert result.errors[0].code == EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value
+        assert "70000" in result.errors[0].message
+
+
+@pytest.mark.unit
+class TestSecurityMetadataValidatorDNSLabelValidation:
+    """Tests for DNS label length validation in SecurityMetadataValidator."""
+
+    def test_valid_dns_labels_pass(
+        self,
+        validator: SecurityMetadataValidator,
+    ) -> None:
+        """DNS labels with 63 characters or less should pass validation."""
+        # Arrange - Label with exactly 63 characters
+        label_63_chars = "a" * 63
+        valid_domains = [
+            f"{label_63_chars}.example.com",  # 63 char label
+            "short.example.com",  # Normal length
+            "a.b.c.d.example.com",  # Multiple short labels
+        ]
+
+        # Act
+        errors = validator.validate_domains(valid_domains, handler_name="test")
+
+        # Assert - No errors
+        assert len(errors) == 0
+
+    def test_dns_label_over_63_chars_fails(
+        self,
+        validator: SecurityMetadataValidator,
+    ) -> None:
+        """DNS labels with more than 63 characters should fail validation."""
+        # Arrange - Label with 64 characters (1 over limit)
+        label_64_chars = "a" * 64
+        invalid_domains = [f"{label_64_chars}.example.com"]
+
+        # Act
+        errors = validator.validate_domains(invalid_domains, handler_name="test")
+
+        # Assert
+        assert len(errors) == 1
+        assert errors[0].code == EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value
+        assert "exceeds maximum length" in errors[0].message
+        assert "63 characters" in errors[0].message
+        assert "64 characters" in errors[0].message
+
+    def test_dns_label_100_chars_fails(
+        self,
+        validator: SecurityMetadataValidator,
+    ) -> None:
+        """DNS labels with 100 characters should fail validation."""
+        # Arrange - Very long label
+        label_100_chars = "x" * 100
+        invalid_domains = [f"{label_100_chars}.example.com"]
+
+        # Act
+        errors = validator.validate_domains(invalid_domains, handler_name="test")
+
+        # Assert
+        assert len(errors) == 1
+        assert errors[0].code == EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value
+        assert "exceeds maximum length" in errors[0].message
+        assert "100 characters" in errors[0].message
+
+    def test_second_label_too_long_fails(
+        self,
+        validator: SecurityMetadataValidator,
+    ) -> None:
+        """Second DNS label with more than 63 characters should fail."""
+        # Arrange - Second label is too long
+        label_64_chars = "b" * 64
+        invalid_domains = [f"api.{label_64_chars}.example.com"]
+
+        # Act
+        errors = validator.validate_domains(invalid_domains, handler_name="test")
+
+        # Assert
+        assert len(errors) == 1
+        assert errors[0].code == EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value
+        assert "exceeds maximum length" in errors[0].message
+
+    def test_wildcard_domain_label_validation(
+        self,
+        validator: SecurityMetadataValidator,
+    ) -> None:
+        """DNS label validation should work correctly with wildcard prefix."""
+        # Arrange - Wildcard with long label
+        label_64_chars = "c" * 64
+        invalid_domains = [f"*.{label_64_chars}.example.com"]
+
+        # Act
+        errors = validator.validate_domains(invalid_domains, handler_name="test")
+
+        # Assert
+        assert len(errors) == 1
+        assert errors[0].code == EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value
+        assert "exceeds maximum length" in errors[0].message
+
+    def test_full_validation_with_long_dns_label(
+        self,
+        validator: SecurityMetadataValidator,
+    ) -> None:
+        """Full validation should catch long DNS label in EFFECT handler."""
+        # Arrange
+        label_70_chars = "z" * 70
+        policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset({"database/readonly"}),
+            allowed_domains=(f"{label_70_chars}.example.com",),  # Too long label
+            data_classification=EnumDataClassification.INTERNAL,
+            is_adapter=False,
+            handler_type_category=EnumHandlerTypeCategory.EFFECT,
+        )
+
+        # Act
+        result = validator.validate(
+            handler_name="effect-handler",
+            handler_type=EnumHandlerTypeCategory.EFFECT,
+            security_policy=policy,
+        )
+
+        # Assert
+        assert result.has_errors
+        assert len(result.errors) == 1
+        assert result.errors[0].code == EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value
+        assert "exceeds maximum length" in result.errors[0].message
 
 
 @pytest.mark.unit
@@ -475,7 +707,9 @@ class TestValidateHandlerSecurityFunction:
 
 
 __all__ = [
-    "TestHandlerSecurityValidator",
-    "TestHandlerSecurityValidatorEdgeCases",
+    "TestSecurityMetadataValidator",
+    "TestSecurityMetadataValidatorEdgeCases",
+    "TestSecurityMetadataValidatorPortValidation",
+    "TestSecurityMetadataValidatorDNSLabelValidation",
     "TestValidateHandlerSecurityFunction",
 ]

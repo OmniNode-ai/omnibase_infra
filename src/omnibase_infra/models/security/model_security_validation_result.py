@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Security validation result model for handler security validation.
+"""Security validation result model for security validation.
 
 This module defines the ModelSecurityValidationResult model for capturing
 complete security validation outcomes, including all errors and warnings.
-This model is used by HandlerSecurityValidator (OMN-1137) to return
+This model is used by SecurityMetadataValidator (OMN-1137) to return
 structured validation outcomes.
 
 Example:
@@ -15,7 +15,7 @@ Example:
     ... )
     >>> result = ModelSecurityValidationResult(
     ...     valid=False,
-    ...     handler_name="my_handler",
+    ...     subject="my_component",
     ...     handler_type=EnumHandlerTypeCategory.EFFECT,
     ...     errors=[
     ...         ModelSecurityError(
@@ -50,20 +50,20 @@ from omnibase_infra.models.security.model_security_warning import ModelSecurityW
 
 
 class ModelSecurityValidationResult(BaseModel):
-    """Result of handler security validation.
+    """Result of security validation.
 
-    Captures the complete outcome of validating a handler's security
+    Captures the complete outcome of validating a component's security
     policy, including all errors and warnings encountered. This model
     provides a structured interface for validation consumers.
 
-    The ``valid`` attribute indicates whether the handler passed security
-    validation. A handler is valid only if there are no errors; warnings
+    The ``valid`` attribute indicates whether the target passed security
+    validation. A target is valid only if there are no errors; warnings
     do not affect validity.
 
     Attributes:
-        valid: Whether the handler passed security validation (no errors).
-        handler_name: Name of the validated handler.
-        handler_type: Behavioral classification of the handler.
+        valid: Whether the target passed security validation (no errors).
+        subject: Name of the validated component or target.
+        handler_type: Behavioral classification of the target.
         errors: List of security validation errors.
         warnings: List of security validation warnings.
 
@@ -83,7 +83,7 @@ class ModelSecurityValidationResult(BaseModel):
         >>> from omnibase_infra.enums import EnumHandlerTypeCategory
         >>> result = ModelSecurityValidationResult(
         ...     valid=True,
-        ...     handler_name="safe_handler",
+        ...     subject="safe_component",
         ...     handler_type=EnumHandlerTypeCategory.COMPUTE,
         ...     errors=[],
         ...     warnings=[],
@@ -101,10 +101,10 @@ class ModelSecurityValidationResult(BaseModel):
     )
 
     valid: bool = Field(
-        description="Whether the handler passed security validation",
+        description="Whether the target passed security validation",
     )
-    handler_name: str = Field(
-        description="Name of the validated handler",
+    subject: str = Field(
+        description="Identifier of the validated component (e.g., handler name)",
     )
     handler_type: EnumHandlerTypeCategory = Field(
         description="Behavioral classification of the handler",
@@ -128,7 +128,7 @@ class ModelSecurityValidationResult(BaseModel):
         Example:
             >>> result = ModelSecurityValidationResult(
             ...     valid=False,
-            ...     handler_name="test",
+            ...     subject="test",
             ...     handler_type=EnumHandlerTypeCategory.EFFECT,
             ...     errors=(ModelSecurityError(
             ...         code="TEST", field="test", message="test", severity="error"
@@ -150,7 +150,7 @@ class ModelSecurityValidationResult(BaseModel):
         Example:
             >>> result = ModelSecurityValidationResult(
             ...     valid=True,
-            ...     handler_name="test",
+            ...     subject="test",
             ...     handler_type=EnumHandlerTypeCategory.COMPUTE,
             ...     errors=(),
             ...     warnings=(ModelSecurityWarning(
@@ -172,7 +172,7 @@ class ModelSecurityValidationResult(BaseModel):
         Example:
             >>> result = ModelSecurityValidationResult(
             ...     valid=True,
-            ...     handler_name="test",
+            ...     subject="test",
             ...     handler_type=EnumHandlerTypeCategory.COMPUTE,
             ...     errors=(),
             ...     warnings=(),
@@ -192,7 +192,7 @@ class ModelSecurityValidationResult(BaseModel):
         Example:
             >>> result = ModelSecurityValidationResult(
             ...     valid=True,
-            ...     handler_name="test",
+            ...     subject="test",
             ...     handler_type=EnumHandlerTypeCategory.COMPUTE,
             ...     errors=(),
             ...     warnings=(),
@@ -229,7 +229,7 @@ class ModelSecurityValidationResult(BaseModel):
     @classmethod
     def success(
         cls,
-        handler_name: str,
+        subject: str,
         handler_type: EnumHandlerTypeCategory,
         warnings: tuple[ModelSecurityWarning, ...] = (),
     ) -> ModelSecurityValidationResult:
@@ -239,8 +239,8 @@ class ModelSecurityValidationResult(BaseModel):
         but will have no errors.
 
         Args:
-            handler_name: Name of the validated handler.
-            handler_type: Behavioral classification of the handler.
+            subject: Name of the validated component or target.
+            handler_type: Behavioral classification of the target.
             warnings: Optional warnings to include in the result.
 
         Returns:
@@ -248,7 +248,7 @@ class ModelSecurityValidationResult(BaseModel):
 
         Example:
             >>> result = ModelSecurityValidationResult.success(
-            ...     handler_name="my_handler",
+            ...     subject="my_component",
             ...     handler_type=EnumHandlerTypeCategory.COMPUTE,
             ... )
             >>> result.valid
@@ -258,7 +258,7 @@ class ModelSecurityValidationResult(BaseModel):
         """
         return cls(
             valid=True,
-            handler_name=handler_name,
+            subject=subject,
             handler_type=handler_type,
             errors=(),
             warnings=warnings,
@@ -267,7 +267,7 @@ class ModelSecurityValidationResult(BaseModel):
     @classmethod
     def failure(
         cls,
-        handler_name: str,
+        subject: str,
         handler_type: EnumHandlerTypeCategory,
         errors: tuple[ModelSecurityError, ...],
         warnings: tuple[ModelSecurityWarning, ...] = (),
@@ -277,8 +277,8 @@ class ModelSecurityValidationResult(BaseModel):
         Factory method for creating an invalid result with errors.
 
         Args:
-            handler_name: Name of the validated handler.
-            handler_type: Behavioral classification of the handler.
+            subject: Name of the validated component or target.
+            handler_type: Behavioral classification of the target.
             errors: Validation errors (must be non-empty for failure).
             warnings: Optional warnings to include in the result.
 
@@ -296,7 +296,7 @@ class ModelSecurityValidationResult(BaseModel):
             ...     severity="error",
             ... )
             >>> result = ModelSecurityValidationResult.failure(
-            ...     handler_name="bad_handler",
+            ...     subject="bad_component",
             ...     handler_type=EnumHandlerTypeCategory.EFFECT,
             ...     errors=(error,),
             ... )
@@ -309,7 +309,7 @@ class ModelSecurityValidationResult(BaseModel):
             raise ValueError("errors must be non-empty for failure results")
         return cls(
             valid=False,
-            handler_name=handler_name,
+            subject=subject,
             handler_type=handler_type,
             errors=errors,
             warnings=warnings,

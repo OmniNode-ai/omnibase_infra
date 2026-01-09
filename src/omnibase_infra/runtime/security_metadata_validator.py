@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Handler Security Validator for OMN-1137.
+"""Security Metadata Validator for OMN-1137.
 
-This module provides the HandlerSecurityValidator class that validates
+This module provides the SecurityMetadataValidator class that validates
 handler security metadata before loading. The validator enforces rules
 about which handler types must have or must not have security metadata.
 
@@ -42,7 +42,11 @@ from urllib.parse import urlparse
 
 from omnibase_core.enums import EnumDataClassification
 
-from omnibase_infra.enums import EnumHandlerTypeCategory, EnumSecurityRuleId
+from omnibase_infra.enums import (
+    EnumHandlerTypeCategory,
+    EnumSecurityRuleId,
+    EnumValidationSeverity,
+)
 from omnibase_infra.models.security import (
     ModelHandlerSecurityPolicy,
     ModelSecurityError,
@@ -52,6 +56,13 @@ from omnibase_infra.models.security import (
 
 # Default data classification that doesn't count as "having security metadata"
 _DEFAULT_CLASSIFICATION = EnumDataClassification.INTERNAL
+
+# Maximum length for a DNS label (RFC 1035)
+_MAX_DNS_LABEL_LENGTH = 63
+
+# Valid port range (1-65535)
+_MIN_PORT = 1
+_MAX_PORT = 65535
 
 # Pattern for validating domain patterns
 # Supports: hostname, hostname:port, wildcards like *.example.com
@@ -64,7 +75,7 @@ _DOMAIN_PATTERN = re.compile(
 )
 
 
-class HandlerSecurityValidator:
+class SecurityMetadataValidator:
     """Validates handler security metadata before loading.
 
     This validator ensures that handler security policies are appropriate
@@ -76,12 +87,14 @@ class HandlerSecurityValidator:
     The validator also checks that security metadata values are valid:
     - Secret scopes must be non-empty strings
     - Domain patterns must be valid URL patterns
+    - Port numbers must be in valid range (1-65535)
+    - DNS labels must be max 63 characters each
 
     Example:
         >>> from omnibase_infra.enums import EnumHandlerTypeCategory
         >>> from omnibase_infra.models.security import ModelHandlerSecurityPolicy
         >>>
-        >>> validator = HandlerSecurityValidator()
+        >>> validator = SecurityMetadataValidator()
         >>>
         >>> # Valid COMPUTE handler (no security metadata)
         >>> policy = ModelHandlerSecurityPolicy()
@@ -127,6 +140,8 @@ class HandlerSecurityValidator:
             - NONDETERMINISTIC_COMPUTE treated like EFFECT for security
             - Secret scopes must be valid (non-empty strings)
             - Domain patterns must be valid URL patterns
+            - Port numbers must be in range 1-65535
+            - DNS labels must be max 63 characters each
 
         Args:
             handler_name: Name of the handler being validated.
@@ -137,7 +152,7 @@ class HandlerSecurityValidator:
             ModelSecurityValidationResult with validation outcome.
 
         Example:
-            >>> validator = HandlerSecurityValidator()
+            >>> validator = SecurityMetadataValidator()
             >>> policy = ModelHandlerSecurityPolicy(
             ...     secret_scopes=frozenset({"database/readonly"}),
             ... )
@@ -169,7 +184,7 @@ class HandlerSecurityValidator:
                             "Security metadata found: "
                             f"{self._describe_security_metadata(security_policy)}"
                         ),
-                        severity="error",
+                        severity=EnumValidationSeverity.ERROR,
                     )
                 )
         elif handler_type in (
@@ -188,7 +203,7 @@ class HandlerSecurityValidator:
                             "one of: secret_scopes, allowed_domains, or a non-default "
                             "data_classification."
                         ),
-                        severity="error",
+                        severity=EnumValidationSeverity.ERROR,
                     )
                 )
 
@@ -209,13 +224,13 @@ class HandlerSecurityValidator:
         # Return result
         if errors:
             return ModelSecurityValidationResult.failure(
-                handler_name=handler_name,
+                subject=handler_name,
                 handler_type=handler_type,
                 errors=tuple(errors),
                 warnings=tuple(warnings),
             )
         return ModelSecurityValidationResult.success(
-            handler_name=handler_name,
+            subject=handler_name,
             handler_type=handler_type,
             warnings=tuple(warnings),
         )
@@ -239,7 +254,7 @@ class HandlerSecurityValidator:
             List of validation errors for invalid secret scopes.
 
         Example:
-            >>> validator = HandlerSecurityValidator()
+            >>> validator = SecurityMetadataValidator()
             >>> errors = validator.validate_secret_scopes(["database/readonly"])
             >>> len(errors)
             0
@@ -261,7 +276,7 @@ class HandlerSecurityValidator:
                             "scope must be a non-empty string without "
                             "leading/trailing whitespace."
                         ),
-                        severity="error",
+                        severity=EnumValidationSeverity.ERROR,
                     )
                 )
             elif scope != scope.strip():
@@ -273,7 +288,7 @@ class HandlerSecurityValidator:
                             f"Invalid secret scope at index {i}{context}: "
                             f"scope '{scope}' has leading/trailing whitespace."
                         ),
-                        severity="error",
+                        severity=EnumValidationSeverity.ERROR,
                     )
                 )
 
@@ -301,6 +316,8 @@ class HandlerSecurityValidator:
             - Strings with leading/trailing whitespace
             - Full URLs (use hostname only)
             - Invalid hostname characters
+            - Port numbers outside 1-65535 range
+            - DNS labels longer than 63 characters
 
         Args:
             allowed_domains: List of domain patterns to validate.
@@ -310,7 +327,7 @@ class HandlerSecurityValidator:
             List of validation errors for invalid domain patterns.
 
         Example:
-            >>> validator = HandlerSecurityValidator()
+            >>> validator = SecurityMetadataValidator()
             >>> errors = validator.validate_domains(["api.example.com"])
             >>> len(errors)
             0
@@ -336,7 +353,7 @@ class HandlerSecurityValidator:
                             f"Invalid domain pattern at index {i}{context}: "
                             "domain must be a non-empty string."
                         ),
-                        severity="error",
+                        severity=EnumValidationSeverity.ERROR,
                     )
                 )
                 continue
@@ -351,7 +368,7 @@ class HandlerSecurityValidator:
                             f"Invalid domain pattern at index {i}{context}: "
                             f"domain '{domain}' has leading/trailing whitespace."
                         ),
-                        severity="error",
+                        severity=EnumValidationSeverity.ERROR,
                     )
                 )
                 continue
@@ -367,7 +384,7 @@ class HandlerSecurityValidator:
                             f"'{domain}' appears to be a full URL. "
                             "Use hostname only (e.g., 'api.example.com')."
                         ),
-                        severity="error",
+                        severity=EnumValidationSeverity.ERROR,
                     )
                 )
                 continue
@@ -384,9 +401,65 @@ class HandlerSecurityValidator:
                             "Use format: hostname or hostname:port "
                             "(e.g., 'api.example.com' or '*.example.com:8080')."
                         ),
-                        severity="error",
+                        severity=EnumValidationSeverity.ERROR,
                     )
                 )
+                continue
+
+            # Extract hostname and port for further validation
+            hostname = domain
+            port_str: str | None = None
+            if ":" in domain:
+                # Split on last colon to get port
+                parts = domain.rsplit(":", 1)
+                hostname = parts[0]
+                port_str = parts[1]
+
+            # Validate port range (1-65535)
+            if port_str is not None:
+                try:
+                    port = int(port_str)
+                    if port < _MIN_PORT or port > _MAX_PORT:
+                        errors.append(
+                            ModelSecurityError(
+                                code=EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value,
+                                field=f"allowed_domains[{i}]",
+                                message=(
+                                    f"Invalid domain pattern at index {i}{context}: "
+                                    f"port {port} is out of valid range "
+                                    f"({_MIN_PORT}-{_MAX_PORT})."
+                                ),
+                                severity=EnumValidationSeverity.ERROR,
+                            )
+                        )
+                        continue
+                except ValueError:
+                    # Port is not a valid integer - already caught by regex
+                    pass
+
+            # Validate DNS label lengths (max 63 characters each)
+            # Remove wildcard prefix if present for label validation
+            hostname_for_labels = hostname
+            if hostname_for_labels.startswith("*."):
+                hostname_for_labels = hostname_for_labels[2:]
+
+            labels = hostname_for_labels.split(".")
+            for label in labels:
+                if len(label) > _MAX_DNS_LABEL_LENGTH:
+                    errors.append(
+                        ModelSecurityError(
+                            code=EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value,
+                            field=f"allowed_domains[{i}]",
+                            message=(
+                                f"Invalid domain pattern at index {i}{context}: "
+                                f"DNS label '{label[:20]}...' exceeds maximum length "
+                                f"of {_MAX_DNS_LABEL_LENGTH} characters "
+                                f"(has {len(label)} characters)."
+                            ),
+                            severity=EnumValidationSeverity.ERROR,
+                        )
+                    )
+                    break  # Only report first label error per domain
 
         return errors
 
@@ -485,11 +558,11 @@ def validate_handler_security(
 
     .. versionadded:: 0.6.4
     """
-    validator = HandlerSecurityValidator()
+    validator = SecurityMetadataValidator()
     return validator.validate(handler_name, handler_type, security_policy)
 
 
 __all__ = [
-    "HandlerSecurityValidator",
+    "SecurityMetadataValidator",
     "validate_handler_security",
 ]

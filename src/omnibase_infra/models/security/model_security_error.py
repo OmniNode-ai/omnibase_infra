@@ -7,22 +7,26 @@ validation failures. Errors indicate policy violations that must be addressed
 before handler registration or invocation can proceed.
 
 Example:
+    >>> from omnibase_infra.enums import EnumValidationSeverity
     >>> error = ModelSecurityError(
     ...     code="SECRET_SCOPE_NOT_PERMITTED",
     ...     field="secret_scopes",
     ...     message="Secret scope 'database-admin' not permitted in production",
-    ...     severity="error",
+    ...     severity=EnumValidationSeverity.ERROR,
     ... )
 
 See Also:
     - ModelSecurityWarning: Advisory warnings that don't block validation
     - ModelSecurityValidationResult: Complete validation result container
     - EnumSecurityRuleId: Security validation rule identifiers
+    - EnumValidationSeverity: Validation severity levels
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.enums import EnumValidationSeverity
 
 
 class ModelSecurityError(BaseModel):
@@ -37,16 +41,17 @@ class ModelSecurityError(BaseModel):
             Should be a stable identifier suitable for programmatic handling.
         field: The field or policy attribute that caused the error.
         message: Human-readable error description.
-        severity: Error severity level. Currently accepts string values
-            ("error", "critical") for flexibility. May be migrated to
-            EnumValidationSeverity in future versions.
+        severity: Error severity level using EnumValidationSeverity.
+            Defaults to ERROR. Use CRITICAL for severe security issues
+            and WARNING for advisory issues.
 
     Example:
+        >>> from omnibase_infra.enums import EnumValidationSeverity
         >>> error = ModelSecurityError(
         ...     code="SECRET_SCOPE_NOT_PERMITTED",
         ...     field="secret_scopes",
         ...     message="Secret scope 'database-admin' not permitted in production",
-        ...     severity="error",
+        ...     severity=EnumValidationSeverity.ERROR,
         ... )
     """
 
@@ -65,9 +70,9 @@ class ModelSecurityError(BaseModel):
     message: str = Field(
         description="Human-readable error description",
     )
-    severity: str = Field(
-        default="error",
-        description="Error severity level (e.g., 'error', 'critical')",
+    severity: EnumValidationSeverity = Field(
+        default=EnumValidationSeverity.ERROR,
+        description="Error severity level (ERROR, CRITICAL, or WARNING)",
     )
 
 

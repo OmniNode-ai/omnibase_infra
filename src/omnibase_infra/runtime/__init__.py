@@ -149,9 +149,9 @@ from omnibase_infra.runtime.invocation_security_enforcer import (
     SecurityViolationError,
 )
 
-# Handler security validator (OMN-1137)
-from omnibase_infra.runtime.handler_security_validator import (
-    HandlerSecurityValidator,
+# Security metadata validator (OMN-1137)
+from omnibase_infra.runtime.security_metadata_validator import (
+    SecurityMetadataValidator,
     validate_handler_security,
 )
 
@@ -251,7 +251,7 @@ __all__: list[str] = [
     # Invocation security enforcer (OMN-1098)
     "InvocationSecurityEnforcer",
     "SecurityViolationError",
-    # Handler security validator (OMN-1137)
-    "HandlerSecurityValidator",
+    # Security metadata validator (OMN-1137)
+    "SecurityMetadataValidator",
     "validate_handler_security",
 ]
