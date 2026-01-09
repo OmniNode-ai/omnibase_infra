@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelFileSystemConfig(BaseModel):
@@ -25,9 +25,10 @@ class ModelFileSystemConfig(BaseModel):
     and optional size limits.
 
     Attributes:
-        allowed_paths: List of directory paths that the handler is allowed
-            to access. This is a required security boundary - operations
-            on paths outside these directories will be rejected.
+        allowed_paths: Immutable tuple of directory paths that the handler is
+            allowed to access. This is a required security boundary - operations
+            on paths outside these directories will be rejected. Uses tuple
+            instead of list to prevent runtime mutation of the whitelist.
         max_read_size: Maximum file size in bytes for read operations.
             If None, the default from environment or code will be used.
         max_write_size: Maximum content size in bytes for write operations.
@@ -40,7 +41,8 @@ class ModelFileSystemConfig(BaseModel):
         ...     max_read_size=10 * 1024 * 1024,  # 10 MB
         ... )
         >>> print(config.allowed_paths)
-        ['/tmp/test', '/data/output']
+        ('/tmp/test', '/data/output')
+        >>> # List input is automatically coerced to immutable tuple
     """
 
     model_config = ConfigDict(
@@ -50,11 +52,31 @@ class ModelFileSystemConfig(BaseModel):
         from_attributes=True,
     )
 
-    allowed_paths: list[str] = Field(
+    allowed_paths: tuple[str, ...] = Field(
         min_length=1,
-        description="List of allowed directory paths for filesystem operations. "
-        "Required for security - must not be empty.",
+        description="Immutable tuple of allowed directory paths for filesystem operations. "
+        "Required for security - must not be empty. List inputs are coerced to tuple.",
     )
+
+    @field_validator("allowed_paths", mode="before")
+    @classmethod
+    def coerce_to_tuple(cls, v: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+        """Coerce list inputs to immutable tuple for security.
+
+        This ensures the allowed_paths whitelist cannot be mutated after
+        model construction, even though Python's frozen=True only prevents
+        reassignment of the attribute, not mutation of mutable objects.
+
+        Args:
+            v: Input value, either a list or tuple of strings.
+
+        Returns:
+            Immutable tuple of path strings.
+        """
+        if isinstance(v, list):
+            return tuple(v)
+        return v
+
     max_read_size: int | None = Field(
         default=None,
         gt=0,

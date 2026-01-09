@@ -1091,7 +1091,7 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 raise InfraConnectionError(
                     f"Directory already exists: {path.name}",
                     context=ctx,
-                )
+                ) from None
             except OSError as e:
                 raise InfraConnectionError(
                     f"Failed to create directory: {e}",
