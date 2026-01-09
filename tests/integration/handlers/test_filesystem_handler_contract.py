@@ -77,9 +77,9 @@ EXPECTED_CAPABILITIES = [
 # =============================================================================
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def contract_source() -> HandlerContractSource:
-    """Create HandlerContractSource for contracts directory."""
+    """Create HandlerContractSource for contracts directory (module-scoped)."""
     return HandlerContractSource(contract_paths=[CONTRACTS_DIR])
 
 

@@ -32,4 +32,4 @@ class EnumFileSystemOperation(str, Enum):
     MKDIR = "mkdir"
 
 
-__all__: list[str] = ["EnumFileSystemOperation"]
+__all__ = ["EnumFileSystemOperation"]

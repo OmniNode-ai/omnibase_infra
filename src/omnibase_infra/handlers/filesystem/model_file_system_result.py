@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.handlers.filesystem.enum_file_system_operation import (
     EnumFileSystemOperation,
@@ -114,6 +114,29 @@ class ModelFileSystemResult(BaseModel):
         default=None,
         description="Directory entries (populated for successful LIST operations)",
     )
+
+    @field_validator("entries")
+    @classmethod
+    def validate_entries(cls, v: list[str] | None) -> list[str] | None:
+        """Validate directory entries are non-empty strings.
+
+        Catches handler implementation bugs where empty filenames are returned.
+
+        Args:
+            v: The entries list to validate, or None.
+
+        Returns:
+            The validated entries list, or None.
+
+        Raises:
+            ValueError: If any entry is an empty string.
+        """
+        if v is None:
+            return v
+        if not all(v):  # Check no empty strings
+            raise ValueError("Directory entries cannot be empty strings")
+        return v
+
     error_message: str | None = Field(
         default=None,
         description="Error description (populated on failure)",
