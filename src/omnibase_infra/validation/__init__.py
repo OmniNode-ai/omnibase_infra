@@ -99,9 +99,6 @@ from omnibase_core.validation import (
     validate_patterns,
     validate_union_usage,
 )
-from omnibase_core.validation import (
-    ModelModuleImportResult as ModelImportValidationResult,
-)
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
@@ -222,7 +219,6 @@ __all__: list[str] = [
     "ModelContractViolation",  # Contract violation model
     "ModelDetectedNodeInfo",  # Detected node info
     "ModelExecutionShapeValidationResult",  # Execution shape result
-    "ModelImportValidationResult",  # Import validation result
     # Validators
     "ChainPropagationValidator",  # Chain propagation validator (OMN-951)
     "CircularImportValidator",  # Circular import validator

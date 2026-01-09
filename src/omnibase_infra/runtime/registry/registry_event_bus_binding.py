@@ -91,43 +91,44 @@ class EventBusBindingRegistry:
         implements ProtocolEventBus.
 
         Validation Order:
-            Validations are performed in fail-fast order with cheap checks first:
+            1. Protocol method existence - verifies bus_cls has publish_envelope()
+               or publish() method via hasattr() checks
+            2. Method callability - verifies the publish method is actually callable,
+               not a non-callable attribute
+            3. Duplicate detection - prevents re-registration of existing bus_kind;
+               performed under lock for thread safety
+            4. Thread-safe registration - stores binding under lock
 
-            1. **Protocol method existence** (O(1) hasattr checks):
-               Verifies bus_cls has either ``publish_envelope()`` or ``publish()``
-               method. This is the cheapest check - just attribute lookup.
-
-            2. **Method callability** (O(1) callable checks):
-               If a publish method exists, verifies it is actually callable
-               (not a non-callable attribute). Slightly more expensive than
-               existence check but still O(1).
-
-            3. **Duplicate registration** (O(1) dict lookup, under lock):
-               Checks if bus_kind is already registered. This validation is
-               performed last and under lock because:
-
-               - It requires lock acquisition (more expensive than attribute checks)
-               - We want to validate the class is well-formed before checking
-                 if it can be registered, so error messages are accurate
-               - Duplicate registration errors are more common during development
-                 but protocol errors indicate deeper issues
+        Note:
+            Unlike ProtocolBindingRegistry, this registry prevents overwriting
+            existing registrations. Event buses are infrastructure components
+            that should remain stable for the application lifetime.
 
         Pydantic vs Registry Validation:
             This registry uses **runtime duck typing** for protocol validation,
-            not Pydantic models. The validation checks:
+            not Pydantic models. This approach allows any class implementing the
+            required methods to be registered, regardless of inheritance hierarchy.
 
-            - Method existence via ``hasattr()``
-            - Method callability via ``callable()``
+        Why Signature Validation is Not Used:
+            We intentionally do NOT use ``inspect.signature()`` to validate
+            method signatures. This design decision supports ONEX architecture:
 
-            This approach allows any class implementing the required methods to
-            be registered, regardless of inheritance hierarchy. Pydantic is not
-            involved in the registration validation process.
+            1. **Event bus signature variance is intentional**: Different event bus
+               implementations may accept various envelope types. Enforcing a
+               specific signature would break valid implementations.
 
-        Thread Safety:
-            The duplicate registration check is performed under lock to ensure
-            thread-safe concurrent registration. Protocol validation is performed
-            outside the lock since it only inspects the class (immutable) and
-            does not access shared state.
+            2. **Duck typing is ONEX principle**: Per CLAUDE.md, protocol resolution
+               uses duck typing through protocols, never isinstance. Signature
+               validation would conflict with this design.
+
+            3. **Generic type flexibility**: ``ProtocolEventBusLike`` uses ``object``
+               for generic payloads to allow flexibility across implementations.
+
+            4. **Wrapper compatibility**: Decorated methods, wrappers with
+               ``*args, **kwargs``, and generic signatures would fail signature
+               validation despite being valid implementations.
+
+            Method existence + callability is sufficient for duck typing validation.
 
         Args:
             bus_kind: Unique identifier for the bus type (e.g., "inmemory", "kafka").

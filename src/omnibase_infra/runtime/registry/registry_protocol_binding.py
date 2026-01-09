@@ -177,27 +177,44 @@ class ProtocolBindingRegistry:
         type is already registered, the existing registration is overwritten.
 
         Validation Order:
-            Validations are performed in fail-fast order with cheap checks first:
+            1. Protocol method existence - verifies handler_cls has execute() or
+               handle() method via hasattr() checks
+            2. Method callability - verifies the handler method is actually callable,
+               not a non-callable attribute
+            3. Thread-safe registration - stores binding under lock; overwrites
+               allowed for existing protocol types
 
-            1. **Protocol method existence** (O(1) hasattr checks):
-               Verifies handler_cls has either ``execute()`` or ``handle()``
-               method. This is the cheapest check - just attribute lookup.
-
-            2. **Method callability** (O(1) callable checks):
-               If a handler method exists, verifies it is actually callable
-               (not a non-callable attribute). Slightly more expensive than
-               existence check but still O(1).
+        Note:
+            Unlike EventBusBindingRegistry, this registry allows overwriting
+            existing registrations. This enables hot-reload patterns during
+            development and testing.
 
         Pydantic vs Registry Validation:
             This registry uses **runtime duck typing** for protocol validation,
-            not Pydantic models. The validation checks:
+            not Pydantic models. This approach allows any class implementing the
+            required methods to be registered, regardless of inheritance hierarchy.
 
-            - Method existence via ``hasattr()``
-            - Method callability via ``callable()``
+        Why Signature Validation is Not Used:
+            We intentionally do NOT use ``inspect.signature()`` to validate
+            method signatures. This design decision supports ONEX architecture:
 
-            This approach allows any class implementing the required methods to
-            be registered, regardless of inheritance hierarchy. Pydantic is not
-            involved in the registration validation process.
+            1. **Handler signature variance is intentional**: Different handlers
+               accept different typed envelopes (e.g., ``ModelEventEnvelope[T]``
+               with various payload types). Enforcing a specific signature would
+               break valid implementations.
+
+            2. **Duck typing is ONEX principle**: Per CLAUDE.md, protocol resolution
+               uses duck typing through protocols, never isinstance. Signature
+               validation would conflict with this design.
+
+            3. **Generic type flexibility**: Protocols use ``object`` for generic
+               payloads explicitly to allow flexibility (see ProtocolEventBusLike).
+
+            4. **Wrapper compatibility**: Decorated methods, wrappers with
+               ``*args, **kwargs``, and generic signatures would fail signature
+               validation despite being valid implementations.
+
+            Method existence + callability is sufficient for duck typing validation.
 
         Args:
             protocol_type: Protocol type identifier (e.g., 'http', 'db', 'kafka').

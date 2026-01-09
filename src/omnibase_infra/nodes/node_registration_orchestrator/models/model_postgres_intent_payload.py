@@ -36,6 +36,7 @@ Edge Case Behavior:
 from __future__ import annotations
 
 import logging
+import warnings
 from collections.abc import Mapping
 from types import MappingProxyType
 from uuid import UUID
@@ -194,10 +195,12 @@ class ModelPostgresIntentPayload(BaseModel):
                 # Log warning for empty Mapping to help detect potentially missing data.
                 # This is different from the default empty tuple - it's an explicit
                 # empty Mapping input that gets coerced.
-                logger.warning(
+                warning_msg = (
                     "Empty Mapping provided for endpoints, coercing to empty tuple. "
                     "If this is intentional, consider using default=() instead."
                 )
+                logger.warning(warning_msg)
+                warnings.warn(warning_msg, UserWarning, stacklevel=2)
                 return ()
             # Validate and convert to tuple - strict mode requires string keys/values
             result: list[tuple[str, str]] = []
