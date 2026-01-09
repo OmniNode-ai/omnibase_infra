@@ -143,6 +143,12 @@ from omnibase_infra.runtime.introspection_event_router import (
     IntrospectionEventRouter,
 )
 
+# Invocation security enforcer (OMN-1098)
+from omnibase_infra.runtime.invocation_security_enforcer import (
+    InvocationSecurityEnforcer,
+    SecurityViolationError,
+)
+
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
 from omnibase_infra.runtime.chain_aware_dispatch import (
     ChainAwareDispatcher,
@@ -236,4 +242,7 @@ __all__: list[str] = [
     "DispatcherNodeRegistrationAcked",
     # Introspection event router (PR #101)
     "IntrospectionEventRouter",
+    # Invocation security enforcer (OMN-1098)
+    "InvocationSecurityEnforcer",
+    "SecurityViolationError",
 ]
