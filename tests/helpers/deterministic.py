@@ -7,7 +7,9 @@ enabling reproducible test behavior and eliminating flakiness from random
 UUID generation or time-dependent logic.
 
 Example usage:
-    >>> from tests.helpers.deterministic import DeterministicIdGenerator, DeterministicClock
+    >>> from tests.helpers.deterministic import (
+    ...     DeterministicIdGenerator, DeterministicClock
+    ... )
     >>>
     >>> # Predictable UUID generation
     >>> id_gen = DeterministicIdGenerator(seed=100)
@@ -26,6 +28,11 @@ Example usage:
 
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
+
+__all__ = [
+    "DeterministicClock",
+    "DeterministicIdGenerator",
+]
 
 
 class DeterministicIdGenerator:
@@ -125,12 +132,12 @@ class DeterministicClock:
 
         Args:
             start: The initial time for the clock. If None, defaults to
-                2024-01-01 00:00:00 UTC. The datetime should be timezone-aware
+                2025-01-01 00:00:00 UTC. The datetime should be timezone-aware
                 for consistency; naive datetimes are accepted but may cause
                 comparison issues with timezone-aware datetimes.
         """
         if start is None:
-            start = datetime(2024, 1, 1, tzinfo=UTC)
+            start = datetime(2025, 1, 1, tzinfo=UTC)
         self._now: datetime = start
 
     def now(self) -> datetime:
@@ -140,9 +147,9 @@ class DeterministicClock:
             The current datetime value of the simulated clock.
 
         Example:
-            >>> clock = DeterministicClock(start=datetime(2024, 6, 15, 12, 0, 0))
+            >>> clock = DeterministicClock(start=datetime(2025, 6, 15, 12, 0, 0))
             >>> clock.now()
-            datetime.datetime(2024, 6, 15, 12, 0)
+            datetime.datetime(2025, 6, 15, 12, 0)
         """
         return self._now
 
@@ -198,8 +205,8 @@ class DeterministicClock:
 
         Args:
             start: The time to reset to. If None, resets to the default
-                start time (2024-01-01 00:00:00 UTC).
+                start time (2025-01-01 00:00:00 UTC).
         """
         if start is None:
-            start = datetime(2024, 1, 1, tzinfo=UTC)
+            start = datetime(2025, 1, 1, tzinfo=UTC)
         self._now = start

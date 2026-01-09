@@ -140,6 +140,24 @@ class ModelOptionalCorrelationId(BaseModel):
     def __bool__(self) -> bool:
         """Boolean representation based on value presence.
 
+        Warning:
+            **Non-standard __bool__ behavior**: This model overrides ``__bool__`` to
+            return ``True`` only when a correlation ID is present. This differs from
+            typical Pydantic model behavior where ``bool(model)`` always returns
+            ``True`` for any valid model instance.
+
+            This design enables idiomatic presence checks::
+
+                if corr_id:
+                    # Correlation ID is present - propagate it
+                    context.set_correlation_id(corr_id.value)
+                else:
+                    # No correlation ID - generate new one
+                    corr_id = corr_id.get_or_generate()
+
+            Use ``corr_id.has_value()`` for explicit, self-documenting code.
+            Use ``corr_id is not None`` if you need to check model existence.
+
         Returns:
             True if correlation ID is present, False otherwise.
         """

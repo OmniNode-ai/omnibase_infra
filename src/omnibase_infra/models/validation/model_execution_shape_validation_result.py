@@ -231,6 +231,37 @@ class ModelExecutionShapeValidationResult(BaseModel):
     def __bool__(self) -> bool:
         """Allow using result in boolean context.
 
+        Warning:
+            **Non-standard __bool__ behavior**: This model overrides ``__bool__`` to
+            return ``True`` only when ``passed`` is True (no blocking violations).
+            This differs from typical Pydantic model behavior where ``bool(model)``
+            always returns ``True`` for any valid model instance.
+
+            This design enables idiomatic CI gate checks::
+
+                if result:
+                    # Validation passed - can proceed
+                    deploy()
+                else:
+                    # Has blocking violations - fail CI
+                    for line in result.format_for_ci():
+                        print(line)
+                    sys.exit(1)
+
+            If you need to check model validity instead, use explicit attribute access::
+
+                # Check for pass (uses __bool__)
+                if result:
+                    ...
+
+                # Check model is valid (always True for constructed instance)
+                if result is not None:
+                    ...
+
+                # Explicit pass check (preferred for clarity)
+                if result.passed:
+                    ...
+
         Returns:
             True if validation passed, False otherwise.
 

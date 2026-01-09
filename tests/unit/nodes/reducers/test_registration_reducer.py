@@ -37,8 +37,11 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums import EnumReductionType, EnumStreamingMode
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
+from pydantic import ValidationError
 
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
@@ -46,11 +49,19 @@ from omnibase_infra.models.registration import (
     ModelNodeMetadata,
 )
 from omnibase_infra.nodes.reducers import RegistrationReducer
-from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from omnibase_infra.nodes.reducers.models import (
+    ModelPayloadConsulRegister,
+    ModelPayloadPostgresUpsertRegistration,
+    ModelRegistrationState,
+)
 from omnibase_infra.nodes.reducers.models.model_registration_state import FailureReason
+from tests.helpers import create_introspection_event
 
 if TYPE_CHECKING:
     from typing import Literal
+
+# Fixed test timestamp for deterministic testing (time injection pattern)
+TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
 # -----------------------------------------------------------------------------
@@ -98,12 +109,15 @@ def valid_event() -> ModelNodeIntrospectionEvent:
     """
     return ModelNodeIntrospectionEvent(
         node_id=uuid4(),
-        node_type="effect",
-        node_version="1.0.0",
+        node_type=EnumNodeKind.EFFECT,
+        node_version=ModelSemVer.parse("1.0.0"),
         correlation_id=uuid4(),
         endpoints={"health": "http://localhost:8080/health"},
-        capabilities=ModelNodeCapabilities(postgres=True, read=True, write=True),
+        declared_capabilities=ModelNodeCapabilities(
+            postgres=True, read=True, write=True
+        ),
         metadata=ModelNodeMetadata(environment="test"),
+        timestamp=TEST_TIMESTAMP,
     )
 
 
@@ -116,41 +130,13 @@ def event_without_health_endpoint() -> ModelNodeIntrospectionEvent:
     """
     return ModelNodeIntrospectionEvent(
         node_id=uuid4(),
-        node_type="compute",
-        node_version="2.0.0",
+        node_type=EnumNodeKind.COMPUTE,
+        node_version=ModelSemVer.parse("2.0.0"),
         correlation_id=uuid4(),
         endpoints={},
-        capabilities=ModelNodeCapabilities(),
+        declared_capabilities=ModelNodeCapabilities(),
         metadata=ModelNodeMetadata(),
-    )
-
-
-def create_introspection_event(
-    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
-    node_id: UUID | None = None,
-    correlation_id: UUID | None = None,
-    endpoints: dict[str, str] | None = None,
-) -> ModelNodeIntrospectionEvent:
-    """Helper factory for creating introspection events.
-
-    Args:
-        node_type: Type of node (default: "effect").
-        node_id: Optional node ID (generates if not provided).
-        correlation_id: Optional correlation ID (generates if not provided).
-        endpoints: Optional endpoints dict (default: health endpoint).
-
-    Returns:
-        Configured ModelNodeIntrospectionEvent instance.
-    """
-    return ModelNodeIntrospectionEvent(
-        node_id=node_id or uuid4(),
-        node_type=node_type,
-        node_version="1.0.0",
-        capabilities=ModelNodeCapabilities(postgres=True, read=True),
-        endpoints=endpoints
-        if endpoints is not None
-        else {"health": "http://localhost:8080/health"},
-        correlation_id=correlation_id or uuid4(),
+        timestamp=TEST_TIMESTAMP,
     )
 
 
@@ -213,8 +199,12 @@ class TestBasicReduce:
 
         output = reducer.reduce(initial_state, event)
 
-        for intent in output.intents:
-            assert intent.payload["correlation_id"] == str(correlation_id)
+        # Find the consul intent and verify correlation_id
+        consul_intent = next(
+            i for i in output.intents if i.intent_type == "consul.register"
+        )
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
+        assert consul_intent.payload.correlation_id == correlation_id
 
     def test_reduce_with_all_node_types(
         self,
@@ -263,10 +253,10 @@ class TestValidation:
         # Create a mock event with None node_id
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = None
-        mock_event.node_type = "effect"
-        mock_event.node_version = "1.0.0"
+        mock_event.node_type = EnumNodeKind.EFFECT
+        mock_event.node_version = ModelSemVer.parse("1.0.0")
         mock_event.endpoints = {}
-        mock_event.capabilities = {}
+        mock_event.declared_capabilities = ModelNodeCapabilities()
         mock_event.metadata = {}
         mock_event.correlation_id = uuid4()
 
@@ -285,7 +275,7 @@ class TestValidation:
 
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = None
-        mock_event.node_type = "effect"
+        mock_event.node_type = EnumNodeKind.EFFECT
         mock_event.correlation_id = uuid4()
 
         output = reducer.reduce(initial_state, mock_event)
@@ -302,7 +292,7 @@ class TestValidation:
 
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = None
-        mock_event.node_type = "effect"
+        mock_event.node_type = EnumNodeKind.EFFECT
         mock_event.correlation_id = uuid4()
 
         output = reducer.reduce(initial_state, mock_event)
@@ -994,7 +984,9 @@ class TestConsulIntentBuilding:
     ) -> None:
         """Test that service_id format is correct."""
         node_id = uuid4()
-        event = create_introspection_event(node_id=node_id, node_type="effect")
+        event = create_introspection_event(
+            node_id=node_id, node_type=EnumNodeKind.EFFECT
+        )
 
         output = reducer.reduce(initial_state, event)
 
@@ -1002,9 +994,11 @@ class TestConsulIntentBuilding:
             (i for i in output.intents if i.intent_type == "consul.register"), None
         )
         assert consul_intent is not None
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
 
-        expected_service_id = f"node-effect-{node_id}"
-        assert consul_intent.payload["service_id"] == expected_service_id
+        # Service ID follows ONEX convention: onex-{node_type}-{node_id}
+        expected_service_id = f"onex-effect-{node_id}"
+        assert consul_intent.payload.service_id == expected_service_id
 
     def test_consul_intent_has_correct_tags(
         self,
@@ -1014,10 +1008,11 @@ class TestConsulIntentBuilding:
         """Test that tags include node_type and version."""
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="compute",
-            node_version="2.3.4",
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("2.3.4"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1026,8 +1021,9 @@ class TestConsulIntentBuilding:
             (i for i in output.intents if i.intent_type == "consul.register"), None
         )
         assert consul_intent is not None
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
 
-        tags = consul_intent.payload["tags"]
+        tags = consul_intent.payload.tags
         assert "node_type:compute" in tags
         assert "node_version:2.3.4" in tags
 
@@ -1044,9 +1040,10 @@ class TestConsulIntentBuilding:
             (i for i in output.intents if i.intent_type == "consul.register"), None
         )
         assert consul_intent is not None
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
 
-        assert "health_check" in consul_intent.payload
-        health_check = consul_intent.payload["health_check"]
+        assert consul_intent.payload.health_check is not None
+        health_check = consul_intent.payload.health_check
         assert health_check["HTTP"] == "http://localhost:8080/health"
         assert health_check["Interval"] == "10s"
         assert health_check["Timeout"] == "5s"
@@ -1064,9 +1061,10 @@ class TestConsulIntentBuilding:
             (i for i in output.intents if i.intent_type == "consul.register"), None
         )
         assert consul_intent is not None
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
 
         # health_check should be None when no health endpoint is provided
-        assert consul_intent.payload["health_check"] is None
+        assert consul_intent.payload.health_check is None
 
     def test_consul_intent_has_correct_target(
         self,
@@ -1074,7 +1072,7 @@ class TestConsulIntentBuilding:
         initial_state: ModelRegistrationState,
     ) -> None:
         """Test that Consul intent target is correctly formatted."""
-        event = create_introspection_event(node_type="orchestrator")
+        event = create_introspection_event(node_type=EnumNodeKind.ORCHESTRATOR)
 
         output = reducer.reduce(initial_state, event)
 
@@ -1092,7 +1090,7 @@ class TestConsulIntentBuilding:
         initial_state: ModelRegistrationState,
     ) -> None:
         """Test that service_name follows onex-{node_type} format."""
-        event = create_introspection_event(node_type="reducer")
+        event = create_introspection_event(node_type=EnumNodeKind.REDUCER)
 
         output = reducer.reduce(initial_state, event)
 
@@ -1100,7 +1098,8 @@ class TestConsulIntentBuilding:
             (i for i in output.intents if i.intent_type == "consul.register"), None
         )
         assert consul_intent is not None
-        assert consul_intent.payload["service_name"] == "onex-reducer"
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
+        assert consul_intent.payload.service_name == "onex-reducer"
 
 
 # -----------------------------------------------------------------------------
@@ -1121,7 +1120,7 @@ class TestPostgresIntentBuilding:
         node_id = uuid4()
         event = create_introspection_event(
             node_id=node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             endpoints={
                 "health": "http://localhost:8080/health",
                 "api": "http://localhost:8080/api",
@@ -1139,35 +1138,39 @@ class TestPostgresIntentBuilding:
             None,
         )
         assert postgres_intent is not None
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
 
-        record = postgres_intent.payload["record"]
-        assert record["node_id"] == str(node_id)
-        assert record["node_type"] == "effect"
-        assert record["node_version"] == "1.0.0"
-        assert "health" in record["endpoints"]
-        assert "api" in record["endpoints"]
+        record = postgres_intent.payload.record
+        assert record.node_id == node_id
+        assert record.node_type == "effect"
+        assert str(record.node_version) == "1.0.0"
+        assert "health" in record.endpoints
+        assert "api" in record.endpoints
 
     def test_postgres_intent_has_correlation_id(
         self,
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
     ) -> None:
-        """Test that correlation_id is propagated."""
+        """Test that correlation_id is propagated via consul intent.
+
+        Note: The postgres payload now uses a typed record model without
+        correlation_id. Correlation is tracked in the consul intent.
+        """
         correlation_id = uuid4()
         event = create_introspection_event(correlation_id=correlation_id)
 
         output = reducer.reduce(initial_state, event)
 
-        postgres_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "postgres.upsert_registration"
-            ),
-            None,
+        # Verify correlation_id is in consul intent
+        consul_intent = next(
+            (i for i in output.intents if i.intent_type == "consul.register"), None
         )
-        assert postgres_intent is not None
-        assert postgres_intent.payload["correlation_id"] == str(correlation_id)
+        assert consul_intent is not None
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
+        assert consul_intent.payload.correlation_id == correlation_id
 
     def test_postgres_intent_has_correct_target(
         self,
@@ -1211,10 +1214,13 @@ class TestPostgresIntentBuilding:
             None,
         )
         assert postgres_intent is not None
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
 
-        record = postgres_intent.payload["record"]
-        assert "registered_at" in record
-        assert "updated_at" in record
+        record = postgres_intent.payload.record
+        assert hasattr(record, "registered_at")
+        assert hasattr(record, "updated_at")
 
     def test_postgres_intent_record_has_health_endpoint(
         self,
@@ -1234,9 +1240,12 @@ class TestPostgresIntentBuilding:
             None,
         )
         assert postgres_intent is not None
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
 
-        record = postgres_intent.payload["record"]
-        assert record["health_endpoint"] == "http://localhost:8080/health"
+        record = postgres_intent.payload.record
+        assert record.health_endpoint == "http://localhost:8080/health"
 
     def test_postgres_intent_record_no_health_endpoint_when_missing(
         self,
@@ -1256,23 +1265,29 @@ class TestPostgresIntentBuilding:
             None,
         )
         assert postgres_intent is not None
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
 
-        record = postgres_intent.payload["record"]
-        assert record["health_endpoint"] is None
+        record = postgres_intent.payload.record
+        assert record.health_endpoint is None
 
     def test_postgres_intent_record_capabilities_serialized(
         self,
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
     ) -> None:
-        """Test that capabilities model is serialized to dict."""
+        """Test that capabilities model is preserved in record."""
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
-            capabilities=ModelNodeCapabilities(postgres=True, database=True, read=True),
+            declared_capabilities=ModelNodeCapabilities(
+                postgres=True, database=True, read=True
+            ),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1286,13 +1301,16 @@ class TestPostgresIntentBuilding:
             None,
         )
         assert postgres_intent is not None
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
 
-        record = postgres_intent.payload["record"]
-        capabilities = record["capabilities"]
-        assert isinstance(capabilities, dict)
-        assert capabilities.get("postgres") is True
-        assert capabilities.get("database") is True
-        assert capabilities.get("read") is True
+        record = postgres_intent.payload.record
+        # Capabilities is preserved as the model
+        assert record.capabilities is not None
+        assert record.capabilities.postgres is True
+        assert record.capabilities.database is True
+        assert record.capabilities.read is True
 
 
 # -----------------------------------------------------------------------------
@@ -1336,7 +1354,7 @@ class TestOutputModel:
 
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = None
-        mock_event.node_type = "effect"
+        mock_event.node_type = EnumNodeKind.EFFECT
         mock_event.correlation_id = uuid4()
 
         output = reducer.reduce(initial_state, mock_event)
@@ -1466,10 +1484,11 @@ class TestEdgeCases:
         """Test reduce works with empty endpoints dict."""
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1485,11 +1504,12 @@ class TestEdgeCases:
         """Test reduce works with empty capabilities."""
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1510,17 +1530,16 @@ class TestEdgeCases:
         from unittest.mock import MagicMock
 
         node_id = uuid4()
-        timestamp = datetime.now(UTC)
 
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = node_id
-        mock_event.node_type = "effect"
-        mock_event.node_version = "1.0.0"
+        mock_event.node_type = EnumNodeKind.EFFECT
+        mock_event.node_version = ModelSemVer.parse("1.0.0")
         mock_event.endpoints = {"health": "http://localhost:8080/health"}
-        mock_event.capabilities = ModelNodeCapabilities()
+        mock_event.declared_capabilities = ModelNodeCapabilities()
         mock_event.metadata = ModelNodeMetadata()
         mock_event.correlation_id = None  # Force deterministic derivation
-        mock_event.timestamp = timestamp
+        mock_event.timestamp = TEST_TIMESTAMP
 
         output = reducer.reduce(initial_state, mock_event)
 
@@ -1538,10 +1557,11 @@ class TestEdgeCases:
 
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         output1 = reducer.reduce(state, event)
@@ -1560,9 +1580,9 @@ class TestEdgeCases:
         """Test reduce with all optional fields populated."""
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="orchestrator",
-            node_version="3.2.1",
-            capabilities=ModelNodeCapabilities(
+            node_type=EnumNodeKind.ORCHESTRATOR,
+            node_version=ModelSemVer.parse("3.2.1"),
+            declared_capabilities=ModelNodeCapabilities(
                 postgres=True,
                 database=True,
                 processing=True,
@@ -1584,7 +1604,7 @@ class TestEdgeCases:
             network_id="prod-network",
             deployment_id="deploy-123",
             epoch=42,
-            timestamp=datetime.now(UTC),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1602,11 +1622,14 @@ class TestEdgeCases:
             None,
         )
         assert postgres_intent is not None
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
 
-        record = postgres_intent.payload["record"]
-        assert record["node_type"] == "orchestrator"
-        assert record["node_version"] == "3.2.1"
-        assert len(record["endpoints"]) == 3
+        record = postgres_intent.payload.record
+        assert record.node_type == "orchestrator"
+        assert str(record.node_version) == "3.2.1"
+        assert len(record.endpoints) == 3
 
 
 # -----------------------------------------------------------------------------
@@ -2040,7 +2063,7 @@ class TestCompleteStateTransitions:
         # Create an invalid event (missing node_id)
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = None
-        mock_event.node_type = "effect"
+        mock_event.node_type = EnumNodeKind.EFFECT
         mock_event.correlation_id = uuid4()
 
         output = reducer.reduce(state, mock_event)
@@ -2608,9 +2631,11 @@ class TestCircuitBreakerNonApplicability:
             assert intent.target is not None
             assert intent.payload is not None
 
-            # Verify these are just intent descriptions, not executed operations
-            # (the payload is serialized data, not live connections)
-            assert isinstance(intent.payload, dict)
+            # Verify payloads are typed models (ProtocolIntentPayload implementations)
+            assert isinstance(
+                intent.payload,
+                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
+            )
 
     def test_reducer_is_deterministic(
         self,
@@ -2655,11 +2680,11 @@ except ImportError:
 
     # Provide dummy decorators when hypothesis is not available
     from collections.abc import Callable
-    from typing import Any, TypeVar
+    from typing import TypeVar
 
-    _F = TypeVar("_F", bound=Callable[..., Any])
+    _F = TypeVar("_F", bound=Callable[..., object])
 
-    def given(*args: Any, **kwargs: Any) -> Callable[[_F], _F]:  # type: ignore[no-redef]
+    def given(*args: object, **kwargs: object) -> Callable[[_F], _F]:  # type: ignore[no-redef]
         def decorator(func: _F) -> _F:
             return pytest.mark.skip(  # type: ignore[no-any-return]
                 reason="hypothesis not installed - add to dev dependencies"
@@ -2667,7 +2692,7 @@ except ImportError:
 
         return decorator
 
-    def settings(*args: Any, **kwargs: Any) -> Callable[[_F], _F]:  # type: ignore[no-redef]
+    def settings(*args: object, **kwargs: object) -> Callable[[_F], _F]:  # type: ignore[no-redef]
         def decorator(func: _F) -> _F:
             return func
 
@@ -2677,11 +2702,11 @@ except ImportError:
         """Stub for hypothesis.strategies when Hypothesis is not installed."""
 
         @staticmethod
-        def sampled_from(values: Any) -> Any:
+        def sampled_from(values: object) -> object:
             return values
 
         @staticmethod
-        def text(*_args: Any, **_kwargs: Any) -> None:
+        def text(*_args: object, **_kwargs: object) -> None:
             return None
 
         @staticmethod
@@ -2689,7 +2714,7 @@ except ImportError:
             return None
 
         @staticmethod
-        def integers(*_args: Any, **_kwargs: Any) -> None:
+        def integers(*_args: object, **_kwargs: object) -> None:
             return None
 
         @staticmethod
@@ -2697,7 +2722,7 @@ except ImportError:
             return None
 
         @staticmethod
-        def dictionaries(*_args: Any, **_kwargs: Any) -> None:
+        def dictionaries(*_args: object, **_kwargs: object) -> None:
             return None
 
     st = StrategiesStub  # type: ignore[no-redef, assignment]  # Alias for compatibility
@@ -2719,14 +2744,22 @@ class TestDeterminismProperty:
     """
 
     @given(
-        node_type=st.sampled_from(["effect", "compute", "reducer", "orchestrator"]),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
         major=st.integers(min_value=0, max_value=99),
         minor=st.integers(min_value=0, max_value=99),
         patch=st.integers(min_value=0, max_value=99),
     )
-    @settings(max_examples=50)
+    # Deadline disabled: test exceeds 200ms default under CPU load from parallel tests
+    @settings(max_examples=50, deadline=None)
     def test_reduce_is_deterministic_for_any_valid_input(
-        self, node_type: str, major: int, minor: int, patch: int
+        self, node_type: EnumNodeKind, major: int, minor: int, patch: int
     ) -> None:
         """Property: reduce(state, event) is deterministic for any valid input.
 
@@ -2739,7 +2772,7 @@ class TestDeterminismProperty:
         state = ModelRegistrationState()
         node_id = uuid4()
         correlation_id = uuid4()
-        node_version = f"{major}.{minor}.{patch}"
+        node_version = ModelSemVer(major=major, minor=minor, patch=patch)
 
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
@@ -2747,6 +2780,7 @@ class TestDeterminismProperty:
             node_version=node_version,
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute reduce twice with identical inputs
@@ -2770,8 +2804,8 @@ class TestDeterminismProperty:
 
             # For postgres intents, exclude timestamp fields from comparison
             if intent1.intent_type == "postgres.upsert_registration":
-                payload1 = dict(intent1.payload)
-                payload2 = dict(intent2.payload)
+                payload1 = dict(intent1.payload.model_dump())
+                payload2 = dict(intent2.payload.model_dump())
                 record1 = dict(payload1.get("record", {}))
                 record2 = dict(payload2.get("record", {}))
                 # Remove timestamps before comparison
@@ -2782,7 +2816,7 @@ class TestDeterminismProperty:
                 payload2["record"] = record2
                 assert payload1 == payload2
             else:
-                assert intent1.payload == intent2.payload
+                assert intent1.payload.model_dump() == intent2.payload.model_dump()
 
         # Items processed must match
         assert output1.items_processed == output2.items_processed
@@ -2834,10 +2868,17 @@ class TestDeterminismProperty:
             current_state = replay_output.result
 
     @given(
-        node_type=st.sampled_from(["effect", "compute", "reducer", "orchestrator"]),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
     )
     @settings(max_examples=20)
-    def test_derived_event_id_is_deterministic(self, node_type: str) -> None:
+    def test_derived_event_id_is_deterministic(self, node_type: EnumNodeKind) -> None:
         """Property: Derived event IDs are deterministic.
 
         When an event lacks a correlation_id, the reducer derives an event_id
@@ -2848,18 +2889,17 @@ class TestDeterminismProperty:
 
         reducer = RegistrationReducer()
         node_id = uuid4()
-        fixed_timestamp = datetime.now(UTC)
 
         # Create mock event without correlation_id (forces derivation)
         mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event.node_id = node_id
         mock_event.node_type = node_type
-        mock_event.node_version = "1.0.0"
+        mock_event.node_version = ModelSemVer.parse("1.0.0")
         mock_event.endpoints = {"health": "http://localhost:8080/health"}
-        mock_event.capabilities = ModelNodeCapabilities()
+        mock_event.declared_capabilities = ModelNodeCapabilities()
         mock_event.metadata = ModelNodeMetadata()
         mock_event.correlation_id = None  # Force deterministic derivation
-        mock_event.timestamp = fixed_timestamp
+        mock_event.timestamp = TEST_TIMESTAMP
 
         # Derive event ID multiple times
         derived_id_1 = reducer._derive_deterministic_event_id(mock_event)
@@ -2902,10 +2942,11 @@ class TestDeterminismProperty:
 
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints=endpoints,
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute reduce twice
@@ -2919,8 +2960,8 @@ class TestDeterminismProperty:
 
             # For postgres intents, exclude timestamp fields from comparison
             if intent1.intent_type == "postgres.upsert_registration":
-                payload1 = dict(intent1.payload)
-                payload2 = dict(intent2.payload)
+                payload1 = dict(intent1.payload.model_dump())
+                payload2 = dict(intent2.payload.model_dump())
                 record1 = dict(payload1.get("record", {}))
                 record2 = dict(payload2.get("record", {}))
                 # Remove timestamps before comparison
@@ -2933,7 +2974,7 @@ class TestDeterminismProperty:
                     f"Payload mismatch for intent_type={intent1.intent_type}"
                 )
             else:
-                assert intent1.payload == intent2.payload, (
+                assert intent1.payload.model_dump() == intent2.payload.model_dump(), (
                     f"Payload mismatch for intent_type={intent1.intent_type}"
                 )
 
@@ -2957,10 +2998,11 @@ class TestDeterminismProperty:
 
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type="compute",
-            node_version="2.0.0",
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("2.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute reduce on all reducer instances
@@ -2983,8 +3025,8 @@ class TestDeterminismProperty:
 
                 # For postgres intents, exclude timestamp fields from comparison
                 if intent1.intent_type == "postgres.upsert_registration":
-                    payload1 = dict(intent1.payload)
-                    payload2 = dict(intent2.payload)
+                    payload1 = dict(intent1.payload.model_dump())
+                    payload2 = dict(intent2.payload.model_dump())
                     record1 = dict(payload1.get("record", {}))
                     record2 = dict(payload2.get("record", {}))
                     # Remove timestamps before comparison
@@ -2997,9 +3039,9 @@ class TestDeterminismProperty:
                         f"Intent {j} payload mismatch between reducer 1 and {i}"
                     )
                 else:
-                    assert intent1.payload == intent2.payload, (
-                        f"Intent {j} payload mismatch between reducer 1 and {i}"
-                    )
+                    assert (
+                        intent1.payload.model_dump() == intent2.payload.model_dump()
+                    ), f"Intent {j} payload mismatch between reducer 1 and {i}"
 
     @given(
         reset_attempts=st.integers(min_value=1, max_value=5),
@@ -3045,10 +3087,19 @@ class TestDeterminismProperty:
             current_state = replay_output.result
 
     @given(
-        node_type=st.sampled_from(["effect", "compute", "reducer", "orchestrator"]),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
     )
     @settings(max_examples=20)
-    def test_state_hash_stability_across_reduce_calls(self, node_type: str) -> None:
+    def test_state_hash_stability_across_reduce_calls(
+        self, node_type: EnumNodeKind
+    ) -> None:
         """Property: State model hash is stable across identical reduce calls.
 
         The ModelRegistrationState uses Pydantic's frozen models. The resulting
@@ -3063,9 +3114,10 @@ class TestDeterminismProperty:
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type=node_type,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute reduce twice
@@ -3114,10 +3166,11 @@ class TestEdgeCasesComprehensive:
         """
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3130,7 +3183,8 @@ class TestEdgeCasesComprehensive:
             (i for i in output.intents if i.intent_type == "consul.register"), None
         )
         assert consul_intent is not None
-        assert consul_intent.payload["health_check"] is None
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
+        assert consul_intent.payload.health_check is None
 
         postgres_intent = next(
             (
@@ -3141,7 +3195,10 @@ class TestEdgeCasesComprehensive:
             None,
         )
         assert postgres_intent is not None
-        assert postgres_intent.payload["record"]["health_endpoint"] is None
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
+        assert postgres_intent.payload.record.health_endpoint is None
 
     def test_event_with_many_endpoints(
         self,
@@ -3168,10 +3225,11 @@ class TestEdgeCasesComprehensive:
 
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="orchestrator",
-            node_version="2.5.0",
+            node_type=EnumNodeKind.ORCHESTRATOR,
+            node_version=ModelSemVer.parse("2.5.0"),
             endpoints=many_endpoints,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3189,8 +3247,11 @@ class TestEdgeCasesComprehensive:
             None,
         )
         assert postgres_intent is not None
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
 
-        record_endpoints = postgres_intent.payload["record"]["endpoints"]
+        record_endpoints = postgres_intent.payload.record.endpoints
         assert len(record_endpoints) == 10
         for key in many_endpoints:
             assert key in record_endpoints
@@ -3205,16 +3266,17 @@ class TestEdgeCasesComprehensive:
         Validates that the reducer handles unusually long version strings
         without truncation or error. SemVer with build metadata can be lengthy.
         """
-        long_version = (
+        long_version = ModelSemVer.parse(
             "1.2.3-alpha.4.5.6+build.metadata.with.many.segments.202512211234"
         )
 
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="compute",
+            node_type=EnumNodeKind.COMPUTE,
             node_version=long_version,
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3226,7 +3288,8 @@ class TestEdgeCasesComprehensive:
             (i for i in output.intents if i.intent_type == "consul.register"), None
         )
         assert consul_intent is not None
-        tags = consul_intent.payload["tags"]
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
+        tags = consul_intent.payload.tags
         assert f"node_version:{long_version}" in tags
 
     def test_rapid_state_transitions(
@@ -3304,7 +3367,6 @@ class TestEdgeCasesComprehensive:
         """
         from unittest.mock import MagicMock
 
-        fixed_timestamp = datetime.now(UTC)
         node_id1 = uuid4()
         node_id2 = uuid4()
 
@@ -3312,23 +3374,23 @@ class TestEdgeCasesComprehensive:
         # Use mocks to set correlation_id=None to trigger deterministic ID derivation
         mock_event1 = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event1.node_id = node_id1
-        mock_event1.node_type = "effect"
-        mock_event1.node_version = "1.0.0"
+        mock_event1.node_type = EnumNodeKind.EFFECT
+        mock_event1.node_version = ModelSemVer.parse("1.0.0")
         mock_event1.endpoints = {"health": "http://localhost:8080/health"}
-        mock_event1.capabilities = ModelNodeCapabilities()
+        mock_event1.declared_capabilities = ModelNodeCapabilities()
         mock_event1.metadata = ModelNodeMetadata()
         mock_event1.correlation_id = None
-        mock_event1.timestamp = fixed_timestamp
+        mock_event1.timestamp = TEST_TIMESTAMP
 
         mock_event2 = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event2.node_id = node_id2
-        mock_event2.node_type = "effect"
-        mock_event2.node_version = "1.0.0"
+        mock_event2.node_type = EnumNodeKind.EFFECT
+        mock_event2.node_version = ModelSemVer.parse("1.0.0")
         mock_event2.endpoints = {"health": "http://localhost:8080/health"}
-        mock_event2.capabilities = ModelNodeCapabilities()
+        mock_event2.declared_capabilities = ModelNodeCapabilities()
         mock_event2.metadata = ModelNodeMetadata()
         mock_event2.correlation_id = None
-        mock_event2.timestamp = fixed_timestamp
+        mock_event2.timestamp = TEST_TIMESTAMP
 
         output1 = reducer.reduce(initial_state, mock_event1)
         output2 = reducer.reduce(initial_state, mock_event2)
@@ -3357,10 +3419,11 @@ class TestEdgeCasesComprehensive:
 
         event = ModelNodeIntrospectionEvent(
             node_id=nil_uuid,
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3373,7 +3436,8 @@ class TestEdgeCasesComprehensive:
             (i for i in output.intents if i.intent_type == "consul.register"), None
         )
         assert consul_intent is not None
-        assert str(nil_uuid) in consul_intent.payload["service_id"]
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
+        assert str(nil_uuid) in consul_intent.payload.service_id
 
     def test_unicode_in_endpoint_urls(
         self,
@@ -3387,14 +3451,15 @@ class TestEdgeCasesComprehensive:
         """
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={
                 "health": "http://localhost:8080/health",
                 "api": "http://localhost:8080/api/v1/donnees",
                 "docs": "http://localhost:8080/wendang/index",
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3410,8 +3475,11 @@ class TestEdgeCasesComprehensive:
             None,
         )
         assert postgres_intent is not None
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
 
-        endpoints = postgres_intent.payload["record"]["endpoints"]
+        endpoints = postgres_intent.payload.record.endpoints
         assert endpoints["api"] == "http://localhost:8080/api/v1/donnees"
         assert endpoints["docs"] == "http://localhost:8080/wendang/index"
 
@@ -3892,9 +3960,12 @@ class TestCommandFoldingPrevention:
                 f"found '{intent.target}'"
             )
 
-            # Verify payload is data, not execution results
-            assert isinstance(intent.payload, dict), (
-                f"Intent payload should be a dict of data for Effect layer, "
+            # Verify payload is a typed model (ProtocolIntentPayload implementation)
+            assert isinstance(
+                intent.payload,
+                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
+            ), (
+                f"Intent payload should be a typed payload model, "
                 f"found {type(intent.payload)}"
             )
 
@@ -3907,8 +3978,9 @@ class TestCommandFoldingPrevention:
                 "success",
                 "error",
             ]
-            for key in intent.payload:
-                assert key not in execution_indicators, (
+            payload_fields = set(type(intent.payload).model_fields.keys())
+            for key in execution_indicators:
+                assert key not in payload_fields, (
                     f"Intent payload contains execution indicator '{key}'. "
                     f"Intents should contain input data, not execution results."
                 )
@@ -3944,11 +4016,11 @@ class TestCommandFoldingPrevention:
         mock_command.execute = MagicMock()  # Commands might have execute()
 
         # Set required event fields so validation passes
-        mock_command.node_type = "effect"
-        mock_command.node_version = "1.0.0"
+        mock_command.node_type = EnumNodeKind.EFFECT
+        mock_command.node_version = ModelSemVer.parse("1.0.0")
         mock_command.correlation_id = uuid4()
         mock_command.endpoints = {"health": "http://localhost:8080/health"}
-        mock_command.capabilities = ModelNodeCapabilities()
+        mock_command.declared_capabilities = ModelNodeCapabilities()
         mock_command.metadata = ModelNodeMetadata()
 
         # When passed to reduce(), it processes as data
@@ -4100,22 +4172,28 @@ class TestEventReplayDeterminism:
         """
         # Create a sequence of unique events with different characteristics
         events: list[ModelNodeIntrospectionEvent] = []
-        node_types: list[str] = ["effect", "compute", "reducer", "orchestrator"]
+        node_types = [
+            EnumNodeKind.EFFECT,
+            EnumNodeKind.COMPUTE,
+            EnumNodeKind.REDUCER,
+            EnumNodeKind.ORCHESTRATOR,
+        ]
 
         for i in range(10):
             events.append(
                 ModelNodeIntrospectionEvent(
                     node_id=uuid4(),
                     node_type=node_types[i % len(node_types)],
-                    node_version=f"{i}.0.0",
+                    node_version=ModelSemVer(major=i, minor=0, patch=0),
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
-                    capabilities=ModelNodeCapabilities(
+                    declared_capabilities=ModelNodeCapabilities(
                         postgres=(i % 2 == 0),
                         read=True,
                         write=(i % 3 == 0),
                     ),
                     metadata=ModelNodeMetadata(environment=f"env-{i}"),
+                    timestamp=TEST_TIMESTAMP,
                 )
             )
 
@@ -4181,10 +4259,11 @@ class TestEventReplayDeterminism:
             events.append(
                 ModelNodeIntrospectionEvent(
                     node_id=uuid4(),
-                    node_type="effect",
-                    node_version="1.0.0",
+                    node_type=EnumNodeKind.EFFECT,
+                    node_version=ModelSemVer.parse("1.0.0"),
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
+                    timestamp=TEST_TIMESTAMP,
                 )
             )
 
@@ -4204,7 +4283,7 @@ class TestEventReplayDeterminism:
 
                 # For postgres intents, exclude timestamp fields
                 if intent.intent_type == "postgres.upsert_registration":
-                    payload_copy = dict(intent.payload)
+                    payload_copy = dict(intent.payload.model_dump())
                     if "record" in payload_copy:
                         record_copy = dict(payload_copy["record"])
                         record_copy.pop("registered_at", None)
@@ -4212,7 +4291,7 @@ class TestEventReplayDeterminism:
                         payload_copy["record"] = record_copy
                     fingerprint["payload"] = payload_copy
                 else:
-                    fingerprint["payload"] = dict(intent.payload)
+                    fingerprint["payload"] = dict(intent.payload.model_dump())
 
                 fingerprints.append(fingerprint)
             return fingerprints
@@ -4280,10 +4359,11 @@ class TestEventReplayDeterminism:
             events.append(
                 ModelNodeIntrospectionEvent(
                     node_id=uuid4(),
-                    node_type="effect",
-                    node_version=f"{i}.0.0",
+                    node_type=EnumNodeKind.EFFECT,
+                    node_version=ModelSemVer(major=i, minor=0, patch=0),
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
+                    timestamp=TEST_TIMESTAMP,
                 )
             )
 
@@ -4367,10 +4447,11 @@ class TestEventReplayDeterminism:
             events.append(
                 ModelNodeIntrospectionEvent(
                     node_id=uuid4(),
-                    node_type="compute",
-                    node_version=f"{i + 1}.0.0",
+                    node_type=EnumNodeKind.COMPUTE,
+                    node_version=ModelSemVer(major=i + 1, minor=0, patch=0),
                     endpoints={"health": f"http://localhost:{8080 + i}/health"},
                     correlation_id=uuid4(),
+                    timestamp=TEST_TIMESTAMP,
                 )
             )
 
@@ -4409,20 +4490,19 @@ class TestEventReplayDeterminism:
         from unittest.mock import MagicMock
 
         # Create a mock event without correlation_id to force ID derivation
-        fixed_timestamp = datetime.now(UTC)
         node_id = uuid4()
 
         def create_mock_event() -> MagicMock:
             """Create a consistent mock event for ID derivation testing."""
             mock = MagicMock(spec=ModelNodeIntrospectionEvent)
             mock.node_id = node_id
-            mock.node_type = "effect"
-            mock.node_version = "1.0.0"
+            mock.node_type = EnumNodeKind.EFFECT
+            mock.node_version = ModelSemVer.parse("1.0.0")
             mock.endpoints = {"health": "http://localhost:8080/health"}
-            mock.capabilities = ModelNodeCapabilities()
+            mock.declared_capabilities = ModelNodeCapabilities()
             mock.metadata = ModelNodeMetadata()
             mock.correlation_id = None  # Forces deterministic derivation
-            mock.timestamp = fixed_timestamp
+            mock.timestamp = TEST_TIMESTAMP
             return mock
 
         # Derive ID multiple times from same event
@@ -4474,10 +4554,11 @@ class TestEventReplayDeterminism:
         node_id = uuid4()
         event1 = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Process first introspection
@@ -4501,10 +4582,11 @@ class TestEventReplayDeterminism:
         # Second introspection
         event2 = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type="compute",
-            node_version="2.0.0",
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("2.0.0"),
             endpoints={"health": "http://localhost:8081/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         output2 = reducer.reduce(state, event2)
         first_pass_final = output2.result
@@ -4556,30 +4638,33 @@ class TestEventReplayDeterminism:
         # Event 1: First node registration
         event1 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         events_and_expected_status.append((event1, "pending"))
 
         # Event 2: Second node registration (overwrites state)
         event2 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="compute",
-            node_version="2.0.0",
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("2.0.0"),
             endpoints={"health": "http://localhost:8081/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         events_and_expected_status.append((event2, "pending"))
 
         # Event 3: Third node registration
         event3 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="reducer",
-            node_version="3.0.0",
+            node_type=EnumNodeKind.REDUCER,
+            node_version=ModelSemVer.parse("3.0.0"),
             endpoints={"health": "http://localhost:8082/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         events_and_expected_status.append((event3, "pending"))
 
@@ -4775,10 +4860,17 @@ class TestPropertyBasedStateInvariants:
                 )
 
     @given(
-        node_type=st.sampled_from(["effect", "compute", "reducer", "orchestrator"]),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
     )
     @settings(max_examples=20)
-    def test_state_transition_preserves_node_id(self, node_type: str) -> None:
+    def test_state_transition_preserves_node_id(self, node_type: EnumNodeKind) -> None:
         """Property: All with_* transitions preserve node_id (except with_reset).
 
         This invariant ensures traceability and consistency:
@@ -4802,9 +4894,10 @@ class TestPropertyBasedStateInvariants:
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type=node_type,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Transition: idle -> pending
@@ -4837,11 +4930,20 @@ class TestPropertyBasedStateInvariants:
         )
 
     @given(
-        node_type=st.sampled_from(["effect", "compute", "reducer", "orchestrator"]),
+        node_type=st.sampled_from(
+            [
+                EnumNodeKind.EFFECT,
+                EnumNodeKind.COMPUTE,
+                EnumNodeKind.REDUCER,
+                EnumNodeKind.ORCHESTRATOR,
+            ]
+        ),
         replay_count=st.integers(min_value=2, max_value=5),
     )
     @settings(max_examples=25)
-    def test_idempotency_property(self, node_type: str, replay_count: int) -> None:
+    def test_idempotency_property(
+        self, node_type: EnumNodeKind, replay_count: int
+    ) -> None:
         """Property: Processing the same event twice always yields identical state.
 
         This invariant ensures safe event replay for:
@@ -4867,9 +4969,10 @@ class TestPropertyBasedStateInvariants:
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type=node_type,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         # First reduce - should process the event
@@ -5094,10 +5197,11 @@ class TestBoundaryConditions:
 
         event = ModelNodeIntrospectionEvent(
             node_id=max_uuid,
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=max_uuid,  # Also test max correlation_id
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5111,7 +5215,8 @@ class TestBoundaryConditions:
             (i for i in output.intents if i.intent_type == "consul.register"), None
         )
         assert consul_intent is not None
-        assert str(max_uuid) in consul_intent.payload["service_id"]
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
+        assert str(max_uuid) in consul_intent.payload.service_id
 
         postgres_intent = next(
             (
@@ -5122,7 +5227,10 @@ class TestBoundaryConditions:
             None,
         )
         assert postgres_intent is not None
-        assert postgres_intent.payload["record"]["node_id"] == str(max_uuid)
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
+        assert postgres_intent.payload.record.node_id == max_uuid
 
     def test_min_uuid_values(
         self,
@@ -5142,10 +5250,11 @@ class TestBoundaryConditions:
 
         event = ModelNodeIntrospectionEvent(
             node_id=min_uuid,
-            node_type="compute",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=min_uuid,  # Also test min correlation_id
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5159,35 +5268,29 @@ class TestBoundaryConditions:
             (i for i in output.intents if i.intent_type == "consul.register"), None
         )
         assert consul_intent is not None
-        assert str(min_uuid) in consul_intent.payload["service_id"]
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
+        assert str(min_uuid) in consul_intent.payload.service_id
 
     def test_empty_string_version_rejected(
         self,
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
     ) -> None:
-        """Test that empty string version is rejected by validation.
+        """Test that empty string version is rejected by ModelSemVer.parse().
 
-        ModelNodeIntrospectionEvent validates node_version as semantic version.
-        Empty strings are rejected at the Pydantic validation layer, which is
-        correct behavior - version should always be a valid semantic version.
+        ModelNodeIntrospectionEvent requires node_version as ModelSemVer.
+        Empty strings are rejected when attempting to parse them.
 
         This test documents the validation behavior as a boundary condition.
         """
-        from pydantic import ValidationError
+        from omnibase_core.errors import ModelOnexError
 
-        with pytest.raises(ValidationError) as exc_info:
-            ModelNodeIntrospectionEvent(
-                node_id=uuid4(),
-                node_type="effect",
-                node_version="",  # Empty version string - should be rejected
-                endpoints={"health": "http://localhost:8080/health"},
-                correlation_id=uuid4(),
-            )
+        # Empty string cannot be parsed as a valid semantic version
+        with pytest.raises(ModelOnexError) as exc_info:
+            ModelSemVer.parse("")
 
-        # Verify the validation error is about the version
+        # Verify the error is about invalid semantic version format
         error_str = str(exc_info.value)
-        assert "node_version" in error_str
         assert "semantic version" in error_str.lower() or "Invalid" in error_str
 
     def test_minimal_valid_version(
@@ -5202,10 +5305,11 @@ class TestBoundaryConditions:
         """
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="0.0.0",  # Minimal valid version
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("0.0.0"),  # Minimal valid version
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5218,7 +5322,8 @@ class TestBoundaryConditions:
             (i for i in output.intents if i.intent_type == "consul.register"), None
         )
         assert consul_intent is not None
-        tags = consul_intent.payload["tags"]
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
+        tags = consul_intent.payload.tags
         assert "node_version:0.0.0" in tags
 
     def test_very_long_endpoint_url(
@@ -5249,13 +5354,14 @@ class TestBoundaryConditions:
 
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="orchestrator",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.ORCHESTRATOR,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={
                 "health": very_long_url,
                 "api": very_long_url,
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5268,7 +5374,8 @@ class TestBoundaryConditions:
             (i for i in output.intents if i.intent_type == "consul.register"), None
         )
         assert consul_intent is not None
-        health_check = consul_intent.payload["health_check"]
+        assert isinstance(consul_intent.payload, ModelPayloadConsulRegister)
+        health_check = consul_intent.payload.health_check
         assert health_check is not None
         assert health_check["HTTP"] == very_long_url
 
@@ -5281,8 +5388,11 @@ class TestBoundaryConditions:
             None,
         )
         assert postgres_intent is not None
-        assert postgres_intent.payload["record"]["health_endpoint"] == very_long_url
-        assert postgres_intent.payload["record"]["endpoints"]["health"] == very_long_url
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
+        assert postgres_intent.payload.record.health_endpoint == very_long_url
+        assert postgres_intent.payload.record.endpoints["health"] == very_long_url
 
     def test_special_characters_in_metadata(
         self,
@@ -5304,11 +5414,12 @@ class TestBoundaryConditions:
 
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             metadata=special_metadata,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5326,14 +5437,17 @@ class TestBoundaryConditions:
             None,
         )
         assert postgres_intent is not None
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
 
-        record_metadata = postgres_intent.payload["record"]["metadata"]
+        record_metadata = postgres_intent.payload.record.metadata
         assert record_metadata is not None
 
         # Check that special characters are preserved
-        assert record_metadata.get("environment") == "prod-東京"
-        assert record_metadata.get("region") == "eu-münster"
-        assert record_metadata.get("cluster") == "k8s/cluster-01"
+        assert record_metadata.environment == "prod-東京"
+        assert record_metadata.region == "eu-münster"
+        assert record_metadata.cluster == "k8s/cluster-01"
 
     def test_concurrent_state_access_safety(
         self,
@@ -5361,7 +5475,7 @@ class TestBoundaryConditions:
 
         # Verify the state is frozen (immutable)
         # Attempting to modify should raise an error
-        with pytest.raises(Exception):  # Pydantic raises ValidationError on mutation
+        with pytest.raises(ValidationError):
             consul_confirmed.status = "complete"  # type: ignore[misc]
 
         # Track results from concurrent reads
@@ -5424,12 +5538,15 @@ class TestBoundaryConditions:
 
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="orchestrator",
-            node_version="10.20.30-alpha.100+build.metadata.long.string",
+            node_type=EnumNodeKind.ORCHESTRATOR,
+            node_version=ModelSemVer.parse(
+                "10.20.30-alpha.100+build.metadata.long.string"
+            ),
             endpoints=many_endpoints,
-            capabilities=full_capabilities,
+            declared_capabilities=full_capabilities,
             metadata=extensive_metadata,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5447,15 +5564,18 @@ class TestBoundaryConditions:
             None,
         )
         assert postgres_intent is not None
+        assert isinstance(
+            postgres_intent.payload, ModelPayloadPostgresUpsertRegistration
+        )
 
-        record = postgres_intent.payload["record"]
-        assert len(record["endpoints"]) == 100
+        record = postgres_intent.payload.record
+        assert len(record.endpoints) == 100
 
         # Verify all capabilities are preserved
-        caps = record["capabilities"]
-        assert caps.get("postgres") is True
-        assert caps.get("database") is True
-        assert caps.get("read") is True
+        caps = record.capabilities
+        assert caps.postgres is True
+        assert caps.database is True
+        assert caps.read is True
 
     def test_uuid_version_variations(
         self,
@@ -5487,10 +5607,11 @@ class TestBoundaryConditions:
         ]:
             event = ModelNodeIntrospectionEvent(
                 node_id=test_uuid,
-                node_type="compute",
-                node_version="1.0.0",
+                node_type=EnumNodeKind.COMPUTE,
+                node_version=ModelSemVer.parse("1.0.0"),
                 endpoints={"health": "http://localhost:8080/health"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
 
             output = reducer.reduce(initial_state, event)
@@ -5653,12 +5774,13 @@ class TestCommandFoldingProhibited:
                 f"Reducers emit intents, not commands."
             )
 
-        # Verify intents are data structures (dicts), not executable
+        # Verify intents are data structures (typed models), not executable
         for intent in output.intents:
-            # Intent payload should be a dict (data), not callable
-            assert isinstance(intent.payload, dict), (
-                f"Intent payload should be dict (data), not {type(intent.payload)}"
-            )
+            # Intent payload should be a typed model (ProtocolIntentPayload)
+            assert isinstance(
+                intent.payload,
+                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
+            ), f"Intent payload should be typed model, not {type(intent.payload)}"
 
             # Intent should not have execute/run methods
             assert not hasattr(intent, "execute"), (
@@ -5841,3 +5963,81 @@ class TestCommandFoldingProhibited:
                 f"Intent target scheme '{scheme}' not recognized. "
                 f"Expected one of: {valid_schemes}"
             )
+
+
+# -----------------------------------------------------------------------------
+# Confirmation Event Handling Tests (Phase 2 Placeholder)
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestReduceConfirmation:
+    """Tests for reduce_confirmation() method.
+
+    The reduce_confirmation() method is a Phase 2 placeholder that raises
+    NotImplementedError until OMN-996 is implemented. This test validates
+    the expected behavior of the placeholder.
+
+    Related:
+        - OMN-996: Implement Confirmation Event Handling
+        - ModelRegistrationConfirmation: Confirmation event model
+    """
+
+    def test_reduce_confirmation_raises_not_implemented_error(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test that reduce_confirmation raises NotImplementedError until implemented.
+
+        This test ensures:
+        1. The placeholder method exists and is callable
+        2. NotImplementedError is raised with appropriate message
+        3. The error message references OMN-996 for tracking
+
+        This prevents accidental regression when implementing the method
+        and ensures developers are directed to the tracking ticket.
+        """
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        # Create a valid confirmation event
+        confirmation = ModelRegistrationConfirmation(
+            event_type="consul.registered",
+            correlation_id=uuid4(),
+            node_id=uuid4(),
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        # Verify NotImplementedError is raised with OMN-996 reference
+        with pytest.raises(NotImplementedError, match="OMN-996"):
+            reducer.reduce_confirmation(initial_state, confirmation)
+
+    def test_reduce_confirmation_error_message_includes_ticket_url(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test that error message includes the Linear ticket URL.
+
+        This ensures developers can easily find the implementation
+        tracking ticket when encountering the NotImplementedError.
+        """
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type="postgres.registration_upserted",
+            correlation_id=uuid4(),
+            node_id=uuid4(),
+            success=False,
+            error_message="Connection refused",
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        with pytest.raises(NotImplementedError) as exc_info:
+            reducer.reduce_confirmation(initial_state, confirmation)
+
+        error_message = str(exc_info.value)
+        assert "linear.app/omninode/issue/OMN-996" in error_message, (
+            "Error message should include the Linear ticket URL for tracking"
+        )

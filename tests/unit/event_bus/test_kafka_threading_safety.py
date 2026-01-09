@@ -32,12 +32,12 @@ interference or resource contention.
 """
 
 import asyncio
-from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
 
 class SimulatedProducerError(Exception):
@@ -55,7 +55,7 @@ class TestKafkaEventBusThreadingSafety:
 
         # Mock the producer
         mock_producer = AsyncMock()
-        mock_future: asyncio.Future[Any] = asyncio.Future()
+        mock_future: asyncio.Future[object] = asyncio.Future()
         mock_future.set_result(Mock(partition=0, offset=0))
         mock_producer.send.return_value = mock_future
 
@@ -139,10 +139,12 @@ class TestKafkaEventBusThreadingSafety:
             # Simulate producer that succeeds on both attempts (no timeout)
             call_count = 0
 
-            async def send_success(*args: object, **kwargs: object) -> Any:
+            async def send_success(
+                *args: object, **kwargs: object
+            ) -> asyncio.Future[object]:
                 nonlocal call_count
                 call_count += 1
-                future: asyncio.Future[Any] = asyncio.Future()
+                future: asyncio.Future[object] = asyncio.Future()
                 future.set_result(Mock(partition=0, offset=0))
                 return future
 
@@ -239,11 +241,11 @@ class TestKafkaEventBusThreadingSafety:
         This test verifies thread-safe circuit breaker behavior under concurrent
         failure conditions. All operations properly catch and suppress exceptions.
         """
-        bus = KafkaEventBus(
-            config=None,
+        config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
             circuit_breaker_threshold=3,
         )
+        bus = KafkaEventBus(config=config)
 
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"

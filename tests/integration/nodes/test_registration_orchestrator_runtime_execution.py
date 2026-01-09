@@ -40,6 +40,11 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+
+# Test timestamp constant for reproducible tests
+TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.node_registration_orchestrator.models import (
@@ -64,16 +69,8 @@ from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
 # Import shared conformance helpers
 from tests.conftest import (
     assert_effect_protocol_interface,
-    assert_has_async_methods,
-    assert_has_methods,
     assert_reducer_protocol_interface,
 )
-
-# Module-level markers - all tests in this file are integration tests
-pytestmark = [
-    pytest.mark.integration,
-]
-
 
 # =============================================================================
 # Mock Implementations
@@ -133,7 +130,7 @@ class MockReducerImpl:
                     node_id=event.node_id,
                     correlation_id=event.correlation_id,
                     payload=ModelConsulIntentPayload(
-                        service_name=f"node-{event.node_type}",
+                        service_name=f"onex-{event.node_type}",
                     ),
                 ),
                 ModelPostgresUpsertIntent(
@@ -142,7 +139,8 @@ class MockReducerImpl:
                     correlation_id=event.correlation_id,
                     payload=ModelPostgresIntentPayload(
                         node_id=event.node_id,
-                        node_type=event.node_type,
+                        # Convert Literal string to EnumNodeKind for strict model
+                        node_type=EnumNodeKind(event.node_type),
                         correlation_id=event.correlation_id,
                         timestamp=event.timestamp.isoformat(),
                     ),
@@ -237,14 +235,8 @@ class MockEffectImpl:
 # =============================================================================
 # Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def mock_container() -> MagicMock:
-    """Create a mock ONEX container."""
-    container = MagicMock()
-    container.config = MagicMock()
-    return container
+# Note: simple_mock_container fixture is provided by
+# tests/integration/nodes/conftest.py - no local definition needed.
 
 
 @pytest.fixture
@@ -267,10 +259,10 @@ def introspection_event(
     return ModelNodeIntrospectionEvent(
         node_id=node_id,
         node_type="effect",
-        node_version="1.0.0",
-        capabilities={},
+        node_version=ModelSemVer.parse("1.0.0"),
         endpoints={"health": "http://localhost:8080/health"},
         correlation_id=correlation_id,
+        timestamp=TEST_TIMESTAMP,
     )
 
 
@@ -318,14 +310,14 @@ def mock_event_emitter() -> MagicMock:
 
 @pytest.fixture
 def configured_container(
-    mock_container: MagicMock,
+    simple_mock_container: MagicMock,
     mock_reducer: MockReducerImpl,
     mock_effect: MockEffectImpl,
     mock_event_emitter: MagicMock,
 ) -> MagicMock:
     """Create container with mock dependencies configured."""
 
-    def resolve_mock(protocol):
+    def resolve_mock(protocol: type) -> object:
         """Resolve mock dependencies using protocol type matching."""
         if protocol is ProtocolReducer:
             return mock_reducer
@@ -333,15 +325,15 @@ def configured_container(
             return mock_effect
         return mock_event_emitter
 
-    mock_container.service_registry = MagicMock()
-    mock_container.service_registry.resolve = MagicMock(side_effect=resolve_mock)
+    simple_mock_container.service_registry = MagicMock()
+    simple_mock_container.service_registry.resolve = MagicMock(side_effect=resolve_mock)
 
     # Store references for test access
-    mock_container._test_reducer = mock_reducer
-    mock_container._test_effect = mock_effect
-    mock_container._test_emitter = mock_event_emitter
+    simple_mock_container._test_reducer = mock_reducer
+    simple_mock_container._test_effect = mock_effect
+    simple_mock_container._test_emitter = mock_event_emitter
 
-    return mock_container
+    return simple_mock_container
 
 
 @pytest.fixture
@@ -548,9 +540,10 @@ class TestStateTransitions:
         event = ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type="compute",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         initial_state = ModelReducerState.initial()
@@ -588,9 +581,10 @@ class TestStateTransitions:
             ModelNodeIntrospectionEvent(
                 node_id=nid,
                 node_type="effect",
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 endpoints={"health": "http://localhost:8080/health"},
                 correlation_id=correlation_id,
+                timestamp=TEST_TIMESTAMP,
             )
             for nid in node_ids
         ]
@@ -659,7 +653,7 @@ class TestEventFlowCoordination:
             correlation_id=correlation_id,
             payload=ModelPostgresIntentPayload(
                 node_id=node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 correlation_id=correlation_id,
                 timestamp=datetime.now(UTC).isoformat(),
             ),
@@ -893,7 +887,7 @@ class TestErrorHandlingAndRecovery:
             correlation_id=correlation_id,
             payload=ModelPostgresIntentPayload(
                 node_id=node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 correlation_id=correlation_id,
                 timestamp=datetime.now(UTC).isoformat(),
             ),
@@ -1021,16 +1015,18 @@ class TestCorrelationTracking:
         event_1 = ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=corr_id_1,
+            timestamp=TEST_TIMESTAMP,
         )
         event_2 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),  # Different node
             node_type="compute",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8081/health"},
             correlation_id=corr_id_2,
+            timestamp=TEST_TIMESTAMP,
         )
 
         state = ModelReducerState.initial()
@@ -1124,9 +1120,10 @@ class TestConcurrencyAndThreadSafety:
             ModelNodeIntrospectionEvent(
                 node_id=uuid4(),
                 node_type="effect",
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 endpoints={"health": f"http://localhost:{8080 + i}/health"},
                 correlation_id=correlation_id,
+                timestamp=TEST_TIMESTAMP,
             )
             for i in range(10)
         ]
@@ -1185,9 +1182,10 @@ class TestConcurrencyAndThreadSafety:
             ModelNodeIntrospectionEvent(
                 node_id=uuid4(),
                 node_type="effect",
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 endpoints={"health": f"http://localhost:{8080 + i}/health"},
                 correlation_id=correlation_id,
+                timestamp=TEST_TIMESTAMP,
             )
             for i in range(5)
         ]

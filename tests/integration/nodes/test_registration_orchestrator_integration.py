@@ -30,16 +30,27 @@ Running Tests:
 
 from __future__ import annotations
 
-from pathlib import Path
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
-import yaml
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+
+# Fixed timestamp for deterministic tests
+TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
+    from omnibase_infra.nodes.node_registration_orchestrator.models import (
+        ModelOrchestratorInput,
+    )
 
 # Import shared conformance helpers
 from tests.conftest import (
@@ -47,47 +58,11 @@ from tests.conftest import (
     assert_reducer_protocol_interface,
 )
 
-# Module-level markers - all tests in this file are integration tests
-pytestmark = [
-    pytest.mark.integration,
-]
-
-
 # =============================================================================
 # Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def mock_container() -> MagicMock:
-    """Create a mock ONEX container."""
-    container = MagicMock()
-    container.config = MagicMock()
-    return container
-
-
-@pytest.fixture
-def contract_path() -> Path:
-    """Return path to contract.yaml."""
-    return Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
-
-
-@pytest.fixture
-def contract_data(contract_path: Path) -> dict:
-    """Load and return contract.yaml as dict.
-
-    Raises:
-        pytest.skip: If contract file doesn't exist (allows tests to be skipped gracefully).
-        yaml.YAMLError: If contract file contains invalid YAML.
-    """
-    if not contract_path.exists():
-        pytest.skip(f"Contract file not found: {contract_path}")
-
-    with open(contract_path, encoding="utf-8") as f:
-        try:
-            return yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            pytest.fail(f"Invalid YAML in contract file: {e}")
+# Note: simple_mock_container, contract_path, and contract_data fixtures are
+# provided by tests/integration/nodes/conftest.py - no local definition needed.
 
 
 # =============================================================================
@@ -143,7 +118,7 @@ class TestContractIntegration:
 
     def test_node_type_is_orchestrator(self, contract_data: dict) -> None:
         """Test that node_type is ORCHESTRATOR."""
-        assert contract_data["node_type"] == "ORCHESTRATOR"
+        assert contract_data["node_type"] == EnumNodeKind.ORCHESTRATOR.name
 
     def test_input_model_importable(self, contract_data: dict) -> None:
         """Test that input model specified in contract is importable and valid.
@@ -249,7 +224,7 @@ class TestWorkflowGraphIntegration:
         """Test that execution graph has all 8 required nodes.
 
         The registration orchestrator workflow requires these nodes in order:
-        1. receive_introspection - Receive introspection or tick event
+        1. receive_introspection - Receive introspection, tick, or ack events
         2. read_projection - Read current registration state from projection (OMN-930)
         3. evaluate_timeout - Evaluate timeout using injected time (OMN-973)
         4. compute_intents - Compute registration intents via reducer
@@ -434,11 +409,11 @@ class TestWorkflowGraphIntegration:
         # Expected properties for all 8 nodes
         # Format: node_id -> (node_type, depends_on)
         expected_node_properties = {
-            # Node 1: Entry point - receives introspection or tick event
+            # Node 1: Entry point - receives introspection, tick, or ack events
             "receive_introspection": {
                 "node_type": "effect",
                 "depends_on": [],
-                "description": "Receive introspection or tick event",
+                "description": "Receive introspection, tick, or ack events",
             },
             # Node 2: Read projection state (OMN-930)
             "read_projection": {
@@ -856,7 +831,9 @@ class TestModelContractAlignment:
 class TestNodeIntegration:
     """Integration tests for node instantiation and base class behavior."""
 
-    def test_node_instantiation_succeeds(self, mock_container: MagicMock) -> None:
+    def test_node_instantiation_succeeds(
+        self, simple_mock_container: MagicMock
+    ) -> None:
         """Test that node can be instantiated successfully with proper state.
 
         Verifies:
@@ -864,7 +841,7 @@ class TestNodeIntegration:
         - Container is stored as expected
         - Node has required orchestrator attributes
         """
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # Verify type via duck typing (check for class name match)
         assert orchestrator.__class__.__name__ == "NodeRegistrationOrchestrator", (
@@ -875,17 +852,17 @@ class TestNodeIntegration:
         assert hasattr(orchestrator, "container"), (
             "Orchestrator must have 'container' attribute"
         )
-        assert orchestrator.container is mock_container, (
+        assert orchestrator.container is simple_mock_container, (
             "Container reference must match provided container"
         )
 
-    def test_node_inherits_base_class(self, mock_container: MagicMock) -> None:
+    def test_node_inherits_base_class(self, simple_mock_container: MagicMock) -> None:
         """Test that node inherits from NodeOrchestrator base class.
 
         Per ONEX conventions, we verify inheritance via duck typing by checking
         for required methods and attributes rather than isinstance checks.
         """
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # Verify NodeOrchestrator behavior via duck typing
         # NodeOrchestrator provides workflow execution and state management methods
@@ -916,9 +893,9 @@ class TestNodeIntegration:
             f"NodeOrchestrator must be in MRO, found: {mro_names}"
         )
 
-    def test_node_is_declarative(self, mock_container: MagicMock) -> None:
+    def test_node_is_declarative(self, simple_mock_container: MagicMock) -> None:
         """Test that node has no custom imperative methods."""
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # Old imperative methods should not exist
         imperative_methods = [
@@ -1091,33 +1068,35 @@ class TestWorkflowExecutionWithMocks:
     @pytest.fixture
     def correlation_id(self) -> UUID:
         """Create a fixed correlation ID for testing propagation."""
-        from uuid import uuid4
-
         return uuid4()
 
     @pytest.fixture
     def node_id(self) -> UUID:
         """Create a fixed node ID for testing."""
-        from uuid import uuid4
-
         return uuid4()
 
     @pytest.fixture
-    def introspection_event(self, node_id: UUID, correlation_id: UUID):
+    def introspection_event(
+        self, node_id: UUID, correlation_id: UUID
+    ) -> ModelNodeIntrospectionEvent:
         """Create a test introspection event."""
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 
         return ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type="effect",
-            node_version="1.0.0",
-            capabilities={},
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
     @pytest.fixture
-    def orchestrator_input(self, introspection_event, correlation_id: UUID):
+    def orchestrator_input(
+        self,
+        introspection_event: ModelNodeIntrospectionEvent,
+        correlation_id: UUID,
+    ) -> ModelOrchestratorInput:
         """Create test input for the orchestrator."""
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelOrchestratorInput,
@@ -1129,7 +1108,7 @@ class TestWorkflowExecutionWithMocks:
         )
 
     @pytest.fixture
-    def mock_reducer(self, node_id: UUID, correlation_id: UUID):
+    def mock_reducer(self, node_id: UUID, correlation_id: UUID) -> object:
         """Create mock reducer that returns registration intents.
 
         The mock reducer implements the ProtocolReducer interface via duck typing.
@@ -1154,17 +1133,17 @@ class TestWorkflowExecutionWithMocks:
         class MockReducer:
             """Mock reducer for testing workflow execution."""
 
-            def __init__(self):
+            def __init__(self) -> None:
                 self.call_count = 0
-                self.received_events = []
-                self.received_states = []
+                self.received_events: list[object] = []
+                self.received_states: list[ModelReducerState] = []
                 self._node_id = node_id
                 self._correlation_id = correlation_id
 
             async def reduce(
                 self,
                 state: ModelReducerState,
-                event,
+                event: object,
             ) -> tuple[ModelReducerState, list[ModelRegistrationIntent]]:
                 """Reduce event to state and intents."""
                 self.call_count += 1
@@ -1178,7 +1157,7 @@ class TestWorkflowExecutionWithMocks:
                         node_id=self._node_id,
                         correlation_id=self._correlation_id,
                         payload=ModelConsulIntentPayload(
-                            service_name=f"node-{event.node_type}",
+                            service_name=f"onex-{event.node_type}",
                         ),
                     ),
                     ModelPostgresUpsertIntent(
@@ -1187,7 +1166,8 @@ class TestWorkflowExecutionWithMocks:
                         correlation_id=self._correlation_id,
                         payload=ModelPostgresIntentPayload(
                             node_id=self._node_id,
-                            node_type=event.node_type,
+                            # Convert Literal string to EnumNodeKind for strict model
+                            node_type=EnumNodeKind(event.node_type),
                             correlation_id=self._correlation_id,
                             timestamp=event.timestamp.isoformat(),
                         ),
@@ -1211,7 +1191,7 @@ class TestWorkflowExecutionWithMocks:
         return mock
 
     @pytest.fixture
-    def mock_effect(self):
+    def mock_effect(self) -> object:
         """Create mock effect that executes intents.
 
         The mock effect implements the ProtocolEffect interface via duck typing.
@@ -1236,7 +1216,7 @@ class TestWorkflowExecutionWithMocks:
         class MockEffect:
             """Mock effect for testing workflow execution."""
 
-            def __init__(self):
+            def __init__(self) -> None:
                 self.call_count = 0
                 self.executed_intents: list[ConcreteIntent] = []
                 self.received_correlation_ids: list[UUID] = []
@@ -1281,16 +1261,18 @@ class TestWorkflowExecutionWithMocks:
         return mock
 
     @pytest.fixture
-    def mock_event_emitter(self):
+    def mock_event_emitter(self) -> object:
         """Create mock event emitter to capture emitted events."""
 
         class MockEventEmitter:
             """Mock event emitter for capturing published events."""
 
-            def __init__(self):
-                self.emitted_events: list[tuple[str, dict]] = []
+            def __init__(self) -> None:
+                self.emitted_events: list[tuple[str, dict[str, object]]] = []
 
-            async def emit(self, event_type: str, event_data: dict) -> None:
+            async def emit(
+                self, event_type: str, event_data: dict[str, object]
+            ) -> None:
                 """Emit an event."""
                 self.emitted_events.append((event_type, event_data))
 
@@ -1303,11 +1285,11 @@ class TestWorkflowExecutionWithMocks:
     @pytest.fixture
     def orchestrator_with_mocks(
         self,
-        mock_container: MagicMock,
-        mock_reducer,
-        mock_effect,
-        mock_event_emitter,
-    ):
+        simple_mock_container: MagicMock,
+        mock_reducer: object,
+        mock_effect: object,
+        mock_event_emitter: object,
+    ) -> NodeRegistrationOrchestrator:
         """Create orchestrator configured with mock reducer, effect, and emitter.
 
         Sets up the container's service registry to return mock implementations
@@ -1320,7 +1302,7 @@ class TestWorkflowExecutionWithMocks:
             ProtocolReducer,
         )
 
-        def resolve_mock(protocol):
+        def resolve_mock(protocol: type) -> object:
             """Resolve mock dependencies using explicit protocol type matching."""
             if protocol is ProtocolReducer:
                 return mock_reducer
@@ -1329,18 +1311,18 @@ class TestWorkflowExecutionWithMocks:
             else:
                 return mock_event_emitter
 
-        mock_container.service_registry = MagicMock()
-        mock_container.service_registry.resolve.side_effect = resolve_mock
+        simple_mock_container.service_registry = MagicMock()
+        simple_mock_container.service_registry.resolve.side_effect = resolve_mock
 
         # Store references for test access
-        mock_container._test_reducer = mock_reducer
-        mock_container._test_effect = mock_effect
-        mock_container._test_emitter = mock_event_emitter
+        simple_mock_container._test_reducer = mock_reducer
+        simple_mock_container._test_effect = mock_effect
+        simple_mock_container._test_emitter = mock_event_emitter
 
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
         return orchestrator
 
-    def test_mock_reducer_implements_protocol(self, mock_reducer) -> None:
+    def test_mock_reducer_implements_protocol(self, mock_reducer: object) -> None:
         """Test that mock reducer correctly implements ProtocolReducer interface.
 
         Per ONEX conventions, protocol compliance is verified via duck typing
@@ -1350,7 +1332,7 @@ class TestWorkflowExecutionWithMocks:
         # Use shared conformance helper
         assert_reducer_protocol_interface(mock_reducer)
 
-    def test_mock_effect_implements_protocol(self, mock_effect) -> None:
+    def test_mock_effect_implements_protocol(self, mock_effect: object) -> None:
         """Test that mock effect correctly implements ProtocolEffect interface.
 
         Per ONEX conventions, protocol compliance is verified via duck typing
@@ -1363,8 +1345,8 @@ class TestWorkflowExecutionWithMocks:
     @pytest.mark.asyncio
     async def test_reducer_generates_intents_from_event(
         self,
-        mock_reducer,
-        introspection_event,
+        mock_reducer: object,
+        introspection_event: object,
     ) -> None:
         """Test that reducer generates intents from introspection event."""
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
@@ -1395,7 +1377,7 @@ class TestWorkflowExecutionWithMocks:
     @pytest.mark.asyncio
     async def test_effect_executes_intents_successfully(
         self,
-        mock_effect,
+        mock_effect: object,
         node_id: UUID,
         correlation_id: UUID,
     ) -> None:
@@ -1425,7 +1407,7 @@ class TestWorkflowExecutionWithMocks:
     @pytest.mark.asyncio
     async def test_effect_handles_failure(
         self,
-        mock_effect,
+        mock_effect: object,
         node_id: UUID,
         correlation_id: UUID,
     ) -> None:
@@ -1453,8 +1435,8 @@ class TestWorkflowExecutionWithMocks:
     @pytest.mark.asyncio
     async def test_correlation_id_propagated_through_reducer(
         self,
-        mock_reducer,
-        introspection_event,
+        mock_reducer: object,
+        introspection_event: object,
         correlation_id: UUID,
     ) -> None:
         """Test correlation ID is preserved in reducer intents."""
@@ -1472,7 +1454,7 @@ class TestWorkflowExecutionWithMocks:
     @pytest.mark.asyncio
     async def test_correlation_id_propagated_through_effect(
         self,
-        mock_effect,
+        mock_effect: object,
         node_id: UUID,
         correlation_id: UUID,
     ) -> None:
@@ -1488,7 +1470,7 @@ class TestWorkflowExecutionWithMocks:
             correlation_id=correlation_id,
             payload=ModelPostgresIntentPayload(
                 node_id=node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 correlation_id=correlation_id,
                 timestamp="2025-01-01T00:00:00Z",
             ),
@@ -1501,9 +1483,9 @@ class TestWorkflowExecutionWithMocks:
     @pytest.mark.asyncio
     async def test_reducer_intents_passed_to_effects(
         self,
-        mock_reducer,
-        mock_effect,
-        introspection_event,
+        mock_reducer: object,
+        mock_effect: object,
+        introspection_event: object,
         correlation_id: UUID,
     ) -> None:
         """Test that reducer intents are correctly passed to effect nodes."""
@@ -1535,9 +1517,9 @@ class TestWorkflowExecutionWithMocks:
     @pytest.mark.asyncio
     async def test_effect_results_aggregated_correctly(
         self,
-        mock_reducer,
-        mock_effect,
-        introspection_event,
+        mock_reducer: object,
+        mock_effect: object,
+        introspection_event: object,
         correlation_id: UUID,
     ) -> None:
         """Test that effect results are properly aggregated."""
@@ -1593,9 +1575,9 @@ class TestWorkflowExecutionWithMocks:
     @pytest.mark.asyncio
     async def test_partial_failure_aggregation(
         self,
-        mock_reducer,
-        mock_effect,
-        introspection_event,
+        mock_reducer: object,
+        mock_effect: object,
+        introspection_event: object,
         correlation_id: UUID,
     ) -> None:
         """Test aggregation when one effect fails and another succeeds."""
@@ -1654,8 +1636,8 @@ class TestWorkflowExecutionWithMocks:
     @pytest.mark.asyncio
     async def test_reducer_deduplicates_processed_nodes(
         self,
-        mock_reducer,
-        introspection_event,
+        mock_reducer: object,
+        introspection_event: object,
     ) -> None:
         """Test that reducer tracks processed nodes for deduplication."""
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
@@ -1677,9 +1659,9 @@ class TestWorkflowExecutionWithMocks:
     @pytest.mark.asyncio
     async def test_workflow_sequence_reducer_before_effect(
         self,
-        mock_reducer,
-        mock_effect,
-        introspection_event,
+        mock_reducer: object,
+        mock_effect: object,
+        introspection_event: object,
         correlation_id: UUID,
     ) -> None:
         """Test that workflow calls reducer before effects."""
@@ -1691,19 +1673,19 @@ class TestWorkflowExecutionWithMocks:
         call_order: list[str] = []
 
         # Wrap reducer to track calls
-        original_reduce = mock_reducer.reduce
+        original_reduce = mock_reducer.reduce  # type: ignore[attr-defined]
 
-        async def tracked_reduce(state, event):
+        async def tracked_reduce(state: object, event: object) -> object:
             call_order.append("reducer")
             return await original_reduce(state, event)
 
-        mock_reducer.reduce = tracked_reduce
+        mock_reducer.reduce = tracked_reduce  # type: ignore[attr-defined]
 
         # Wrap effect to track calls
-        original_execute = mock_effect.execute_intent
+        original_execute = mock_effect.execute_intent  # type: ignore[attr-defined]
 
-        async def tracked_execute(intent, corr_id):
-            call_order.append(f"effect:{intent.kind}")
+        async def tracked_execute(intent: object, corr_id: UUID) -> object:
+            call_order.append(f"effect:{intent.kind}")  # type: ignore[attr-defined]
             return await original_execute(intent, corr_id)
 
         mock_effect.execute_intent = tracked_execute
@@ -1722,7 +1704,7 @@ class TestWorkflowExecutionWithMocks:
 
     def test_orchestrator_instantiation_with_mocks(
         self,
-        orchestrator_with_mocks,
+        orchestrator_with_mocks: NodeRegistrationOrchestrator,
     ) -> None:
         """Test that orchestrator can be instantiated with mock container.
 
@@ -1758,8 +1740,8 @@ class TestWorkflowExecutionWithMocks:
 
     def test_mock_container_provides_dependencies(
         self,
-        orchestrator_with_mocks,
-        mock_container: MagicMock,
+        orchestrator_with_mocks: NodeRegistrationOrchestrator,
+        simple_mock_container: MagicMock,
     ) -> None:
         """Test that mock container provides reducer and effect dependencies.
 
@@ -1768,19 +1750,19 @@ class TestWorkflowExecutionWithMocks:
         and correct method signatures, rather than using isinstance checks.
         """
         # Verify mocks are accessible via container
-        assert hasattr(mock_container, "_test_reducer"), (
+        assert hasattr(simple_mock_container, "_test_reducer"), (
             "Container must have '_test_reducer' attribute"
         )
-        assert hasattr(mock_container, "_test_effect"), (
+        assert hasattr(simple_mock_container, "_test_effect"), (
             "Container must have '_test_effect' attribute"
         )
-        assert hasattr(mock_container, "_test_emitter"), (
+        assert hasattr(simple_mock_container, "_test_emitter"), (
             "Container must have '_test_emitter' attribute"
         )
 
         # Use shared conformance helpers for protocol verification
-        assert_reducer_protocol_interface(mock_container._test_reducer)
-        assert_effect_protocol_interface(mock_container._test_effect)
+        assert_reducer_protocol_interface(simple_mock_container._test_reducer)
+        assert_effect_protocol_interface(simple_mock_container._test_effect)
 
 
 # =============================================================================

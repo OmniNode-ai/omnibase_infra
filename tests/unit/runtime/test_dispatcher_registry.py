@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 """
-Unit tests for DispatcherRegistry.
+Unit tests for RegistryDispatcher.
 
 Tests the dispatcher registry functionality including:
 - Dispatcher registration and validation
@@ -12,11 +12,12 @@ Tests the dispatcher registry functionality including:
 
 Related:
     - OMN-934: Dispatcher registry for message dispatch engine
-    - src/omnibase_infra/runtime/dispatcher_registry.py
+    - src/omnibase_infra/runtime/registry_dispatcher.py
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,8 +28,8 @@ from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
-from omnibase_infra.runtime.dispatcher_registry import (
-    DispatcherRegistry,
+from omnibase_infra.runtime.registry_dispatcher import (
+    RegistryDispatcher,
 )
 
 # Import shared conformance helper
@@ -71,6 +72,7 @@ class MockMessageDispatcher:
             status=EnumDispatchStatus.SUCCESS,
             topic="test.events",
             dispatcher_id=self._dispatcher_id,
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
 
@@ -80,9 +82,9 @@ class MockMessageDispatcher:
 
 
 @pytest.fixture
-def dispatcher_registry() -> DispatcherRegistry:
-    """Create a fresh DispatcherRegistry for tests."""
-    return DispatcherRegistry()
+def dispatcher_registry() -> RegistryDispatcher:
+    """Create a fresh RegistryDispatcher for tests."""
+    return RegistryDispatcher()
 
 
 @pytest.fixture
@@ -154,7 +156,7 @@ class TestProtocolMessageDispatcher:
         1. Duck typing: Check for required attributes/methods using hasattr()
            and callable(). This is the ONEX-preferred approach.
 
-        2. DispatcherRegistry.register_dispatcher(): Comprehensive validation
+        2. RegistryDispatcher.register_dispatcher(): Comprehensive validation
            including property type checking, execution shape validation,
            and detailed error messages for debugging.
     """
@@ -206,7 +208,7 @@ class TestProtocolMessageDispatcher:
         """Demonstrate the recommended pattern for protocol validation.
 
         Use duck typing for quick structural checks, then let
-        DispatcherRegistry.register_dispatcher() perform comprehensive
+        RegistryDispatcher.register_dispatcher() perform comprehensive
         validation including execution shape checking.
         """
         # Pattern: Duck typing check before registration (ONEX convention)
@@ -223,7 +225,7 @@ class TestProtocolMessageDispatcher:
 
         if has_required and callable(event_reducer_dispatcher.handle):
             # Proceed with registration - comprehensive validation happens here
-            registry = DispatcherRegistry()
+            registry = RegistryDispatcher()
             registry.register_dispatcher(event_reducer_dispatcher)
             assert registry.dispatcher_count == 1
         else:
@@ -259,7 +261,7 @@ class TestDispatcherRegistration:
 
     def test_register_valid_dispatcher(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should register a valid dispatcher successfully."""
@@ -268,7 +270,7 @@ class TestDispatcherRegistration:
 
     def test_register_multiple_dispatchers(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
         event_compute_dispatcher: MockMessageDispatcher,
         command_orchestrator_dispatcher: MockMessageDispatcher,
@@ -281,7 +283,7 @@ class TestDispatcherRegistration:
 
     def test_register_with_custom_message_types(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should allow overriding message_types at registration."""
@@ -307,7 +309,7 @@ class TestDispatcherRegistration:
         assert len(dispatchers) == 0
 
     def test_register_none_dispatcher_raises(
-        self, dispatcher_registry: DispatcherRegistry
+        self, dispatcher_registry: RegistryDispatcher
     ) -> None:
         """Should raise when registering None dispatcher."""
         with pytest.raises(ModelOnexError) as exc_info:
@@ -318,7 +320,7 @@ class TestDispatcherRegistration:
 
     def test_register_duplicate_dispatcher_id_raises(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should raise when registering duplicate dispatcher_id."""
@@ -337,7 +339,7 @@ class TestDispatcherRegistration:
         assert exc_info.value.error_code == EnumCoreErrorCode.DUPLICATE_REGISTRATION
 
     def test_register_dispatcher_missing_dispatcher_id_raises(
-        self, dispatcher_registry: DispatcherRegistry
+        self, dispatcher_registry: RegistryDispatcher
     ) -> None:
         """Should raise when dispatcher lacks dispatcher_id property."""
         dispatcher = MagicMock(spec=[])  # No dispatcher_id attribute
@@ -349,7 +351,7 @@ class TestDispatcherRegistration:
         assert "dispatcher_id" in str(exc_info.value)
 
     def test_register_dispatcher_missing_category_raises(
-        self, dispatcher_registry: DispatcherRegistry
+        self, dispatcher_registry: RegistryDispatcher
     ) -> None:
         """Should raise when dispatcher lacks category property."""
         dispatcher = MagicMock()
@@ -373,7 +375,7 @@ class TestExecutionShapeValidation:
 
     def test_valid_shapes_event_to_reducer(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """EVENT -> REDUCER is a valid execution shape."""
@@ -382,7 +384,7 @@ class TestExecutionShapeValidation:
 
     def test_valid_shapes_event_to_compute(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_compute_dispatcher: MockMessageDispatcher,
     ) -> None:
         """EVENT -> COMPUTE is a valid execution shape."""
@@ -391,7 +393,7 @@ class TestExecutionShapeValidation:
 
     def test_valid_shapes_command_to_orchestrator(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         command_orchestrator_dispatcher: MockMessageDispatcher,
     ) -> None:
         """COMMAND -> ORCHESTRATOR is a valid execution shape."""
@@ -400,7 +402,7 @@ class TestExecutionShapeValidation:
 
     def test_valid_shapes_command_to_effect(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         command_effect_dispatcher: MockMessageDispatcher,
     ) -> None:
         """COMMAND -> EFFECT is a valid execution shape."""
@@ -409,7 +411,7 @@ class TestExecutionShapeValidation:
 
     def test_valid_shapes_intent_to_orchestrator(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         intent_orchestrator_dispatcher: MockMessageDispatcher,
     ) -> None:
         """INTENT -> ORCHESTRATOR is a valid execution shape."""
@@ -417,7 +419,7 @@ class TestExecutionShapeValidation:
         assert dispatcher_registry.dispatcher_count == 1
 
     def test_invalid_shape_command_to_reducer_raises(
-        self, dispatcher_registry: DispatcherRegistry
+        self, dispatcher_registry: RegistryDispatcher
     ) -> None:
         """COMMAND -> REDUCER is an invalid execution shape."""
         invalid_dispatcher = MockMessageDispatcher(
@@ -433,7 +435,7 @@ class TestExecutionShapeValidation:
         assert "invalid execution shape" in str(exc_info.value).lower()
 
     def test_invalid_shape_intent_to_reducer_raises(
-        self, dispatcher_registry: DispatcherRegistry
+        self, dispatcher_registry: RegistryDispatcher
     ) -> None:
         """INTENT -> REDUCER is an invalid execution shape."""
         invalid_dispatcher = MockMessageDispatcher(
@@ -448,7 +450,7 @@ class TestExecutionShapeValidation:
         assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
 
     def test_invalid_shape_event_to_effect_raises(
-        self, dispatcher_registry: DispatcherRegistry
+        self, dispatcher_registry: RegistryDispatcher
     ) -> None:
         """EVENT -> EFFECT is an invalid execution shape."""
         invalid_dispatcher = MockMessageDispatcher(
@@ -463,7 +465,7 @@ class TestExecutionShapeValidation:
         assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
 
     def test_invalid_shape_intent_to_effect_raises(
-        self, dispatcher_registry: DispatcherRegistry
+        self, dispatcher_registry: RegistryDispatcher
     ) -> None:
         """INTENT -> EFFECT is an invalid execution shape."""
         invalid_dispatcher = MockMessageDispatcher(
@@ -487,20 +489,20 @@ class TestFreezePattern:
     """Tests for freeze-after-init pattern."""
 
     def test_initial_state_not_frozen(
-        self, dispatcher_registry: DispatcherRegistry
+        self, dispatcher_registry: RegistryDispatcher
     ) -> None:
         """Registry should start unfrozen."""
         assert dispatcher_registry.is_frozen is False
 
     def test_freeze_sets_frozen_flag(
-        self, dispatcher_registry: DispatcherRegistry
+        self, dispatcher_registry: RegistryDispatcher
     ) -> None:
         """freeze() should set is_frozen to True."""
         dispatcher_registry.freeze()
         assert dispatcher_registry.is_frozen is True
 
     def test_freeze_is_idempotent(
-        self, dispatcher_registry: DispatcherRegistry
+        self, dispatcher_registry: RegistryDispatcher
     ) -> None:
         """Calling freeze() multiple times should be safe."""
         dispatcher_registry.freeze()
@@ -510,7 +512,7 @@ class TestFreezePattern:
 
     def test_register_after_freeze_raises(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should raise when registering after freeze."""
@@ -524,7 +526,7 @@ class TestFreezePattern:
 
     def test_unregister_after_freeze_raises(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should raise when unregistering after freeze."""
@@ -538,7 +540,7 @@ class TestFreezePattern:
 
     def test_get_dispatchers_before_freeze_raises(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should raise when getting dispatchers before freeze."""
@@ -552,7 +554,7 @@ class TestFreezePattern:
 
     def test_get_dispatcher_by_id_before_freeze_raises(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should raise when getting dispatcher by ID before freeze."""
@@ -574,7 +576,7 @@ class TestDispatcherLookup:
 
     def test_get_dispatchers_by_category(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
         event_compute_dispatcher: MockMessageDispatcher,
     ) -> None:
@@ -588,7 +590,7 @@ class TestDispatcherLookup:
 
     def test_get_dispatchers_by_category_and_type(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
         event_compute_dispatcher: MockMessageDispatcher,
     ) -> None:
@@ -615,7 +617,7 @@ class TestDispatcherLookup:
 
     def test_get_dispatchers_empty_category(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should return empty list for category with no dispatchers."""
@@ -627,7 +629,7 @@ class TestDispatcherLookup:
 
     def test_get_dispatcher_by_id_found(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should return dispatcher when found by ID."""
@@ -641,7 +643,7 @@ class TestDispatcherLookup:
 
     def test_get_dispatcher_by_id_not_found(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should return None when dispatcher ID not found."""
@@ -662,7 +664,7 @@ class TestUnregistration:
 
     def test_unregister_existing_dispatcher(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should unregister existing dispatcher and return True."""
@@ -674,7 +676,7 @@ class TestUnregistration:
         assert dispatcher_registry.dispatcher_count == 0
 
     def test_unregister_nonexistent_dispatcher(
-        self, dispatcher_registry: DispatcherRegistry
+        self, dispatcher_registry: RegistryDispatcher
     ) -> None:
         """Should return False when dispatcher not found."""
         result = dispatcher_registry.unregister_dispatcher("nonexistent-dispatcher")
@@ -682,7 +684,7 @@ class TestUnregistration:
 
     def test_unregister_removes_from_category_index(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
         event_compute_dispatcher: MockMessageDispatcher,
     ) -> None:
@@ -708,20 +710,20 @@ class TestStringRepresentation:
 
     def test_str_representation(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """__str__ should return formatted summary."""
         dispatcher_registry.register_dispatcher(event_reducer_dispatcher)
 
         result = str(dispatcher_registry)
-        assert "DispatcherRegistry" in result
+        assert "RegistryDispatcher" in result
         assert "dispatchers=1" in result
         assert "frozen=False" in result
 
     def test_str_representation_frozen(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """__str__ should show frozen state."""
@@ -733,14 +735,14 @@ class TestStringRepresentation:
 
     def test_repr_representation(
         self,
-        dispatcher_registry: DispatcherRegistry,
+        dispatcher_registry: RegistryDispatcher,
         event_reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
         """__repr__ should return detailed representation."""
         dispatcher_registry.register_dispatcher(event_reducer_dispatcher)
 
         result = repr(dispatcher_registry)
-        assert "DispatcherRegistry(" in result
+        assert "RegistryDispatcher(" in result
         assert "dispatchers=" in result
         assert "categories=" in result
         assert "event-reducer-dispatcher" in result

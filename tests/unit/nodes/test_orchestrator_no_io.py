@@ -25,8 +25,6 @@ import ast
 import inspect
 from unittest.mock import MagicMock
 
-import pytest
-
 # Import shared AST analysis utilities from test helpers
 # See: tests/helpers/ast_analysis.py for implementation details.
 from tests.helpers.ast_analysis import (
@@ -282,17 +280,34 @@ class TestOrchestratorNoDirectNetworkCalls:
             }
         )
 
-        # Filter out whitelisted timeout methods
+        # Whitelist: Heartbeat handler methods added by OMN-1006.
+        # These are legitimate public methods for heartbeat event handling
+        # and do not violate the "pure coordinator" principle because they:
+        # 1. Delegate to HandlerNodeHeartbeat (no direct I/O)
+        # 2. Are optional integration points for liveness tracking
+        # 3. Follow the same delegation pattern as timeout coordination
+        heartbeat_handler_methods = frozenset(
+            {
+                "set_heartbeat_handler",  # Setter for heartbeat handler injection
+                "has_heartbeat_handler",  # Property to check if handler is set
+                "handle_heartbeat",  # Heartbeat event handler (delegates to handler)
+            }
+        )
+
+        # Combined whitelist of all allowed methods
+        whitelisted_methods = timeout_coordinator_methods | heartbeat_handler_methods
+
+        # Filter out whitelisted methods
         non_whitelisted_methods = [
-            m for m in own_methods if m not in timeout_coordinator_methods
+            m for m in own_methods if m not in whitelisted_methods
         ]
 
         # Orchestrator should have NO public methods defined directly
-        # except for whitelisted timeout coordination methods
+        # except for whitelisted coordination methods
         assert non_whitelisted_methods == [], (
             f"Orchestrator should have no custom public methods.\n"
             f"Found: {non_whitelisted_methods}\n"
-            f"(Whitelisted timeout methods: {sorted(timeout_coordinator_methods)})\n"
+            f"(Whitelisted methods: {sorted(whitelisted_methods)})\n"
             f"A pure coordinator delegates all work to the base class "
             f"which handles workflow execution via contract.yaml."
         )
@@ -329,7 +344,6 @@ class TestOrchestratorDelegatesToEffectProtocol:
         )
 
         # Verify it's a Protocol (runtime_checkable)
-        from typing import Protocol, runtime_checkable
 
         # Check it's marked as runtime_checkable
         assert hasattr(ProtocolEffect, "__protocol_attrs__") or hasattr(
@@ -467,22 +481,39 @@ class TestOrchestratorIsPureCoordinator:
             }
         )
 
-        # Pure coordinator should have only __init__ and whitelisted timeout methods
+        # Whitelist: Heartbeat handler methods added by OMN-1006.
+        # These are legitimate public methods for heartbeat event handling
+        # and do not violate the "pure coordinator" principle because they:
+        # 1. Delegate to HandlerNodeHeartbeat (no direct I/O)
+        # 2. Are optional integration points for liveness tracking
+        # 3. Follow the same delegation pattern as timeout coordination
+        heartbeat_handler_methods = frozenset(
+            {
+                "set_heartbeat_handler",  # Setter for heartbeat handler injection
+                "has_heartbeat_handler",  # Property to check if handler is set
+                "handle_heartbeat",  # Heartbeat event handler (delegates to handler)
+            }
+        )
+
+        # Combined whitelist of all allowed methods
+        whitelisted_methods = timeout_coordinator_methods | heartbeat_handler_methods
+
+        # Pure coordinator should have only __init__ and whitelisted methods
         non_init_methods = [
             name
             for name in method_names
-            if name != "__init__" and name not in timeout_coordinator_methods
+            if name != "__init__" and name not in whitelisted_methods
         ]
 
         assert not non_init_methods, (
             f"Pure coordinator should only have __init__ method.\n"
             f"Found additional methods: {non_init_methods}\n"
-            f"(Whitelisted timeout methods: {sorted(timeout_coordinator_methods)})\n"
+            f"(Whitelisted methods: {sorted(whitelisted_methods)})\n"
             f"Orchestrator should only call super().__init__(container) and rely on "
             f"base class + contract.yaml for all behavior."
         )
 
-        # Verify __init__ is minimal (just super().__init__ call)
+        # Verify __init__ is minimal (just super().__init__ call + handler initializers)
         init_method = next((m for m in methods if m.name == "__init__"), None)
         if init_method:
             # Count statements in __init__ body (excluding docstring)
@@ -490,12 +521,16 @@ class TestOrchestratorIsPureCoordinator:
                 stmt for stmt in init_method.body if not is_docstring(stmt)
             ]
 
-            # Allow up to 2 statements: super().__init__() call and possibly one assignment
-            assert len(init_statements) <= 2, (
-                f"__init__ should be minimal (1-2 statements).\n"
+            # Allow up to 3 statements:
+            # 1. super().__init__(container) call
+            # 2. _timeout_coordinator = None (OMN-932)
+            # 3. _heartbeat_handler = None (OMN-1006)
+            assert len(init_statements) <= 3, (
+                f"__init__ should be minimal (1-3 statements).\n"
                 f"Found {len(init_statements)} statements in __init__ body.\n"
-                f"Orchestrator should only call super().__init__(container) and rely on "
-                f"base class + contract.yaml for all behavior."
+                f"Orchestrator should only call super().__init__(container) and "
+                f"initialize optional handler attributes, relying on "
+                f"base class + contract.yaml for all other behavior."
             )
 
     def test_orchestrator_docstring_documents_delegation_pattern(

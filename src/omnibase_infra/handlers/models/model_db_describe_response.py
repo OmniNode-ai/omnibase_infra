@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Database Describe Response Model.
 
-This module provides the Pydantic model for database adapter metadata
+This module provides the Pydantic model for database handler metadata
 and capabilities responses.
 """
 
@@ -12,22 +12,24 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelDbDescribeResponse(BaseModel):
-    """Database adapter metadata and capabilities response.
+    """Database handler metadata and capabilities response.
 
-    Provides adapter metadata including supported operations,
+    Provides handler metadata including supported operations,
     configuration, and version information.
 
     Attributes:
-        adapter_type: Type of adapter (e.g., "db")
+        handler_type: Architectural role of handler (e.g., "infra_handler")
+        handler_category: Behavioral classification (e.g., "effect")
         supported_operations: List of supported operation types
         pool_size: Connection pool size
         timeout_seconds: Query timeout in seconds
-        initialized: Whether the adapter has been initialized
-        version: Adapter version string
+        initialized: Whether the handler has been initialized
+        version: Handler version string
 
     Example:
         >>> describe = ModelDbDescribeResponse(
-        ...     adapter_type="db",
+        ...     handler_type="infra_handler",
+        ...     handler_category="effect",
         ...     supported_operations=["db.query", "db.execute"],
         ...     pool_size=5,
         ...     timeout_seconds=30.0,
@@ -45,8 +47,11 @@ class ModelDbDescribeResponse(BaseModel):
         from_attributes=True,  # Support pytest-xdist compatibility
     )
 
-    adapter_type: str = Field(
-        description="Type of adapter (e.g., 'db')",
+    handler_type: str = Field(
+        description="Architectural role of handler (e.g., 'infra_handler')",
+    )
+    handler_category: str = Field(
+        description="Behavioral classification (e.g., 'effect')",
     )
     supported_operations: list[str] = Field(
         description="List of supported operation types",
@@ -60,10 +65,10 @@ class ModelDbDescribeResponse(BaseModel):
         description="Query timeout in seconds",
     )
     initialized: bool = Field(
-        description="Whether the adapter has been initialized",
+        description="Whether the handler has been initialized",
     )
     version: str = Field(
-        description="Adapter version string",
+        description="Handler version string",
     )
 
 

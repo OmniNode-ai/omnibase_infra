@@ -330,14 +330,14 @@ class TestModelRuntimeSchedulerConfig:
         """Test that environment variables override configuration."""
         # Set environment variables
         env_vars = {
-            "RUNTIME_SCHEDULER_TICK_INTERVAL_MS": "5000",
-            "RUNTIME_SCHEDULER_ID": "env-scheduler",
-            "RUNTIME_SCHEDULER_TICK_TOPIC": "env.runtime.tick.v1",
-            "RUNTIME_SCHEDULER_PERSIST_SEQUENCE": "false",
-            "RUNTIME_SCHEDULER_MAX_JITTER_MS": "50",
-            "RUNTIME_SCHEDULER_CB_THRESHOLD": "10",
-            "RUNTIME_SCHEDULER_CB_RESET_TIMEOUT": "120.0",
-            "RUNTIME_SCHEDULER_ENABLE_METRICS": "false",
+            "ONEX_RUNTIME_SCHEDULER_TICK_INTERVAL_MS": "5000",
+            "ONEX_RUNTIME_SCHEDULER_ID": "env-scheduler",
+            "ONEX_RUNTIME_SCHEDULER_TICK_TOPIC": "env.runtime.tick.v1",
+            "ONEX_RUNTIME_SCHEDULER_PERSIST_SEQUENCE": "false",
+            "ONEX_RUNTIME_SCHEDULER_MAX_JITTER_MS": "50",
+            "ONEX_RUNTIME_SCHEDULER_CB_THRESHOLD": "10",
+            "ONEX_RUNTIME_SCHEDULER_CB_RESET_TIMEOUT": "120.0",
+            "ONEX_RUNTIME_SCHEDULER_ENABLE_METRICS": "false",
         }
 
         with patch.dict(os.environ, env_vars, clear=False):
@@ -356,7 +356,7 @@ class TestModelRuntimeSchedulerConfig:
         """Test that invalid integer env var uses default with warning."""
         with patch.dict(
             os.environ,
-            {"RUNTIME_SCHEDULER_TICK_INTERVAL_MS": "not-a-number"},
+            {"ONEX_RUNTIME_SCHEDULER_TICK_INTERVAL_MS": "not-a-number"},
             clear=False,
         ):
             config = ModelRuntimeSchedulerConfig.default()
@@ -370,14 +370,18 @@ class TestModelRuntimeSchedulerConfig:
 
         for val in true_values:
             with patch.dict(
-                os.environ, {"RUNTIME_SCHEDULER_PERSIST_SEQUENCE": val}, clear=False
+                os.environ,
+                {"ONEX_RUNTIME_SCHEDULER_PERSIST_SEQUENCE": val},
+                clear=False,
             ):
                 config = ModelRuntimeSchedulerConfig.default()
                 assert config.persist_sequence_number is True, f"Failed for '{val}'"
 
         for val in false_values:
             with patch.dict(
-                os.environ, {"RUNTIME_SCHEDULER_PERSIST_SEQUENCE": val}, clear=False
+                os.environ,
+                {"ONEX_RUNTIME_SCHEDULER_PERSIST_SEQUENCE": val},
+                clear=False,
             ):
                 config = ModelRuntimeSchedulerConfig.default()
                 assert config.persist_sequence_number is False, f"Failed for '{val}'"
@@ -579,7 +583,7 @@ class TestRuntimeSchedulerLifecycle:
 
         # Verify tick loop has stopped
         assert scheduler.is_running is False
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.STOPPED
 
     async def test_scheduler_status_transitions(
@@ -587,17 +591,17 @@ class TestRuntimeSchedulerLifecycle:
     ) -> None:
         """Test scheduler status transitions through lifecycle."""
         # Initial state
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.STOPPED
 
         # After start
         await scheduler.start()
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.RUNNING
 
         # After stop
         await scheduler.stop()
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.STOPPED
 
 
@@ -744,7 +748,21 @@ class TestRuntimeSchedulerRestartSafety:
         scheduler_config: ModelRuntimeSchedulerConfig,
         mock_event_bus: AsyncMock,
     ) -> None:
-        """Test that sequence number is marked for persistence on stop."""
+        """Test that sequence number is marked for persistence on stop.
+
+        This test mocks the Valkey client to verify that persistence logic
+        works correctly when Valkey is available. When stop() is called,
+        the current sequence number should be persisted to Valkey.
+        """
+        from unittest.mock import MagicMock
+
+        # Create mock Valkey client
+        mock_valkey_client = MagicMock()
+        mock_valkey_client.ping = AsyncMock(return_value=True)
+        mock_valkey_client.get = AsyncMock(return_value=None)  # No existing sequence
+        mock_valkey_client.set = AsyncMock(return_value=True)
+        mock_valkey_client.aclose = AsyncMock(return_value=None)
+
         # Create config with persistence enabled
         config_with_persistence = ModelRuntimeSchedulerConfig(
             tick_interval_ms=100,  # Minimum allowed
@@ -756,23 +774,32 @@ class TestRuntimeSchedulerRestartSafety:
             persist_sequence_number=True,  # Enable persistence
         )
 
-        scheduler = RuntimeScheduler(
-            config=config_with_persistence, event_bus=mock_event_bus
-        )
+        with patch(
+            "omnibase_infra.runtime.runtime_scheduler.redis.Redis",
+            return_value=mock_valkey_client,
+        ):
+            scheduler = RuntimeScheduler(
+                config=config_with_persistence, event_bus=mock_event_bus
+            )
 
-        await scheduler.start()
+            await scheduler.start()
 
-        # Emit some ticks
-        for _ in range(5):
-            await scheduler.emit_tick()
+            # Emit some ticks
+            for _ in range(5):
+                await scheduler.emit_tick()
 
-        await scheduler.stop()
+            await scheduler.stop()
 
-        # Check metrics show persistence was tracked
-        metrics = scheduler.get_metrics()
-        assert metrics.current_sequence_number == 5
-        # last_persisted_sequence should be updated on stop
-        assert metrics.last_persisted_sequence == 5
+            # Check metrics show persistence was tracked
+            metrics = await scheduler.get_metrics()
+            assert metrics.current_sequence_number == 5
+            # last_persisted_sequence should be updated on stop
+            assert metrics.last_persisted_sequence == 5
+
+            # Verify Valkey was called with correct sequence
+            mock_valkey_client.set.assert_called_with(
+                config_with_persistence.sequence_number_key, "5"
+            )
 
     async def test_concurrent_tick_emission_sequence_safety(
         self, scheduler: RuntimeScheduler, mock_event_bus: AsyncMock
@@ -813,14 +840,14 @@ class TestRuntimeSchedulerMetrics:
         self, scheduler: RuntimeScheduler, mock_event_bus: AsyncMock
     ) -> None:
         """Test that ticks_emitted counter increments."""
-        metrics_before = scheduler.get_metrics()
+        metrics_before = await scheduler.get_metrics()
         assert metrics_before.ticks_emitted == 0
 
         await scheduler.emit_tick()
         await scheduler.emit_tick()
         await scheduler.emit_tick()
 
-        metrics_after = scheduler.get_metrics()
+        metrics_after = await scheduler.get_metrics()
         assert metrics_after.ticks_emitted == 3
 
     async def test_metrics_track_failures(
@@ -829,16 +856,18 @@ class TestRuntimeSchedulerMetrics:
         mock_event_bus: AsyncMock,
     ) -> None:
         """Test that failure count increments on publish errors."""
+        from omnibase_infra.errors import InfraConnectionError
+
         # Configure event bus to fail
         mock_event_bus.publish = AsyncMock(side_effect=Exception("Publish failed"))
 
         scheduler = RuntimeScheduler(config=scheduler_config, event_bus=mock_event_bus)
 
-        # Try to emit tick (should fail)
-        with pytest.raises(Exception, match="Publish failed"):
+        # Try to emit tick (should fail with wrapped ONEX error)
+        with pytest.raises(InfraConnectionError):
             await scheduler.emit_tick()
 
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.ticks_failed == 1
 
     async def test_metrics_timing_recorded(
@@ -847,7 +876,7 @@ class TestRuntimeSchedulerMetrics:
         """Test that tick duration timing is recorded."""
         await scheduler.emit_tick()
 
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
 
         # Duration should be recorded (non-zero)
         assert metrics.last_tick_duration_ms > 0
@@ -862,7 +891,7 @@ class TestRuntimeSchedulerMetrics:
         for _ in range(5):
             await scheduler.emit_tick()
 
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
 
         # Max should be >= average
         assert metrics.max_tick_duration_ms >= metrics.average_tick_duration_ms
@@ -876,7 +905,7 @@ class TestRuntimeSchedulerMetrics:
         # Wait a bit
         await asyncio.sleep(0.1)
 
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.started_at is not None
         assert metrics.total_uptime_seconds > 0
 
@@ -889,7 +918,7 @@ class TestRuntimeSchedulerMetrics:
         # Successful emit
         await scheduler.emit_tick()
 
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.consecutive_failures == 0
 
 
@@ -922,7 +951,7 @@ class TestRuntimeSchedulerCircuitBreaker:
                 pass
 
         # Circuit should now be open
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.circuit_breaker_open is True
 
     async def test_circuit_breaker_blocks_when_open(
@@ -964,7 +993,7 @@ class TestRuntimeSchedulerCircuitBreaker:
         scheduler = RuntimeScheduler(config=scheduler_config, event_bus=mock_event_bus)
         await scheduler.emit_tick()
 
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.circuit_breaker_open is False
 
     async def test_circuit_breaker_auto_reset_after_timeout(
@@ -992,7 +1021,7 @@ class TestRuntimeSchedulerCircuitBreaker:
             except Exception:
                 pass
 
-        assert scheduler.get_metrics().circuit_breaker_open is True
+        assert (await scheduler.get_metrics()).circuit_breaker_open is True
 
         # Wait for reset timeout (1.0 seconds + small buffer)
         await asyncio.sleep(1.1)
@@ -1004,7 +1033,7 @@ class TestRuntimeSchedulerCircuitBreaker:
         await scheduler.emit_tick()
 
         # Circuit should be closed after success
-        assert scheduler.get_metrics().circuit_breaker_open is False
+        assert (await scheduler.get_metrics()).circuit_breaker_open is False
 
     async def test_start_blocked_when_circuit_open(
         self,
@@ -1152,7 +1181,7 @@ class TestRuntimeSchedulerEdgeCases:
         # Concurrently get metrics while ticks are being emitted
         async def get_metrics_repeatedly() -> None:
             for _ in range(10):
-                metrics = scheduler.get_metrics()
+                metrics = await scheduler.get_metrics()
                 assert metrics.scheduler_id == "test-scheduler"
                 await asyncio.sleep(0.01)
 
@@ -1174,7 +1203,7 @@ class TestRuntimeSchedulerEdgeCases:
         """Test that metrics snapshot doesn't change after emission."""
         await scheduler.emit_tick()
 
-        metrics1 = scheduler.get_metrics()
+        metrics1 = await scheduler.get_metrics()
         ticks1 = metrics1.ticks_emitted
 
         await scheduler.emit_tick()
@@ -1183,7 +1212,7 @@ class TestRuntimeSchedulerEdgeCases:
         assert metrics1.ticks_emitted == ticks1
 
         # New snapshot should show update
-        metrics2 = scheduler.get_metrics()
+        metrics2 = await scheduler.get_metrics()
         assert metrics2.ticks_emitted == ticks1 + 1
 
 
@@ -1202,14 +1231,14 @@ class TestRuntimeSchedulerIntegration:
     ) -> None:
         """Test complete lifecycle with metrics verification."""
         # Initial state
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.STOPPED
         assert metrics.ticks_emitted == 0
         assert metrics.started_at is None
 
         # Start scheduler
         await scheduler.start()
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.RUNNING
         assert metrics.started_at is not None
 
@@ -1217,13 +1246,13 @@ class TestRuntimeSchedulerIntegration:
         await asyncio.sleep(0.35)
 
         # Verify ticks were emitted
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.ticks_emitted >= 2
         assert metrics.current_sequence_number >= 2
 
         # Stop scheduler
         await scheduler.stop()
-        metrics = scheduler.get_metrics()
+        metrics = await scheduler.get_metrics()
         assert metrics.status == EnumSchedulerStatus.STOPPED
         assert not metrics.is_healthy()
 

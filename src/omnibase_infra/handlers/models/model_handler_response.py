@@ -9,12 +9,12 @@ infrastructure handlers.
 Usage Pattern:
     Each handler defines its own payload model and uses ModelHandlerResponse[PayloadType]:
 
-    - ConsulHandler: ModelHandlerResponse[ModelConsulHandlerPayload]
-    - DbAdapter: ModelHandlerResponse[ModelDbQueryPayload]
-    - VaultAdapter: ModelHandlerResponse[ModelVaultHandlerPayload]
-    - HttpRestAdapter: ModelHandlerResponse[ModelHttpHandlerPayload]
+    - HandlerConsul: ModelHandlerResponse[ModelConsulHandlerPayload]
+    - HandlerDb: ModelHandlerResponse[ModelDbQueryPayload]
+    - HandlerVault: ModelHandlerResponse[ModelVaultHandlerPayload]
+    - HttpRestHandler: ModelHandlerResponse[ModelHttpHandlerPayload]
 
-This replaces raw dict[str, JsonValue] responses with strongly-typed models,
+This replaces raw dict[str, JsonType] responses with strongly-typed models,
 ensuring consistent access patterns (response.status, response.payload, etc.)
 across all handlers.
 """

@@ -13,10 +13,13 @@ Payload Types:
     - ModelConsulKVPutPayload: KV put operation result
     - ModelConsulRegisterPayload: Service registration result
     - ModelConsulDeregisterPayload: Service deregistration result
-    - ModelConsulHealthCheckPayload: Health check operation result
 
 Union Type:
     ConsulPayload: Discriminated union of all payload types using operation_type field
+
+Registry-Based Alternative (OMN-1007):
+    - ModelPayloadConsul: Base model for all Consul handler payloads
+    - RegistryPayloadConsul: Decorator-based registry for payload type discovery
 """
 
 from omnibase_infra.handlers.models.consul.enum_consul_operation_type import (
@@ -25,12 +28,12 @@ from omnibase_infra.handlers.models.consul.enum_consul_operation_type import (
 from omnibase_infra.handlers.models.consul.model_consul_deregister_payload import (
     ModelConsulDeregisterPayload,
 )
+from omnibase_infra.handlers.models.consul.model_consul_handler_config import (
+    ModelConsulHandlerConfig,
+)
 from omnibase_infra.handlers.models.consul.model_consul_handler_payload import (
     ConsulPayload,
     ModelConsulHandlerPayload,
-)
-from omnibase_infra.handlers.models.consul.model_consul_health_check_payload import (
-    ModelConsulHealthCheckPayload,
 )
 from omnibase_infra.handlers.models.consul.model_consul_kv_get_found_payload import (
     ModelConsulKVGetFoundPayload,
@@ -50,17 +53,29 @@ from omnibase_infra.handlers.models.consul.model_consul_kv_put_payload import (
 from omnibase_infra.handlers.models.consul.model_consul_register_payload import (
     ModelConsulRegisterPayload,
 )
+from omnibase_infra.handlers.models.consul.model_consul_retry_config import (
+    ModelConsulRetryConfig,
+)
+from omnibase_infra.handlers.models.consul.model_payload_consul import (
+    ModelPayloadConsul,
+)
+from omnibase_infra.handlers.models.consul.registry_payload_consul import (
+    RegistryPayloadConsul,
+)
 
 __all__: list[str] = [
+    "ConsulPayload",
     "EnumConsulOperationType",
-    "ModelConsulKVItem",
+    "ModelConsulDeregisterPayload",
+    "ModelConsulHandlerConfig",
+    "ModelConsulHandlerPayload",
     "ModelConsulKVGetFoundPayload",
     "ModelConsulKVGetNotFoundPayload",
     "ModelConsulKVGetRecursePayload",
+    "ModelConsulKVItem",
     "ModelConsulKVPutPayload",
     "ModelConsulRegisterPayload",
-    "ModelConsulDeregisterPayload",
-    "ModelConsulHealthCheckPayload",
-    "ConsulPayload",
-    "ModelConsulHandlerPayload",
+    "ModelConsulRetryConfig",
+    "ModelPayloadConsul",
+    "RegistryPayloadConsul",
 ]

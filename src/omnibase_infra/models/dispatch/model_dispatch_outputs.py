@@ -184,6 +184,36 @@ class ModelDispatchOutputs(BaseModel):
     def __bool__(self) -> bool:
         """Check if there are any output topics.
 
+        Warning:
+            **Non-standard __bool__ behavior**: This model overrides ``__bool__`` to
+            return ``True`` only when the topics list is non-empty. This differs from
+            typical Pydantic model behavior where ``bool(model)`` always returns ``True``
+            for any valid model instance.
+
+            This design enables idiomatic output presence checks::
+
+                if outputs:
+                    # There are topics to process
+                    for topic in outputs:
+                        publish_to(topic)
+                else:
+                    # No output was produced
+                    pass
+
+            If you need to check model validity instead, use explicit checks::
+
+                # Check for outputs (uses __bool__)
+                if outputs:
+                    ...
+
+                # Check model is valid (always True for constructed instance)
+                if outputs is not None:
+                    ...
+
+                # Explicit length check (preferred for clarity)
+                if len(outputs) > 0:
+                    ...
+
         Returns:
             True if there is at least one topic, False otherwise.
 

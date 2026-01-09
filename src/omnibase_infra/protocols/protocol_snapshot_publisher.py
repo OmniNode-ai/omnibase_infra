@@ -136,9 +136,10 @@ class ProtocolSnapshotPublisher(Protocol):
         - Tombstone: null value indicates entity deletion
         - Consumers see: only latest snapshot per entity
 
-    Thread Safety:
-        Implementations must be thread-safe for concurrent publishing.
-        Multiple callers may invoke publish_snapshot concurrently.
+    Concurrency Safety:
+        Implementations must be coroutine-safe for concurrent async publishing.
+        Multiple coroutines may invoke publish_snapshot concurrently. Use
+        asyncio.Lock for shared mutable state (coroutine-safe, not thread-safe).
 
     Error Handling:
         All methods should raise OnexError subclasses on failure:
@@ -223,11 +224,13 @@ class ProtocolSnapshotPublisher(Protocol):
 
         Example:
             ```python
+            from omnibase_core.enums import EnumNodeKind
+
             snapshot = ModelRegistrationProjection(
                 entity_id=uuid4(),
                 domain="registration",
                 current_state=EnumRegistrationState.ACTIVE,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 last_applied_event_id=uuid4(),
                 registered_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),

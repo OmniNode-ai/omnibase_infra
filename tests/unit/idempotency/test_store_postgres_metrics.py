@@ -68,9 +68,12 @@ class TestPostgresIdempotencyStoreMetrics:
         yield store
         await store.shutdown()
 
-    def test_initial_metrics_are_zero(self, store: PostgresIdempotencyStore) -> None:
+    @pytest.mark.asyncio
+    async def test_initial_metrics_are_zero(
+        self, store: PostgresIdempotencyStore
+    ) -> None:
         """Test that metrics start at zero for new store."""
-        metrics = store.get_metrics()
+        metrics = await store.get_metrics()
 
         assert metrics.total_checks == 0
         assert metrics.duplicate_count == 0
@@ -94,7 +97,7 @@ class TestPostgresIdempotencyStoreMetrics:
 
         await initialized_store.check_and_record(uuid4())
 
-        metrics = initialized_store.get_metrics()
+        metrics = await initialized_store.get_metrics()
         assert metrics.total_checks == 1
         assert metrics.duplicate_count == 0
         assert metrics.error_count == 0
@@ -113,7 +116,7 @@ class TestPostgresIdempotencyStoreMetrics:
 
         await initialized_store.check_and_record(uuid4())
 
-        metrics = initialized_store.get_metrics()
+        metrics = await initialized_store.get_metrics()
         assert metrics.total_checks == 1
         assert metrics.duplicate_count == 1
         assert metrics.error_count == 0
@@ -133,7 +136,7 @@ class TestPostgresIdempotencyStoreMetrics:
         with pytest.raises(InfraTimeoutError):
             await initialized_store.check_and_record(uuid4())
 
-        metrics = initialized_store.get_metrics()
+        metrics = await initialized_store.get_metrics()
         assert metrics.total_checks == 1
         assert metrics.duplicate_count == 0
         assert metrics.error_count == 1
@@ -155,7 +158,7 @@ class TestPostgresIdempotencyStoreMetrics:
         with pytest.raises(InfraConnectionError):
             await initialized_store.check_and_record(uuid4())
 
-        metrics = initialized_store.get_metrics()
+        metrics = await initialized_store.get_metrics()
         assert metrics.total_checks == 1
         assert metrics.error_count == 1
         assert metrics.error_rate == 1.0
@@ -173,7 +176,7 @@ class TestPostgresIdempotencyStoreMetrics:
 
         await initialized_store.cleanup_expired(ttl_seconds=86400)
 
-        metrics = initialized_store.get_metrics()
+        metrics = await initialized_store.get_metrics()
         assert metrics.total_cleanup_deleted == 42
         assert metrics.last_cleanup_deleted == 42
         assert metrics.last_cleanup_at is not None
@@ -196,7 +199,7 @@ class TestPostgresIdempotencyStoreMetrics:
         mock_conn.execute = AsyncMock(return_value="DELETE 20")
         await initialized_store.cleanup_expired(ttl_seconds=86400)
 
-        metrics = initialized_store.get_metrics()
+        metrics = await initialized_store.get_metrics()
         assert metrics.total_cleanup_deleted == 30  # 10 + 20
         assert metrics.last_cleanup_deleted == 20  # Most recent
 
@@ -224,7 +227,7 @@ class TestPostgresIdempotencyStoreMetrics:
         with pytest.raises(InfraTimeoutError):
             await initialized_store.check_and_record(uuid4())
 
-        metrics = initialized_store.get_metrics()
+        metrics = await initialized_store.get_metrics()
         assert metrics.total_checks == 4
         assert metrics.duplicate_count == 1
         assert metrics.error_count == 1
@@ -233,10 +236,13 @@ class TestPostgresIdempotencyStoreMetrics:
         assert metrics.success_count == 2  # 4 - 1 - 1
         assert metrics.success_rate == 0.5  # 2/4
 
-    def test_get_metrics_returns_copy(self, store: PostgresIdempotencyStore) -> None:
+    @pytest.mark.asyncio
+    async def test_get_metrics_returns_copy(
+        self, store: PostgresIdempotencyStore
+    ) -> None:
         """Test that get_metrics returns a copy to prevent external mutation."""
-        metrics1 = store.get_metrics()
+        metrics1 = await store.get_metrics()
         metrics1.total_checks = 100  # Mutate the copy
 
-        metrics2 = store.get_metrics()
+        metrics2 = await store.get_metrics()
         assert metrics2.total_checks == 0  # Original unchanged

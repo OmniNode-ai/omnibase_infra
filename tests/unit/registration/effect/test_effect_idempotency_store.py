@@ -28,6 +28,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import (
     ModelEffectIdempotencyConfig,
@@ -430,7 +431,7 @@ class TestConfiguration:
     def test_config_is_frozen(self) -> None:
         """Test that config is immutable."""
         config = ModelEffectIdempotencyConfig()
-        with pytest.raises(Exception):  # Pydantic raises ValidationError
+        with pytest.raises(ValidationError):
             config.max_cache_size = 5000  # type: ignore[misc]
 
     def test_store_uses_config(self) -> None:

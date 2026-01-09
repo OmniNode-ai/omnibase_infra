@@ -9,14 +9,21 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
     EnumVaultOperationType,
 )
+from omnibase_infra.handlers.models.vault.model_payload_vault import (
+    ModelPayloadVault,
+)
+from omnibase_infra.handlers.models.vault.registry_payload_vault import (
+    RegistryPayloadVault,
+)
 
 
-class ModelVaultListPayload(BaseModel):
+@RegistryPayloadVault.register("list_secrets")
+class ModelVaultListPayload(ModelPayloadVault):
     """Payload for vault.list_secrets operation result.
 
     Contains the list of secret keys at the specified path.

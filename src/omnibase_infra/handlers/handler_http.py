@@ -1,26 +1,35 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""HTTP REST Adapter - MVP implementation using httpx async client.
+"""HTTP REST Handler - MVP implementation using httpx async client.
 
 Supports GET and POST operations with 30-second fixed timeout.
 PUT, DELETE, PATCH deferred to Beta. Retry logic and rate limiting deferred to Beta.
+
+Note:
+    Environment variable configuration (ONEX_HTTP_TIMEOUT, ONEX_HTTP_MAX_REQUEST_SIZE,
+    ONEX_HTTP_MAX_RESPONSE_SIZE) is parsed at module import time, not at handler
+    instantiation. This means:
+
+    - Changes to environment variables require application restart to take effect
+    - Tests should use ``unittest.mock.patch.dict(os.environ, ...)`` before importing,
+      or use ``importlib.reload()`` to re-import the module after patching
+    - This is an intentional design choice for startup-time validation
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import httpx
-from omnibase_core.enums.enum_handler_type import EnumHandlerType
 from omnibase_core.models.dispatch import ModelHandlerOutput
 
-from omnibase_infra.enums import EnumInfraTransportType
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -29,13 +38,37 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.handlers.models.http import ModelHttpBodyContent
 from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.utils import parse_env_float, parse_env_int
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TIMEOUT_SECONDS: float = 30.0
-_DEFAULT_MAX_REQUEST_SIZE: int = 10 * 1024 * 1024  # 10 MB
-_DEFAULT_MAX_RESPONSE_SIZE: int = 50 * 1024 * 1024  # 50 MB
+
+_DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
+    "ONEX_HTTP_TIMEOUT",
+    30.0,
+    min_value=1.0,
+    max_value=300.0,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="http_handler",
+)
+_DEFAULT_MAX_REQUEST_SIZE: int = parse_env_int(
+    "ONEX_HTTP_MAX_REQUEST_SIZE",
+    10 * 1024 * 1024,
+    min_value=1024,
+    max_value=104857600,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="http_handler",
+)  # 10 MB default, min 1 KB, max 100 MB
+_DEFAULT_MAX_RESPONSE_SIZE: int = parse_env_int(
+    "ONEX_HTTP_MAX_RESPONSE_SIZE",
+    50 * 1024 * 1024,
+    min_value=1024,
+    max_value=104857600,
+    transport_type=EnumInfraTransportType.HTTP,
+    service_name="http_handler",
+)  # 50 MB default, min 1 KB, max 100 MB
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 # Streaming chunk size for responses without Content-Length header
 _STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks
@@ -71,8 +104,8 @@ def _categorize_size(size: int) -> str:
         return "very_large"
 
 
-class HttpRestAdapter(MixinEnvelopeExtraction):
-    """HTTP REST protocol adapter using httpx async client (MVP: GET, POST only).
+class HttpRestHandler(MixinEnvelopeExtraction):
+    """HTTP REST protocol handler using httpx async client (MVP: GET, POST only).
 
     Security Features:
         - Configurable request/response size limits to prevent DoS attacks
@@ -81,7 +114,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
     """
 
     def __init__(self) -> None:
-        """Initialize HttpRestAdapter in uninitialized state."""
+        """Initialize HttpRestHandler in uninitialized state."""
         self._client: httpx.AsyncClient | None = None
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._max_request_size: int = _DEFAULT_MAX_REQUEST_SIZE
@@ -90,10 +123,77 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
 
     @property
     def handler_type(self) -> EnumHandlerType:
-        """Return EnumHandlerType.HTTP."""
-        return EnumHandlerType.HTTP
+        """Return the architectural role of this handler.
 
-    async def initialize(self, config: dict[str, JsonValue]) -> None:
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - This handler is an infrastructure
+            protocol/transport handler (as opposed to NODE_HANDLER for event
+            processing, PROJECTION_HANDLER for read models, or COMPUTE_HANDLER
+            for pure computation).
+
+        Note:
+            handler_type determines lifecycle, protocol selection, and runtime
+            invocation patterns. It answers "what is this handler in the architecture?"
+
+        See Also:
+            - handler_category: Behavioral classification (EFFECT/COMPUTE)
+            - transport_type: Specific transport protocol (HTTP/DATABASE/etc.)
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the behavioral classification of this handler.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - This handler performs side-effecting
+            I/O operations (external HTTP requests). EFFECT handlers are not
+            deterministic and interact with external systems.
+
+        Note:
+            handler_category determines security rules, determinism guarantees,
+            replay safety, and permissions. It answers "how does this handler
+            behave at runtime?"
+
+            Categories:
+            - COMPUTE: Pure, deterministic transformations (no side effects)
+            - EFFECT: Side-effecting I/O (database, HTTP, service calls)
+            - NONDETERMINISTIC_COMPUTE: Pure but not deterministic (UUID, random)
+
+        See Also:
+            - handler_type: Architectural role (INFRA_HANDLER/NODE_HANDLER/etc.)
+            - transport_type: Specific transport protocol (HTTP/DATABASE/etc.)
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
+        return EnumHandlerTypeCategory.EFFECT
+
+    @property
+    def transport_type(self) -> EnumInfraTransportType:
+        """Return the transport protocol identifier for this handler.
+
+        Returns:
+            EnumInfraTransportType.HTTP - This handler uses HTTP/REST protocol.
+
+        Note:
+            transport_type identifies the specific transport/protocol this handler
+            uses. It is the third dimension of the handler type system, alongside
+            handler_type (architectural role) and handler_category (behavioral
+            classification).
+
+            The three dimensions together form a complete handler classification:
+            - handler_type: INFRA_HANDLER (what it is architecturally)
+            - handler_category: EFFECT (how it behaves at runtime)
+            - transport_type: HTTP (what protocol it uses)
+
+        See Also:
+            - handler_type: Architectural role
+            - handler_category: Behavioral classification
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
+        return EnumInfraTransportType.HTTP
+
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize HTTP client with configurable timeout and size limits.
 
         Args:
@@ -119,6 +219,18 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             categories (small/medium/large/very_large) - exact sizes are not exposed
             in error messages to prevent attackers from probing limits.
         """
+        # Generate correlation_id for initialization tracing
+        init_correlation_id = uuid4()
+
+        logger.info(
+            "Initializing %s",
+            self.__class__.__name__,
+            extra={
+                "handler": self.__class__.__name__,
+                "correlation_id": str(init_correlation_id),
+            },
+        )
+
         try:
             self._timeout = _DEFAULT_TIMEOUT_SECONDS
 
@@ -155,34 +267,25 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             )
             self._initialized = True
             logger.info(
-                "HttpRestAdapter initialized",
+                "%s initialized successfully",
+                self.__class__.__name__,
                 extra={
+                    "handler": self.__class__.__name__,
                     "timeout_seconds": self._timeout,
-                    "max_request_size": self._max_request_size,
-                    "max_response_size": self._max_response_size,
+                    "max_request_size_bytes": self._max_request_size,
+                    "max_response_size_bytes": self._max_response_size,
+                    "correlation_id": str(init_correlation_id),
                 },
             )
         except Exception as e:
-            # Extract correlation_id from config if provided, otherwise generate new
-            raw_correlation_id = config.get("correlation_id")
-            if isinstance(raw_correlation_id, UUID):
-                error_correlation_id = raw_correlation_id
-            elif isinstance(raw_correlation_id, str):
-                try:
-                    error_correlation_id = UUID(raw_correlation_id)
-                except ValueError:
-                    error_correlation_id = uuid4()
-            else:
-                error_correlation_id = uuid4()
-
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="initialize",
-                target_name="http_rest_adapter",
-                correlation_id=error_correlation_id,
+                target_name="http_handler",
+                correlation_id=init_correlation_id,
             )
             raise ProtocolConfigurationError(
-                "Failed to initialize HTTP adapter", context=ctx
+                "Failed to initialize HTTP handler", context=ctx
             ) from e
 
     async def shutdown(self) -> None:
@@ -191,11 +294,11 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             await self._client.aclose()
             self._client = None
         self._initialized = False
-        logger.info("HttpRestAdapter shutdown complete")
+        logger.info("HttpRestHandler shutdown complete")
 
     async def execute(
-        self, envelope: dict[str, JsonValue]
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+        self, envelope: dict[str, object]
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Execute HTTP operation (http.get or http.post) from envelope.
 
         Args:
@@ -206,7 +309,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
                 - envelope_id: Optional envelope ID for causality tracking
 
         Returns:
-            ModelHandlerOutput[dict[str, JsonValue]] containing:
+            ModelHandlerOutput[dict[str, object]] containing:
                 - result: dict with status, payload (status_code, headers, body), and correlation_id
                 - input_envelope_id: UUID for causality tracking
                 - correlation_id: UUID for request/response correlation
@@ -219,11 +322,11 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="execute",
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HttpRestAdapter not initialized. Call initialize() first.", context=ctx
+                "HttpRestHandler not initialized. Call initialize() first.", context=ctx
             )
 
         operation = envelope.get("operation")
@@ -231,7 +334,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="execute",
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -242,7 +345,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -255,7 +358,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -267,7 +370,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="http_rest_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
@@ -298,7 +401,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
 
     def _extract_headers(
         self,
-        payload: dict[str, JsonValue],
+        payload: dict[str, object],
         operation: str,
         url: str,
         correlation_id: UUID,
@@ -380,7 +483,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="validate_request_size",
-                target_name="http_adapter",
+                target_name="http_handler",
                 correlation_id=correlation_id,
             )
             raise InfraUnavailableError(
@@ -525,6 +628,67 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
 
         return b"".join(chunks)
 
+    def _prepare_request_content(
+        self,
+        method: str,
+        headers: dict[str, str],
+        body_content: ModelHttpBodyContent,
+        ctx: ModelInfraErrorContext,
+    ) -> tuple[bytes | str | None, dict[str, object] | None, dict[str, str]]:
+        """Prepare request content for HTTP request.
+
+        Handles body serialization for POST requests, managing pre-serialized bytes
+        from size validation and various body types (dict, str, other JSON-serializable).
+
+        Args:
+            method: HTTP method (GET, POST)
+            headers: Request headers (will be copied, not mutated)
+            body_content: Model containing body and optional pre-serialized bytes
+            ctx: Error context for exceptions
+
+        Returns:
+            Tuple of (request_content, request_json, request_headers):
+                - request_content: bytes or str content for the request
+                - request_json: dict for httpx json= parameter (mutually exclusive with content)
+                - request_headers: Headers dict (possibly with Content-Type added)
+
+        Raises:
+            ProtocolConfigurationError: If body is not JSON-serializable.
+        """
+        request_content: bytes | str | None = None
+        request_json: dict[str, object] | None = None
+        request_headers = dict(headers)  # Copy to avoid mutating caller's headers
+
+        body = body_content.body
+        pre_serialized = body_content.pre_serialized
+
+        if method != "POST" or body is None:
+            return request_content, request_json, request_headers
+
+        if pre_serialized is not None:
+            # Use pre-serialized bytes from _validate_request_size to avoid
+            # double serialization. Set Content-Type header since we're using
+            # content= instead of json= parameter.
+            request_content = pre_serialized
+            if "content-type" not in {k.lower() for k in request_headers}:
+                request_headers["Content-Type"] = "application/json"
+        elif isinstance(body, dict):
+            # Fallback for dict bodies without pre-serialized content
+            # (shouldn't happen in normal flow, but handles edge cases)
+            request_json = body
+        elif isinstance(body, str):
+            request_content = body
+        else:
+            try:
+                request_content = json.dumps(body)
+            except TypeError as e:
+                raise ProtocolConfigurationError(
+                    f"Body is not JSON-serializable: {type(body).__name__}",
+                    context=ctx,
+                ) from e
+
+        return request_content, request_json, request_headers
+
     async def _execute_request(
         self,
         method: str,
@@ -534,7 +698,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
         correlation_id: UUID,
         input_envelope_id: UUID,
         pre_serialized: bytes | None = None,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Execute HTTP request with pre-read response size validation.
 
         Uses httpx streaming to validate Content-Length header BEFORE reading
@@ -552,7 +716,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
                 instead of re-serializing the body, avoiding double serialization.
 
         Returns:
-            ModelHandlerOutput[dict[str, JsonValue]] with wrapped response data
+            ModelHandlerOutput[dict[str, object]] with wrapped response data
         """
         if self._client is None:
             ctx = ModelInfraErrorContext(
@@ -562,7 +726,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HttpRestAdapter not initialized - call initialize() first", context=ctx
+                "HttpRestHandler not initialized - call initialize() first", context=ctx
             )
 
         ctx = ModelInfraErrorContext(
@@ -573,32 +737,10 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
         )
 
         # Prepare request content for POST
-        request_content: bytes | str | None = None
-        request_json: dict[str, JsonValue] | None = None
-        request_headers = dict(headers)  # Copy to avoid mutating caller's headers
-
-        if method == "POST" and body is not None:
-            if pre_serialized is not None:
-                # Use pre-serialized bytes from _validate_request_size to avoid
-                # double serialization. Set Content-Type header since we're using
-                # content= instead of json= parameter.
-                request_content = pre_serialized
-                if "content-type" not in {k.lower() for k in request_headers}:
-                    request_headers["Content-Type"] = "application/json"
-            elif isinstance(body, dict):
-                # Fallback for dict bodies without pre-serialized content
-                # (shouldn't happen in normal flow, but handles edge cases)
-                request_json = body
-            elif isinstance(body, str):
-                request_content = body
-            else:
-                try:
-                    request_content = json.dumps(body)
-                except TypeError as e:
-                    raise ProtocolConfigurationError(
-                        f"Body is not JSON-serializable: {type(body).__name__}",
-                        context=ctx,
-                    ) from e
+        body_content = ModelHttpBodyContent(body=body, pre_serialized=pre_serialized)
+        request_content, request_json, request_headers = self._prepare_request_content(
+            method, headers, body_content, ctx
+        )
 
         try:
             # Use streaming request to get response headers before reading body
@@ -645,7 +787,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
         body_bytes: bytes,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Build response envelope from httpx Response and pre-read body bytes.
 
         This method is used with streaming responses where the body has already
@@ -715,23 +857,50 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             },
         )
 
-    async def health_check(self) -> dict[str, JsonValue]:
-        """Return adapter health status."""
-        correlation_id = uuid4()
-        return {
-            "healthy": self._initialized and self._client is not None,
-            "initialized": self._initialized,
-            "adapter_type": self.handler_type.value,
-            "timeout_seconds": self._timeout,
-            "max_request_size": self._max_request_size,
-            "max_response_size": self._max_response_size,
-            "correlation_id": str(correlation_id),
-        }
+    def describe(self) -> dict[str, object]:
+        """Return handler metadata and capabilities for introspection.
 
-    def describe(self) -> dict[str, JsonValue]:
-        """Return adapter metadata and capabilities."""
+        This method exposes the handler's three-dimensional type classification
+        along with its operational configuration and capabilities.
+
+        Returns:
+            dict containing:
+                - handler_type: Architectural role from handler_type property
+                  (e.g., "infra_handler"). See EnumHandlerType for valid values.
+                - handler_category: Behavioral classification from handler_category
+                  property (e.g., "effect"). See EnumHandlerTypeCategory for valid values.
+                - transport_type: Protocol identifier from transport_type property
+                  (e.g., "http"). See EnumInfraTransportType for valid values.
+                - supported_operations: List of supported operations
+                - timeout_seconds: Request timeout in seconds
+                - max_request_size: Maximum request body size in bytes
+                - max_response_size: Maximum response body size in bytes
+                - initialized: Whether the handler is initialized
+                - version: Handler version string
+
+        Note:
+            The handler_type, handler_category, and transport_type fields form the
+            three-dimensional handler classification system:
+
+            1. handler_type (architectural role): Determines lifecycle and invocation
+               patterns. This handler is INFRA_HANDLER (protocol/transport handler).
+
+            2. handler_category (behavioral classification): Determines security rules
+               and replay safety. This handler is EFFECT (side-effecting I/O).
+
+            3. transport_type (protocol identifier): Identifies the specific transport.
+               This handler uses HTTP protocol.
+
+        See Also:
+            - handler_type property: Full documentation of architectural role
+            - handler_category property: Full documentation of behavioral classification
+            - transport_type property: Full documentation of transport identifier
+            - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+        """
         return {
-            "adapter_type": self.handler_type.value,
+            "handler_type": self.handler_type.value,
+            "handler_category": self.handler_category.value,
+            "transport_type": self.transport_type.value,
             "supported_operations": sorted(_SUPPORTED_OPERATIONS),
             "timeout_seconds": self._timeout,
             "max_request_size": self._max_request_size,
@@ -741,4 +910,4 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
         }
 
 
-__all__: list[str] = ["HttpRestAdapter"]
+__all__: list[str] = ["HttpRestHandler"]

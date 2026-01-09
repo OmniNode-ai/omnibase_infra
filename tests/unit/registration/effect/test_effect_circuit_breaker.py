@@ -33,14 +33,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumCircuitState, EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraUnavailableError,
     ModelInfraErrorContext,
 )
 from omnibase_infra.mixins.mixin_async_circuit_breaker import (
-    CircuitState,
     MixinAsyncCircuitBreaker,
 )
 
@@ -97,7 +96,7 @@ class MockConsulEffect(MixinAsyncCircuitBreaker):
     """Mock Consul effect with circuit breaker integration.
 
     Simulates a real infrastructure effect that uses the circuit breaker
-    mixin for fault tolerance, similar to ConsulHandler or VaultAdapter.
+    mixin for fault tolerance, similar to HandlerConsul or HandlerVault.
     """
 
     def __init__(
@@ -125,7 +124,7 @@ class MockConsulEffect(MixinAsyncCircuitBreaker):
     ) -> dict[str, str]:
         """Register service with circuit breaker protection.
 
-        This follows the pattern used by ConsulHandler and VaultAdapter.
+        This follows the pattern used by HandlerConsul and HandlerVault.
         """
         if correlation_id is None:
             correlation_id = uuid4()
@@ -164,11 +163,11 @@ class MockConsulEffect(MixinAsyncCircuitBreaker):
                 context=context,
             ) from e
 
-    def get_circuit_state(self) -> CircuitState:
+    def get_circuit_state(self) -> EnumCircuitState:
         """Get current circuit state (for test assertions)."""
         if self._circuit_breaker_open:
-            return CircuitState.OPEN
-        return CircuitState.CLOSED
+            return EnumCircuitState.OPEN
+        return EnumCircuitState.CLOSED
 
     def get_failure_count(self) -> int:
         """Get current failure count (for test assertions)."""
@@ -242,11 +241,11 @@ class MockPostgresEffect(MixinAsyncCircuitBreaker):
                 context=context,
             ) from e
 
-    def get_circuit_state(self) -> CircuitState:
+    def get_circuit_state(self) -> EnumCircuitState:
         """Get current circuit state."""
         if self._circuit_breaker_open:
-            return CircuitState.OPEN
-        return CircuitState.CLOSED
+            return EnumCircuitState.OPEN
+        return EnumCircuitState.CLOSED
 
     def get_failure_count(self) -> int:
         """Get current failure count."""
@@ -307,13 +306,13 @@ class TestEffectCircuitBreakerTransitions:
         - Verify circuit CLOSES
         """
         # Phase 1: Start with circuit CLOSED
-        assert consul_effect.get_circuit_state() == CircuitState.CLOSED
+        assert consul_effect.get_circuit_state() == EnumCircuitState.CLOSED
         assert consul_effect.get_failure_count() == 0
 
         # Phase 2: Successful operation keeps circuit closed
         result = await consul_effect.register_service("test-service")
         assert result["status"] == "registered"
-        assert consul_effect.get_circuit_state() == CircuitState.CLOSED
+        assert consul_effect.get_circuit_state() == EnumCircuitState.CLOSED
 
         # Phase 3: Configure backend to fail
         mock_consul_backend.should_fail = True
@@ -325,14 +324,14 @@ class TestEffectCircuitBreakerTransitions:
             # After each failure, check state
             if i < 2:
                 # Before threshold, circuit stays closed
-                assert consul_effect.get_circuit_state() == CircuitState.CLOSED
+                assert consul_effect.get_circuit_state() == EnumCircuitState.CLOSED
                 assert consul_effect.get_failure_count() == i + 1
             else:
                 # At threshold, circuit opens
-                assert consul_effect.get_circuit_state() == CircuitState.OPEN
+                assert consul_effect.get_circuit_state() == EnumCircuitState.OPEN
 
         # Phase 5: Verify circuit is OPEN
-        assert consul_effect.get_circuit_state() == CircuitState.OPEN
+        assert consul_effect.get_circuit_state() == EnumCircuitState.OPEN
         assert consul_effect.get_failure_count() >= 3
 
         # Phase 6: Wait for reset timeout (configured as 0.1s)
@@ -349,7 +348,7 @@ class TestEffectCircuitBreakerTransitions:
         assert result["status"] == "registered"
 
         # Phase 9: Verify circuit is CLOSED
-        assert consul_effect.get_circuit_state() == CircuitState.CLOSED
+        assert consul_effect.get_circuit_state() == EnumCircuitState.CLOSED
         assert consul_effect.get_failure_count() == 0
 
     async def test_circuit_transitions_half_open_to_open_on_failure(
@@ -364,7 +363,7 @@ class TestEffectCircuitBreakerTransitions:
             with pytest.raises(InfraConnectionError):
                 await consul_effect.register_service("failing-service")
 
-        assert consul_effect.get_circuit_state() == CircuitState.OPEN
+        assert consul_effect.get_circuit_state() == EnumCircuitState.OPEN
 
         # Wait for reset timeout to transition to HALF_OPEN
         await asyncio.sleep(0.15)
@@ -376,7 +375,7 @@ class TestEffectCircuitBreakerTransitions:
                 await consul_effect.register_service(f"still-failing-{i}")
 
         # Circuit should be OPEN again
-        assert consul_effect.get_circuit_state() == CircuitState.OPEN
+        assert consul_effect.get_circuit_state() == EnumCircuitState.OPEN
 
 
 @pytest.mark.unit
@@ -404,7 +403,7 @@ class TestEffectCircuitBreakerBlocking:
                 await consul_effect.register_service("failing-service")
 
         # Verify circuit is OPEN
-        assert consul_effect.get_circuit_state() == CircuitState.OPEN
+        assert consul_effect.get_circuit_state() == EnumCircuitState.OPEN
 
         # Phase 2: Reset backend call count to track new calls
         initial_call_count = mock_consul_backend.call_count
@@ -467,8 +466,8 @@ class TestEffectCircuitBreakerIsolation:
         - Verify PostgreSQL operations allowed
         """
         # Phase 1: Verify both circuits start CLOSED
-        assert consul_effect.get_circuit_state() == CircuitState.CLOSED
-        assert postgres_effect.get_circuit_state() == CircuitState.CLOSED
+        assert consul_effect.get_circuit_state() == EnumCircuitState.CLOSED
+        assert postgres_effect.get_circuit_state() == EnumCircuitState.CLOSED
 
         # Phase 2: Make Consul fail and open its circuit
         mock_consul_backend.should_fail = True
@@ -477,15 +476,15 @@ class TestEffectCircuitBreakerIsolation:
                 await consul_effect.register_service("failing-consul-service")
 
         # Phase 3: Verify Consul circuit is OPEN
-        assert consul_effect.get_circuit_state() == CircuitState.OPEN
+        assert consul_effect.get_circuit_state() == EnumCircuitState.OPEN
 
         # Phase 4: Verify PostgreSQL circuit is still CLOSED
-        assert postgres_effect.get_circuit_state() == CircuitState.CLOSED
+        assert postgres_effect.get_circuit_state() == EnumCircuitState.CLOSED
 
         # Phase 5: Verify PostgreSQL operations still work
         result = await postgres_effect.execute_query("SELECT 1")
         assert result[0]["result"] == "success"
-        assert postgres_effect.get_circuit_state() == CircuitState.CLOSED
+        assert postgres_effect.get_circuit_state() == EnumCircuitState.CLOSED
 
         # Phase 6: Verify Consul operations are blocked
         with pytest.raises(InfraUnavailableError) as exc_info:
@@ -499,7 +498,7 @@ class TestEffectCircuitBreakerIsolation:
 
         # Postgres has 1 failure, Consul still blocked
         assert postgres_effect.get_failure_count() == 1
-        assert consul_effect.get_circuit_state() == CircuitState.OPEN
+        assert consul_effect.get_circuit_state() == EnumCircuitState.OPEN
 
     async def test_multiple_effects_recover_independently(
         self,
@@ -519,8 +518,8 @@ class TestEffectCircuitBreakerIsolation:
             with pytest.raises(InfraConnectionError):
                 await postgres_effect.execute_query("SELECT 1")
 
-        assert consul_effect.get_circuit_state() == CircuitState.OPEN
-        assert postgres_effect.get_circuit_state() == CircuitState.OPEN
+        assert consul_effect.get_circuit_state() == EnumCircuitState.OPEN
+        assert postgres_effect.get_circuit_state() == EnumCircuitState.OPEN
 
         # Wait for reset timeout
         await asyncio.sleep(0.15)
@@ -531,13 +530,13 @@ class TestEffectCircuitBreakerIsolation:
 
         result = await consul_effect.register_service("recovered")
         assert result["status"] == "registered"
-        assert consul_effect.get_circuit_state() == CircuitState.CLOSED
+        assert consul_effect.get_circuit_state() == EnumCircuitState.CLOSED
 
         # PostgreSQL still failing
         for _ in range(3):
             with pytest.raises(InfraConnectionError):
                 await postgres_effect.execute_query("SELECT 1")
-        assert postgres_effect.get_circuit_state() == CircuitState.OPEN
+        assert postgres_effect.get_circuit_state() == EnumCircuitState.OPEN
 
 
 @pytest.mark.unit
@@ -572,7 +571,7 @@ class TestEffectCircuitBreakerCorrelationId:
             assert exc_info.value.model.correlation_id == test_correlation_id
 
         # Phase 3: Verify circuit is OPEN
-        assert consul_effect.get_circuit_state() == CircuitState.OPEN
+        assert consul_effect.get_circuit_state() == EnumCircuitState.OPEN
 
         # Phase 4: Attempt operation with the same correlation_id
         with pytest.raises(InfraUnavailableError) as exc_info:
@@ -664,7 +663,7 @@ class TestEffectCircuitBreakerEdgeCases:
             with pytest.raises(InfraConnectionError):
                 await effect1.register_service("failing")
 
-        assert effect1.get_circuit_state() == CircuitState.OPEN
+        assert effect1.get_circuit_state() == EnumCircuitState.OPEN
 
         # Create new effect instance - should have fresh state
         mock_consul_backend.should_fail = False
@@ -676,7 +675,7 @@ class TestEffectCircuitBreakerEdgeCases:
             reset_timeout=60.0,
         )
 
-        assert effect2.get_circuit_state() == CircuitState.CLOSED
+        assert effect2.get_circuit_state() == EnumCircuitState.CLOSED
         assert effect2.get_failure_count() == 0
 
         # New effect should work normally
@@ -700,7 +699,7 @@ class TestEffectCircuitBreakerEdgeCases:
         with pytest.raises(InfraConnectionError):
             await effect.register_service("first-failure")
 
-        assert effect.get_circuit_state() == CircuitState.OPEN
+        assert effect.get_circuit_state() == EnumCircuitState.OPEN
 
         # Immediately blocked
         with pytest.raises(InfraUnavailableError):
@@ -724,7 +723,7 @@ class TestEffectCircuitBreakerEdgeCases:
             with pytest.raises(InfraConnectionError):
                 await effect.register_service("failing")
 
-        assert effect.get_circuit_state() == CircuitState.OPEN
+        assert effect.get_circuit_state() == EnumCircuitState.OPEN
 
         # With 0 timeout, next check should auto-reset to HALF_OPEN
         mock_consul_backend.should_fail = False
@@ -733,7 +732,7 @@ class TestEffectCircuitBreakerEdgeCases:
         # Should succeed (auto-reset)
         result = await effect.register_service("recovered")
         assert result["status"] == "registered"
-        assert effect.get_circuit_state() == CircuitState.CLOSED
+        assert effect.get_circuit_state() == EnumCircuitState.CLOSED
 
     async def test_concurrent_operations_thread_safety(
         self,
@@ -770,14 +769,14 @@ class TestEffectCircuitBreakerEdgeCases:
                 await consul_effect.register_service("failing")
 
         assert consul_effect.get_failure_count() == 2
-        assert consul_effect.get_circuit_state() == CircuitState.CLOSED
+        assert consul_effect.get_circuit_state() == EnumCircuitState.CLOSED
 
         # Successful operation should reset counter
         mock_consul_backend.should_fail = False
         await consul_effect.register_service("success")
 
         assert consul_effect.get_failure_count() == 0
-        assert consul_effect.get_circuit_state() == CircuitState.CLOSED
+        assert consul_effect.get_circuit_state() == EnumCircuitState.CLOSED
 
 
 @pytest.mark.unit

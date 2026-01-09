@@ -6,6 +6,20 @@ This module provides a reusable mixin for extracting correlation_id and envelope
 from request envelopes. These IDs are essential for distributed tracing and
 causality tracking across infrastructure components.
 
+Envelope Structure:
+    Request envelopes in ONEX infrastructure follow a standard structure::
+
+        {
+            "envelope_id": UUID,         # Unique ID for this specific envelope
+            "correlation_id": UUID,      # Groups related operations across services
+            "operation": str,            # Operation identifier (e.g., "http.get")
+            "payload": dict,             # Operation-specific payload data
+            "metadata": dict,            # Optional metadata (timestamps, sources)
+        }
+
+    The envelope_id and correlation_id fields can be either UUID objects or
+    string representations. This mixin handles both formats transparently.
+
 Features:
     - Extracts correlation_id for request grouping and distributed tracing
     - Extracts envelope_id for request/response causality tracking
@@ -18,7 +32,7 @@ Usage:
     from omnibase_infra.mixins import MixinEnvelopeExtraction
 
     class MyHandler(MixinEnvelopeExtraction):
-        async def handle(self, envelope: dict[str, JsonValue]):
+        async def handle(self, envelope: dict[str, object]):
             correlation_id = self._extract_correlation_id(envelope)
             envelope_id = self._extract_envelope_id(envelope)
             # ... use IDs for tracing and causality tracking
@@ -31,11 +45,7 @@ Correlation ID vs Envelope ID:
       Enables fine-grained request/response pairing even across async boundaries.
 """
 
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
 
 
 class MixinEnvelopeExtraction:
@@ -48,7 +58,7 @@ class MixinEnvelopeExtraction:
     extract tracing IDs from incoming request envelopes.
     """
 
-    def _extract_correlation_id(self, envelope: "dict[str, JsonValue]") -> UUID:
+    def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
         """Extract or generate correlation ID from envelope.
 
         Correlation IDs enable distributed tracing by grouping all operations
@@ -74,7 +84,7 @@ class MixinEnvelopeExtraction:
                 pass
         return uuid4()
 
-    def _extract_envelope_id(self, envelope: "dict[str, JsonValue]") -> UUID:
+    def _extract_envelope_id(self, envelope: dict[str, object]) -> UUID:
         """Extract or generate envelope ID for causality tracking.
 
         Envelope IDs enable end-to-end causality tracking in distributed systems.

@@ -15,9 +15,6 @@ from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag
 from omnibase_infra.handlers.models.vault.model_vault_delete_payload import (
     ModelVaultDeletePayload,
 )
-from omnibase_infra.handlers.models.vault.model_vault_health_check_payload import (
-    ModelVaultHealthCheckPayload,
-)
 from omnibase_infra.handlers.models.vault.model_vault_list_payload import (
     ModelVaultListPayload,
 )
@@ -60,8 +57,7 @@ VaultPayload = Annotated[
     | Annotated[ModelVaultWritePayload, Tag("write_secret")]
     | Annotated[ModelVaultDeletePayload, Tag("delete_secret")]
     | Annotated[ModelVaultListPayload, Tag("list_secrets")]
-    | Annotated[ModelVaultRenewTokenPayload, Tag("renew_token")]
-    | Annotated[ModelVaultHealthCheckPayload, Tag("health_check")],
+    | Annotated[ModelVaultRenewTokenPayload, Tag("renew_token")],
     Discriminator(_vault_payload_discriminator),
 ]
 
@@ -70,7 +66,7 @@ class ModelVaultHandlerPayload(BaseModel):
     """Wrapper model for Vault handler payloads.
 
     Contains the discriminated union of all possible Vault operation payloads.
-    This allows the VaultAdapter to return a consistent payload wrapper while
+    This allows the HandlerVault to return a consistent payload wrapper while
     the actual payload type varies based on the operation.
 
     Attributes:
@@ -100,6 +96,6 @@ class ModelVaultHandlerPayload(BaseModel):
 
 
 __all__: list[str] = [
-    "VaultPayload",
     "ModelVaultHandlerPayload",
+    "VaultPayload",
 ]

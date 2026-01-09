@@ -29,8 +29,8 @@ import pytest
 from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
 )
-from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.validation import (
     ExecutionShapeValidator,
@@ -87,7 +87,7 @@ class TestReducerReturningEventsRejected:
             if v.violation_type == EnumExecutionShapeViolation.REDUCER_RETURNS_EVENTS
         ]
         assert len(reducer_event_violations) >= 1
-        assert reducer_event_violations[0].handler_type == EnumHandlerType.REDUCER
+        assert reducer_event_violations[0].node_archetype == EnumNodeArchetype.REDUCER
         assert "event" in reducer_event_violations[0].message.lower()
 
     def test_reducer_returning_event_call_rejected_by_ast(self, tmp_path: Path) -> None:
@@ -121,7 +121,7 @@ class TestReducerReturningEventsRejected:
 
         # Should detect violation when reducer returns EVENT
         violation = validator.validate_handler_output(
-            handler_type=EnumHandlerType.REDUCER,
+            node_archetype=EnumNodeArchetype.REDUCER,
             output=OrderCreatedEvent(),
             output_category=EnumMessageCategory.EVENT,
         )
@@ -131,7 +131,7 @@ class TestReducerReturningEventsRejected:
             violation.violation_type
             == EnumExecutionShapeViolation.REDUCER_RETURNS_EVENTS
         )
-        assert violation.handler_type == EnumHandlerType.REDUCER
+        assert violation.node_archetype == EnumNodeArchetype.REDUCER
         assert violation.severity == "error"
 
     def test_reducer_returning_event_raises_via_decorator(self) -> None:
@@ -140,7 +140,7 @@ class TestReducerReturningEventsRejected:
         class OrderCreatedEvent:
             category = EnumMessageCategory.EVENT
 
-        @enforce_execution_shape(EnumHandlerType.REDUCER)
+        @enforce_execution_shape(EnumNodeArchetype.REDUCER)
         def bad_reducer_handler(data: dict) -> OrderCreatedEvent:
             return OrderCreatedEvent()
 
@@ -181,7 +181,7 @@ class TestOrchestratorPerformingIORejected:
             == EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_INTENTS
         ]
         assert len(intent_violations) >= 1
-        assert intent_violations[0].handler_type == EnumHandlerType.ORCHESTRATOR
+        assert intent_violations[0].node_archetype == EnumNodeArchetype.ORCHESTRATOR
 
     def test_orchestrator_returning_projection_rejected_by_ast(
         self, tmp_path: Path
@@ -208,7 +208,7 @@ class TestOrchestratorPerformingIORejected:
             == EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_PROJECTIONS
         ]
         assert len(projection_violations) >= 1
-        assert projection_violations[0].handler_type == EnumHandlerType.ORCHESTRATOR
+        assert projection_violations[0].node_archetype == EnumNodeArchetype.ORCHESTRATOR
 
     def test_orchestrator_returning_intent_rejected_by_runtime(self) -> None:
         """Orchestrator returning Intent rejected by runtime validator."""
@@ -218,7 +218,7 @@ class TestOrchestratorPerformingIORejected:
 
         validator = RuntimeShapeValidator()
         violation = validator.validate_handler_output(
-            handler_type=EnumHandlerType.ORCHESTRATOR,
+            node_archetype=EnumNodeArchetype.ORCHESTRATOR,
             output=CheckoutIntent(),
             output_category=EnumMessageCategory.INTENT,
         )
@@ -237,7 +237,7 @@ class TestOrchestratorPerformingIORejected:
 
         validator = RuntimeShapeValidator()
         violation = validator.validate_handler_output(
-            handler_type=EnumHandlerType.ORCHESTRATOR,
+            node_archetype=EnumNodeArchetype.ORCHESTRATOR,
             output=OrderProjection(),
             output_category=EnumNodeOutputType.PROJECTION,
         )
@@ -254,7 +254,7 @@ class TestOrchestratorPerformingIORejected:
         class CheckoutIntent:
             category = EnumMessageCategory.INTENT
 
-        @enforce_execution_shape(EnumHandlerType.ORCHESTRATOR)
+        @enforce_execution_shape(EnumNodeArchetype.ORCHESTRATOR)
         def bad_orchestrator(data: dict) -> CheckoutIntent:
             return CheckoutIntent()
 
@@ -272,7 +272,7 @@ class TestOrchestratorPerformingIORejected:
         class OrderProjection:
             category = EnumNodeOutputType.PROJECTION
 
-        @enforce_execution_shape(EnumHandlerType.ORCHESTRATOR)
+        @enforce_execution_shape(EnumNodeArchetype.ORCHESTRATOR)
         def bad_orchestrator(data: dict) -> OrderProjection:
             return OrderProjection()
 
@@ -313,7 +313,7 @@ class TestEffectReturningProjectionsRejected:
             == EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
         ]
         assert len(projection_violations) >= 1
-        assert projection_violations[0].handler_type == EnumHandlerType.EFFECT
+        assert projection_violations[0].node_archetype == EnumNodeArchetype.EFFECT
         assert "projection" in projection_violations[0].message.lower()
 
     def test_effect_returning_projection_call_rejected_by_ast(
@@ -347,7 +347,7 @@ class TestEffectReturningProjectionsRejected:
 
         validator = RuntimeShapeValidator()
         violation = validator.validate_handler_output(
-            handler_type=EnumHandlerType.EFFECT,
+            node_archetype=EnumNodeArchetype.EFFECT,
             output=UserProfileProjection(),
             output_category=EnumNodeOutputType.PROJECTION,
         )
@@ -357,7 +357,7 @@ class TestEffectReturningProjectionsRejected:
             violation.violation_type
             == EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
         )
-        assert violation.handler_type == EnumHandlerType.EFFECT
+        assert violation.node_archetype == EnumNodeArchetype.EFFECT
         assert violation.severity == "error"
 
     def test_effect_returning_projection_raises_via_decorator(self) -> None:
@@ -366,7 +366,7 @@ class TestEffectReturningProjectionsRejected:
         class UserProfileProjection:
             category = EnumNodeOutputType.PROJECTION
 
-        @enforce_execution_shape(EnumHandlerType.EFFECT)
+        @enforce_execution_shape(EnumNodeArchetype.EFFECT)
         def bad_effect_handler(data: dict) -> UserProfileProjection:
             return UserProfileProjection()
 
@@ -406,7 +406,7 @@ class TestReducerAccessingSystemTimeRejected:
             == EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME
         ]
         assert len(time_violations) >= 1
-        assert time_violations[0].handler_type == EnumHandlerType.REDUCER
+        assert time_violations[0].node_archetype == EnumNodeArchetype.REDUCER
         assert "deterministic" in time_violations[0].message.lower()
 
     def test_reducer_calling_datetime_now_rejected_by_ast(self, tmp_path: Path) -> None:
@@ -586,7 +586,7 @@ class TestHandlerDirectPublishRejected:
     def test_all_handler_types_forbidden_from_direct_publish(
         self, tmp_path: Path
     ) -> None:
-        """All handler types (Effect, Compute, Reducer, Orchestrator) are forbidden."""
+        """All node archetypes (Effect, Compute, Reducer, Orchestrator) are forbidden."""
         handler_templates = [
             ("OrderEffectHandler", "Effect"),
             ("OrderComputeHandler", "Compute"),
@@ -668,7 +668,7 @@ class TestViolationFormatting:
 
         validator = RuntimeShapeValidator()
         violation = validator.validate_handler_output(
-            handler_type=EnumHandlerType.REDUCER,
+            node_archetype=EnumNodeArchetype.REDUCER,
             output=OrderCreatedEvent(),
             output_category=EnumMessageCategory.EVENT,
             file_path="test_handler.py",
@@ -693,7 +693,7 @@ class TestValidHandlers:
 
         validator = RuntimeShapeValidator()
         violation = validator.validate_handler_output(
-            handler_type=EnumHandlerType.REDUCER,
+            node_archetype=EnumNodeArchetype.REDUCER,
             output=OrderSummaryProjection(),
             output_category=EnumNodeOutputType.PROJECTION,
         )
@@ -708,7 +708,7 @@ class TestValidHandlers:
 
         validator = RuntimeShapeValidator()
         violation = validator.validate_handler_output(
-            handler_type=EnumHandlerType.EFFECT,
+            node_archetype=EnumNodeArchetype.EFFECT,
             output=OrderCreatedEvent(),
             output_category=EnumMessageCategory.EVENT,
         )
@@ -723,7 +723,7 @@ class TestValidHandlers:
 
         validator = RuntimeShapeValidator()
         violation = validator.validate_handler_output(
-            handler_type=EnumHandlerType.ORCHESTRATOR,
+            node_archetype=EnumNodeArchetype.ORCHESTRATOR,
             output=ProcessOrderCommand(),
             output_category=EnumMessageCategory.COMMAND,
         )
@@ -747,7 +747,7 @@ class TestValidHandlers:
 
         for category in EnumMessageCategory:
             violation = validator.validate_handler_output(
-                handler_type=EnumHandlerType.COMPUTE,
+                node_archetype=EnumNodeArchetype.COMPUTE,
                 output=make_test_message(category),
                 output_category=category,
             )
@@ -770,7 +770,7 @@ class TestAllowedReturnTypesValidation:
 
         # Create a rule that only allows PROJECTION (like REDUCER)
         rule = ModelExecutionShapeRule(
-            handler_type=EnumHandlerType.REDUCER,
+            node_archetype=EnumNodeArchetype.REDUCER,
             allowed_return_types=[EnumNodeOutputType.PROJECTION],
             forbidden_return_types=[EnumNodeOutputType.EVENT],
             can_publish_directly=False,
@@ -797,7 +797,7 @@ class TestAllowedReturnTypesValidation:
 
         # Create a rule with empty allowed list but one forbidden type
         rule = ModelExecutionShapeRule(
-            handler_type=EnumHandlerType.EFFECT,
+            node_archetype=EnumNodeArchetype.EFFECT,
             allowed_return_types=[],  # Empty = permissive mode
             forbidden_return_types=[EnumNodeOutputType.PROJECTION],
             can_publish_directly=False,
@@ -820,7 +820,7 @@ class TestAllowedReturnTypesValidation:
 
         # Create a rule where EVENT is in both lists (edge case)
         rule = ModelExecutionShapeRule(
-            handler_type=EnumHandlerType.REDUCER,
+            node_archetype=EnumNodeArchetype.REDUCER,
             allowed_return_types=[
                 EnumNodeOutputType.PROJECTION,
                 EnumNodeOutputType.EVENT,  # Also in forbidden
@@ -843,7 +843,7 @@ class TestAllowedReturnTypesValidation:
         )
 
         # EFFECT: allowed = [EVENT, COMMAND], forbidden = [PROJECTION]
-        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+        effect_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.EFFECT]
         assert effect_rule.is_return_type_allowed(EnumNodeOutputType.EVENT) is True
         assert effect_rule.is_return_type_allowed(EnumNodeOutputType.COMMAND) is True
         assert (
@@ -853,7 +853,7 @@ class TestAllowedReturnTypesValidation:
         assert effect_rule.is_return_type_allowed(EnumNodeOutputType.INTENT) is False
 
         # REDUCER: allowed = [PROJECTION], forbidden = [EVENT]
-        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.REDUCER]
         assert (
             reducer_rule.is_return_type_allowed(EnumNodeOutputType.PROJECTION) is True
         )
@@ -864,14 +864,14 @@ class TestAllowedReturnTypesValidation:
         assert reducer_rule.is_return_type_allowed(EnumNodeOutputType.INTENT) is False
 
         # ORCHESTRATOR: allowed = [COMMAND, EVENT], forbidden = [INTENT, PROJECTION]
-        orch_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.ORCHESTRATOR]
+        orch_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.ORCHESTRATOR]
         assert orch_rule.is_return_type_allowed(EnumNodeOutputType.COMMAND) is True
         assert orch_rule.is_return_type_allowed(EnumNodeOutputType.EVENT) is True
         assert orch_rule.is_return_type_allowed(EnumNodeOutputType.INTENT) is False
         assert orch_rule.is_return_type_allowed(EnumNodeOutputType.PROJECTION) is False
 
         # COMPUTE: allowed = [all 4 output types], forbidden = []
-        compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
+        compute_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.COMPUTE]
         for output_type in EnumNodeOutputType:
             assert compute_rule.is_return_type_allowed(output_type) is True, (
                 f"COMPUTE should allow {output_type.value}"
@@ -899,11 +899,11 @@ class TestEnumMappingLogic:
         )
 
         validator = ExecutionShapeValidator()
-        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+        effect_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.EFFECT]
 
         # EnumMessageCategory.EVENT should work via internal mapping
         result = validator._is_return_type_allowed(
-            EnumMessageCategory.EVENT, EnumHandlerType.EFFECT, effect_rule
+            EnumMessageCategory.EVENT, EnumNodeArchetype.EFFECT, effect_rule
         )
         assert result is True, "EFFECT should allow EVENT via EnumMessageCategory"
 
@@ -914,11 +914,11 @@ class TestEnumMappingLogic:
         )
 
         validator = ExecutionShapeValidator()
-        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+        effect_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.EFFECT]
 
         # EnumMessageCategory.COMMAND should work via internal mapping
         result = validator._is_return_type_allowed(
-            EnumMessageCategory.COMMAND, EnumHandlerType.EFFECT, effect_rule
+            EnumMessageCategory.COMMAND, EnumNodeArchetype.EFFECT, effect_rule
         )
         assert result is True, "EFFECT should allow COMMAND via EnumMessageCategory"
 
@@ -929,11 +929,11 @@ class TestEnumMappingLogic:
         )
 
         validator = ExecutionShapeValidator()
-        compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
+        compute_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.COMPUTE]
 
         # EnumMessageCategory.INTENT should work via internal mapping
         result = validator._is_return_type_allowed(
-            EnumMessageCategory.INTENT, EnumHandlerType.COMPUTE, compute_rule
+            EnumMessageCategory.INTENT, EnumNodeArchetype.COMPUTE, compute_rule
         )
         assert result is True, "COMPUTE should allow INTENT via EnumMessageCategory"
 
@@ -944,13 +944,13 @@ class TestEnumMappingLogic:
         )
 
         validator = ExecutionShapeValidator()
-        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
-        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+        effect_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.EFFECT]
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.REDUCER]
 
         # EnumNodeOutputType.EVENT should work directly
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.EVENT, EnumHandlerType.EFFECT, effect_rule
+                EnumNodeOutputType.EVENT, EnumNodeArchetype.EFFECT, effect_rule
             )
             is True
         )
@@ -958,7 +958,7 @@ class TestEnumMappingLogic:
         # EnumNodeOutputType.PROJECTION should work directly for REDUCER
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.PROJECTION, EnumHandlerType.REDUCER, reducer_rule
+                EnumNodeOutputType.PROJECTION, EnumNodeArchetype.REDUCER, reducer_rule
             )
             is True
         )
@@ -970,14 +970,14 @@ class TestEnumMappingLogic:
         )
 
         validator = ExecutionShapeValidator()
-        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+        effect_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.EFFECT]
 
         # EnumMessageCategory.EVENT and EnumNodeOutputType.EVENT should behave identically
         result_message_cat = validator._is_return_type_allowed(
-            EnumMessageCategory.EVENT, EnumHandlerType.EFFECT, effect_rule
+            EnumMessageCategory.EVENT, EnumNodeArchetype.EFFECT, effect_rule
         )
         result_node_output = validator._is_return_type_allowed(
-            EnumNodeOutputType.EVENT, EnumHandlerType.EFFECT, effect_rule
+            EnumNodeOutputType.EVENT, EnumNodeArchetype.EFFECT, effect_rule
         )
         assert result_message_cat == result_node_output, (
             "Both enum types should produce consistent results for EVENT"
@@ -999,11 +999,11 @@ class TestProjectionOnlyAllowedForReducer:
         )
 
         validator = ExecutionShapeValidator()
-        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.REDUCER]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.PROJECTION, EnumHandlerType.REDUCER, reducer_rule
+                EnumNodeOutputType.PROJECTION, EnumNodeArchetype.REDUCER, reducer_rule
             )
             is True
         ), "REDUCER should be allowed to produce PROJECTION"
@@ -1015,11 +1015,11 @@ class TestProjectionOnlyAllowedForReducer:
         )
 
         validator = ExecutionShapeValidator()
-        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+        effect_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.EFFECT]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.PROJECTION, EnumHandlerType.EFFECT, effect_rule
+                EnumNodeOutputType.PROJECTION, EnumNodeArchetype.EFFECT, effect_rule
             )
             is False
         ), "EFFECT should NOT be allowed to produce PROJECTION"
@@ -1031,12 +1031,12 @@ class TestProjectionOnlyAllowedForReducer:
         )
 
         validator = ExecutionShapeValidator()
-        orchestrator_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.ORCHESTRATOR]
+        orchestrator_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.ORCHESTRATOR]
 
         assert (
             validator._is_return_type_allowed(
                 EnumNodeOutputType.PROJECTION,
-                EnumHandlerType.ORCHESTRATOR,
+                EnumNodeArchetype.ORCHESTRATOR,
                 orchestrator_rule,
             )
             is False
@@ -1049,21 +1049,21 @@ class TestProjectionOnlyAllowedForReducer:
         )
 
         validator = ExecutionShapeValidator()
-        compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
+        compute_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.COMPUTE]
 
         # COMPUTE is the most permissive handler type - allows all output types
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.PROJECTION, EnumHandlerType.COMPUTE, compute_rule
+                EnumNodeOutputType.PROJECTION, EnumNodeArchetype.COMPUTE, compute_rule
             )
             is True
         ), "COMPUTE should be allowed to produce PROJECTION (most permissive)"
 
 
-class TestHandlerTypeOutputRestrictions:
-    """Comprehensive tests for handler-specific output type restrictions.
+class TestNodeArchetypeOutputRestrictions:
+    """Comprehensive tests for node archetype-specific output type restrictions.
 
-    Each handler type has specific constraints on what output types it can produce:
+    Each node archetype has specific constraints on what output types it can produce:
     - EFFECT: Can return EVENT, COMMAND but NOT PROJECTION or INTENT
     - REDUCER: Can only return PROJECTION, NOT EVENT, COMMAND, or INTENT
     - ORCHESTRATOR: Can return EVENT, COMMAND but NOT INTENT or PROJECTION
@@ -1077,11 +1077,11 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+        effect_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.EFFECT]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.EVENT, EnumHandlerType.EFFECT, effect_rule
+                EnumNodeOutputType.EVENT, EnumNodeArchetype.EFFECT, effect_rule
             )
             is True
         )
@@ -1093,11 +1093,11 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+        effect_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.EFFECT]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.COMMAND, EnumHandlerType.EFFECT, effect_rule
+                EnumNodeOutputType.COMMAND, EnumNodeArchetype.EFFECT, effect_rule
             )
             is True
         )
@@ -1109,12 +1109,12 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+        effect_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.EFFECT]
 
         # INTENT is not in EFFECT's allowed_return_types
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.INTENT, EnumHandlerType.EFFECT, effect_rule
+                EnumNodeOutputType.INTENT, EnumNodeArchetype.EFFECT, effect_rule
             )
             is False
         )
@@ -1126,11 +1126,11 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+        effect_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.EFFECT]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.PROJECTION, EnumHandlerType.EFFECT, effect_rule
+                EnumNodeOutputType.PROJECTION, EnumNodeArchetype.EFFECT, effect_rule
             )
             is False
         )
@@ -1142,11 +1142,11 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.REDUCER]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.PROJECTION, EnumHandlerType.REDUCER, reducer_rule
+                EnumNodeOutputType.PROJECTION, EnumNodeArchetype.REDUCER, reducer_rule
             )
             is True
         )
@@ -1158,11 +1158,11 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.REDUCER]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.EVENT, EnumHandlerType.REDUCER, reducer_rule
+                EnumNodeOutputType.EVENT, EnumNodeArchetype.REDUCER, reducer_rule
             )
             is False
         )
@@ -1174,11 +1174,11 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.REDUCER]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.COMMAND, EnumHandlerType.REDUCER, reducer_rule
+                EnumNodeOutputType.COMMAND, EnumNodeArchetype.REDUCER, reducer_rule
             )
             is False
         )
@@ -1190,11 +1190,11 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.REDUCER]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.INTENT, EnumHandlerType.REDUCER, reducer_rule
+                EnumNodeOutputType.INTENT, EnumNodeArchetype.REDUCER, reducer_rule
             )
             is False
         )
@@ -1206,11 +1206,11 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        orch_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.ORCHESTRATOR]
+        orch_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.ORCHESTRATOR]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.EVENT, EnumHandlerType.ORCHESTRATOR, orch_rule
+                EnumNodeOutputType.EVENT, EnumNodeArchetype.ORCHESTRATOR, orch_rule
             )
             is True
         )
@@ -1222,11 +1222,11 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        orch_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.ORCHESTRATOR]
+        orch_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.ORCHESTRATOR]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.COMMAND, EnumHandlerType.ORCHESTRATOR, orch_rule
+                EnumNodeOutputType.COMMAND, EnumNodeArchetype.ORCHESTRATOR, orch_rule
             )
             is True
         )
@@ -1238,11 +1238,11 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        orch_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.ORCHESTRATOR]
+        orch_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.ORCHESTRATOR]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.INTENT, EnumHandlerType.ORCHESTRATOR, orch_rule
+                EnumNodeOutputType.INTENT, EnumNodeArchetype.ORCHESTRATOR, orch_rule
             )
             is False
         )
@@ -1254,11 +1254,11 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        orch_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.ORCHESTRATOR]
+        orch_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.ORCHESTRATOR]
 
         assert (
             validator._is_return_type_allowed(
-                EnumNodeOutputType.PROJECTION, EnumHandlerType.ORCHESTRATOR, orch_rule
+                EnumNodeOutputType.PROJECTION, EnumNodeArchetype.ORCHESTRATOR, orch_rule
             )
             is False
         )
@@ -1270,13 +1270,13 @@ class TestHandlerTypeOutputRestrictions:
         )
 
         validator = ExecutionShapeValidator()
-        compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
+        compute_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.COMPUTE]
 
         # COMPUTE is the most permissive - should allow all output types
         for output_type in EnumNodeOutputType:
             assert (
                 validator._is_return_type_allowed(
-                    output_type, EnumHandlerType.COMPUTE, compute_rule
+                    output_type, EnumNodeArchetype.COMPUTE, compute_rule
                 )
                 is True
             ), f"COMPUTE should allow {output_type.value}"
@@ -1296,13 +1296,13 @@ class TestEnumMappingEdgeCases:
         )
 
         validator = ExecutionShapeValidator()
-        compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
+        compute_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.COMPUTE]
 
         # For each message category, the validator should return True or False
         # (not raise an exception) when called with COMPUTE (most permissive)
         for category in EnumMessageCategory:
             result = validator._is_return_type_allowed(
-                category, EnumHandlerType.COMPUTE, compute_rule
+                category, EnumNodeArchetype.COMPUTE, compute_rule
             )
             # COMPUTE allows all mapped types, so all should be True
             assert result is True, (
@@ -1316,11 +1316,11 @@ class TestEnumMappingEdgeCases:
         )
 
         validator = ExecutionShapeValidator()
-        compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
+        compute_rule = EXECUTION_SHAPE_RULES[EnumNodeArchetype.COMPUTE]
 
         for output_type in EnumNodeOutputType:
             result = validator._is_return_type_allowed(
-                output_type, EnumHandlerType.COMPUTE, compute_rule
+                output_type, EnumNodeArchetype.COMPUTE, compute_rule
             )
             assert result is True, (
                 f"EnumNodeOutputType.{output_type.name} should be allowed for COMPUTE"

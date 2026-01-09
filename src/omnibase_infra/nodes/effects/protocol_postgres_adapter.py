@@ -5,10 +5,11 @@
 This module defines the protocol that PostgreSQL adapters must implement
 to be used with the NodeRegistryEffect node.
 
-Thread Safety:
-    Implementations MUST be thread-safe for concurrent async calls.
-    Multiple async tasks may invoke upsert() simultaneously for
-    different or identical node registrations.
+Concurrency Safety:
+    Implementations MUST be safe for concurrent async calls.
+    Multiple coroutines may invoke upsert() simultaneously for
+    different or identical node registrations. Implementations
+    should use asyncio.Lock for coroutine-safety when protecting shared state.
 
 Related:
     - NodeRegistryEffect: Effect node that uses this protocol
@@ -18,23 +19,27 @@ Related:
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
+
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 
 
+@runtime_checkable
 class ProtocolPostgresAdapter(Protocol):
     """Protocol for PostgreSQL registration persistence.
 
     Implementations must provide async upsert capability for
     registration records.
 
-    Thread Safety:
-        Implementations MUST be thread-safe for concurrent async calls.
+    Concurrency Safety:
+        Implementations MUST be safe for concurrent async coroutine calls.
 
         **Guarantees implementers MUST provide:**
-            - Concurrent upsert() calls are safe
+            - Concurrent upsert() calls are coroutine-safe
             - Connection pooling (if used) is async-safe
             - Database transactions are properly isolated
 
@@ -42,13 +47,15 @@ class ProtocolPostgresAdapter(Protocol):
             - Multiple coroutines can call upsert() concurrently
             - Each upsert operation is independent
             - Failures in one upsert do not affect others
+
+        Note: asyncio.Lock provides coroutine-safety, not thread-safety.
     """
 
     async def upsert(
         self,
         node_id: UUID,
-        node_type: str,
-        node_version: str,
+        node_type: EnumNodeKind,
+        node_version: ModelSemVer,
         endpoints: dict[str, str],
         metadata: dict[str, str],
     ) -> ModelBackendResult:
@@ -56,10 +63,29 @@ class ProtocolPostgresAdapter(Protocol):
 
         Args:
             node_id: Unique identifier for the node.
-            node_type: Type of ONEX node.
+            node_type: Type of ONEX node (EnumNodeKind).
             node_version: Semantic version of the node.
             endpoints: Dict of endpoint type to URL.
             metadata: Additional metadata.
+
+        Returns:
+            ModelBackendResult with success status, optional error message,
+            timing information, and correlation context.
+        """
+        ...
+
+    async def deactivate(
+        self,
+        node_id: UUID,
+    ) -> ModelBackendResult:
+        """Deactivate a node registration record.
+
+        Marks the registration as inactive (soft delete) rather than
+        removing it entirely. This preserves historical data while
+        stopping the node from appearing in active registrations.
+
+        Args:
+            node_id: Unique identifier for the node to deactivate.
 
         Returns:
             ModelBackendResult with success status, optional error message,

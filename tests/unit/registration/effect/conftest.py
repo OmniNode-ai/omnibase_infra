@@ -38,6 +38,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.idempotency import InMemoryIdempotencyStore
 from omnibase_infra.models.registration import (
@@ -279,18 +280,18 @@ def sample_introspection_event(
         >>> def test_process_event(sample_introspection_event):
         ...     event = sample_introspection_event
         ...     assert event.node_type == "effect"
-        ...     assert event.node_version == "1.0.0"
+        ...     assert str(event.node_version) == "1.0.0"
     """
     return ModelNodeIntrospectionEvent(
         node_id=sample_node_id,
         node_type="effect",
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         correlation_id=correlation_id,
         endpoints={
             "health": "http://localhost:8080/health",
             "api": "http://localhost:8080/api",
         },
-        capabilities=ModelNodeCapabilities(
+        declared_capabilities=ModelNodeCapabilities(
             postgres=True,
             read=True,
             write=True,
@@ -305,6 +306,7 @@ def sample_introspection_event(
         network_id="test-network",
         deployment_id="test-deployment",
         epoch=1,
+        timestamp=datetime.now(UTC),  # Required: time injection pattern
     )
 
 
@@ -327,7 +329,7 @@ def sample_node_registration(
     return ModelNodeRegistration(
         node_id=sample_node_id,
         node_type="effect",
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         capabilities=ModelNodeCapabilities(
             postgres=True,
             read=True,
@@ -348,47 +350,6 @@ def sample_node_registration(
 # -----------------------------------------------------------------------------
 # Factory Fixtures
 # -----------------------------------------------------------------------------
-
-
-def create_introspection_event(
-    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
-    node_id: UUID | None = None,
-    correlation_id: UUID | None = None,
-    endpoints: dict[str, str] | None = None,
-    node_version: str = "1.0.0",
-) -> ModelNodeIntrospectionEvent:
-    """Factory function for creating introspection events.
-
-    Provides flexibility for creating custom events in tests while
-    maintaining sensible defaults.
-
-    Args:
-        node_type: Type of node (default: "effect").
-        node_id: Optional node ID (generates if not provided).
-        correlation_id: Optional correlation ID (generates if not provided).
-        endpoints: Optional endpoints dict (default: health endpoint).
-        node_version: Semantic version string (default: "1.0.0").
-
-    Returns:
-        ModelNodeIntrospectionEvent: Configured event instance.
-
-    Example:
-        >>> event = create_introspection_event(
-        ...     node_type="reducer",
-        ...     node_version="2.0.0",
-        ... )
-        >>> assert event.node_type == "reducer"
-    """
-    return ModelNodeIntrospectionEvent(
-        node_id=node_id or uuid4(),
-        node_type=node_type,
-        node_version=node_version,
-        correlation_id=correlation_id or uuid4(),
-        endpoints=endpoints
-        if endpoints is not None
-        else {"health": "http://localhost:8080/health"},
-        capabilities=ModelNodeCapabilities(postgres=True, read=True),
-    )
 
 
 def create_node_registration(

@@ -390,9 +390,9 @@ def wait_for_healthy(
     Returns:
         bool: True if container became healthy, False if timeout.
     """
-    start_time = time.time()
+    start_time = time.monotonic()
 
-    while time.time() - start_time < timeout:
+    while time.monotonic() - start_time < timeout:
         result = subprocess.run(
             [
                 "docker",
@@ -434,9 +434,9 @@ def wait_for_log_message(
     Returns:
         bool: True if message found, False if timeout.
     """
-    start_time = time.time()
+    start_time = time.monotonic()
 
-    while time.time() - start_time < timeout:
+    while time.monotonic() - start_time < timeout:
         result = subprocess.run(
             ["docker", "logs", container_name],
             capture_output=True,

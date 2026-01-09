@@ -248,7 +248,7 @@ as violations. The target is to reduce to <200 through `dict[str, object]` to `J
    HandlerType = Union[
        ConsulAdapter,
        KafkaAdapter,
-       VaultAdapter,
+       HandlerVault,
        PostgresAdapter,
        RedisAdapter,
        # ... 15 more
@@ -270,7 +270,7 @@ as violations. The target is to reduce to <200 through `dict[str, object]` to `J
    metadata: dict[str, object]
 
    # After: Strongly typed, reduces union pressure
-   from omnibase_core.types import JsonValue
+   from omnibase_infra.models.types import JsonValue
    metadata: JsonValue
    ```
 

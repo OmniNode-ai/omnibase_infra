@@ -11,6 +11,7 @@ Usage:
     python scripts/validate.py contracts
     python scripts/validate.py patterns
     python scripts/validate.py unions
+    python scripts/validate.py any_types
     python scripts/validate.py imports
     python scripts/validate.py all
 """
@@ -177,9 +178,51 @@ def run_unions(verbose: bool = False) -> bool:
         return True
 
 
+def run_any_types(verbose: bool = False) -> bool:
+    """Run Any type usage validation.
+
+    Checks for forbidden Any type usage in function signatures and type annotations.
+    Valid usages (Pydantic Field() with NOTE comment) are allowed.
+    """
+    src_path = Path("src/omnibase_infra")
+    if not src_path.exists():
+        if verbose:
+            print("Any Types: SKIP (no src/omnibase_infra directory)")
+        return True
+
+    try:
+        from omnibase_infra.validation.any_type_validator import validate_any_types_ci
+
+        result = validate_any_types_ci(src_path)
+
+        if verbose or not result.passed:
+            print(f"Any Types: {'PASS' if result.passed else 'FAIL'}")
+            print(
+                f"  Files checked: {result.files_checked}, "
+                f"blocking violations: {result.blocking_count}, "
+                f"total violations: {result.total_violations}"
+            )
+            # Show violations
+            for v in result.violations:
+                print(f"  - {v.file_path}:{v.line_number}: {v.violation_type.value}")
+                if verbose:
+                    print(f"      {v.code_snippet}")
+                    print(f"      Suggestion: {v.suggestion}")
+
+        return result.passed
+
+    except ImportError as e:
+        print(f"Skipping Any type validation: {e}")
+        return True
+
+
 def run_imports(verbose: bool = False) -> bool:
     """Run circular import check."""
-    src_path = Path("src/omnibase_infra/")
+    # Use src/ as the source path so module names are fully qualified
+    # (e.g., "omnibase_infra.clients" instead of just "clients").
+    # The CircularImportValidator creates module names relative to source_path,
+    # so using src/ ensures Python can import them correctly.
+    src_path = Path("src/")
     if not src_path.exists():
         if verbose:
             print("Imports: SKIP (no src directory)")
@@ -187,9 +230,10 @@ def run_imports(verbose: bool = False) -> bool:
 
     try:
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-        from omnibase_core.validation.circular_import_validator import (
-            CircularImportValidator,
-        )
+
+        # CircularImportValidator re-exported from omnibase_core.validation in 0.6.2+
+        # (moved from circular_import_validator to validator_circular_import submodule)
+        from omnibase_core.validation import CircularImportValidator
 
         validator = CircularImportValidator(source_path=src_path)
         result = validator.validate()
@@ -295,6 +339,7 @@ def run_all(verbose: bool = False, quick: bool = False) -> bool:
         validators.extend(
             [
                 ("Unions", run_unions),
+                ("Any Types", run_any_types),
                 ("Imports", run_imports),
             ]
         )
@@ -326,7 +371,15 @@ def main() -> int:
         "validator",
         nargs="?",
         default="all",
-        choices=["all", "architecture", "contracts", "patterns", "unions", "imports"],
+        choices=[
+            "all",
+            "architecture",
+            "contracts",
+            "patterns",
+            "unions",
+            "any_types",
+            "imports",
+        ],
         help="Which validator to run (default: all)",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
@@ -341,6 +394,7 @@ def main() -> int:
         "contracts": run_contracts,
         "patterns": run_patterns,
         "unions": run_unions,
+        "any_types": run_any_types,
         "imports": run_imports,
     }
 

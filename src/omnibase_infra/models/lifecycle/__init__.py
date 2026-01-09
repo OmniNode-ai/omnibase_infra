@@ -32,12 +32,8 @@ from omnibase_infra.runtime.models.model_health_check_result import (
 )
 from omnibase_infra.runtime.models.model_lifecycle_result import ModelLifecycleResult
 
-# Alias for backward compatibility with code importing ModelHandlerHealthCheckResult
-ModelHandlerHealthCheckResult = ModelHealthCheckResult
-
 __all__ = [
     "ModelBatchLifecycleResult",
-    "ModelHandlerHealthCheckResult",  # Backward compatibility alias
     "ModelHealthCheckResult",
     "ModelLifecycleResult",
 ]

@@ -23,6 +23,37 @@ Thread Safety:
     ModelDispatchResult is immutable (frozen=True) after creation,
     making it thread-safe for concurrent read access.
 
+JsonType Recursion Fix (OMN-1274):
+    The ``error_details`` field uses ``dict[str, object]`` instead of the
+    recursive ``JsonType`` type alias. Here is why:
+
+    **The Original Problem:**
+    ``JsonType`` was a recursive type alias::
+
+        JsonType = dict[str, "JsonType"] | list["JsonType"] | str | int | float | bool | None
+
+    Pydantic 2.x performs eager schema generation at class definition time,
+    causing ``RecursionError`` when expanding recursive type aliases::
+
+        JsonType -> dict[str, JsonType] | list[JsonType] | ...
+                 -> dict[str, dict[str, JsonType] | ...] | ...
+                 -> ... (infinite recursion)
+
+    **Why dict[str, object] is Correct for error_details:**
+    Error details are structured diagnostic information, always represented as
+    key-value dictionaries (e.g., ``{"retry_count": 3, "service": "db"}``).
+    They do NOT need to support arrays or primitives at the root level.
+
+    Using ``dict[str, object]`` provides:
+    - Correct semantics: Error details are always dictionaries
+    - Type safety: Pydantic validates the outer structure
+    - No recursion: ``object`` avoids recursive type expansion
+
+    **Caveats:**
+    - Values are typed as ``object`` (no static type checking)
+    - For fields needing full JSON support, use ``JsonType`` from
+      ``omnibase_core.types`` (now fixed via TypeAlias pattern)
+
 Example:
     >>> from omnibase_infra.models.dispatch import (
     ...     ModelDispatchResult,
@@ -50,13 +81,14 @@ Example:
 See Also:
     omnibase_infra.models.dispatch.ModelDispatchRoute: Routing rule model
     omnibase_infra.models.dispatch.EnumDispatchStatus: Dispatch status enum
+    ADR: ``docs/decisions/adr-any-type-pydantic-workaround.md`` (historical)
+    Pydantic issue: https://github.com/pydantic/pydantic/issues/3278
 """
 
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
@@ -160,9 +192,10 @@ class ModelDispatchResult(BaseModel):
         description="Time taken for the dispatch operation in milliseconds.",
         ge=0,
     )
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     started_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="Timestamp when the dispatch started (UTC).",
+        ...,
+        description="Timestamp when the dispatch started (UTC, must be explicitly provided).",
     )
     completed_at: datetime | None = Field(
         default=None,
@@ -179,6 +212,14 @@ class ModelDispatchResult(BaseModel):
         description="Number of outputs produced by the dispatcher.",
         ge=0,
     )
+    output_events: list[BaseModel] = Field(
+        default_factory=list,
+        description=(
+            "List of output events produced by the dispatcher that need to be "
+            "published to output_topic. These are raw Pydantic models that will "
+            "be wrapped in ModelEventEnvelope by the kernel before publishing."
+        ),
+    )
 
     # ---- Error Information ----
     error_message: str | None = Field(
@@ -189,7 +230,7 @@ class ModelDispatchResult(BaseModel):
         default=None,
         description="Error code if the dispatch failed.",
     )
-    error_details: dict[str, JsonValue] = Field(
+    error_details: dict[str, object] = Field(
         default_factory=dict,
         description="Additional JSON-serializable error details for debugging.",
     )
@@ -202,9 +243,9 @@ class ModelDispatchResult(BaseModel):
     )
 
     # ---- Tracing Context ----
-    correlation_id: UUID | None = Field(
-        default=None,
-        description="Correlation ID from the original message.",
+    correlation_id: UUID = Field(
+        default_factory=uuid4,
+        description="Correlation ID from the original message (auto-generated if not provided).",
     )
     trace_id: UUID | None = Field(
         default=None,
@@ -229,10 +270,12 @@ class ModelDispatchResult(BaseModel):
             True if status is SUCCESS, False otherwise
 
         Example:
+            >>> from datetime import datetime, UTC
             >>> result = ModelDispatchResult(
             ...     dispatch_id=uuid4(),
             ...     status=EnumDispatchStatus.SUCCESS,
             ...     topic="test.events",
+            ...     started_at=datetime.now(UTC),
             ... )
             >>> result.is_successful()
             True
@@ -247,10 +290,12 @@ class ModelDispatchResult(BaseModel):
             True if the status represents an error condition, False otherwise
 
         Example:
+            >>> from datetime import datetime, UTC
             >>> result = ModelDispatchResult(
             ...     dispatch_id=uuid4(),
             ...     status=EnumDispatchStatus.HANDLER_ERROR,
             ...     topic="test.events",
+            ...     started_at=datetime.now(UTC),
             ...     error_message="Dispatcher failed",
             ... )
             >>> result.is_error()
@@ -266,10 +311,12 @@ class ModelDispatchResult(BaseModel):
             True if the status indicates a retriable failure, False otherwise
 
         Example:
+            >>> from datetime import datetime, UTC
             >>> result = ModelDispatchResult(
             ...     dispatch_id=uuid4(),
             ...     status=EnumDispatchStatus.TIMEOUT,
             ...     topic="test.events",
+            ...     started_at=datetime.now(UTC),
             ... )
             >>> result.requires_retry()
             True
@@ -290,7 +337,7 @@ class ModelDispatchResult(BaseModel):
         status: EnumDispatchStatus,
         message: str,
         code: EnumCoreErrorCode | None = None,
-        details: dict[str, JsonValue] | None = None,
+        details: dict[str, object] | None = None,
     ) -> "ModelDispatchResult":
         """
         Create a new result with error information.
@@ -305,10 +352,12 @@ class ModelDispatchResult(BaseModel):
             New ModelDispatchResult with error information
 
         Example:
+            >>> from datetime import datetime, UTC
             >>> result = ModelDispatchResult(
             ...     dispatch_id=uuid4(),
             ...     status=EnumDispatchStatus.ROUTED,
             ...     topic="test.events",
+            ...     started_at=datetime.now(UTC),
             ... )
             >>> error_result = result.with_error(
             ...     EnumDispatchStatus.HANDLER_ERROR,
@@ -342,10 +391,12 @@ class ModelDispatchResult(BaseModel):
             New ModelDispatchResult marked as SUCCESS
 
         Example:
+            >>> from datetime import datetime, UTC
             >>> result = ModelDispatchResult(
             ...     dispatch_id=uuid4(),
             ...     status=EnumDispatchStatus.ROUTED,
             ...     topic="test.events",
+            ...     started_at=datetime.now(UTC),
             ... )
             >>> success_result = result.with_success(
             ...     outputs=ModelDispatchOutputs(topics=["output.topic.v1"]),

@@ -3,7 +3,7 @@
 """HTTP Handler Response Model.
 
 This module provides the Pydantic model for HTTP handler response envelopes
-used by the HttpRestAdapter.
+used by the HttpRestHandler.
 
 This model provides type consistency with ModelDbQueryResponse,
 ModelConsulHandlerResponse, and ModelVaultHandlerResponse, ensuring

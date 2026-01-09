@@ -72,8 +72,14 @@ Related:
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from uuid import UUID
 
+from omnibase_infra.errors import (
+    InfraAuthenticationError,
+    InfraConnectionError,
+    InfraTimeoutError,
+)
 from omnibase_infra.nodes.effects.models.model_backend_result import (
     ModelBackendResult,
 )
@@ -96,81 +102,7 @@ from omnibase_infra.nodes.effects.protocol_postgres_adapter import (
 from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
     InMemoryEffectIdempotencyStore,
 )
-
-# Safe error patterns that don't contain secrets.
-# These are checked in order - longer/more specific patterns should come first
-# to ensure they match before shorter substrings.
-_SAFE_ERROR_PATTERNS: tuple[str, ...] = (
-    # Connection patterns (longer first)
-    "connection refused",
-    "connection reset",
-    "connection timeout",
-    "connection closed",
-    # Network patterns
-    "network unreachable",
-    "host not found",
-    "dns lookup failed",
-    # Availability patterns
-    "service unavailable",
-    "too many connections",
-    "resource exhausted",
-    # Auth patterns (type only, not details)
-    "authentication failed",
-    "permission denied",
-    "access denied",
-    # State patterns
-    "already exists",
-    "not found",
-    "conflict",
-    # Generic patterns (last, most generic)
-    "timeout",
-    "unavailable",
-)
-
-
-def _sanitize_backend_error(backend_name: str, raw_error: object) -> str:
-    """Sanitize a backend error message to avoid exposing secrets.
-
-    Backend error messages (from Consul, PostgreSQL, etc.) may contain
-    sensitive information like connection strings, credentials, or internal
-    hostnames. This function extracts only safe, generic error information.
-
-    Args:
-        backend_name: Name of the backend (e.g., "Consul", "PostgreSQL").
-        raw_error: Raw error from the backend (string, exception, or any object).
-
-    Returns:
-        Sanitized error message safe for logging and user-facing responses.
-
-    Examples:
-        >>> _sanitize_backend_error("PostgreSQL", "connection refused")
-        'PostgreSQL operation failed: connection refused'
-
-        >>> _sanitize_backend_error("Consul", "auth failed: password=secret123")
-        'Consul operation failed'
-
-        >>> _sanitize_backend_error("Consul", None)
-        'Consul operation failed'
-
-        >>> _sanitize_backend_error("PostgreSQL", {"error": "timeout"})
-        'PostgreSQL operation failed: timeout'
-    """
-    if raw_error is None:
-        return f"{backend_name} operation failed"
-
-    # Convert to string for analysis
-    error_str = str(raw_error).lower().strip()
-
-    if not error_str:
-        return f"{backend_name} operation failed"
-
-    # Check for safe, generic error patterns (checked in order - first match wins)
-    for safe_pattern in _SAFE_ERROR_PATTERNS:
-        if safe_pattern in error_str:
-            return f"{backend_name} operation failed: {safe_pattern}"
-
-    # Default: don't expose the raw error, use generic message
-    return f"{backend_name} operation failed"
+from omnibase_infra.utils import sanitize_backend_error, sanitize_error_message
 
 
 class NodeRegistryEffect:
@@ -212,9 +144,9 @@ class NodeRegistryEffect:
         - PostgreSQL upsert: typically 1-5ms (network dependent)
         - Idempotency overhead: <0.1ms
 
-    Thread Safety:
+    Coroutine Safety:
         This class is async-safe. The underlying idempotency store
-        uses asyncio.Lock for thread-safe operations.
+        uses asyncio.Lock for coroutine-safe operations.
 
     Attributes:
         consul_client: Client for Consul service registration.
@@ -321,7 +253,6 @@ class NodeRegistryEffect:
             consul_result = ModelBackendResult(
                 success=True,
                 duration_ms=0.0,
-                retries=0,
                 correlation_id=correlation_id,
             )
         else:
@@ -334,7 +265,6 @@ class NodeRegistryEffect:
             postgres_result = ModelBackendResult(
                 success=True,
                 duration_ms=0.0,
-                retries=0,
                 correlation_id=correlation_id,
             )
         else:
@@ -347,6 +277,7 @@ class NodeRegistryEffect:
             correlation_id=correlation_id,
             consul_result=consul_result,
             postgres_result=postgres_result,
+            timestamp=datetime.now(UTC),
         )
 
     async def _register_consul(
@@ -362,10 +293,9 @@ class NodeRegistryEffect:
             ModelBackendResult with operation outcome.
         """
         start_time = time.perf_counter()
-        retries = 0
 
         try:
-            service_id = f"node-{request.node_type}-{request.node_id}"
+            service_id = f"onex-{request.node_type}-{request.node_id}"
             service_name = request.service_name or f"onex-{request.node_type}"
 
             result = await self._consul_client.register_service(
@@ -381,35 +311,70 @@ class NodeRegistryEffect:
                 return ModelBackendResult(
                     success=True,
                     duration_ms=duration_ms,
-                    retries=retries,
                     backend_id="consul",
                     correlation_id=request.correlation_id,
                 )
             else:
                 # Sanitize backend error to avoid exposing secrets
                 # (connection strings, credentials, internal hostnames)
-                sanitized_error = _sanitize_backend_error("Consul", result.error)
+                sanitized_error = sanitize_backend_error("consul", result.error)
                 return ModelBackendResult(
                     success=False,
                     error=sanitized_error,
                     error_code="CONSUL_REGISTRATION_ERROR",
                     duration_ms=duration_ms,
-                    retries=retries,
                     backend_id="consul",
                     correlation_id=request.correlation_id,
                 )
 
-        except Exception as e:
+        except (TimeoutError, InfraTimeoutError) as e:
+            # Timeout during registration - retriable error
             duration_ms = (time.perf_counter() - start_time) * 1000
-            # Sanitize error message to avoid exposing secrets (connection strings, credentials)
-            # Use exception type name for debugging without exposing raw message
-            sanitized_error = f"{type(e).__name__}: Consul registration failed"
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="CONSUL_TIMEOUT_ERROR",
+                duration_ms=duration_ms,
+                backend_id="consul",
+                correlation_id=request.correlation_id,
+            )
+
+        except InfraAuthenticationError as e:
+            # Authentication failure - non-retriable error
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="CONSUL_AUTH_ERROR",
+                duration_ms=duration_ms,
+                backend_id="consul",
+                correlation_id=request.correlation_id,
+            )
+
+        except InfraConnectionError as e:
+            # Connection failure - retriable error
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
                 error_code="CONSUL_CONNECTION_ERROR",
                 duration_ms=duration_ms,
-                retries=retries,
+                backend_id="consul",
+                correlation_id=request.correlation_id,
+            )
+
+        except Exception as e:
+            # Unknown exception - sanitize to prevent credential exposure
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="CONSUL_UNKNOWN_ERROR",
+                duration_ms=duration_ms,
                 backend_id="consul",
                 correlation_id=request.correlation_id,
             )
@@ -427,7 +392,6 @@ class NodeRegistryEffect:
             ModelBackendResult with operation outcome.
         """
         start_time = time.perf_counter()
-        retries = 0
 
         try:
             result = await self._postgres_adapter.upsert(
@@ -444,35 +408,70 @@ class NodeRegistryEffect:
                 return ModelBackendResult(
                     success=True,
                     duration_ms=duration_ms,
-                    retries=retries,
                     backend_id="postgres",
                     correlation_id=request.correlation_id,
                 )
             else:
                 # Sanitize backend error to avoid exposing secrets
                 # (connection strings, credentials, internal hostnames)
-                sanitized_error = _sanitize_backend_error("PostgreSQL", result.error)
+                sanitized_error = sanitize_backend_error("postgres", result.error)
                 return ModelBackendResult(
                     success=False,
                     error=sanitized_error,
                     error_code="POSTGRES_UPSERT_ERROR",
                     duration_ms=duration_ms,
-                    retries=retries,
                     backend_id="postgres",
                     correlation_id=request.correlation_id,
                 )
 
-        except Exception as e:
+        except (TimeoutError, InfraTimeoutError) as e:
+            # Timeout during upsert - retriable error
             duration_ms = (time.perf_counter() - start_time) * 1000
-            # Sanitize error message to avoid exposing secrets (connection strings, credentials)
-            # Use exception type name for debugging without exposing raw message
-            sanitized_error = f"{type(e).__name__}: PostgreSQL upsert failed"
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="POSTGRES_TIMEOUT_ERROR",
+                duration_ms=duration_ms,
+                backend_id="postgres",
+                correlation_id=request.correlation_id,
+            )
+
+        except InfraAuthenticationError as e:
+            # Authentication failure - non-retriable error
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="POSTGRES_AUTH_ERROR",
+                duration_ms=duration_ms,
+                backend_id="postgres",
+                correlation_id=request.correlation_id,
+            )
+
+        except InfraConnectionError as e:
+            # Connection failure - retriable error
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            sanitized_error = sanitize_error_message(e)
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
                 error_code="POSTGRES_CONNECTION_ERROR",
                 duration_ms=duration_ms,
-                retries=retries,
+                backend_id="postgres",
+                correlation_id=request.correlation_id,
+            )
+
+        except Exception as e:
+            # Unknown exception - sanitize to prevent credential exposure
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            sanitized_error = sanitize_error_message(e)
+            return ModelBackendResult(
+                success=False,
+                error=sanitized_error,
+                error_code="POSTGRES_UNKNOWN_ERROR",
+                duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=request.correlation_id,
             )

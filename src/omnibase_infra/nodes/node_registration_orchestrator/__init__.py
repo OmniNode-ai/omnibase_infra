@@ -16,6 +16,23 @@ The orchestrator extends NodeOrchestrator from omnibase_core, which provides:
 - Parallel/sequential execution modes
 - Action emission for deferred execution
 
+Event Handlers (all co-located in handlers/ subdirectory):
+    - HandlerNodeIntrospected: Processes NodeIntrospectionEvent (canonical trigger)
+    - HandlerNodeRegistrationAcked: Processes NodeRegistrationAcked commands
+    - HandlerRuntimeTick: Processes RuntimeTick for timeout evaluation
+    - HandlerNodeHeartbeat: Processes NodeHeartbeat for liveness tracking (OMN-1006)
+
+    For handler access, import from handlers submodule:
+    ```python
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeHeartbeat,
+        HandlerNodeIntrospected,
+        HandlerNodeRegistrationAcked,
+        HandlerRuntimeTick,
+        ModelHeartbeatHandlerResult,
+    )
+    ```
+
 Exports:
     NodeRegistrationOrchestrator: Main orchestrator node implementation (declarative)
     TimeoutCoordinator: Coordinator for RuntimeTick timeout coordination
@@ -43,14 +60,14 @@ from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator imp
 )
 
 __all__: list[str] = [
-    # Primary export - the declarative orchestrator
-    "NodeRegistrationOrchestrator",
-    # Coordinators
-    "TimeoutCoordinator",
-    "ModelTimeoutCoordinationResult",
+    "ModelIntentExecutionResult",
     # Models
     "ModelOrchestratorConfig",
     "ModelOrchestratorInput",
     "ModelOrchestratorOutput",
-    "ModelIntentExecutionResult",
+    "ModelTimeoutCoordinationResult",
+    # Primary export - the declarative orchestrator
+    "NodeRegistrationOrchestrator",
+    # Coordinators
+    "TimeoutCoordinator",
 ]

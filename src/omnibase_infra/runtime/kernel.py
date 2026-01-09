@@ -7,25 +7,34 @@ bootstrap that wires configuration into the existing RuntimeHostProcess.
 
 The kernel is responsible for:
     1. Loading runtime configuration from contracts or environment
-    2. Creating and starting the InMemoryEventBus
+    2. Creating and starting the event bus (InMemoryEventBus or KafkaEventBus)
     3. Building the dependency container (event_bus, config)
     4. Instantiating RuntimeHostProcess with contract-driven configuration
     5. Starting the HTTP health server for Docker/K8s probes
     6. Setting up graceful shutdown signal handlers
     7. Running the runtime until shutdown is requested
 
+Event Bus Selection:
+    The kernel supports two event bus implementations:
+    - InMemoryEventBus: For local development and testing (default)
+    - KafkaEventBus: For production use with Kafka/Redpanda
+
+    Selection is determined by:
+    - KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses Kafka)
+    - config.event_bus.type field in runtime_config.yaml
+
 Usage:
     # Run with default contracts directory (./contracts)
     python -m omnibase_infra.runtime.kernel
 
     # Run with custom contracts directory
-    CONTRACTS_DIR=/path/to/contracts python -m omnibase_infra.runtime.kernel
+    ONEX_CONTRACTS_DIR=/path/to/contracts python -m omnibase_infra.runtime.kernel
 
     # Or via the installed entrypoint
     onex-runtime
 
 Environment Variables:
-    CONTRACTS_DIR: Path to contracts directory (default: ./contracts)
+    ONEX_CONTRACTS_DIR: Path to contracts directory (default: ./contracts)
     ONEX_HTTP_PORT: Port for health check HTTP server (default: 8085)
     ONEX_LOG_LEVEL: Logging level (default: INFO)
     ONEX_ENVIRONMENT: Runtime environment name (default: local)
@@ -45,13 +54,12 @@ import os
 import signal
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
+import asyncpg
 import yaml
 from omnibase_core.container import ModelONEXContainer
 from pydantic import ValidationError
@@ -61,14 +69,46 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
+    ServiceResolutionError,
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
-from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
-from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT, HealthServer
+from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.projectors import ProjectorRegistration
+from omnibase_infra.runtime.container_wiring import (
+    wire_infrastructure_services,
+    wire_registration_handlers,
+)
+from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
+from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+from omnibase_infra.runtime.introspection_event_router import (
+    IntrospectionEventRouter,
+)
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+
+# Circular Import Note (OMN-529):
+# ---------------------------------
+# ServiceHealth and DEFAULT_HTTP_PORT are imported inside bootstrap() rather than
+# at module level to avoid a circular import. The import chain is:
+#
+#   1. omnibase_infra/runtime/__init__.py imports kernel_bootstrap from kernel.py
+#   2. If kernel.py imported ServiceHealth at module level, it would load service_health.py
+#   3. service_health.py imports ModelHealthCheckResponse from runtime.models
+#   4. This triggers initialization of omnibase_infra.runtime package (step 1)
+#   5. Runtime package tries to import kernel.py which is still initializing -> circular!
+#
+# The lazy import in bootstrap() is acceptable because:
+#   - ServiceHealth is only instantiated at runtime, not at import time
+#   - Type checking uses forward references (no import needed)
+#   - No import-time side effects are bypassed
+#   - The omnibase_infra.services.__init__.py already excludes ServiceHealth exports
+#     to prevent accidental circular imports from other modules
+#
+# See also: omnibase_infra/services/__init__.py "ServiceHealth Import Guide" section
 from omnibase_infra.runtime.validation import validate_runtime_config
 from omnibase_infra.utils.correlation import generate_correlation_id
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +123,9 @@ except Exception:
 # Default configuration
 DEFAULT_CONTRACTS_DIR = "./contracts"
 DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
+
+# Environment variable names for contracts directory
+ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
 DEFAULT_INPUT_TOPIC = "requests"
 DEFAULT_OUTPUT_TOPIC = "responses"
 DEFAULT_GROUP_ID = "onex-runtime"
@@ -90,6 +133,22 @@ DEFAULT_GROUP_ID = "onex-runtime"
 # Port validation constants
 MIN_PORT = 1
 MAX_PORT = 65535
+
+
+def _get_contracts_dir() -> Path:
+    """Get contracts directory from environment.
+
+    Reads the ONEX_CONTRACTS_DIR environment variable. If not set,
+    returns the default contracts directory.
+
+    Returns:
+        Path to the contracts directory.
+    """
+    onex_value = os.environ.get(ENV_CONTRACTS_DIR)
+    if onex_value:
+        return Path(onex_value)
+
+    return Path(DEFAULT_CONTRACTS_DIR)
 
 
 def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
@@ -154,7 +213,7 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
             correlation_id,
         )
         try:
-            with open(config_path, encoding="utf-8") as f:
+            with config_path.open(encoding="utf-8") as f:
                 raw_config = yaml.safe_load(f) or {}
 
             # Contract validation: validate against schema before Pydantic
@@ -263,9 +322,9 @@ async def bootstrap() -> int:
     structured sequence to ensure proper resource initialization and cleanup.
 
     Bootstrap Sequence:
-        1. Determine contracts directory from CONTRACTS_DIR environment variable
+        1. Determine contracts directory from ONEX_CONTRACTS_DIR environment variable
         2. Load and validate runtime configuration from contracts or environment
-        3. Create and initialize InMemoryEventBus for event-driven architecture
+        3. Create and initialize event bus (InMemoryEventBus or KafkaEventBus based on config)
         4. Create ModelONEXContainer and wire infrastructure services (async)
         5. Resolve ProtocolBindingRegistry from container (async)
         6. Instantiate RuntimeHostProcess with validated configuration and pre-resolved registry
@@ -293,7 +352,7 @@ async def bootstrap() -> int:
             - 1: Configuration error, runtime error, or unexpected failure
 
     Environment Variables:
-        CONTRACTS_DIR: Path to contracts directory (default: ./contracts)
+        ONEX_CONTRACTS_DIR: Path to contracts directory (default: ./contracts)
         ONEX_HTTP_PORT: Port for health check server (default: 8085)
         ONEX_LOG_LEVEL: Logging level (default: INFO)
         ONEX_ENVIRONMENT: Environment name (default: local)
@@ -319,15 +378,24 @@ async def bootstrap() -> int:
         Health endpoint: http://0.0.0.0:8085/health
         ============================================================
     """
-    # Initialize runtime and health server to None for cleanup guard
+    # Lazy import to break circular dependency chain - see "Circular Import Note"
+    # comment near line 98 for detailed explanation of the import cycle.
+    from omnibase_infra.services.service_health import (
+        DEFAULT_HTTP_PORT,
+        ServiceHealth,
+    )
+
+    # Initialize resources to None for cleanup guard in finally block
     runtime: RuntimeHostProcess | None = None
-    health_server: HealthServer | None = None
+    health_server: ServiceHealth | None = None
+    postgres_pool: asyncpg.Pool | None = None
+    introspection_unsubscribe: Callable[[], Awaitable[None]] | None = None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
     try:
         # 1. Determine contracts directory
-        contracts_dir = Path(os.getenv("CONTRACTS_DIR", DEFAULT_CONTRACTS_DIR))
+        contracts_dir = _get_contracts_dir()
         logger.info(
             "ONEX Kernel starting with contracts_dir=%s (correlation_id=%s)",
             contracts_dir,
@@ -349,17 +417,67 @@ async def bootstrap() -> int:
         )
 
         # 3. Create event bus
-        # MVP limitation: Always creates InMemoryEventBus regardless of config.event_bus.type.
-        # The config model supports "kafka" as a type value for future compatibility,
-        # but Kafka event bus implementation is not yet available. When Kafka support
-        # is added, this section should dispatch based on config.event_bus.type.
+        # Dispatch based on configuration or environment variable:
+        # - If KAFKA_BOOTSTRAP_SERVERS env var is set, use KafkaEventBus
+        # - If config.event_bus.type == "kafka", use KafkaEventBus
+        # - Otherwise, use InMemoryEventBus for local development/testing
         # Environment override takes precedence over config for environment field.
         environment = os.getenv("ONEX_ENVIRONMENT") or config.event_bus.environment
+        kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+        use_kafka = kafka_bootstrap_servers or config.event_bus.type == "kafka"
+
         event_bus_start_time = time.time()
-        event_bus = InMemoryEventBus(
-            environment=environment,
-            group=config.consumer_group,
-        )
+        event_bus: InMemoryEventBus | KafkaEventBus
+        event_bus_type: str
+
+        if use_kafka:
+            # Use KafkaEventBus for production/integration testing
+            kafka_config = ModelKafkaEventBusConfig(
+                bootstrap_servers=kafka_bootstrap_servers or "localhost:9092",
+                environment=environment,
+                group=config.consumer_group,
+                circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
+            )
+            event_bus = KafkaEventBus(config=kafka_config)
+            event_bus_type = "kafka"
+
+            # Start KafkaEventBus to connect to Kafka/Redpanda and enable consumers
+            # Without this, the event bus cannot publish or consume messages
+            try:
+                await event_bus.start()
+                logger.debug(
+                    "KafkaEventBus started successfully (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception as e:
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="start_event_bus",
+                    correlation_id=correlation_id,
+                    target_name=kafka_bootstrap_servers or "localhost:9092",
+                )
+                raise RuntimeHostError(
+                    f"Failed to start KafkaEventBus: {sanitize_error_message(e)}",
+                    context=context,
+                ) from e
+
+            logger.info(
+                "Using KafkaEventBus (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "bootstrap_servers": kafka_bootstrap_servers or "localhost:9092",
+                    "environment": environment,
+                    "consumer_group": config.consumer_group,
+                },
+            )
+        else:
+            # Use InMemoryEventBus for local development/testing
+            event_bus = InMemoryEventBus(
+                environment=environment,
+                group=config.consumer_group,
+            )
+            event_bus_type = "inmemory"
+
         event_bus_duration = time.time() - event_bus_start_time
         logger.debug(
             "Event bus created in %.3fs (correlation_id=%s)",
@@ -367,6 +485,7 @@ async def bootstrap() -> int:
             correlation_id,
             extra={
                 "duration_seconds": event_bus_duration,
+                "event_bus_type": event_bus_type,
                 "environment": environment,
                 "consumer_group": config.consumer_group,
             },
@@ -375,7 +494,58 @@ async def bootstrap() -> int:
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
         container = ModelONEXContainer()
-        wire_summary = await wire_infrastructure_services(container)
+        if container.service_registry is None:
+            logger.warning(
+                "DEGRADED_MODE: service_registry is None (omnibase_core circular import bug?), "
+                "skipping container wiring (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "error_type": "NoneType",
+                    "correlation_id": correlation_id,
+                    "degraded_mode": True,
+                    "degraded_reason": "service_registry_unavailable",
+                    "component": "container_wiring",
+                },
+            )
+            wire_summary: dict[str, list[str] | str] = {
+                "services": [],
+                "status": "degraded",
+            }  # Empty summary for degraded mode
+        else:
+            try:
+                wire_summary = await wire_infrastructure_services(container)
+            except ServiceResolutionError as e:
+                # Service resolution failed during wiring - container configuration issue.
+                logger.warning(
+                    "DEGRADED_MODE: Container wiring failed due to service resolution error, "
+                    "continuing in degraded mode (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                        "degraded_mode": True,
+                        "degraded_reason": "service_resolution_error",
+                        "component": "container_wiring",
+                    },
+                )
+                wire_summary = {"services": [], "status": "degraded"}
+            except (RuntimeError, AttributeError) as e:
+                # Unexpected error during wiring - container internals issue.
+                logger.warning(
+                    "DEGRADED_MODE: Container wiring failed with unexpected error, "
+                    "continuing in degraded mode (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                        "degraded_mode": True,
+                        "degraded_reason": "wiring_error",
+                        "component": "container_wiring",
+                    },
+                )
+                wire_summary = {"services": [], "status": "degraded"}
         container_duration = time.time() - container_start_time
         logger.debug(
             "Container wired in %.3fs (correlation_id=%s)",
@@ -387,23 +557,269 @@ async def bootstrap() -> int:
             },
         )
 
-        # 5. Resolve ProtocolBindingRegistry from container
-        from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+        # 4.5. Create PostgreSQL pool for projections
+        # Only create if POSTGRES_HOST is set (indicates registration should be enabled)
+        projector: ProjectorRegistration | None = None
+        introspection_dispatcher: DispatcherNodeIntrospected | None = None
+        consul_handler = None  # Will be initialized if Consul is configured
 
-        handler_registry: ProtocolBindingRegistry = (
-            await container.service_registry.resolve_service(ProtocolBindingRegistry)
-        )
+        postgres_host = os.getenv("POSTGRES_HOST")
+        if postgres_host:
+            postgres_pool_start_time = time.time()
+            try:
+                postgres_dsn = (
+                    f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:"
+                    f"{os.getenv('POSTGRES_PASSWORD', '')}@"
+                    f"{postgres_host}:"
+                    f"{os.getenv('POSTGRES_PORT', '5432')}/"
+                    f"{os.getenv('POSTGRES_DATABASE', 'omninode_bridge')}"
+                )
+                postgres_pool = await asyncpg.create_pool(
+                    postgres_dsn,
+                    min_size=2,
+                    max_size=10,
+                )
+                postgres_pool_duration = time.time() - postgres_pool_start_time
+                logger.info(
+                    "PostgreSQL pool created in %.3fs (correlation_id=%s)",
+                    postgres_pool_duration,
+                    correlation_id,
+                    extra={
+                        "host": postgres_host,
+                        "port": os.getenv("POSTGRES_PORT", "5432"),
+                        "database": os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
+                    },
+                )
+
+                # 4.6. Create ProjectorRegistration and initialize schema
+                projector = ProjectorRegistration(postgres_pool)
+                await projector.initialize_schema(correlation_id=correlation_id)
+                logger.info(
+                    "ProjectorRegistration schema initialized (correlation_id=%s)",
+                    correlation_id,
+                )
+
+                # 4.6.5. Initialize HandlerConsul if Consul is configured
+                # CONSUL_HOST determines whether to enable Consul registration
+                consul_host = os.getenv("CONSUL_HOST")
+                if consul_host:
+                    consul_port = int(os.getenv("CONSUL_PORT", "8500"))
+                    try:
+                        # Deferred import: Only load HandlerConsul when Consul is configured.
+                        # This avoids loading the consul dependency (and its transitive deps)
+                        # when Consul integration is disabled, reducing startup time.
+                        from omnibase_infra.handlers import HandlerConsul
+
+                        consul_handler = HandlerConsul()
+                        await consul_handler.initialize(
+                            {
+                                "host": consul_host,
+                                "port": consul_port,
+                            }
+                        )
+                        logger.info(
+                            "HandlerConsul initialized for dual registration (correlation_id=%s)",
+                            correlation_id,
+                            extra={
+                                "consul_host": consul_host,
+                                "consul_port": consul_port,
+                            },
+                        )
+                    except Exception as consul_error:
+                        # Log warning but continue without Consul (PostgreSQL is source of truth)
+                        # Use sanitize_error_message to prevent credential leakage in logs
+                        logger.warning(
+                            "Failed to initialize HandlerConsul, proceeding without Consul: %s (correlation_id=%s)",
+                            sanitize_error_message(consul_error),
+                            correlation_id,
+                            extra={
+                                "error_type": type(consul_error).__name__,
+                            },
+                        )
+                        consul_handler = None
+                else:
+                    logger.debug(
+                        "CONSUL_HOST not set, Consul registration disabled (correlation_id=%s)",
+                        correlation_id,
+                    )
+
+                # 4.7. Wire registration handlers with projector and consul_handler
+                registration_summary = await wire_registration_handlers(
+                    container,
+                    postgres_pool,
+                    projector=projector,
+                    consul_handler=consul_handler,
+                )
+                logger.info(
+                    "Registration handlers wired (correlation_id=%s)",
+                    correlation_id,
+                    extra={
+                        "services": registration_summary["services"],
+                    },
+                )
+
+                # 4.8. Create introspection dispatcher for routing events
+                # Deferred import: HandlerNodeIntrospected depends on PostgreSQL and
+                # registration infrastructure. Only loaded after PostgreSQL pool is
+                # successfully created and registration handlers are wired.
+                from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+                    HandlerNodeIntrospected,
+                )
+
+                # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+                if container.service_registry is None:
+                    logger.warning(
+                        "DEGRADED_MODE: ServiceRegistry not available, skipping introspection dispatcher creation (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "error_type": "NoneType",
+                            "correlation_id": correlation_id,
+                            "degraded_mode": True,
+                            "degraded_reason": "service_registry_unavailable",
+                            "component": "introspection_dispatcher",
+                        },
+                    )
+                    # Set introspection_dispatcher to None and continue without it
+                    introspection_dispatcher = None
+                else:
+                    logger.debug(
+                        "Resolving HandlerNodeIntrospected from container (correlation_id=%s)",
+                        correlation_id,
+                    )
+                    handler_introspected: HandlerNodeIntrospected = (
+                        await container.service_registry.resolve_service(
+                            HandlerNodeIntrospected
+                        )
+                    )
+                    logger.debug(
+                        "HandlerNodeIntrospected resolved successfully (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "handler_class": handler_introspected.__class__.__name__,
+                        },
+                    )
+
+                    introspection_dispatcher = DispatcherNodeIntrospected(
+                        handler_introspected
+                    )
+                    logger.info(
+                        "Introspection dispatcher created and wired (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "dispatcher_class": introspection_dispatcher.__class__.__name__,
+                            "handler_class": handler_introspected.__class__.__name__,
+                        },
+                    )
+
+            except Exception as pool_error:
+                # Log warning but continue without registration support
+                # Use sanitize_error_message to prevent credential leakage in logs
+                # (PostgreSQL connection errors may include DSN with password)
+                logger.warning(
+                    "Failed to initialize PostgreSQL pool for registration: %s (correlation_id=%s)",
+                    sanitize_error_message(pool_error),
+                    correlation_id,
+                    extra={
+                        "error_type": type(pool_error).__name__,
+                    },
+                )
+                if postgres_pool is not None:
+                    try:
+                        await postgres_pool.close()
+                    except Exception as cleanup_error:
+                        # Sanitize cleanup errors to prevent credential leakage
+                        # NOTE: Do NOT use exc_info=True here - tracebacks may contain
+                        # connection strings with credentials from PostgreSQL errors
+                        logger.warning(
+                            "Cleanup failed for PostgreSQL pool close: %s (correlation_id=%s)",
+                            sanitize_error_message(cleanup_error),
+                            correlation_id,
+                        )
+                    postgres_pool = None
+                projector = None
+                introspection_dispatcher = None
+        else:
+            logger.debug(
+                "POSTGRES_HOST not set, skipping registration handler wiring (correlation_id=%s)",
+                correlation_id,
+            )
+
+        # 5. Resolve ProtocolBindingRegistry from container or create new instance
+        # NOTE: Fallback to creating new instance is intentional degraded mode behavior.
+        # The handler registry is optional for basic runtime operation - core event
+        # processing continues even without explicit handler bindings. However,
+        # ProtocolConfigurationError should NOT be masked as it indicates invalid
+        # configuration that would cause undefined behavior.
+        handler_registry: ProtocolBindingRegistry | None = None
+
+        # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+        if container.service_registry is not None:
+            try:
+                handler_registry = await container.service_registry.resolve_service(
+                    ProtocolBindingRegistry
+                )
+            except ServiceResolutionError as e:
+                # Service not registered - expected in minimal configurations.
+                # Create a new instance directly as fallback.
+                logger.warning(
+                    "DEGRADED_MODE: ProtocolBindingRegistry not registered in container, "
+                    "creating new instance (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                        "degraded_mode": True,
+                        "degraded_reason": "service_not_registered",
+                        "component": "handler_registry",
+                    },
+                )
+                handler_registry = ProtocolBindingRegistry()
+            except (RuntimeError, AttributeError) as e:
+                # Unexpected resolution failure - container internals issue.
+                # Log with more diagnostic context but still allow degraded operation.
+                logger.warning(
+                    "DEGRADED_MODE: Unexpected error resolving ProtocolBindingRegistry, "
+                    "creating new instance (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                        "degraded_mode": True,
+                        "degraded_reason": "resolution_error",
+                        "component": "handler_registry",
+                    },
+                )
+                handler_registry = ProtocolBindingRegistry()
+            # NOTE: ProtocolConfigurationError is NOT caught here - configuration
+            # errors should propagate and stop startup to prevent undefined behavior.
+        else:
+            # ServiceRegistry not available, create a new ProtocolBindingRegistry directly
+            logger.warning(
+                "DEGRADED_MODE: ServiceRegistry not available, creating ProtocolBindingRegistry directly (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "error_type": "NoneType",
+                    "correlation_id": correlation_id,
+                    "degraded_mode": True,
+                    "degraded_reason": "service_registry_unavailable",
+                    "component": "handler_registry",
+                },
+            )
+            handler_registry = ProtocolBindingRegistry()
 
         # 6. Create runtime host process with config and pre-resolved registry
         # RuntimeHostProcess accepts config as dict; cast model_dump() result to
-        # dict[str, JsonValue] to avoid implicit Any typing (Pydantic's model_dump()
+        # dict[str, object] to avoid implicit Any typing (Pydantic's model_dump()
         # returns dict[str, Any] but all our model fields are strongly typed)
         runtime_create_start_time = time.time()
         runtime = RuntimeHostProcess(
+            container=container,
             event_bus=event_bus,
             input_topic=config.input_topic,
             output_topic=config.output_topic,
-            config=cast("dict[str, JsonValue]", config.model_dump()),
+            config=cast("dict[str, object]", config.model_dump()),
             handler_registry=handler_registry,
         )
         runtime_create_duration = time.time() - runtime_create_start_time
@@ -503,7 +919,8 @@ async def bootstrap() -> int:
             )
             http_port = DEFAULT_HTTP_PORT
 
-        health_server = HealthServer(
+        health_server = ServiceHealth(
+            container=container,
             runtime=runtime,
             port=http_port,
             version=KERNEL_VERSION,
@@ -521,17 +938,73 @@ async def bootstrap() -> int:
             },
         )
 
+        # 9.5. Start introspection event consumer if dispatcher is available
+        # This consumer subscribes to the input topic and routes introspection
+        # events to the HandlerNodeIntrospected via DispatcherNodeIntrospected.
+        # Unlike RuntimeHostProcess which routes based on handler_type field,
+        # this consumer directly parses introspection events from JSON.
+        #
+        # The message handler is extracted to IntrospectionMessageHandler for
+        # better testability and separation of concerns (PR #101 code quality).
+        if introspection_dispatcher is not None and isinstance(
+            event_bus, KafkaEventBus
+        ):
+            # Create extracted event router with proper dependency injection
+            introspection_event_router = IntrospectionEventRouter(
+                dispatcher=introspection_dispatcher,
+                event_bus=event_bus,
+                output_topic=config.output_topic,
+            )
+
+            # Subscribe with callback - returns unsubscribe function
+            subscribe_start_time = time.time()
+            logger.info(
+                "Subscribing to introspection events on Kafka (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "topic": config.input_topic,
+                    "consumer_group": f"{config.consumer_group}-introspection",
+                    "event_bus_type": "kafka",
+                },
+            )
+
+            introspection_unsubscribe = await event_bus.subscribe(
+                topic=config.input_topic,
+                group_id=f"{config.consumer_group}-introspection",
+                on_message=introspection_event_router.handle_message,
+            )
+            subscribe_duration = time.time() - subscribe_start_time
+
+            logger.info(
+                "Introspection event consumer started successfully in %.3fs (correlation_id=%s)",
+                subscribe_duration,
+                correlation_id,
+                extra={
+                    "topic": config.input_topic,
+                    "consumer_group": f"{config.consumer_group}-introspection",
+                    "subscribe_duration_seconds": subscribe_duration,
+                },
+            )
+
         # Calculate total bootstrap time
         bootstrap_duration = time.time() - bootstrap_start_time
 
         # Display startup banner with key configuration
+        if introspection_dispatcher is not None:
+            if consul_handler is not None:
+                registration_status = "enabled (PostgreSQL + Consul)"
+            else:
+                registration_status = "enabled (PostgreSQL only)"
+        else:
+            registration_status = "disabled"
         banner_lines = [
             "=" * 60,
             f"ONEX Runtime Kernel v{KERNEL_VERSION}",
             f"Environment: {environment}",
             f"Contracts: {contracts_dir}",
-            f"Event Bus: {config.event_bus.type} (group: {config.consumer_group})",
+            f"Event Bus: {event_bus_type} (group: {config.consumer_group})",
             f"Topics: {config.input_topic} → {config.output_topic}",
+            f"Registration: {registration_status}",
             f"Health endpoint: http://0.0.0.0:{http_port}/health",
             f"Bootstrap time: {bootstrap_duration:.3f}s",
             f"Correlation ID: {correlation_id}",
@@ -566,7 +1039,23 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
-        # Stop health server first (fast, non-blocking)
+        # Stop introspection consumer first (fast)
+        if introspection_unsubscribe is not None:
+            try:
+                await introspection_unsubscribe()
+                logger.debug(
+                    "Introspection consumer stopped (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception as consumer_stop_error:
+                logger.warning(
+                    "Failed to stop introspection consumer: %s (correlation_id=%s)",
+                    sanitize_error_message(consumer_stop_error),
+                    correlation_id,
+                )
+            introspection_unsubscribe = None
+
+        # Stop health server (fast, non-blocking)
         if health_server is not None:
             try:
                 health_stop_start_time = time.time()
@@ -612,6 +1101,26 @@ async def bootstrap() -> int:
             )
         runtime = None  # Mark as stopped to prevent double-stop in finally
 
+        # Close PostgreSQL pool
+        if postgres_pool is not None:
+            try:
+                pool_close_start_time = time.time()
+                await postgres_pool.close()
+                pool_close_duration = time.time() - pool_close_start_time
+                logger.debug(
+                    "PostgreSQL pool closed in %.3fs (correlation_id=%s)",
+                    pool_close_duration,
+                    correlation_id,
+                )
+            except Exception as pool_close_error:
+                # Sanitize to prevent credential leakage
+                logger.warning(
+                    "Failed to close PostgreSQL pool: %s (correlation_id=%s)",
+                    sanitize_error_message(pool_close_error),
+                    correlation_id,
+                )
+            postgres_pool = None
+
         shutdown_duration = time.time() - shutdown_start_time
         logger.info(
             "ONEX runtime stopped successfully in %.3fs (correlation_id=%s)",
@@ -650,9 +1159,10 @@ async def bootstrap() -> int:
     except Exception as e:
         # Unexpected errors: log with full context and return error code
         # (consistent with ProtocolConfigurationError and RuntimeHostError handlers)
+        # Sanitize error message to prevent credential leakage
         logger.exception(
             "ONEX runtime failed with unexpected error: %s (correlation_id=%s)",
-            e,
+            sanitize_error_message(e),
             correlation_id,
             extra={
                 "error_type": type(e).__name__,
@@ -661,14 +1171,26 @@ async def bootstrap() -> int:
         return 1
 
     finally:
-        # Guard cleanup - stop health server and runtime if not already stopped
+        # Guard cleanup - stop all resources if not already stopped
+        # Order: introspection consumer -> health server -> runtime -> pool
+
+        if introspection_unsubscribe is not None:
+            try:
+                await introspection_unsubscribe()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Failed to stop introspection consumer during cleanup: %s (correlation_id=%s)",
+                    sanitize_error_message(cleanup_error),
+                    correlation_id,
+                )
+
         if health_server is not None:
             try:
                 await health_server.stop()
             except Exception as cleanup_error:
                 logger.warning(
                     "Failed to stop health server during cleanup: %s (correlation_id=%s)",
-                    cleanup_error,
+                    sanitize_error_message(cleanup_error),
                     correlation_id,
                 )
 
@@ -677,9 +1199,21 @@ async def bootstrap() -> int:
                 await runtime.stop()
             except Exception as cleanup_error:
                 # Log cleanup failures with context instead of suppressing them
+                # Sanitize to prevent potential credential leakage from runtime errors
                 logger.warning(
                     "Failed to stop runtime during cleanup: %s (correlation_id=%s)",
-                    cleanup_error,
+                    sanitize_error_message(cleanup_error),
+                    correlation_id,
+                )
+
+        if postgres_pool is not None:
+            try:
+                await postgres_pool.close()
+            except Exception as cleanup_error:
+                # Sanitize to prevent credential leakage from PostgreSQL errors
+                logger.warning(
+                    "Failed to close PostgreSQL pool during cleanup: %s (correlation_id=%s)",
+                    sanitize_error_message(cleanup_error),
                     correlation_id,
                 )
 
@@ -789,4 +1323,9 @@ if __name__ == "__main__":
     main()
 
 
-__all__: list[str] = ["bootstrap", "main", "load_runtime_config"]
+__all__: list[str] = [
+    "ENV_CONTRACTS_DIR",
+    "bootstrap",
+    "load_runtime_config",
+    "main",
+]

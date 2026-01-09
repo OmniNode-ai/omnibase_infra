@@ -9,14 +9,21 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
     EnumVaultOperationType,
 )
+from omnibase_infra.handlers.models.vault.model_payload_vault import (
+    ModelPayloadVault,
+)
+from omnibase_infra.handlers.models.vault.registry_payload_vault import (
+    RegistryPayloadVault,
+)
 
 
-class ModelVaultRenewTokenPayload(BaseModel):
+@RegistryPayloadVault.register("renew_token")
+class ModelVaultRenewTokenPayload(ModelPayloadVault):
     """Payload for vault.renew_token operation result.
 
     Contains token renewal information including new TTL.

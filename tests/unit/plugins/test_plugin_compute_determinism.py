@@ -17,11 +17,20 @@ Requirements:
 - Tests cover edge cases (empty inputs, nested structures, large datasets)
 - Tests verify thread safety without locks affecting determinism
 - Tests verify no side effects or state leakage
+
+Note on Type Annotations:
+    This test module intentionally passes raw dict types to plugin.execute() instead of
+    ModelPluginInputData/ModelPluginContext to test the plugin's behavior with raw dict
+    inputs. The PluginJsonNormalizer implementation accepts dict[str, object] at runtime,
+    so these type violations are intentional for testing purposes.
+
+    The mypy directive below disables arg-type checking for this entire module since
+    ALL argument type mismatches in this file are intentional for testing raw dict inputs.
 """
+# mypy: disable-error-code="arg-type"
 
 import concurrent.futures
 import copy
-from typing import Any
 
 from omnibase_infra.plugins.examples.plugin_json_normalizer import PluginJsonNormalizer
 
@@ -107,7 +116,7 @@ class TestRepeatabilityRequirement:
         """Repeatability holds for empty input."""
         # Arrange
         plugin = PluginJsonNormalizer()
-        input_data: dict[str, Any] = {"json": {}}
+        input_data: dict[str, object] = {"json": {}}
         context = {"correlation_id": "test-repeat-empty"}
 
         # Act: Execute 100 times
@@ -172,7 +181,7 @@ class TestConcurrentExecutionSafety:
         input_data = {
             "json": {
                 "users": [{"name": "Alice", "id": 2}, {"name": "Bob", "id": 1}],
-                "metadata": {"version": "1.0", "created": "2024-01-01"},
+                "metadata": {"version": "1.0", "created": "2025-01-01"},
             }
         }
         context = {"correlation_id": "test-concurrent"}
@@ -466,7 +475,7 @@ class TestEdgeCases:
         """Empty JSON input produces deterministic results."""
         # Arrange
         plugin = PluginJsonNormalizer()
-        input_data: dict[str, Any] = {"json": {}}
+        input_data: dict[str, object] = {"json": {}}
         context = {"correlation_id": "test-empty"}
 
         # Act: Execute multiple times

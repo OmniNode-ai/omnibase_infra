@@ -47,14 +47,11 @@ import json
 import logging
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
 from omnibase_infra.errors import (
     InfraUnavailableError,
     ModelInfraErrorContext,
@@ -151,7 +148,7 @@ class InMemoryEventBus:
         # Topic -> offset counter for message ordering
         self._topic_offsets: dict[str, int] = defaultdict(int)
 
-        # Lock for thread safety
+        # Lock for coroutine safety
         self._lock = asyncio.Lock()
 
         # Started flag
@@ -206,7 +203,7 @@ class InMemoryEventBus:
             extra={"environment": self._environment, "group": self._group},
         )
 
-    async def initialize(self, config: dict[str, JsonValue]) -> None:
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize the event bus with configuration.
 
         Protocol method for compatibility with ProtocolEventBus.
@@ -281,6 +278,7 @@ class InMemoryEventBus:
             headers = ModelEventHeaders(
                 source=f"{self._environment}.{self._group}",
                 event_type=topic,
+                timestamp=datetime.now(UTC),
             )
 
         async with self._lock:
@@ -353,22 +351,48 @@ class InMemoryEventBus:
         envelope: object,
         topic: str,
     ) -> None:
-        """Publish an OnexEnvelope to a topic.
+        """Publish an event envelope to a topic.
 
         Protocol method for ProtocolEventBus compatibility.
         Serializes the envelope to JSON bytes and publishes.
 
+        Envelope Structure:
+            The envelope is expected to be a Pydantic model (typically
+            ModelEventEnvelope from omnibase_core) with the following structure:
+
+            - correlation_id: UUID for tracing the event across services
+            - event_type: String identifying the event type
+            - payload: The event data (dict or Pydantic model)
+            - metadata: Optional metadata dict
+            - timestamp: When the event was created
+
+            Serialization:
+                - Pydantic models: Uses model_dump(mode="json")
+                - Legacy Pydantic v1: Uses dict()
+                - Dict objects: Passed through directly
+                - Other types: Serialized via json.dumps (may raise TypeError)
+
         Args:
-            envelope: Envelope object to publish (ModelOnexEnvelope)
-            topic: Target topic name
+            envelope: Envelope object to publish. Typically ModelEventEnvelope
+                from omnibase_core, but any object with model_dump(), dict(),
+                or dict-like structure is supported.
+            topic: Target topic name for publishing.
+
+        Raises:
+            InfraUnavailableError: If the bus has not been started.
+            TypeError: If envelope cannot be JSON-serialized.
         """
         # Serialize envelope to JSON bytes
         # Note: envelope is expected to have a model_dump() method (Pydantic)
         envelope_dict: object
         if hasattr(envelope, "model_dump"):
-            envelope_dict = envelope.model_dump(mode="json")  # type: ignore[union-attr]
+            # Use getattr for type-safe method access after hasattr check
+            model_dump_method = envelope.model_dump
+            envelope_dict = model_dump_method(mode="json")
         elif hasattr(envelope, "dict"):
-            envelope_dict = envelope.dict()  # type: ignore[union-attr]
+            # Use getattr for type-safe method access after hasattr check
+            dict_method = envelope.dict
+            envelope_dict = dict_method()
         elif isinstance(envelope, dict):
             envelope_dict = envelope
         else:
@@ -383,6 +407,7 @@ class InMemoryEventBus:
             source=f"{self._environment}.{self._group}",
             event_type=topic,
             content_type="application/json",
+            timestamp=datetime.now(UTC),
         )
 
         await self.publish(topic, None, value, headers)
@@ -459,7 +484,7 @@ class InMemoryEventBus:
     async def broadcast_to_environment(
         self,
         command: str,
-        payload: dict[str, JsonValue],
+        payload: dict[str, object],
         target_environment: str | None = None,
     ) -> None:
         """Broadcast command to environment.
@@ -480,6 +505,7 @@ class InMemoryEventBus:
             source=f"{self._environment}.{self._group}",
             event_type="broadcast",
             content_type="application/json",
+            timestamp=datetime.now(UTC),
         )
 
         await self.publish(topic, None, value, headers)
@@ -487,7 +513,7 @@ class InMemoryEventBus:
     async def send_to_group(
         self,
         command: str,
-        payload: dict[str, JsonValue],
+        payload: dict[str, object],
         target_group: str,
     ) -> None:
         """Send command to specific group.
@@ -507,6 +533,7 @@ class InMemoryEventBus:
             source=f"{self._environment}.{self._group}",
             event_type="group_command",
             content_type="application/json",
+            timestamp=datetime.now(UTC),
         )
 
         await self.publish(topic, None, value, headers)
@@ -526,7 +553,7 @@ class InMemoryEventBus:
             extra={"environment": self._environment, "group": self._group},
         )
 
-    async def health_check(self) -> dict[str, JsonValue]:
+    async def health_check(self) -> dict[str, object]:
         """Check event bus health.
 
         Protocol method for ProtocolEventBus compatibility.
@@ -660,7 +687,7 @@ class InMemoryEventBus:
                 return True
             return False
 
-    async def get_circuit_breaker_status(self) -> dict[str, JsonValue]:
+    async def get_circuit_breaker_status(self) -> dict[str, object]:
         """Get circuit breaker status for all subscribers.
 
         Returns:

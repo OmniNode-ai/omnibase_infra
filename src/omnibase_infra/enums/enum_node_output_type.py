@@ -4,7 +4,7 @@
 
 Defines the valid output types that ONEX nodes can produce. This enum is used
 for execution shape validation to ensure nodes produce only allowed output types
-based on their handler type (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
+based on their node archetype (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
 
 IMPORTANT: This enum is distinct from EnumMessageCategory:
     - EnumMessageCategory: Defines message categories for routing (Kafka topics)
@@ -15,14 +15,14 @@ Key Difference - PROJECTION:
     but is NOT a message routing category (projections are not routed via Kafka
     topics in the same way as EVENTs, COMMANDs, and INTENTs).
 
-Output Type Constraints by Handler Type:
+Output Type Constraints by Node Archetype:
     - EFFECT: Can output EVENT, COMMAND (external interaction results)
     - COMPUTE: Can output EVENT, COMMAND, INTENT (pure transformations)
     - REDUCER: Can output PROJECTION only (state consolidation)
     - ORCHESTRATOR: Can output COMMAND, EVENT (workflow coordination)
 
 See Also:
-    - EnumHandlerType: Defines the 4-node architecture handler types
+    - EnumNodeArchetype: Defines the 4-node architecture node archetypes
     - EnumMessageCategory: Defines message categories for topic routing
     - EnumExecutionShapeViolation: Defines validation violation types
 """
@@ -41,7 +41,7 @@ class EnumNodeOutputType(str, Enum):
 
     This enum defines what types of outputs a node can produce. The execution
     shape validator uses this to ensure nodes only produce outputs allowed
-    for their handler type.
+    for their node archetype.
 
     This is NOT the same as EnumMessageCategory which defines how messages
     are routed through Kafka topics. EnumNodeOutputType is specifically for
@@ -64,15 +64,15 @@ class EnumNodeOutputType(str, Enum):
             because projections are node outputs, not routed messages.
 
     Example:
-        >>> from omnibase_infra.enums import EnumNodeOutputType, EnumHandlerType
+        >>> from omnibase_infra.enums import EnumNodeOutputType, EnumNodeArchetype
         >>>
         >>> # Validate that a REDUCER node can produce PROJECTION
-        >>> handler_type = EnumHandlerType.REDUCER
+        >>> node_archetype = EnumNodeArchetype.REDUCER
         >>> output_type = EnumNodeOutputType.PROJECTION
         >>> # PROJECTION is valid for REDUCER
         >>>
         >>> # Validate that an EFFECT node cannot produce PROJECTION
-        >>> handler_type = EnumHandlerType.EFFECT
+        >>> node_archetype = EnumNodeArchetype.EFFECT
         >>> output_type = EnumNodeOutputType.PROJECTION
         >>> # This would be an execution shape violation
     """

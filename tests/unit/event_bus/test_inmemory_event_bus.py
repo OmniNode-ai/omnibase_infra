@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 
 import pytest
+from pydantic import BaseModel
 
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
@@ -171,6 +173,7 @@ class TestInMemoryEventBusPublish:
             source="custom-source",
             event_type="custom-event",
             priority="high",
+            timestamp=datetime.now(UTC),
         )
         await event_bus.publish("test-topic", None, b"value", headers)
 
@@ -755,8 +758,6 @@ class TestInMemoryEventBusPublishEnvelope:
         """Test publish_envelope with a Pydantic model."""
         await event_bus.start()
 
-        from pydantic import BaseModel
-
         class TestEnvelope(BaseModel):
             message: str
             count: int
@@ -1276,7 +1277,9 @@ class TestModelEventMessage:
     @pytest.mark.asyncio
     async def test_message_ack(self) -> None:
         """Test message ack is a no-op for in-memory."""
-        headers = ModelEventHeaders(source="test", event_type="test")
+        headers = ModelEventHeaders(
+            source="test", event_type="test", timestamp=datetime.now(UTC)
+        )
         message = ModelEventMessage(
             topic="test",
             key=b"key",
@@ -1291,7 +1294,9 @@ class TestModelEventMessage:
 
     def test_message_fields(self) -> None:
         """Test message field access."""
-        headers = ModelEventHeaders(source="test", event_type="test")
+        headers = ModelEventHeaders(
+            source="test", event_type="test", timestamp=datetime.now(UTC)
+        )
         message = ModelEventMessage(
             topic="my-topic",
             key=b"my-key",
@@ -1315,18 +1320,24 @@ class TestModelEventHeaders:
     @pytest.mark.asyncio
     async def test_validate_headers_valid(self) -> None:
         """Test validate_headers returns True for valid headers."""
-        headers = ModelEventHeaders(source="test", event_type="test")
+        headers = ModelEventHeaders(
+            source="test", event_type="test", timestamp=datetime.now(UTC)
+        )
         assert await headers.validate_headers() is True
 
     @pytest.mark.asyncio
     async def test_validate_headers_empty_event_type(self) -> None:
         """Test validate_headers returns False for empty event_type."""
-        headers = ModelEventHeaders(source="test", event_type="")
+        headers = ModelEventHeaders(
+            source="test", event_type="", timestamp=datetime.now(UTC)
+        )
         assert await headers.validate_headers() is False
 
     def test_headers_defaults(self) -> None:
         """Test header default values."""
-        headers = ModelEventHeaders(source="test", event_type="test")
+        headers = ModelEventHeaders(
+            source="test", event_type="test", timestamp=datetime.now(UTC)
+        )
 
         assert headers.content_type == "application/json"
         assert headers.schema_version == "1.0.0"

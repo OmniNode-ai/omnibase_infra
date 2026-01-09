@@ -63,18 +63,19 @@ from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID, uuid4
 
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
-
-if TYPE_CHECKING:
-    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-
-from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.validation.chain_propagation_validator import (
     ChainPropagationValidator,
     get_correlation_id,
     get_message_id,
 )
+
+if TYPE_CHECKING:
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 # TypeVar for payload types when creating child envelopes
 T = TypeVar("T")

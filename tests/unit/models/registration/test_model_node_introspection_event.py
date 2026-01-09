@@ -17,6 +17,8 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.models.registration import (
@@ -24,6 +26,9 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeMetadata,
 )
+
+# Fixed test timestamp for deterministic testing (time injection pattern)
+TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
 class TestModelNodeIntrospectionEventBasicInstantiation:
@@ -35,13 +40,14 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
         correlation_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.node_id == test_node_id
-        assert event.node_type == "effect"
-        assert event.node_version == "1.0.0"  # Default value
-        assert event.capabilities == ModelNodeCapabilities()
+        assert event.node_type == EnumNodeKind.EFFECT
+        assert str(event.node_version) == "1.0.0"  # Default value
+        assert event.declared_capabilities == ModelNodeCapabilities()
         assert event.endpoints == {}
         assert event.node_role is None
         assert event.metadata == ModelNodeMetadata()
@@ -58,9 +64,9 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
         timestamp = datetime.now(UTC)
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="compute",
-            node_version="2.1.0",
-            capabilities={"processing": True, "batch_size": 100},
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("2.1.0"),
+            declared_capabilities={"processing": True, "batch_size": 100},
             endpoints={
                 "health": "http://localhost:8080/health",
                 "metrics": "http://localhost:8080/metrics",
@@ -74,9 +80,9 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
             timestamp=timestamp,
         )
         assert event.node_id == test_node_id
-        assert event.node_type == "compute"
-        assert event.node_version == "2.1.0"
-        assert event.capabilities == ModelNodeCapabilities(
+        assert event.node_type == EnumNodeKind.COMPUTE
+        assert str(event.node_version) == "2.1.0"
+        assert event.declared_capabilities == ModelNodeCapabilities(
             processing=True, batch_size=100
         )
         assert event.endpoints == {
@@ -102,69 +108,78 @@ class TestModelNodeIntrospectionEventNodeVersion:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_version == "1.0.0"
+        assert str(event.node_version) == "1.0.0"
 
     def test_node_version_explicit_value(self) -> None:
         """Test that node_version can be set explicitly."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
-            node_version="2.3.4",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("2.3.4"),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_version == "2.3.4"
+        assert str(event.node_version) == "2.3.4"
 
     def test_node_version_with_prerelease(self) -> None:
         """Test that node_version accepts prerelease versions."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
-            node_version="1.0.0-beta.2",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0-beta.2"),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_version == "1.0.0-beta.2"
+        assert str(event.node_version) == "1.0.0-beta.2"
 
     def test_node_version_with_build_metadata(self) -> None:
         """Test that node_version accepts build metadata."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
-            node_version="1.0.0+build.456",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0+build.456"),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_version == "1.0.0+build.456"
+        assert str(event.node_version) == "1.0.0+build.456"
 
     def test_node_version_serialization_roundtrip(self) -> None:
         """Test that node_version is preserved in JSON serialization."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
-            node_version="3.2.1",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("3.2.1"),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         json_str = event.model_dump_json()
         restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
-        assert restored.node_version == "3.2.1"
+        assert str(restored.node_version) == "3.2.1"
 
     def test_node_version_in_model_dump(self) -> None:
         """Test that node_version appears in model_dump output."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
-            node_version="4.5.6",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("4.5.6"),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         data = event.model_dump()
         assert "node_version" in data
-        assert data["node_version"] == "4.5.6"
+        # model_dump() serializes ModelSemVer as a dict with major/minor/patch fields
+        assert data["node_version"]["major"] == 4
+        assert data["node_version"]["minor"] == 5
+        assert data["node_version"]["patch"] == 6
 
 
 class TestModelNodeIntrospectionEventNodeTypeValidation:
@@ -174,33 +189,45 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
         """Test that 'effect' is a valid node_type."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
-            node_id=test_node_id, node_type="effect", correlation_id=uuid4()
+            node_id=test_node_id,
+            node_type=EnumNodeKind.EFFECT,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_type == "effect"
+        assert event.node_type == EnumNodeKind.EFFECT
 
     def test_valid_node_type_compute(self) -> None:
         """Test that 'compute' is a valid node_type."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
-            node_id=test_node_id, node_type="compute", correlation_id=uuid4()
+            node_id=test_node_id,
+            node_type=EnumNodeKind.COMPUTE,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_type == "compute"
+        assert event.node_type == EnumNodeKind.COMPUTE
 
     def test_valid_node_type_reducer(self) -> None:
         """Test that 'reducer' is a valid node_type."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
-            node_id=test_node_id, node_type="reducer", correlation_id=uuid4()
+            node_id=test_node_id,
+            node_type=EnumNodeKind.REDUCER,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_type == "reducer"
+        assert event.node_type == EnumNodeKind.REDUCER
 
     def test_valid_node_type_orchestrator(self) -> None:
         """Test that 'orchestrator' is a valid node_type."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
-            node_id=test_node_id, node_type="orchestrator", correlation_id=uuid4()
+            node_id=test_node_id,
+            node_type=EnumNodeKind.ORCHESTRATOR,
+            correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
-        assert event.node_type == "orchestrator"
+        assert event.node_type == EnumNodeKind.ORCHESTRATOR
 
     def test_invalid_node_type_raises_validation_error(self) -> None:
         """Test that invalid node_type raises ValidationError."""
@@ -210,6 +237,7 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
                 node_id=test_node_id,
                 node_type="invalid_type",  # type: ignore[arg-type]
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         assert "node_type" in str(exc_info.value)
 
@@ -221,6 +249,7 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
                 node_id=test_node_id,
                 node_type="",  # type: ignore[arg-type]
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
 
     def test_invalid_node_type_none(self) -> None:
@@ -231,6 +260,7 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
                 node_id=test_node_id,
                 node_type=None,  # type: ignore[arg-type]
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
 
 
@@ -242,14 +272,15 @@ class TestModelNodeIntrospectionEventSerialization:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="reducer",
+            node_type=EnumNodeKind.REDUCER,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         json_str = event.model_dump_json()
         restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
         assert restored.node_id == event.node_id
         assert restored.node_type == event.node_type
-        assert restored.capabilities == event.capabilities
+        assert restored.declared_capabilities == event.declared_capabilities
         assert restored.endpoints == event.endpoints
 
     def test_json_serialization_roundtrip_full(self) -> None:
@@ -258,8 +289,8 @@ class TestModelNodeIntrospectionEventSerialization:
         correlation_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="orchestrator",
-            capabilities={"routing": True},
+            node_type=EnumNodeKind.ORCHESTRATOR,
+            declared_capabilities={"routing": True},
             endpoints={"api": "http://localhost:8080/api"},
             node_role="coordinator",
             metadata={"cluster": "primary"},
@@ -267,13 +298,14 @@ class TestModelNodeIntrospectionEventSerialization:
             network_id="network-001",
             deployment_id="deploy-001",
             epoch=5,
+            timestamp=TEST_TIMESTAMP,
         )
         json_str = event.model_dump_json()
         restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
 
         assert restored.node_id == event.node_id
         assert restored.node_type == event.node_type
-        assert restored.capabilities == event.capabilities
+        assert restored.declared_capabilities == event.declared_capabilities
         assert restored.endpoints == event.endpoints
         assert restored.node_role == event.node_role
         assert restored.metadata == event.metadata
@@ -289,18 +321,19 @@ class TestModelNodeIntrospectionEventSerialization:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
-            capabilities=ModelNodeCapabilities(database=True),
+            node_type=EnumNodeKind.EFFECT,
+            declared_capabilities=ModelNodeCapabilities(database=True),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         data = event.model_dump()
         assert isinstance(data, dict)
         assert data["node_id"] == test_node_id
         assert data["node_type"] == "effect"
         # capabilities is now a nested dict from ModelNodeCapabilities
-        assert data["capabilities"]["database"] is True
+        assert data["declared_capabilities"]["database"] is True
         # Check other default values in the capabilities dict
-        assert data["capabilities"]["postgres"] is False
+        assert data["declared_capabilities"]["postgres"] is False
 
     def test_model_dump_mode_json(self) -> None:
         """Test model_dump with mode='json' for JSON-compatible output."""
@@ -308,8 +341,9 @@ class TestModelNodeIntrospectionEventSerialization:
         correlation_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="compute",
+            node_type=EnumNodeKind.COMPUTE,
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
         data = event.model_dump(mode="json")
         # UUID should be serialized as string in JSON mode
@@ -320,20 +354,23 @@ class TestModelNodeIntrospectionEventSerialization:
 
 
 class TestModelNodeIntrospectionEventTimestamp:
-    """Tests for timestamp auto-generation."""
+    """Tests for timestamp field (required, injected by caller)."""
 
-    def test_timestamp_auto_generation(self) -> None:
-        """Test that timestamp is auto-generated when not provided."""
+    def test_timestamp_is_required(self) -> None:
+        """Test that timestamp is required (time injection pattern).
+
+        Per ONEX time injection pattern, timestamps must be explicitly
+        injected by the caller for testability and deterministic behavior.
+        """
         test_node_id = uuid4()
-        before = datetime.now(UTC)
-        event = ModelNodeIntrospectionEvent(
-            node_id=test_node_id,
-            node_type="orchestrator",
-            correlation_id=uuid4(),
-        )
-        after = datetime.now(UTC)
-        assert event.timestamp is not None
-        assert before <= event.timestamp <= after
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type=EnumNodeKind.ORCHESTRATOR,
+                correlation_id=uuid4(),
+                # timestamp intentionally omitted
+            )
+        assert "timestamp" in str(exc_info.value)
 
     def test_timestamp_explicit_value(self) -> None:
         """Test that explicit timestamp is preserved."""
@@ -341,7 +378,7 @@ class TestModelNodeIntrospectionEventTimestamp:
         explicit_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             timestamp=explicit_time,
             correlation_id=uuid4(),
         )
@@ -352,10 +389,33 @@ class TestModelNodeIntrospectionEventTimestamp:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="compute",
+            node_type=EnumNodeKind.COMPUTE,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert isinstance(event.timestamp, datetime)
+
+    def test_naive_timestamp_rejected(self) -> None:
+        """Test that naive datetime (without tzinfo) is rejected.
+
+        Timezone-aware timestamps are required to prevent ambiguity in
+        distributed systems where events may be processed across time zones.
+        """
+        from datetime import datetime as dt
+
+        test_node_id = uuid4()
+        naive_timestamp = dt(2025, 1, 1, 12, 0, 0)  # No tzinfo
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type=EnumNodeKind.EFFECT,
+                correlation_id=uuid4(),
+                timestamp=naive_timestamp,
+            )
+
+        error_str = str(exc_info.value).lower()
+        assert "timezone-aware" in error_str or "tzinfo" in error_str
 
 
 class TestModelNodeIntrospectionEventImmutability:
@@ -366,8 +426,9 @@ class TestModelNodeIntrospectionEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         with pytest.raises(ValidationError):
             event.node_id = uuid4()  # type: ignore[misc]
@@ -377,8 +438,9 @@ class TestModelNodeIntrospectionEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         with pytest.raises(ValidationError):
             event.node_type = "compute"  # type: ignore[misc]
@@ -388,9 +450,10 @@ class TestModelNodeIntrospectionEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         with pytest.raises(ValidationError):
             event.node_version = "2.0.0"  # type: ignore[misc]
@@ -400,20 +463,23 @@ class TestModelNodeIntrospectionEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
-            capabilities={"original": True},
+            node_type=EnumNodeKind.EFFECT,
+            declared_capabilities={"original": True},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         with pytest.raises(ValidationError):
-            event.capabilities = {"modified": True}  # type: ignore[misc]
+            # Intentional: assigning dict to ModelNodeCapabilities to test frozen rejection
+            event.declared_capabilities = {"modified": True}  # type: ignore[misc, assignment]
 
     def test_frozen_model_cannot_modify_correlation_id(self) -> None:
         """Test that correlation_id cannot be modified after creation."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         with pytest.raises(ValidationError):
             event.correlation_id = uuid4()  # type: ignore[misc]
@@ -423,8 +489,9 @@ class TestModelNodeIntrospectionEventImmutability:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         with pytest.raises(ValidationError):
             event.timestamp = datetime.now(UTC)  # type: ignore[misc]
@@ -438,8 +505,9 @@ class TestModelNodeIntrospectionEventEdgeCases:
         with pytest.raises(ValidationError):
             ModelNodeIntrospectionEvent(
                 node_id="",  # type: ignore[arg-type]
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
 
     def test_complex_capabilities_dict(self) -> None:
@@ -447,29 +515,31 @@ class TestModelNodeIntrospectionEventEdgeCases:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="compute",
-            capabilities={
+            node_type=EnumNodeKind.COMPUTE,
+            declared_capabilities={
                 "processing": True,
                 "max_batch": 1000,
                 "supported_types": ["json", "xml", "csv"],
                 "config": {"timeout": 30, "retries": 3},
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
-        assert event.capabilities.processing is True
-        assert event.capabilities.max_batch == 1000
-        assert event.capabilities.supported_types == ["json", "xml", "csv"]
-        assert event.capabilities.config["timeout"] == 30
+        assert event.declared_capabilities.processing is True
+        assert event.declared_capabilities.max_batch == 1000
+        assert event.declared_capabilities.supported_types == ["json", "xml", "csv"]
+        assert event.declared_capabilities.config["timeout"] == 30
 
     def test_unicode_in_fields(self) -> None:
         """Test Unicode characters in string fields."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             node_role="处理器",
             metadata={"description": "Узел обработки"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.node_id == test_node_id
         assert event.node_role == "处理器"
@@ -481,8 +551,9 @@ class TestModelNodeIntrospectionEventEdgeCases:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
                 extra_field="not_allowed",  # type: ignore[call-arg]
             )
         assert "extra_field" in str(exc_info.value)
@@ -497,9 +568,10 @@ class TestModelNodeIntrospectionEventEdgeCases:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 epoch=-1,
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         assert "epoch" in str(exc_info.value)
 
@@ -508,9 +580,10 @@ class TestModelNodeIntrospectionEventEdgeCases:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             epoch=0,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.epoch == 0
 
@@ -519,9 +592,10 @@ class TestModelNodeIntrospectionEventEdgeCases:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             epoch=42,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.epoch == 42
 
@@ -530,9 +604,10 @@ class TestModelNodeIntrospectionEventEdgeCases:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             epoch=2**31,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.epoch == 2**31
 
@@ -548,9 +623,9 @@ class TestModelNodeIntrospectionEventFromAttributes:
         class DictLike:
             def __init__(self, node_id: UUID, correlation_id: UUID) -> None:
                 self.node_id = node_id
-                self.node_type = "compute"
-                self.node_version = "1.0.0"
-                self.capabilities: dict[str, bool] = {}
+                self.node_type = EnumNodeKind.COMPUTE
+                self.node_version = ModelSemVer.parse("1.0.0")
+                self.declared_capabilities: dict[str, bool] = {}
                 self.endpoints: dict[str, str] = {}
                 self.node_role = None
                 self.metadata: dict[str, str] = {}
@@ -563,8 +638,8 @@ class TestModelNodeIntrospectionEventFromAttributes:
         obj = DictLike(test_node_id, test_correlation_id)
         event = ModelNodeIntrospectionEvent.model_validate(obj)
         assert event.node_id == test_node_id
-        assert event.node_type == "compute"
-        assert event.node_version == "1.0.0"
+        assert event.node_type == EnumNodeKind.COMPUTE
+        assert str(event.node_version) == "1.0.0"
         assert event.correlation_id == test_correlation_id
 
 
@@ -578,13 +653,13 @@ class TestModelNodeIntrospectionEventEquality:
         timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         event1 = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             timestamp=timestamp,
             correlation_id=correlation_id,
         )
         event2 = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             timestamp=timestamp,
             correlation_id=correlation_id,
         )
@@ -596,13 +671,13 @@ class TestModelNodeIntrospectionEventEquality:
         correlation_id = uuid4()
         event1 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             timestamp=timestamp,
             correlation_id=correlation_id,
         )
         event2 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             timestamp=timestamp,
             correlation_id=correlation_id,
         )
@@ -615,13 +690,13 @@ class TestModelNodeIntrospectionEventEquality:
         timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         event1 = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             timestamp=timestamp,
             correlation_id=correlation_id,
         )
         event2 = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="compute",
+            node_type=EnumNodeKind.COMPUTE,
             timestamp=timestamp,
             correlation_id=correlation_id,
         )
@@ -632,8 +707,9 @@ class TestModelNodeIntrospectionEventEquality:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event != "not a model"
         assert event != 42
@@ -660,7 +736,7 @@ class TestModelNodeIntrospectionEventHashing:
         timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             timestamp=timestamp,
             correlation_id=uuid4(),
         )
@@ -677,8 +753,9 @@ class TestModelNodeIntrospectionEventStringRepresentation:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         str_repr = str(event)
         # Pydantic models include field values in string representation
@@ -689,8 +766,9 @@ class TestModelNodeIntrospectionEventStringRepresentation:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         repr_str = repr(event)
         assert isinstance(repr_str, str)
@@ -701,8 +779,9 @@ class TestModelNodeIntrospectionEventStringRepresentation:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="orchestrator",
+            node_type=EnumNodeKind.ORCHESTRATOR,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         str_repr = str(event)
         repr_str = repr(event)
@@ -718,8 +797,9 @@ class TestModelNodeIntrospectionEventCopying:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         copied = event.model_copy()
         assert copied is not event
@@ -731,8 +811,9 @@ class TestModelNodeIntrospectionEventCopying:
         new_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         copied = event.model_copy(update={"node_id": new_node_id})
         assert copied.node_id == new_node_id
@@ -745,17 +826,18 @@ class TestModelNodeIntrospectionEventCopying:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
-            capabilities={"key": "value"},
+            node_type=EnumNodeKind.EFFECT,
+            declared_capabilities={"key": "value"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         copied = event.model_copy(deep=True)
         # Both should have same values
-        assert copied.capabilities == event.capabilities
+        assert copied.declared_capabilities == event.declared_capabilities
         # But dict should be independent (deep copy)
         # Note: For frozen models, we can't modify in place, but the dict
         # reference should still be different
-        assert copied.capabilities is not event.capabilities
+        assert copied.declared_capabilities is not event.declared_capabilities
 
 
 class TestModelNodeIntrospectionEventEndpointUrlValidation:
@@ -766,12 +848,13 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             endpoints={
                 "health": "http://localhost:8080/health",
                 "metrics": "http://localhost:8080/metrics",
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.endpoints["health"] == "http://localhost:8080/health"
         assert event.endpoints["metrics"] == "http://localhost:8080/metrics"
@@ -781,12 +864,13 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             endpoints={
                 "api": "https://api.example.com:443/v1",
                 "health": "https://api.example.com/health",
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.endpoints["api"] == "https://api.example.com:443/v1"
         assert event.endpoints["health"] == "https://api.example.com/health"
@@ -796,11 +880,12 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             endpoints={
                 "health": "http://localhost:8080/api/v1/health?timeout=30&verbose=true",
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert (
             event.endpoints["health"]
@@ -812,9 +897,10 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             endpoints={},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         assert event.endpoints == {}
 
@@ -824,9 +910,10 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 endpoints={"health": "localhost:8080/health"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -839,9 +926,10 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 endpoints={"health": "http:///health"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -853,9 +941,10 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 endpoints={"api": "not-a-url"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -868,9 +957,10 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 endpoints={"health": ""},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -882,9 +972,10 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 endpoints={"health": "/health"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -896,13 +987,14 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 endpoints={
                     "health": "http://localhost:8080/health",
                     "metrics": "invalid-url",
                     "api": "http://localhost:8080/api",
                 },
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -915,9 +1007,10 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
-                node_type="effect",
+                node_type=EnumNodeKind.EFFECT,
                 endpoints={"my_bad_endpoint": "no-scheme"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
         error_str = str(exc_info.value)
         assert "my_bad_endpoint" in error_str
@@ -927,12 +1020,13 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             endpoints={
                 "health": "http://localhost:8080/health",
                 "metrics": "https://api.example.com/metrics",
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
         json_str = event.model_dump_json()
         restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)

@@ -10,7 +10,6 @@ Architecture:
     - success: Whether the operation completed successfully
     - error: Error message if the operation failed (sanitized)
     - duration_ms: Time taken for the operation
-    - retries: Number of retry attempts made
 
     This model is used within ModelRegistryResponse to report per-backend status,
     enabling partial failure detection and targeted retry strategies.
@@ -64,14 +63,34 @@ class ModelBackendResult(BaseModel):
         error: Sanitized error message if success is False.
         error_code: Optional error code for programmatic handling.
         duration_ms: Time taken for the operation in milliseconds.
-        retries: Number of retry attempts made before final result.
         backend_id: Optional identifier for the backend instance.
+
+    Design Note - No ``retries`` Field:
+        This model intentionally does NOT include a ``retries`` field because:
+
+        1. **Effect layer dispatches once**: The effect node dispatches to handlers
+           exactly once per operation. It does not implement retry loops.
+        2. **Handlers own retry logic**: Handlers implement their own retry behavior
+           using the ``retry_policy`` configuration from the contract. Retry count
+           is internal handler state, not exposed in results.
+        3. **Caller-controlled retries**: Callers can use the ``retry_partial_failure``
+           operation for explicit retries after partial failures.
+
+        **Important**: At the effect layer, a ``retries`` field would always be 0.
+        Retry counts are only meaningful when aggregated by the orchestrator layer,
+        which tracks how many times ``retry_partial_failure`` was called.
+
+        For observability of retry attempts:
+        - Handlers should emit metrics/logs during internal retry loops
+        - Use ``correlation_id`` to correlate retry attempts across logs
+        - Orchestrator layer can track ``retry_partial_failure`` operation calls
+
+        See: ``contract.yaml`` error_handling.retry_policy for handler configuration.
 
     Example:
         >>> result = ModelBackendResult(
         ...     success=True,
         ...     duration_ms=45.2,
-        ...     retries=0,
         ... )
         >>> result.success
         True
@@ -82,58 +101,11 @@ class ModelBackendResult(BaseModel):
         ...     error="Connection refused to database host",
         ...     error_code="DATABASE_CONNECTION_ERROR",
         ...     duration_ms=5000.0,
-        ...     retries=3,
         ... )
         >>> result.success
         False
         >>> result.error
         'Connection refused to database host'
-
-    Migration Notes:
-        Changed: [OMN-1001] Union Reduction Phase 1
-
-        Previous Pattern (DEPRECATED):
-            Backend results were returned as ``dict[str, bool | str]`` with
-            keys "success" and "error". This pattern had several issues:
-
-            - No type safety: ``result["success"]`` could raise KeyError
-            - Union types required runtime type checking
-            - IDE autocompletion and type hints were limited
-            - No validation of field values or constraints
-
-            Example of old pattern::
-
-                # Old pattern - dict-based (DO NOT USE)
-                result: dict[str, bool | str] = {"success": True, "error": ""}
-                if result.get("success", False):
-                    process_success()
-                error_msg = result.get("error")
-
-        New Pattern (CURRENT):
-            This Pydantic model provides strong typing, type-safe attribute
-            access, built-in validation, and immutability guarantees.
-
-            Example of new pattern::
-
-                # New pattern - Pydantic model (USE THIS)
-                result = ModelBackendResult(success=True, duration_ms=45.2)
-                if result.success:
-                    process_success()
-                error_msg = result.error  # Type-safe, None if not set
-
-        Migration Guide:
-            Replace dict access patterns with attribute access:
-
-            - ``result.get("success", False)`` -> ``result.success``
-            - ``result.get("error")`` -> ``result.error``
-            - ``result["success"]`` -> ``result.success``
-            - ``"success" in result`` -> always available as attribute
-            - ``result.get("error_code")`` -> ``result.error_code``
-
-        Breaking Change:
-            This is a breaking change. Code using the old dict-based pattern
-            will fail with AttributeError when accessing dict methods on the
-            model instance. Update all call sites to use attribute access.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -154,11 +126,6 @@ class ModelBackendResult(BaseModel):
         default=0.0,
         description="Time taken for the operation in milliseconds",
         ge=0.0,
-    )
-    retries: int = Field(
-        default=0,
-        description="Number of retry attempts made before final result",
-        ge=0,
     )
     backend_id: str | None = Field(
         default=None,

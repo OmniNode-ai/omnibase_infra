@@ -120,26 +120,13 @@ Topic Taxonomy Reference:
 
 import re
 from functools import lru_cache
-from typing import NamedTuple
 
 from omnibase_core.enums.enum_topic_taxonomy import EnumTopicType
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
-
-
-class CacheInfo(NamedTuple):
-    """Cache statistics returned by get_topic_parse_cache_info().
-
-    This mirrors functools._CacheInfo structure for type safety.
-    """
-
-    hits: int
-    misses: int
-    maxsize: int | None
-    currsize: int
-
+from omnibase_infra.types import TypeCacheInfo
 
 # Module-level LRU cache for topic parsing performance.
 # Since ModelTopicParser is stateless and all class-level attributes are constants,
@@ -294,12 +281,12 @@ def _parse_topic_cached(topic: str) -> ModelParsedTopic:
     )
 
 
-def get_topic_parse_cache_info() -> CacheInfo:
+def get_topic_parse_cache_info() -> TypeCacheInfo:
     """
     Get cache statistics for topic parsing.
 
     Returns:
-        CacheInfo: A named tuple with hits, misses, maxsize, and currsize.
+        TypeCacheInfo: A named tuple with hits, misses, maxsize, and currsize.
 
     Example:
         >>> from omnibase_infra.models.dispatch import get_topic_parse_cache_info
@@ -307,9 +294,9 @@ def get_topic_parse_cache_info() -> CacheInfo:
         >>> print(f"Cache hit rate: {info.hits / (info.hits + info.misses):.2%}")
         Cache hit rate: 95.00%
     """
-    # Convert from functools._CacheInfo to our typed CacheInfo
+    # Convert from functools._CacheInfo to our typed TypeCacheInfo
     info = _parse_topic_cached.cache_info()
-    return CacheInfo(
+    return TypeCacheInfo(
         hits=info.hits,
         misses=info.misses,
         maxsize=info.maxsize,
@@ -735,6 +722,6 @@ class ModelTopicParser:
 
 __all__ = [
     "ModelTopicParser",
-    "get_topic_parse_cache_info",
     "clear_topic_parse_cache",
+    "get_topic_parse_cache_info",
 ]

@@ -37,12 +37,12 @@ The following are explicitly OUT OF SCOPE for MVP (v0.1.0):
 - **No graceful shutdown drain** - Basic shutdown only
 
 **Explicitly Forbidden in MVP**:
-- Multiple handlers of the same type (one HttpHandler, one DbHandler only)
+- Multiple handlers of the same type (one HttpHandler, one HandlerDb only)
 - Multi-topic subscription (single input topic, single output topic)
 - Async background tasks in ANY MVP code
 - Dynamic handler registration at runtime
 - Handler hot-reload or reconfiguration
-- Transactions in DbHandler (individual queries only)
+- Transactions in HandlerDb (individual queries only)
 
 **Operations MUST Error Loudly**:
 - Attempting to register duplicate handler types -> `ProtocolConfigurationError`
@@ -83,8 +83,8 @@ runtime:
 - `retry_policy` - Reserved for Beta resilience
 - `rate_limit` - Reserved for Beta throttling
 - `handlers.type: "local"` - LocalHandler forbidden in infra contracts
-- `handlers.type: "vault"` - VaultAdapter deferred to Beta
-- `handlers.type: "consul"` - ConsulHandler deferred to Beta
+- `handlers.type: "vault"` - HandlerVault deferred to Beta
+- `handlers.type: "consul"` - HandlerConsul deferred to Beta
 
 ---
 
@@ -99,13 +99,18 @@ runtime:
 | 3 | `ProtocolHandler` | Interface defined with `handler_type` returning enum | [ ] |
 | 4 | `ProtocolEventBus` | Interface defined with `publish_envelope`, `subscribe` | [ ] |
 | 5 | `NodeRuntime` | Routes envelope to correct handler by type | [ ] |
-| 6 | `FileRegistry` | Loads contracts from directory, fails on invalid | [ ] |
+| 6 | `HandlerContractSource` | Discovers handler_contract.yaml files from filesystem | [ ] |
 | 7 | `HttpHandler` | Executes GET/POST, returns response envelope | [ ] |
-| 8 | `DbHandler` | Executes query/execute, returns response envelope | [ ] |
+| 8 | `HandlerDb` | Executes query/execute, returns response envelope | [ ] |
 | 9 | `InMemoryEventBus` | Publishes and consumes envelopes per topic | [ ] |
 | 10 | `BaseRuntimeHostProcess` | Loads contract, wires handlers, starts consumption | [ ] |
 | 11 | `wiring.py` | Registers handlers from config without duplicates | [ ] |
 | 12 | E2E Flow | Envelope in -> handler executes -> response out | [ ] |
+
+> **Note**: The checklist references core components. `omnibase_infra` provides `HandlerContractSource`
+> for handler contract discovery from `handler_contract.yaml` files. `omnibase_core` will provide a general-purpose
+> contract registry (see Issue 1.8) for loading node contracts from filesystem. These are complementary components:
+> `HandlerContractSource` handles handler-specific discovery, while the core registry handles general contract loading.
 
 **MVP Smoke Test** (single command to verify):
 ```bash
@@ -115,7 +120,7 @@ pytest tests/integration/test_e2e_envelope_flow.py -v
 
 **Minimum Viable Configuration**:
 - Event Bus: `InMemoryEventBus` only
-- Handlers: `HttpHandler` + `DbHandler` only
+- Handlers: `HttpHandler` + `HandlerDb` only
 - Nodes: At least 1 node contract loaded
 - Contract: Simplified MVP schema (no retry_policy, no tenant_id)
 
@@ -427,18 +432,31 @@ Create the core runtime that hosts multiple node instances. **MINIMAL for MVP - 
 
 ---
 
-### Issue 1.8: Implement FileRegistry class (SIMPLE) [MVP]
+### Issue 1.8: Implement FileContractRegistry class (SIMPLE) [MVP]
 
-**Title**: Create FileRegistry for contract loading
+**Title**: Create FileContractRegistry for contract loading
 **Type**: Feature
 **Priority**: High
 **Labels**: `architecture`, `runtime`, `core`
 **Milestone**: v0.1.0 MVP
 
+> **Implementation Status**: This component is PLANNED for `omnibase_core` and does NOT yet exist.
+> This issue defines the specification for future implementation.
+
+> **Naming Convention**: Following ONEX naming standards (`Registry<Purpose>`), this class should be named
+> `FileContractRegistry` (file: `registry_file_contract.py`). The name describes its purpose: a registry
+> that loads contracts from files. Alternative names considered: `RegistryFileBased`, `FileRegistry`.
+
+> **Relationship with HandlerContractSource**: `omnibase_infra` currently provides `HandlerContractSource`
+> for handler-specific contract discovery from `handler_contract.yaml` files. Once `FileContractRegistry`
+> is implemented in `omnibase_core`, `HandlerContractSource` should be evaluated for potential migration
+> to use `FileContractRegistry` as its underlying file loading mechanism, while retaining handler-specific
+> discovery logic. These remain complementary components with different scopes.
+
 **Description**:
 Create the file-based contract registry for loading node contracts from filesystem. **Simple for MVP - just load YAML to Pydantic, no skip rules.**
 
-**File**: `src/omnibase_core/runtime/file_registry.py` (NEW)
+**File**: `src/omnibase_core/runtime/registry_file_contract.py` (NEW)
 
 **MVP Methods**: `load(path) -> Model`, `load_all(directory) -> list[Model]`
 
@@ -885,7 +903,7 @@ Implement `HttpHandler` for HTTP REST operations using httpx. **Minimal for MVP 
 
 ---
 
-### Issue 3.3: Implement DbHandler (MINIMAL) [MVP]
+### Issue 3.3: Implement HandlerDb (MINIMAL) [MVP]
 
 **Title**: Create PostgreSQL database protocol handler
 **Type**: Feature
@@ -894,7 +912,7 @@ Implement `HttpHandler` for HTTP REST operations using httpx. **Minimal for MVP 
 **Milestone**: v0.1.0 MVP
 
 **Description**:
-Implement `DbHandler` for PostgreSQL operations using asyncpg. **Minimal for MVP - query + execute only, no transactions.**
+Implement `HandlerDb` for PostgreSQL operations using asyncpg. **Minimal for MVP - query + execute only, no transactions.**
 
 **File**: `src/omnibase_infra/handlers/db_handler.py`
 
@@ -913,7 +931,7 @@ Implement `DbHandler` for PostgreSQL operations using asyncpg. **Minimal for MVP
 **SQL Injection Protection**:
 - All queries MUST use parameterized statements (no string interpolation)
 - Parameters passed via `parameters` list, never embedded in SQL string
-- DbHandler MUST validate parameter count matches placeholder count
+- HandlerDb MUST validate parameter count matches placeholder count
 - Suspicious patterns (`;--`, `DROP`, `UNION` outside subqueries) trigger warning log
 
 **Unsupported Operation Handling**:
@@ -1185,8 +1203,8 @@ def postgres_container():
 
 @pytest.fixture
 def db_handler(postgres_container):
-    """DbHandler with real PostgreSQL."""
-    handler = DbHandler()
+    """HandlerDb with real PostgreSQL."""
+    handler = HandlerDb()
     await handler.initialize({"connection_string": postgres_container})
     yield handler
     await handler.shutdown()
@@ -1205,8 +1223,8 @@ def inmemory_event_bus():
 
 @pytest.fixture
 def mock_db_handler():
-    """DbHandler with mocked pool."""
-    handler = DbHandler()
+    """HandlerDb with mocked pool."""
+    handler = HandlerDb()
     handler._pool = AsyncMock()
     handler._pool.execute.return_value = [{"id": 1}]
     return handler
@@ -1237,7 +1255,7 @@ def mock_db_handler():
 **Milestone**: v0.1.0 MVP
 
 **Description**:
-Unit tests for HttpHandler and DbHandler with mocked dependencies.
+Unit tests for HttpHandler and HandlerDb with mocked dependencies.
 
 **Files**:
 - `tests/unit/handlers/test_http_handler.py`
@@ -1475,7 +1493,7 @@ Phase 1 (Core Types - omnibase_core)
     +-- 1.5 ProtocolHandler [MVP]
     +-- 1.6 NodeInstance [MVP]
     +-- 1.7 NodeRuntime (minimal) [MVP]
-    +-- 1.8 FileRegistry (simple) [MVP]
+    +-- 1.8 FileContractRegistry (simple) [MVP]
     +-- 1.9 LocalHandler [MVP]
     +-- 1.10 Dev CLI (simple) [MVP]
     +-- 1.11 Minimal error taxonomy [MVP]
@@ -1492,7 +1510,7 @@ Phase 3 (Infra - MVP)
     |
     +-- 3.1 Directory structure (simplified) [MVP]
     +-- 3.2 HttpHandler (minimal) [MVP]
-    +-- 3.3 DbHandler (minimal) [MVP]
+    +-- 3.3 HandlerDb (minimal) [MVP]
     +-- 3.4 InMemoryEventBus [MVP]
     +-- 3.5 wiring.py (simple) [MVP]
     +-- 3.6 BaseRuntimeHostProcess (minimal) [MVP]
@@ -1545,7 +1563,7 @@ New contributors should tackle issues in this order to build momentum:
 | 6 | `ProtocolEventBus` export | omnibase_spi | S | Core protocols |
 | 7 | `InMemoryEventBus` | omnibase_infra | M | SPI protocols |
 | 8 | `HttpHandler` (skeleton) | omnibase_infra | M | ProtocolHandler |
-| 9 | `DbHandler` (skeleton) | omnibase_infra | M | ProtocolHandler |
+| 9 | `HandlerDb` (skeleton) | omnibase_infra | M | ProtocolHandler |
 | 10 | `wiring.py` | omnibase_infra | M | Handlers |
 | 11 | `BaseRuntimeHostProcess` (skeleton) | omnibase_infra | L | All above |
 | 12 | E2E integration test | omnibase_infra | L | All above |
@@ -1590,7 +1608,7 @@ runtime:
 
 **What this contract does**:
 1. Uses `InMemoryEventBus` (MVP default)
-2. Registers `HttpHandler` and `DbHandler`
+2. Registers `HttpHandler` and `HandlerDb`
 3. Loads one node contract (`example_node`)
 
 **What this contract does NOT have** (intentionally):
@@ -1610,7 +1628,7 @@ omnibase-runtime-host minimum_runtime_host.yaml
 INFO  BaseRuntimeHostProcess initializing...
 INFO  Loading contract: minimum_runtime_host.yaml
 INFO  Registering handler: HttpHandler
-INFO  Registering handler: DbHandler
+INFO  Registering handler: HandlerDb
 INFO  Loading node: example_node
 INFO  Starting InMemoryEventBus...
 INFO  BaseRuntimeHostProcess ready. Listening on topic: onex.*.*.cmd.v1
@@ -1696,7 +1714,7 @@ dependencies: []
 |--------|-------------|--------------|
 | `node_type` | `EFFECT` | `COMPUTE` |
 | `io_operations` | Lists external I/O | Empty (pure) |
-| Handler usage | Uses HttpHandler, DbHandler | No handlers (pure logic) |
+| Handler usage | Uses HttpHandler, HandlerDb | No handlers (pure logic) |
 | Side effects | Yes (external calls) | No (deterministic) |
 
 ---

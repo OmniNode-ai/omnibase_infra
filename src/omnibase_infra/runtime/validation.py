@@ -31,6 +31,7 @@ Usage:
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -40,23 +41,21 @@ import yaml
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
-# Topic name pattern: alphanumeric, underscores, and hyphens only
-# This matches Kafka/Redpanda topic naming conventions
-TOPIC_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+# Topic name pattern: alphanumeric, underscores, hyphens, and periods
+# This matches Kafka/Redpanda topic naming conventions and ONEX naming
+# (e.g., "dev.onex.evt.node-introspection.v1")
+TOPIC_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 # Valid event bus types (matches ModelEventBusConfig.type Literal)
 VALID_EVENT_BUS_TYPES = frozenset({"inmemory", "kafka"})
 
 # Shutdown grace period bounds (matches ModelShutdownConfig constraints)
 MIN_GRACE_PERIOD_SECONDS = 0
-MAX_GRACE_PERIOD_SECONDS = 300
+MAX_GRACE_PERIOD_SECONDS = 3600  # Max 1 hour to match ModelShutdownConfig
 
 
 def validate_runtime_config(
-    config: JsonValue,
+    config: Mapping[str, object],
     contract_path: Path | None = None,
 ) -> list[str]:
     """Validate runtime configuration against contract schema.
@@ -65,11 +64,11 @@ def validate_runtime_config(
     This is a pre-validation step before Pydantic model validation.
 
     Validation Rules:
-        - input_topic: Must be string matching ^[a-zA-Z0-9_-]+$
-        - output_topic: Must be string matching ^[a-zA-Z0-9_-]+$
-        - consumer_group/group_id: Must be string matching ^[a-zA-Z0-9_-]+$
+        - input_topic: Must be string matching ^[a-zA-Z0-9._-]+$
+        - output_topic: Must be string matching ^[a-zA-Z0-9._-]+$
+        - consumer_group/group_id: Must be string matching ^[a-zA-Z0-9._-]+$
         - event_bus.type: Must be "inmemory" or "kafka"
-        - shutdown.grace_period_seconds: Must be integer 0-300
+        - shutdown.grace_period_seconds: Must be integer 0-3600
 
     Args:
         config: Configuration dictionary to validate. Can be the raw dict
@@ -105,7 +104,7 @@ def validate_runtime_config(
                 errors.append(f"{field} must be a string, got {type(value).__name__}")
             elif not TOPIC_NAME_PATTERN.match(value):
                 errors.append(
-                    f"{field} must match pattern ^[a-zA-Z0-9_-]+$, got: '{value}'"
+                    f"{field} must match pattern ^[a-zA-Z0-9._-]+$, got: '{value}'"
                 )
 
     # Validate consumer_group or group_id (alias)
@@ -122,7 +121,7 @@ def validate_runtime_config(
             errors.append(f"{group_field} must be a string, got {type(value).__name__}")
         elif not TOPIC_NAME_PATTERN.match(value):
             errors.append(
-                f"{group_field} must match pattern ^[a-zA-Z0-9_-]+$, got: '{value}'"
+                f"{group_field} must match pattern ^[a-zA-Z0-9._-]+$, got: '{value}'"
             )
 
     # Validate event_bus if present
@@ -212,7 +211,7 @@ def validate_runtime_config(
 def load_and_validate_config(
     config_path: Path,
     contract_path: Path | None = None,
-) -> JsonValue:
+) -> dict[str, object]:
     """Load and validate runtime configuration from a YAML file.
 
     Loads a YAML configuration file and performs contract validation.
@@ -261,7 +260,7 @@ def load_and_validate_config(
 
     # Load YAML file
     try:
-        with open(config_path, encoding="utf-8") as f:
+        with config_path.open(encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
     except FileNotFoundError as e:
         raise ProtocolConfigurationError(
@@ -307,10 +306,10 @@ def load_and_validate_config(
 
 
 __all__: list[str] = [
-    "validate_runtime_config",
-    "load_and_validate_config",
+    "MAX_GRACE_PERIOD_SECONDS",
+    "MIN_GRACE_PERIOD_SECONDS",
     "TOPIC_NAME_PATTERN",
     "VALID_EVENT_BUS_TYPES",
-    "MIN_GRACE_PERIOD_SECONDS",
-    "MAX_GRACE_PERIOD_SECONDS",
+    "load_and_validate_config",
+    "validate_runtime_config",
 ]

@@ -92,14 +92,22 @@ Security Design (Intentional Fail-Open Architecture):
 """
 
 from omnibase_core.validation import (
+    CircularImportValidator,
     validate_all,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage,
 )
-from omnibase_core.validation.circular_import_validator import CircularImportValidator
-from omnibase_core.validation.contract_validator import ProtocolContractValidator
+
+# AST-based Any type validation for strong typing policy (OMN-1276)
+from omnibase_infra.validation.any_type_validator import (
+    AnyTypeDetector,
+    ModelAnyTypeValidationResult,
+    validate_any_types,
+    validate_any_types_ci,
+    validate_any_types_in_file,
+)
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
@@ -127,7 +135,7 @@ from omnibase_infra.validation.contract_linter import (
 from omnibase_infra.validation.execution_shape_validator import (
     EXECUTION_SHAPE_RULES,
     ExecutionShapeValidator,
-    HandlerInfo,
+    ModelDetectedNodeInfo,
     ModelExecutionShapeValidationResult,
     get_execution_shape_rules,
     validate_execution_shapes,
@@ -141,10 +149,15 @@ from omnibase_infra.validation.infra_validators import (
     validate_infra_all,
     validate_infra_architecture,
     validate_infra_circular_imports,
-    validate_infra_contract_deep,
     validate_infra_contracts,
     validate_infra_patterns,
     validate_infra_union_usage,
+)
+
+# Registration-time security validation for handlers (OMN-1098)
+from omnibase_infra.validation.registration_security_validator import (
+    RegistrationSecurityValidator,
+    validate_handler_registration,
 )
 
 # Routing coverage validation for startup fail-fast (OMN-958)
@@ -167,9 +180,21 @@ from omnibase_infra.validation.runtime_shape_validator import (
     enforce_execution_shape,
 )
 
+# Security validation for handler introspection and security constraints
+from omnibase_infra.validation.security_validator import (
+    SENSITIVE_METHOD_PATTERNS,
+    SENSITIVE_PARAMETER_NAMES,
+    SecurityRuleId,
+    convert_to_validation_error,
+    has_sensitive_parameters,
+    is_sensitive_method_name,
+    validate_handler_security,
+    validate_method_exposure,
+)
+
 # Topic category validation for execution shape enforcement
 from omnibase_infra.validation.topic_category_validator import (
-    HANDLER_EXPECTED_CATEGORIES,
+    NODE_ARCHETYPE_EXPECTED_CATEGORIES,
     TOPIC_CATEGORY_PATTERNS,
     TOPIC_SUFFIXES,
     TopicCategoryASTVisitor,
@@ -179,65 +204,80 @@ from omnibase_infra.validation.topic_category_validator import (
     validate_topic_categories_in_file,
 )
 
-__all__ = [
-    # Direct re-exports from omnibase_core
-    "validate_architecture",
-    "validate_contracts",
-    "validate_patterns",
-    "validate_union_usage",
-    "validate_all",
-    "ProtocolContractValidator",
-    "CircularImportValidator",
-    # Infrastructure-specific wrappers
-    "INFRA_MAX_UNIONS",
-    "validate_infra_architecture",
-    "validate_infra_contracts",
-    "validate_infra_patterns",
-    "validate_infra_contract_deep",
-    "validate_infra_union_usage",
-    "validate_infra_circular_imports",
-    "validate_infra_all",
-    "get_validation_summary",
-    # Runtime shape validation
-    "EXECUTION_SHAPE_RULES",
-    "ExecutionShapeViolationError",
-    "RuntimeShapeValidator",
-    "detect_message_category",
-    "enforce_execution_shape",
-    # Topic category validation
-    "TopicCategoryValidator",
-    "TopicCategoryASTVisitor",
-    "TOPIC_CATEGORY_PATTERNS",
-    "TOPIC_SUFFIXES",
-    "HANDLER_EXPECTED_CATEGORIES",
-    "validate_topic_categories_in_file",
-    "validate_topic_categories_in_directory",
-    "validate_message_on_topic",
-    # Routing coverage validation (OMN-958)
-    "RoutingCoverageError",
-    "RoutingCoverageValidator",
-    "discover_message_types",
-    "discover_registered_routes",
-    "validate_routing_coverage_on_startup",
-    "check_routing_coverage_ci",
-    # AST-based execution shape validation (OMN-958)
-    "ExecutionShapeValidator",
-    "HandlerInfo",
-    "ModelExecutionShapeValidationResult",
-    "validate_execution_shapes",
-    "validate_execution_shapes_ci",
-    "get_execution_shape_rules",
-    # Chain propagation validation (OMN-951)
-    "ChainPropagationError",
-    "ChainPropagationValidator",
-    "enforce_chain_propagation",
-    "validate_message_chain",
-    # Contract linting (PR #57)
-    "ContractLinter",
-    "EnumContractViolationSeverity",
-    "ModelContractLintResult",
-    "ModelContractViolation",
-    "lint_contract_file",
-    "lint_contracts_ci",
-    "lint_contracts_in_directory",
+# Validation error aggregation and reporting for startup (OMN-1091)
+from omnibase_infra.validation.validation_aggregator import ValidationAggregator
+
+__all__: list[str] = [
+    # Constants
+    "EXECUTION_SHAPE_RULES",  # Runtime shape validation rules
+    "INFRA_MAX_UNIONS",  # Infrastructure max union threshold
+    "NODE_ARCHETYPE_EXPECTED_CATEGORIES",  # Node archetype categories
+    "SENSITIVE_METHOD_PATTERNS",  # Security validation patterns
+    "SENSITIVE_PARAMETER_NAMES",  # Security validation names
+    "TOPIC_CATEGORY_PATTERNS",  # Topic category patterns
+    "TOPIC_SUFFIXES",  # Topic suffix constants
+    # Errors
+    "ChainPropagationError",  # Chain propagation error (OMN-951)
+    "ExecutionShapeViolationError",  # Execution shape violation
+    "RoutingCoverageError",  # Routing coverage error (OMN-958)
+    # Enums
+    "EnumContractViolationSeverity",  # Contract violation severity
+    "SecurityRuleId",  # Security rule identifiers
+    # Models
+    "ModelAnyTypeValidationResult",  # Any type validation result (OMN-1276)
+    "ModelContractLintResult",  # Contract lint result
+    "ModelContractViolation",  # Contract violation model
+    "ModelDetectedNodeInfo",  # Detected node info
+    "ModelExecutionShapeValidationResult",  # Execution shape result
+    # Validators
+    "AnyTypeDetector",  # Any type AST detector (OMN-1276)
+    "ChainPropagationValidator",  # Chain propagation validator (OMN-951)
+    "CircularImportValidator",  # Circular import validator
+    "ContractLinter",  # Contract linter (PR #57)
+    "ExecutionShapeValidator",  # AST-based shape validation (OMN-958)
+    "RegistrationSecurityValidator",  # Registration-time security (OMN-1098)
+    "RoutingCoverageValidator",  # Routing coverage validator (OMN-958)
+    "RuntimeShapeValidator",  # Runtime shape validator
+    "TopicCategoryASTVisitor",  # Topic category AST visitor
+    "TopicCategoryValidator",  # Topic category validator
+    "ValidationAggregator",  # Validation error aggregation (OMN-1091)
+    # Functions
+    "check_routing_coverage_ci",  # CI routing coverage check
+    "convert_to_validation_error",  # Error conversion utility
+    "detect_message_category",  # Message category detection
+    "discover_message_types",  # Message type discovery
+    "discover_registered_routes",  # Route discovery
+    "enforce_chain_propagation",  # Chain propagation enforcement
+    "enforce_execution_shape",  # Execution shape enforcement
+    "get_execution_shape_rules",  # Get shape rules
+    "get_validation_summary",  # Get validation summary
+    "has_sensitive_parameters",  # Sensitive parameter check
+    "is_sensitive_method_name",  # Sensitive method check
+    "lint_contract_file",  # Lint single contract file
+    "lint_contracts_ci",  # CI contract linting
+    "lint_contracts_in_directory",  # Directory contract linting
+    "validate_all",  # Re-export from omnibase_core
+    "validate_any_types",  # Any type validation (OMN-1276)
+    "validate_any_types_ci",  # Any type CI validation (OMN-1276)
+    "validate_any_types_in_file",  # Any type file validation (OMN-1276)
+    "validate_architecture",  # Re-export from omnibase_core
+    "validate_contracts",  # Re-export from omnibase_core
+    "validate_execution_shapes",  # Execution shape validation
+    "validate_execution_shapes_ci",  # CI shape validation
+    "validate_handler_registration",  # Handler registration validation (OMN-1098)
+    "validate_handler_security",  # Handler security validation
+    "validate_infra_all",  # Infrastructure validation
+    "validate_infra_architecture",  # Infrastructure architecture
+    "validate_infra_circular_imports",  # Circular import check
+    "validate_infra_contracts",  # Infrastructure contracts
+    "validate_infra_patterns",  # Infrastructure patterns
+    "validate_infra_union_usage",  # Union usage validation
+    "validate_message_chain",  # Message chain validation
+    "validate_message_on_topic",  # Topic message validation
+    "validate_method_exposure",  # Method exposure validation
+    "validate_patterns",  # Re-export from omnibase_core
+    "validate_routing_coverage_on_startup",  # Startup routing check
+    "validate_topic_categories_in_directory",  # Directory topic validation
+    "validate_topic_categories_in_file",  # File topic validation
+    "validate_union_usage",  # Re-export from omnibase_core
 ]

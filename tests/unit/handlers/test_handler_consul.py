@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for ConsulHandler.
+"""Unit tests for HandlerConsul.
 
-These tests use mocked consul client to validate ConsulHandler behavior
+These tests use mocked consul client to validate HandlerConsul behavior
 without requiring actual Consul server infrastructure.
 """
 
@@ -15,6 +15,7 @@ import consul
 import pytest
 from pydantic import SecretStr, ValidationError
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -22,13 +23,17 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.handlers.handler_consul import ConsulHandler
-from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
+from omnibase_infra.handlers.handler_consul import HandlerConsul
+from omnibase_infra.handlers.models.consul import ModelConsulHandlerConfig
 
 
 @pytest.fixture
 def consul_config() -> dict[str, object]:
-    """Provide test Consul configuration."""
+    """Provide test Consul configuration.
+
+    Returns:
+        Configuration dictionary with all Consul handler settings.
+    """
     return {
         "host": "consul.example.com",
         "port": 8500,
@@ -142,8 +147,8 @@ def mock_consul_client() -> MagicMock:
     return client
 
 
-class TestConsulHandlerInitialization:
-    """Test ConsulHandler initialization and configuration."""
+class TestHandlerConsulInitialization:
+    """Test HandlerConsul initialization and configuration."""
 
     @pytest.mark.asyncio
     async def test_initialize_success(
@@ -152,7 +157,7 @@ class TestConsulHandlerInitialization:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test successful initialization with valid config."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -174,7 +179,7 @@ class TestConsulHandlerInitialization:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test initialization with default config values."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -195,7 +200,7 @@ class TestConsulHandlerInitialization:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test initialization with ACL token."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -211,7 +216,7 @@ class TestConsulHandlerInitialization:
     @pytest.mark.asyncio
     async def test_initialize_invalid_port(self) -> None:
         """Test initialization fails with invalid port."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
         config: dict[str, object] = {"port": 0}
 
         with pytest.raises((ProtocolConfigurationError, RuntimeHostError)):
@@ -220,7 +225,7 @@ class TestConsulHandlerInitialization:
     @pytest.mark.asyncio
     async def test_initialize_invalid_scheme(self) -> None:
         """Test initialization fails with invalid scheme."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
         config: dict[str, object] = {"scheme": "ftp"}
 
         with pytest.raises((ProtocolConfigurationError, RuntimeHostError)):
@@ -232,7 +237,7 @@ class TestConsulHandlerInitialization:
         consul_config: dict[str, object],
     ) -> None:
         """Test initialization fails with connection error."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -251,7 +256,7 @@ class TestConsulHandlerInitialization:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test initialization fails when cluster has no leader."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -296,18 +301,35 @@ class TestConsulHandlerInitialization:
         assert "SecretStr" in token_repr
 
 
-class TestConsulHandlerType:
-    """Test ConsulHandler type property."""
+class TestHandlerConsulType:
+    """Test HandlerConsul type and category properties."""
 
     def test_handler_type_property(self) -> None:
-        """Test handler_type property returns correct type."""
-        handler = ConsulHandler()
+        """Test handler_type property returns EnumHandlerType.INFRA_HANDLER.
+
+        Infrastructure protocol handlers (Consul, Vault, Kafka, etc.) return
+        INFRA_HANDLER as their architectural role. The transport-specific
+        identification is provided by handler_category.
+        """
+        handler = HandlerConsul()
         handler_type = handler.handler_type
-        assert handler_type == "consul"
+        assert handler_type == EnumHandlerType.INFRA_HANDLER
+        assert handler_type.value == "infra_handler"
+
+    def test_handler_category_property(self) -> None:
+        """Test handler_category property returns EnumHandlerTypeCategory.EFFECT.
+
+        Consul handlers are EFFECT handlers because they perform side-effecting
+        I/O operations (service registration, KV store operations, etc.).
+        """
+        handler = HandlerConsul()
+        handler_category = handler.handler_category
+        assert handler_category == EnumHandlerTypeCategory.EFFECT
+        assert handler_category.value == "effect"
 
 
-class TestConsulHandlerKVOperations:
-    """Test ConsulHandler KV store operations."""
+class TestHandlerConsulKVOperations:
+    """Test HandlerConsul KV store operations."""
 
     @pytest.mark.asyncio
     async def test_kv_get_success(
@@ -316,7 +338,7 @@ class TestConsulHandlerKVOperations:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test successful KV get operation."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -354,7 +376,7 @@ class TestConsulHandlerKVOperations:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test KV get when key not found."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -389,7 +411,7 @@ class TestConsulHandlerKVOperations:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test KV get with recurse option."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -440,7 +462,7 @@ class TestConsulHandlerKVOperations:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test successful KV put operation."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -474,7 +496,7 @@ class TestConsulHandlerKVOperations:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test KV put with flags parameter."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -503,7 +525,7 @@ class TestConsulHandlerKVOperations:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test KV operation fails with missing key."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -529,7 +551,7 @@ class TestConsulHandlerKVOperations:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test KV put fails with missing value."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -549,8 +571,8 @@ class TestConsulHandlerKVOperations:
             assert "value" in str(exc_info.value).lower()
 
 
-class TestConsulHandlerServiceOperations:
-    """Test ConsulHandler service discovery operations."""
+class TestHandlerConsulServiceOperations:
+    """Test HandlerConsul service discovery operations."""
 
     @pytest.mark.asyncio
     async def test_register_service_success(
@@ -559,7 +581,7 @@ class TestConsulHandlerServiceOperations:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test successful service registration."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -597,7 +619,7 @@ class TestConsulHandlerServiceOperations:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test service registration with minimal parameters."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -629,7 +651,7 @@ class TestConsulHandlerServiceOperations:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test service registration fails with missing name."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -655,7 +677,7 @@ class TestConsulHandlerServiceOperations:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test successful service deregistration."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -686,7 +708,7 @@ class TestConsulHandlerServiceOperations:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test service deregistration fails with missing service_id."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -706,89 +728,8 @@ class TestConsulHandlerServiceOperations:
             assert "service_id" in str(exc_info.value).lower()
 
 
-class TestConsulHandlerHealthOperations:
-    """Test ConsulHandler health check operations."""
-
-    @pytest.mark.asyncio
-    async def test_health_check_operation_success(
-        self,
-        consul_config: dict[str, object],
-        mock_consul_client: MagicMock,
-    ) -> None:
-        """Test health check via execute operation."""
-        handler = ConsulHandler()
-
-        with patch(
-            "omnibase_infra.handlers.handler_consul.consul.Consul"
-        ) as MockClient:
-            MockClient.return_value = mock_consul_client
-
-            await handler.initialize(consul_config)
-
-            envelope = {
-                "operation": "consul.health_check",
-                "payload": {},
-                "correlation_id": uuid4(),
-            }
-
-            output = await handler.execute(envelope)
-            result = output.result
-
-            assert result.status == "success"
-            # Access payload data through the discriminated union
-            payload_data = result.payload.data
-            assert payload_data.healthy is True
-
-    @pytest.mark.asyncio
-    async def test_handler_health_check_success(
-        self,
-        consul_config: dict[str, object],
-        mock_consul_client: MagicMock,
-    ) -> None:
-        """Test handler health check returns healthy status."""
-        handler = ConsulHandler()
-
-        with patch(
-            "omnibase_infra.handlers.handler_consul.consul.Consul"
-        ) as MockClient:
-            MockClient.return_value = mock_consul_client
-
-            await handler.initialize(consul_config)
-
-            health = await handler.health_check()
-
-            assert health["healthy"] is True
-            assert health["initialized"] is True
-            assert health["handler_type"] == "consul"
-
-    @pytest.mark.asyncio
-    async def test_handler_health_check_unhealthy(
-        self,
-        consul_config: dict[str, object],
-        mock_consul_client: MagicMock,
-    ) -> None:
-        """Test health check propagates errors."""
-        handler = ConsulHandler()
-
-        with patch(
-            "omnibase_infra.handlers.handler_consul.consul.Consul"
-        ) as MockClient:
-            MockClient.return_value = mock_consul_client
-
-            await handler.initialize(consul_config)
-
-            # Now set error for subsequent health check calls
-            mock_consul_client.status.leader.side_effect = consul.ConsulException(
-                "Connection refused"
-            )
-
-            # Health check should raise error per PR #38 pattern
-            with pytest.raises(InfraConnectionError):
-                await handler.health_check()
-
-
-class TestConsulHandlerExecuteRouting:
-    """Test ConsulHandler execute operation routing."""
+class TestHandlerConsulExecuteRouting:
+    """Test HandlerConsul execute operation routing."""
 
     @pytest.mark.asyncio
     async def test_execute_routes_to_kv_get(
@@ -797,7 +738,7 @@ class TestConsulHandlerExecuteRouting:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test execute routes to KV get operation."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -822,7 +763,7 @@ class TestConsulHandlerExecuteRouting:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test execute with unsupported operation raises error."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -844,7 +785,7 @@ class TestConsulHandlerExecuteRouting:
     @pytest.mark.asyncio
     async def test_execute_not_initialized(self) -> None:
         """Test execute fails when handler not initialized."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         envelope = {
             "operation": "consul.kv_get",
@@ -864,7 +805,7 @@ class TestConsulHandlerExecuteRouting:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test execute fails with missing operation."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -889,7 +830,7 @@ class TestConsulHandlerExecuteRouting:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test execute fails with missing payload."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -908,8 +849,8 @@ class TestConsulHandlerExecuteRouting:
             assert "payload" in str(exc_info.value).lower()
 
 
-class TestConsulHandlerCorrelationId:
-    """Test ConsulHandler correlation ID handling."""
+class TestHandlerConsulCorrelationId:
+    """Test HandlerConsul correlation ID handling."""
 
     @pytest.mark.asyncio
     async def test_correlation_id_extraction_uuid(
@@ -918,7 +859,7 @@ class TestConsulHandlerCorrelationId:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test correlation ID extraction from UUID."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -944,7 +885,7 @@ class TestConsulHandlerCorrelationId:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test correlation ID extraction from string."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -971,7 +912,7 @@ class TestConsulHandlerCorrelationId:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test correlation ID is generated when not provided."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -992,8 +933,8 @@ class TestConsulHandlerCorrelationId:
             assert isinstance(result.correlation_id, UUID)
 
 
-class TestConsulHandlerDescribe:
-    """Test ConsulHandler describe functionality."""
+class TestHandlerConsulDescribe:
+    """Test HandlerConsul describe functionality."""
 
     @pytest.mark.asyncio
     async def test_describe(
@@ -1002,7 +943,7 @@ class TestConsulHandlerDescribe:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test describe returns handler metadata."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -1012,8 +953,12 @@ class TestConsulHandlerDescribe:
 
             description = handler.describe()
 
+            # handler_type is the architectural role (INFRA_HANDLER for protocol handlers)
             assert "handler_type" in description
-            assert description["handler_type"] == "consul"
+            assert description["handler_type"] == "infra_handler"
+            # handler_category is the behavioral classification (EFFECT for I/O operations)
+            assert "handler_category" in description
+            assert description["handler_category"] == "effect"
             assert "supported_operations" in description
             supported_ops = description["supported_operations"]
             assert isinstance(supported_ops, list)
@@ -1022,13 +967,12 @@ class TestConsulHandlerDescribe:
             assert "consul.kv_put" in supported_ops
             assert "consul.register" in supported_ops
             assert "consul.deregister" in supported_ops
-            assert "consul.health_check" in supported_ops
             assert description["initialized"] is True
             assert description["version"] == "0.1.0-mvp"
 
 
-class TestConsulHandlerShutdown:
-    """Test ConsulHandler shutdown functionality."""
+class TestHandlerConsulShutdown:
+    """Test HandlerConsul shutdown functionality."""
 
     @pytest.mark.asyncio
     async def test_shutdown(
@@ -1037,7 +981,7 @@ class TestConsulHandlerShutdown:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test handler shutdown releases resources."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -1055,8 +999,8 @@ class TestConsulHandlerShutdown:
             assert handler._config is None
 
 
-class TestConsulHandlerErrorHandling:
-    """Test ConsulHandler error handling and sanitization."""
+class TestHandlerConsulErrorHandling:
+    """Test HandlerConsul error handling and sanitization."""
 
     @pytest.mark.asyncio
     async def test_connection_error_handling(
@@ -1065,7 +1009,7 @@ class TestConsulHandlerErrorHandling:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test connection error is properly wrapped."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -1094,7 +1038,7 @@ class TestConsulHandlerErrorHandling:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test timeout error is properly wrapped."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -1123,7 +1067,7 @@ class TestConsulHandlerErrorHandling:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test authentication error is properly wrapped."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -1147,8 +1091,8 @@ class TestConsulHandlerErrorHandling:
                 await handler.execute(envelope)
 
 
-class TestConsulHandlerRetryLogic:
-    """Test ConsulHandler retry logic with exponential backoff."""
+class TestHandlerConsulRetryLogic:
+    """Test HandlerConsul retry logic with exponential backoff."""
 
     @pytest.mark.asyncio
     async def test_retry_on_transient_failure(
@@ -1157,7 +1101,7 @@ class TestConsulHandlerRetryLogic:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test retry logic on transient failures."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -1192,7 +1136,7 @@ class TestConsulHandlerRetryLogic:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test retry logic when all attempts exhausted."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -1217,13 +1161,13 @@ class TestConsulHandlerRetryLogic:
             assert mock_consul_client.kv.get.call_count == 3
 
 
-class TestConsulHandlerErrorCodes:
-    """Test ConsulHandler error code validation and consistency."""
+class TestHandlerConsulErrorCodes:
+    """Test HandlerConsul error code validation and consistency."""
 
     @pytest.mark.asyncio
     async def test_protocol_configuration_error_code(self) -> None:
         """Test ProtocolConfigurationError has correct error code."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         # Invalid configuration
         invalid_config: dict[str, object] = {
@@ -1244,7 +1188,7 @@ class TestConsulHandlerErrorCodes:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test InfraConnectionError has correct error code."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -1277,7 +1221,7 @@ class TestConsulHandlerErrorCodes:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test InfraAuthenticationError has correct error code."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -1304,8 +1248,8 @@ class TestConsulHandlerErrorCodes:
             assert exc_info.value.model.error_code.name == "AUTHENTICATION_ERROR"
 
 
-class TestConsulHandlerSecuritySanitization:
-    """Test ConsulHandler security sanitization of error messages."""
+class TestHandlerConsulSecuritySanitization:
+    """Test HandlerConsul security sanitization of error messages."""
 
     @pytest.mark.asyncio
     async def test_validation_error_does_not_expose_token(self) -> None:
@@ -1315,7 +1259,7 @@ class TestConsulHandlerSecuritySanitization:
         which could expose sensitive tokens. This test verifies the handler
         sanitizes validation errors to only show field names, not values.
         """
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         # Configuration with an invalid token type that will trigger validation error
         # The sensitive value should NOT appear in the error message
@@ -1343,7 +1287,7 @@ class TestConsulHandlerSecuritySanitization:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test that error messages never include credential information."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         sensitive_token = "my_acl_token_credential_xyz123"
         config: dict[str, object] = {
@@ -1379,8 +1323,8 @@ class TestConsulHandlerSecuritySanitization:
             assert sensitive_token not in error_message
 
 
-class TestConsulHandlerThreadPool:
-    """Test ConsulHandler thread pool functionality."""
+class TestHandlerConsulThreadPool:
+    """Test HandlerConsul thread pool functionality."""
 
     @pytest.mark.asyncio
     async def test_thread_pool_default_size(
@@ -1389,7 +1333,7 @@ class TestConsulHandlerThreadPool:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test thread pool uses default size when not specified."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         # Remove max_concurrent_operations to test default
         consul_config.pop("max_concurrent_operations", None)
@@ -1410,7 +1354,7 @@ class TestConsulHandlerThreadPool:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test thread pool is properly shutdown when handler shuts down."""
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         with patch(
             "omnibase_infra.handlers.handler_consul.consul.Consul"
@@ -1427,18 +1371,17 @@ class TestConsulHandlerThreadPool:
 
 
 __all__: list[str] = [
-    "TestConsulHandlerInitialization",
-    "TestConsulHandlerType",
-    "TestConsulHandlerKVOperations",
-    "TestConsulHandlerServiceOperations",
-    "TestConsulHandlerHealthOperations",
-    "TestConsulHandlerExecuteRouting",
-    "TestConsulHandlerCorrelationId",
-    "TestConsulHandlerDescribe",
-    "TestConsulHandlerShutdown",
-    "TestConsulHandlerErrorHandling",
-    "TestConsulHandlerRetryLogic",
-    "TestConsulHandlerErrorCodes",
-    "TestConsulHandlerSecuritySanitization",
-    "TestConsulHandlerThreadPool",
+    "TestHandlerConsulInitialization",
+    "TestHandlerConsulType",
+    "TestHandlerConsulKVOperations",
+    "TestHandlerConsulServiceOperations",
+    "TestHandlerConsulExecuteRouting",
+    "TestHandlerConsulCorrelationId",
+    "TestHandlerConsulDescribe",
+    "TestHandlerConsulShutdown",
+    "TestHandlerConsulErrorHandling",
+    "TestHandlerConsulRetryLogic",
+    "TestHandlerConsulErrorCodes",
+    "TestHandlerConsulSecuritySanitization",
+    "TestHandlerConsulThreadPool",
 ]

@@ -1,6 +1,37 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # ONEX Node Contract - Registration Orchestrator Node
+#
+# TODO(OMN-XXX): Contract complexity - Consider extracting handler_routing,
+# error_recovery, and timeout_config sections into separate subcontracts
+# as this contract grows. Current size: ~460 lines.
+#
+# =============================================================================
+# SUBCONTRACT ARCHITECTURE NOTE (PR #79 Nitpick)
+# =============================================================================
+# As this contract grows in complexity, consider extracting sections into
+# subcontracts. ONEX supports 6 subcontract types from ModelContract:
+#
+#   1. fsm_subcontract        - FSM state machine definitions
+#   2. event_subcontract      - Event type definitions and routing
+#   3. aggregation_subcontract - Aggregation/projection rules
+#   4. state_subcontract      - State management configuration
+#   5. routing_subcontract    - Message routing rules
+#   6. caching_subcontract    - Caching strategy definitions
+#
+# Current candidates for extraction:
+#   - handler_routing section (246 lines) -> routing_subcontract
+#   - consumed_events/published_events    -> event_subcontract
+#   - coordination_rules                  -> state_subcontract
+#
+# Extraction pattern:
+#   1. Create subcontracts/ directory
+#   2. Move section to routing_subcontract.yaml
+#   3. Reference: routing_subcontract: !include subcontracts/routing.yaml
+#
+# This keeps the main contract readable while enabling modular evolution.
+# =============================================================================
+#
 contract_version:
   major: 1
   minor: 0
@@ -9,17 +40,14 @@ node_version: "1.0.0"
 name: "node_registration_orchestrator"
 node_type: "ORCHESTRATOR"
 description: "Registration workflow orchestrator that coordinates node lifecycle by calling reducer for intents and effect for execution."
-
 input_model:
   name: "ModelOrchestratorInput"
   module: "omnibase_infra.nodes.node_registration_orchestrator.models"
   description: "Input containing introspection event and workflow configuration."
-
 output_model:
   name: "ModelOrchestratorOutput"
   module: "omnibase_infra.nodes.node_registration_orchestrator.models"
   description: "Output containing dual registration outcome and workflow status."
-
 # OMN-973: Time injection context for timeout evaluation
 # Implemented in omnibase_infra#66. The DispatchContextEnforcer injects `now`
 # timestamps from RuntimeTick events into orchestrator dispatch context, enabling
@@ -30,7 +58,6 @@ time_injection:
   source: "RuntimeTick"
   field: "now"
   description: "Use injected timestamp from RuntimeTick for timeout evaluation"
-
 # OMN-930: Projection reader integration for state decisions
 # Implemented in omnibase_spi#44. ProtocolProjectionReader is now defined in
 # omnibase_spi.protocols, enabling dependency injection of projection readers.
@@ -43,7 +70,6 @@ projection_reader:
   projections:
     - name: "node_registration_state"
       description: "Current registration state for all nodes"
-
 # Workflow Coordination Configuration
 # ====================================
 # Design Decision: Single Source of Truth for Coordination Settings
@@ -85,15 +111,13 @@ workflow_coordination:
         minor: 0
         patch: 0
       description: "Registers nodes with Consul and PostgreSQL based on introspection events"
-
     execution_graph:
       nodes:
         - node_id: "receive_introspection"
           node_type: effect
-          description: "Receive introspection or tick event"
+          description: "Receive introspection, tick, or ack events"
           step_config:
-            event_pattern: ["node-introspection.*", "registry-request-introspection.*", "runtime-tick.*"]
-
+            event_pattern: ["node-introspection.*", "registry-request-introspection.*", "runtime-tick.*", "node-registration-acked.*"]
         # OMN-930: Reads current registration state via ProtocolProjectionReader.
         # Uses ProjectionReaderRegistration to query node_registration_state.
         - node_id: "read_projection"
@@ -104,7 +128,6 @@ workflow_coordination:
             protocol: "ProtocolProjectionReader"
             operation: "read_projection"
             projection_name: "node_registration_state"
-
         # OMN-973: Evaluates timeout using injected `now` from dispatch context.
         # The DispatchContextEnforcer injects time from RuntimeTick events.
         - node_id: "evaluate_timeout"
@@ -114,7 +137,6 @@ workflow_coordination:
           step_config:
             time_injection: true
             timeout_evaluation: true
-
         - node_id: "compute_intents"
           node_type: reducer
           description: "Compute registration intents from introspection event"
@@ -122,7 +144,6 @@ workflow_coordination:
           step_config:
             reducer_protocol: "ProtocolReducer"
             output_type: "list[ModelRegistrationIntent]"
-
         - node_id: "execute_consul_registration"
           node_type: effect
           description: "Execute Consul registration intent"
@@ -130,7 +151,6 @@ workflow_coordination:
           step_config:
             effect_node: "node_registry_effect"
             intent_filter: "consul.*"
-
         - node_id: "execute_postgres_registration"
           node_type: effect
           description: "Execute PostgreSQL registration intent"
@@ -138,21 +158,18 @@ workflow_coordination:
           step_config:
             effect_node: "node_registry_effect"
             intent_filter: "postgres.*"
-
         - node_id: "aggregate_results"
           node_type: compute
           description: "Aggregate registration results"
           depends_on: ["execute_consul_registration", "execute_postgres_registration"]
           step_config:
             aggregation_strategy: "all_or_partial"
-
         - node_id: "publish_outcome"
           node_type: effect
           description: "Publish registration outcome event"
           depends_on: ["aggregate_results"]
           step_config:
             event_type: "NodeRegistrationResultEvent"
-
     # ┌─────────────────────────────────────────────────────────────────────────┐
     # │ COORDINATION RULES (Single Source of Truth - See header comments)        │
     # ├─────────────────────────────────────────────────────────────────────────┤
@@ -181,7 +198,6 @@ workflow_coordination:
       execution_mode: parallel
       parallel_execution_allowed: true
       max_parallel_branches: 2
-
       # ┌─────────────────────────────────────────────────────────────────────┐
       # │ WORKFLOW STEP RETRIES (coordination_rules.max_retries)              │
       # ├─────────────────────────────────────────────────────────────────────┤
@@ -201,20 +217,19 @@ workflow_coordination:
       # │ error-level retry configuration.                                    │
       # └─────────────────────────────────────────────────────────────────────┘
       failure_recovery_strategy: retry
-      max_retries: 3  # Workflow step retry count (see box above)
+      max_retries: 3 # Workflow step retry count (see box above)
       recovery_enabled: true
-
       # Timeout configuration
       timeout_ms: 30000
-
       # Checkpoint and state persistence
       checkpoint_enabled: true
       checkpoint_interval_ms: 5000
+      # NOTE: state_persistence_enabled is defined in ModelWorkflowConfig but the
+      # workflow execution layer does NOT read or use this flag yet. Kept true for
+      # forward compatibility. Actual persistence happens via direct projector calls.
       state_persistence_enabled: true
-
       # Rollback configuration
       rollback_enabled: true
-
 consumed_events:
   - topic: "{env}.{namespace}.onex.evt.node-introspection.v1"
     event_type: "NodeIntrospectionEvent"
@@ -224,7 +239,128 @@ consumed_events:
     event_type: "RuntimeTick"
     internal: true
     description: "Internal tick for timeout evaluation"
-
+  - topic: "{env}.{namespace}.onex.cmd.node-registration-acked.v1"
+    event_type: "NodeRegistrationAcked"
+    message_category: "COMMAND"
+    description: "Node acknowledges registration acceptance"
+  # OMN-1006: Node heartbeat events for liveness tracking
+  # Heartbeats update last_heartbeat_at and extend liveness_deadline in the
+  # registration projection. The HandlerNodeHeartbeat processes these events.
+  # Note: direct_handler=true indicates this event bypasses the workflow and is
+  # handled by a dedicated handler (HandlerNodeHeartbeat) via handle_heartbeat().
+  - topic: "{env}.{namespace}.onex.evt.node-heartbeat.v1"
+    event_type: "NodeHeartbeatEvent"
+    description: "Periodic heartbeat from active nodes for liveness tracking"
+    direct_handler: true
+# Handler Routing Configuration
+# ==============================
+# Declarative mapping of consumed events to handler implementations.
+# This section defines the event-to-handler routing that the orchestrator
+# performs at runtime. Each handler is stateless and returns EVENTS only.
+#
+# Handler Pattern (from omnibase_infra/orchestrators/registration/handlers/):
+#   async def handle(event, now, correlation_id) -> list[BaseModel]
+#
+# All handlers:
+#   - Receive `now` parameter for deterministic time-based decisions
+#   - Query projection state via ProjectionReaderRegistration (read-only)
+#   - Return a list of event models (never intents or projections)
+#   - Are coroutine-safe for concurrent async calls with different event instances
+handler_routing:
+  # Handler routing is keyed by the model class name of the event payload.
+  # The orchestrator extracts the payload from ModelEventEnvelope and routes
+  # based on isinstance() checks in the order specified below.
+  routing_strategy: "payload_type_match"
+  handlers:
+    # ModelNodeIntrospectionEvent -> HandlerNodeIntrospected
+    # Canonical registration trigger - node announces itself to the cluster.
+    # Queries projection state and emits NodeRegistrationInitiated if:
+    #   - Node is new (no projection exists)
+    #   - Node is in retriable state (LIVENESS_EXPIRED, REJECTED, ACK_TIMED_OUT)
+    - event_model:
+        name: "ModelNodeIntrospectionEvent"
+        module: "omnibase_infra.models.registration.model_node_introspection_event"
+      handler:
+        name: "HandlerNodeIntrospected"
+        module: "omnibase_infra.orchestrators.registration.handlers.handler_node_introspected"
+      output_events:
+        - "ModelNodeRegistrationInitiated"
+      state_decision_matrix:
+        - current_state: null
+          action: "emit_registration_initiated"
+          description: "New node - initiate registration"
+        - current_state: "LIVENESS_EXPIRED"
+          action: "emit_registration_initiated"
+          description: "Re-registration after liveness expiry"
+        - current_state: "REJECTED"
+          action: "emit_registration_initiated"
+          description: "Retry after rejection"
+        - current_state: "ACK_TIMED_OUT"
+          action: "emit_registration_initiated"
+          description: "Retry after ack timeout"
+        - current_state: "PENDING_REGISTRATION"
+          action: "no_op"
+          description: "Already processing"
+        - current_state: "ACCEPTED"
+          action: "no_op"
+          description: "Waiting for ack"
+        - current_state: "AWAITING_ACK"
+          action: "no_op"
+          description: "Waiting for ack"
+        - current_state: "ACK_RECEIVED"
+          action: "no_op"
+          description: "Transitioning to active"
+        - current_state: "ACTIVE"
+          action: "no_op"
+          description: "Already active - use heartbeat"
+    # ModelRuntimeTick -> HandlerRuntimeTick
+    # Periodic timeout detection - evaluates pending registrations for timeouts.
+    # Queries all entities in timeout-eligible states and emits:
+    #   - NodeRegistrationAckTimedOut for expired ack deadlines
+    #   - NodeLivenessExpired for expired liveness deadlines
+    - event_model:
+        name: "ModelRuntimeTick"
+        module: "omnibase_infra.runtime.models.model_runtime_tick"
+      handler:
+        name: "HandlerRuntimeTick"
+        module: "omnibase_infra.orchestrators.registration.handlers.handler_runtime_tick"
+      output_events:
+        - "ModelNodeRegistrationAckTimedOut"
+        - "ModelNodeLivenessExpired"
+      timeout_evaluation:
+        uses_injected_now: true
+        queries_pending_entities: true
+        state_filters:
+          - "AWAITING_ACK"
+          - "ACTIVE"
+    # ModelNodeRegistrationAcked -> HandlerNodeRegistrationAcked
+    # Acknowledgment processing - node confirms it received registration acceptance.
+    # Validates state transition and emits:
+    #   - NodeRegistrationAckReceived for successful acknowledgment
+    #   - NodeBecameActive when transitioning to active state
+    - event_model:
+        name: "ModelNodeRegistrationAcked"
+        module: "omnibase_infra.models.registration.commands.model_node_registration_acked"
+      handler:
+        name: "HandlerNodeRegistrationAcked"
+        module: "omnibase_infra.orchestrators.registration.handlers.handler_node_registration_acked"
+      message_category: "COMMAND"
+      output_events:
+        - "ModelNodeRegistrationAckReceived"
+        - "ModelNodeBecameActive"
+      state_transition:
+        valid_from_states:
+          - "AWAITING_ACK"
+        target_state: "ACTIVE"
+  # Handler initialization configuration
+  # All handlers share the same projection reader dependency
+  handler_dependencies:
+    projection_reader:
+      protocol: "ProtocolProjectionReader"
+      implementation: "ProjectionReaderRegistration"
+      module: "omnibase_infra.projectors.projection_reader_registration"
+      shared: true
+      description: "Shared projection reader for all handlers"
 published_events:
   - topic: "{env}.{namespace}.onex.evt.node-registration-result.v1"
     event_type: "NodeRegistrationResultEvent"
@@ -242,7 +378,6 @@ published_events:
     event_type: "NodeBecameActive"
   - topic: "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
     event_type: "NodeLivenessExpired"
-
 intent_consumption:
   subscribed_intents:
     - "consul.register"
@@ -252,7 +387,6 @@ intent_consumption:
     "consul.register": "node_registry_effect"
     "consul.deregister": "node_registry_effect"
     "postgres.upsert_registration": "node_registry_effect"
-
 dependencies:
   - name: "reducer_protocol"
     type: "protocol"
@@ -266,7 +400,6 @@ dependencies:
     type: "protocol"
     module: "omnibase_spi.protocols"
     description: "Protocol for reading projection state."
-
 # Error Handling Configuration
 # =============================
 # ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -296,7 +429,7 @@ dependencies:
 # └─────────────────────────────────────────────────────────────────────────────┘
 error_handling:
   retry_policy:
-    max_retries: 3  # Error-level retry count (see box above)
+    max_retries: 3 # Error-level retry count (see box above)
     initial_delay_ms: 100
     max_delay_ms: 5000
     exponential_base: 2
@@ -304,12 +437,10 @@ error_handling:
       - "EffectExecutionError"
       - "ConnectionError"
       - "TimeoutError"
-
   circuit_breaker:
     enabled: true
     failure_threshold: 5
     reset_timeout_ms: 60000
-
   error_types:
     - name: "ReducerError"
       description: "Error from reducer during intent generation"
@@ -323,12 +454,10 @@ error_handling:
       description: "Error during result aggregation"
       recoverable: false
       retry_strategy: "none"
-
 health_check:
   enabled: true
   endpoint: "/health"
   interval_seconds: 30
-
 metadata:
   author: "OmniNode Team"
   created: "2025-12-18"

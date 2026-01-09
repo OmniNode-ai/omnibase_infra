@@ -302,9 +302,12 @@ class TestConcurrentSubscribeUnsubscribe:
         async def handler(msg: ModelEventMessage) -> None:
             pass
 
+        # Use unique topic and group per test to avoid cross-test coupling
+        test_topic = f"double-unsub-topic-{id(self)}"
+        test_group = f"double-unsub-group-{id(self)}"
         unsub = await event_bus.subscribe(
-            topic="double-unsub-topic",
-            group_id="group1",
+            topic=test_topic,
+            group_id=test_group,
             on_message=handler,
         )
 
@@ -312,7 +315,7 @@ class TestConcurrentSubscribeUnsubscribe:
         await asyncio.gather(*[unsub() for _ in range(10)])
 
         # Should not raise and subscriber count should be 0
-        count = await event_bus.get_subscriber_count(topic="double-unsub-topic")
+        count = await event_bus.get_subscriber_count(topic=test_topic)
         assert count == 0
 
         await event_bus.close()
@@ -619,13 +622,16 @@ class TestLifecycleRaceConditions:
         subscribe_count = 0
         lock = asyncio.Lock()
 
+        # Use unique group per test to avoid cross-test coupling
+        test_group = f"subscribe-close-group-{id(self)}"
+
         async def subscribe_task() -> None:
             nonlocal subscribe_count
             for i in range(20):
                 try:
                     await event_bus.subscribe(
                         topic=f"topic-{i}",
-                        group_id="group1",
+                        group_id=test_group,
                         on_message=handler,
                     )
                     async with lock:

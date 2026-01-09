@@ -18,8 +18,20 @@ from omnibase_infra.models.dispatch import (
     ModelParsedTopic,
     ModelTopicParser,
 )
+from omnibase_infra.models.errors import ModelHandlerValidationError
+from omnibase_infra.models.handlers import ModelHandlerIdentifier
 from omnibase_infra.models.health import ModelHealthCheckResult
 from omnibase_infra.models.logging import ModelLogContext
+from omnibase_infra.models.model_retry_error_classification import (
+    ModelRetryErrorClassification,
+)
+
+# ModelSemVer and SEMVER_DEFAULT must be imported from omnibase_core.models.primitives.model_semver
+# The local model_semver.py has been REMOVED and raises ImportError on import.
+# Import directly from omnibase_core:
+#   from omnibase_core.models.primitives.model_semver import ModelSemVer
+# To create SEMVER_DEFAULT:
+#   SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 from omnibase_infra.models.projection import (
     ModelRegistrationProjection,
     ModelRegistrationSnapshot,
@@ -34,6 +46,11 @@ from omnibase_infra.models.registration import (
     ModelNodeMetadata,
     ModelNodeRegistration,
 )
+from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+from omnibase_infra.models.security import (
+    ModelEnvironmentPolicy,
+    ModelHandlerSecurityPolicy,
+)
 from omnibase_infra.models.validation import (
     ModelCoverageMetrics,
     ModelExecutionShapeRule,
@@ -41,10 +58,16 @@ from omnibase_infra.models.validation import (
     ModelValidationOutcome,
 )
 
-__all__ = [
+__all__: list[str] = [
     # Dispatch models
     "EnumDispatchStatus",
     "EnumTopicStandard",
+    # Resilience models
+    "ModelCircuitBreakerConfig",
+    # SemVer models - REMOVED: Use omnibase_core.models.primitives.model_semver instead
+    # (model_semver.py now raises ImportError on import)
+    # Validation models
+    "ModelCoverageMetrics",
     "ModelDispatchLogContext",
     "ModelDispatchMetrics",
     "ModelDispatchOutcome",
@@ -52,27 +75,34 @@ __all__ = [
     "ModelDispatchRoute",
     "ModelDispatcherMetrics",
     "ModelDispatcherRegistration",
-    "ModelParsedTopic",
-    "ModelTopicParser",
+    "ModelExecutionShapeRule",
+    "ModelExecutionShapeViolationResult",
+    # Error models
+    "ModelHandlerValidationError",
+    # Handler models
+    "ModelHandlerIdentifier",
     # Health models
     "ModelHealthCheckResult",
-    # Logging models
-    "ModelLogContext",
-    # Projection models
-    "ModelRegistrationProjection",
-    "ModelRegistrationSnapshot",
-    "ModelSequenceInfo",
-    "ModelSnapshotTopicConfig",
     # Registration models
     "ModelIntrospectionMetrics",
+    # Logging models
+    "ModelLogContext",
     "ModelNodeCapabilities",
     "ModelNodeHeartbeatEvent",
     "ModelNodeIntrospectionEvent",
     "ModelNodeMetadata",
     "ModelNodeRegistration",
-    # Validation models
-    "ModelCoverageMetrics",
-    "ModelExecutionShapeRule",
-    "ModelExecutionShapeViolationResult",
+    "ModelParsedTopic",
+    # Projection models
+    "ModelRegistrationProjection",
+    "ModelRegistrationSnapshot",
+    # Retry models
+    "ModelRetryErrorClassification",
+    # Security models
+    "ModelEnvironmentPolicy",
+    "ModelHandlerSecurityPolicy",
+    "ModelSequenceInfo",
+    "ModelSnapshotTopicConfig",
+    "ModelTopicParser",
     "ModelValidationOutcome",
 ]

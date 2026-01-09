@@ -31,9 +31,11 @@ Related:
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.nodes.effects import NodeRegistryEffect
 from omnibase_infra.nodes.effects.models import ModelRegistryRequest
@@ -86,8 +88,9 @@ class TestFullSuccessFlow:
         # Verify Consul registration details
         consul_reg = consul_client.registrations[0]
         assert sample_request.node_id is not None
+        # Service ID follows ONEX convention: onex-{node_type}-{node_id}
         assert (
-            f"node-{sample_request.node_type}-{sample_request.node_id}"
+            f"onex-{sample_request.node_type}-{sample_request.node_id}"
             == consul_reg.service_id
         )
         assert consul_reg.service_name == sample_request.service_name
@@ -184,11 +187,12 @@ class TestConsulFailureFlow:
 
         # Assert - Error captured (sanitized to prevent secret exposure)
         # Raw error "Service unavailable" is sanitized to "service unavailable" safe prefix
+        # Backend name is lowercase as passed to sanitize_backend_error()
         assert response.consul_result.error is not None
-        assert "Consul operation failed" in response.consul_result.error
+        assert "consul operation failed" in response.consul_result.error
         assert "service unavailable" in response.consul_result.error
         assert response.error_summary is not None
-        assert "Consul" in response.error_summary
+        assert "consul" in response.error_summary.lower()
 
         # Assert - Only PostgreSQL registration recorded
         assert len(consul_client.registrations) == 0
@@ -224,11 +228,13 @@ class TestConsulFailureFlow:
         response = await effect.register_node(sample_request)
 
         # Assert - Partial failure with sanitized error
+        # Note: Standard Python ConnectionError falls into the generic Exception
+        # handler because only InfraConnectionError maps to CONSUL_CONNECTION_ERROR
         assert response.status == "partial"
         assert response.consul_result.success is False
         assert response.consul_result.error is not None
         assert "ConnectionError" in response.consul_result.error
-        assert response.consul_result.error_code == "CONSUL_CONNECTION_ERROR"
+        assert response.consul_result.error_code == "CONSUL_UNKNOWN_ERROR"
 
         # Assert - PostgreSQL still succeeded
         assert response.postgres_result.success is True
@@ -278,11 +284,12 @@ class TestPostgresFailureFlow:
 
         # Assert - Error captured (sanitized to prevent secret exposure)
         # Raw error "Connection timeout" is sanitized to "timeout" safe prefix
+        # Backend name is lowercase as passed to sanitize_backend_error()
         assert response.postgres_result.error is not None
-        assert "PostgreSQL operation failed" in response.postgres_result.error
+        assert "postgres operation failed" in response.postgres_result.error
         assert "timeout" in response.postgres_result.error
         assert response.error_summary is not None
-        assert "PostgreSQL" in response.error_summary
+        assert "postgres" in response.error_summary.lower()
 
         # Assert - Only Consul registration recorded
         assert len(consul_client.registrations) == 1
@@ -314,11 +321,12 @@ class TestPostgresFailureFlow:
         response = await effect.register_node(sample_request)
 
         # Assert - Partial failure with sanitized error
+        # Note: TimeoutError is correctly caught and mapped to POSTGRES_TIMEOUT_ERROR
         assert response.status == "partial"
         assert response.postgres_result.success is False
         assert response.postgres_result.error is not None
         assert "TimeoutError" in response.postgres_result.error
-        assert response.postgres_result.error_code == "POSTGRES_CONNECTION_ERROR"
+        assert response.postgres_result.error_code == "POSTGRES_TIMEOUT_ERROR"
 
         # Assert - Consul still succeeded
         assert response.consul_result.success is True
@@ -372,15 +380,16 @@ class TestBothFailFlow:
 
         # Assert - Errors captured (sanitized to prevent secret exposure)
         # Raw errors without safe prefix patterns are sanitized to generic message
+        # Backend names are lowercase as passed to sanitize_backend_error()
         assert response.consul_result.error is not None
         assert response.postgres_result.error is not None
-        assert "Consul operation failed" in response.consul_result.error
-        assert "PostgreSQL operation failed" in response.postgres_result.error
+        assert "consul operation failed" in response.consul_result.error
+        assert "postgres operation failed" in response.postgres_result.error
 
         # Assert - Error summary contains both
         assert response.error_summary is not None
-        assert "Consul" in response.error_summary
-        assert "PostgreSQL" in response.error_summary
+        assert "consul" in response.error_summary.lower()
+        assert "postgres" in response.error_summary.lower()
 
         # Assert - No registrations recorded
         assert len(consul_client.registrations) == 0
@@ -611,22 +620,24 @@ class TestIdempotencyVerification:
         request1 = ModelRegistryRequest(
             node_id=base_node_id,
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=uuid4(),  # Different correlation_id
             service_name="onex-effect",
             endpoints={"health": "http://localhost:8080/health"},
             tags=["onex"],
             metadata={},
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         request2 = ModelRegistryRequest(
             node_id=base_node_id,  # Same node_id
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=uuid4(),  # Different correlation_id
             service_name="onex-effect",
             endpoints={"health": "http://localhost:8080/health"},
             tags=["onex"],
             metadata={},
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         # Act

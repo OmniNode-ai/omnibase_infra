@@ -24,14 +24,12 @@ Related:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Literal
+from datetime import datetime
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
-
-# Type alias for valid ONEX node types
-NodeType = Literal["effect", "compute", "reducer", "orchestrator"]
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelRegistryRequest(BaseModel):
@@ -58,17 +56,21 @@ class ModelRegistryRequest(BaseModel):
         timestamp: When this request was created.
 
     Example:
+        >>> from datetime import UTC, datetime
         >>> from uuid import uuid4
+        >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
+        >>> from omnibase_core.models.primitives.model_semver import ModelSemVer
         >>> request = ModelRegistryRequest(
         ...     node_id=uuid4(),
-        ...     node_type="effect",
-        ...     node_version="1.0.0",
+        ...     node_type=EnumNodeKind.EFFECT,
+        ...     node_version=ModelSemVer(major=1, minor=0, patch=0),
         ...     correlation_id=uuid4(),
         ...     service_name="onex-effect",
         ...     endpoints={"health": "http://localhost:8080/health"},
+        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
         ... )
         >>> request.node_type
-        'effect'
+        <EnumNodeKind.EFFECT: 'effect'>
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -77,11 +79,11 @@ class ModelRegistryRequest(BaseModel):
         ...,
         description="Unique identifier for the node being registered",
     )
-    node_type: NodeType = Field(
+    node_type: EnumNodeKind = Field(
         ...,
         description="Type of ONEX node (effect, compute, reducer, orchestrator)",
     )
-    node_version: str = Field(
+    node_version: ModelSemVer = Field(
         ...,
         description="Semantic version of the node",
     )
@@ -109,10 +111,32 @@ class ModelRegistryRequest(BaseModel):
         default=None,
         description="Optional health check configuration for Consul",
     )
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="When this request was created",
+        ...,
+        description="When this request was created (must be explicitly provided)",
     )
 
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
+        """Validate that timestamp is timezone-aware.
 
-__all__ = ["ModelRegistryRequest", "NodeType"]
+        Args:
+            v: The timestamp value to validate.
+
+        Returns:
+            The validated timestamp.
+
+        Raises:
+            ValueError: If timestamp is naive (no timezone info).
+        """
+        if v.tzinfo is None:
+            raise ValueError(
+                "timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            )
+        return v
+
+
+__all__ = ["ModelRegistryRequest"]

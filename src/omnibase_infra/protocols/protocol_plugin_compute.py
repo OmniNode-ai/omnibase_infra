@@ -52,13 +52,13 @@ Example Usage:
 
     @runtime_checkable
     class ProtocolPluginCompute(Protocol):
-        def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+        def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
             '''Execute deterministic computation.'''
             ...
 
     # Example plugin implementation
     class JsonSchemaValidator:
-        def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+        def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
             '''Validate JSON data against schema.'''
             schema = context.get("schema", {})
             data = input_data.get("data", {})
@@ -104,100 +104,20 @@ See Also:
 
 from __future__ import annotations
 
-from typing import Protocol, TypedDict, runtime_checkable
+from typing import Protocol, runtime_checkable
+
+# Import directly from submodules to avoid circular import through plugins/__init__.py
+# (plugins/__init__.py imports plugin_compute_base which imports this module)
+from omnibase_infra.plugins.models.model_plugin_context import ModelPluginContext
+from omnibase_infra.plugins.models.model_plugin_input_data import ModelPluginInputData
+from omnibase_infra.plugins.models.model_plugin_output_data import ModelPluginOutputData
 
 __all__ = [
-    "PluginInputData",
-    "PluginContext",
-    "PluginOutputData",
+    "ModelPluginContext",
+    "ModelPluginInputData",
+    "ModelPluginOutputData",
     "ProtocolPluginCompute",
 ]
-
-
-class PluginInputData(TypedDict, total=False):
-    """Base structure for plugin input data.
-
-    This TypedDict defines the expected structure for input_data parameter.
-    Plugins may extend or specialize this structure based on their requirements.
-
-    Attributes:
-        All fields are optional by default (total=False).
-        Concrete plugins should document their required fields.
-
-    Example:
-        ```python
-        class JsonNormalizerInput(TypedDict):
-            json: dict[str, object]  # Required field for JSON normalizer
-
-        # Runtime validation in validate_input()
-        def validate_input(self, input_data: PluginInputData) -> None:
-            if "json" not in input_data:
-                raise ValueError("Missing required field: json")
-        ```
-
-    Note:
-        This is a base type hint. Runtime validation should be performed
-        in the validate_input() method to ensure type safety.
-    """
-
-
-class PluginContext(TypedDict, total=False):
-    """Base structure for plugin execution context.
-
-    This TypedDict defines the expected structure for context parameter.
-    Common context fields include correlation IDs, timestamps, and configuration.
-
-    Common Fields:
-        correlation_id: UUID for distributed tracing
-        execution_timestamp: When execution started (deterministic if provided)
-        plugin_config: Plugin-specific configuration parameters
-        metadata: Additional metadata for observability
-
-    Example:
-        ```python
-        context: PluginContext = {
-            "correlation_id": uuid4(),
-            "execution_timestamp": "2025-01-15T12:00:00Z",
-            "plugin_config": {"max_depth": 10},
-            "metadata": {"source": "api_gateway"},
-        }
-        ```
-
-    Note:
-        All fields are optional (total=False). Plugins should document
-        which context fields they require in their validate_input() method.
-    """
-
-
-class PluginOutputData(TypedDict, total=False):
-    """Base structure for plugin output data.
-
-    This TypedDict defines the expected structure for return values.
-    Plugins may extend or specialize this structure based on their outputs.
-
-    Common Fields:
-        result: Primary computation result
-        metadata: Output metadata (execution time, version, etc.)
-        errors: List of validation or computation errors
-        warnings: List of non-fatal warnings
-
-    Example:
-        ```python
-        output: PluginOutputData = {
-            "result": {"normalized": {...}},
-            "metadata": {
-                "execution_time_ms": 15,
-                "plugin_version": "1.0.0",
-            },
-            "errors": [],
-            "warnings": [],
-        }
-        ```
-
-    Note:
-        This is a base type hint. Concrete plugins should define their
-        own output structure TypedDict for stronger type safety.
-    """
 
 
 @runtime_checkable
@@ -222,7 +142,7 @@ class ProtocolPluginCompute(Protocol):
     Example:
         ```python
         class DataNormalizer:
-            def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+            def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
                 '''Normalize numeric data to [0, 1] range.'''
                 values: list[float] = input_data.get("values", [])
                 min_val: float = context.get("min_value", 0.0)
@@ -243,8 +163,8 @@ class ProtocolPluginCompute(Protocol):
     """
 
     def execute(
-        self, input_data: PluginInputData, context: PluginContext
-    ) -> PluginOutputData:
+        self, input_data: ModelPluginInputData, context: ModelPluginContext
+    ) -> ModelPluginOutputData:
         """Execute deterministic computation on input data.
 
         This method must be deterministic: given the same input_data and context,
@@ -282,7 +202,7 @@ class ProtocolPluginCompute(Protocol):
 
             Example - Input Validation Error:
                 ```python
-                def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+                def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
                     from omnibase_core.errors import OnexError
                     from omnibase_core.enums import CoreErrorCode
 
@@ -308,7 +228,7 @@ class ProtocolPluginCompute(Protocol):
 
             Example - Computation Error with Context:
                 ```python
-                def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+                def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
                     from omnibase_core.errors import OnexError
                     from omnibase_core.enums import CoreErrorCode
 
@@ -346,7 +266,7 @@ class ProtocolPluginCompute(Protocol):
 
             Example - Type Validation Error:
                 ```python
-                def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+                def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
                     from omnibase_core.errors import OnexError
                     from omnibase_core.enums import CoreErrorCode
 
@@ -378,7 +298,7 @@ class ProtocolPluginCompute(Protocol):
 
             Example - Fallback Values:
                 ```python
-                def execute(self, input_data: PluginInputData, context: PluginContext) -> PluginOutputData:
+                def execute(self, input_data: ModelPluginInputData, context: ModelPluginContext) -> ModelPluginOutputData:
                     from omnibase_core.errors import OnexError
                     from omnibase_core.enums import CoreErrorCode
 

@@ -12,14 +12,26 @@ Tests the contract-driven bootstrap entrypoint including:
 
 from __future__ import annotations
 
+from collections.abc import Coroutine
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
+from omnibase_core.container import ModelONEXContainer
 
 from omnibase_infra.errors import ProtocolConfigurationError
+
+# Import shared service registry availability check
+from tests.conftest import check_service_registry_available
+
+# Check if service_registry is available (circular import bug in omnibase_core 0.6.2)
+_SERVICE_REGISTRY_AVAILABLE = check_service_registry_available()
+_SKIP_REASON = (
+    "service_registry is None due to circular import bug in omnibase_core 0.6.2. "
+    "Upgrade to omnibase_core >= 0.6.3 to run these tests."
+)
 from omnibase_infra.runtime.kernel import (
     DEFAULT_GROUP_ID,
     DEFAULT_INPUT_TOPIC,
@@ -53,7 +65,7 @@ class TestLoadRuntimeConfig:
             "output_topic": "test-responses",
             "group_id": "test-group",
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         # Load config
@@ -143,7 +155,7 @@ class TestLoadRuntimeConfig:
         test_config = {
             "input_topic": "invalid topic with spaces",
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -166,7 +178,7 @@ class TestLoadRuntimeConfig:
             "output_topic": "also invalid",
             "event_bus": {"type": "unknown-type"},
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -205,7 +217,7 @@ class TestLoadRuntimeConfig:
             "consumer_group": "bad group name",
             "event_bus": {"type": "unknown-type"},
         }
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -232,16 +244,30 @@ class TestLoadRuntimeConfig:
         assert error_context["error_count"] == 4
 
 
+@pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
 class TestBootstrap:
     """Tests for the bootstrap function."""
 
     @pytest.fixture
     def mock_runtime_host(self) -> Generator[MagicMock, None, None]:
-        """Create a mock RuntimeHostProcess."""
+        """Create a mock RuntimeHostProcess.
+
+        Uses side_effect with async no-op functions to ensure coroutines
+        created by AsyncMock are properly awaited and cleaned up, avoiding
+        'coroutine was never awaited' warnings when asyncio.wait_for wraps
+        the stop() call.
+        """
+
+        async def noop_start() -> None:
+            """Async no-op for start that completes immediately."""
+
+        async def noop_stop() -> None:
+            """Async no-op for stop that completes immediately."""
+
         with patch("omnibase_infra.runtime.kernel.RuntimeHostProcess") as mock_cls:
             mock_instance = MagicMock()
-            mock_instance.start = AsyncMock()
-            mock_instance.stop = AsyncMock()
+            mock_instance.start = AsyncMock(side_effect=noop_start)
+            mock_instance.stop = AsyncMock(side_effect=noop_stop)
             mock_instance.input_topic = "requests"
             mock_instance.output_topic = "responses"
             mock_cls.return_value = mock_instance
@@ -257,17 +283,29 @@ class TestBootstrap:
 
     @pytest.fixture
     def mock_health_server(self) -> Generator[MagicMock, None, None]:
-        """Create a mock HealthServer."""
-        with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_cls:
+        """Create a mock ServiceHealth.
+
+        Uses side_effect with async no-op functions to ensure coroutines
+        are properly awaited and cleaned up.
+        """
+
+        async def noop_start() -> None:
+            """Async no-op for start that completes immediately."""
+
+        async def noop_stop() -> None:
+            """Async no-op for stop that completes immediately."""
+
+        with patch("omnibase_infra.services.service_health.ServiceHealth") as mock_cls:
             mock_instance = MagicMock()
-            mock_instance.start = AsyncMock()
-            mock_instance.stop = AsyncMock()
+            mock_instance.start = AsyncMock(side_effect=noop_start)
+            mock_instance.stop = AsyncMock(side_effect=noop_stop)
             mock_instance.is_running = True
             mock_cls.return_value = mock_instance
             yield mock_cls
 
     async def test_bootstrap_starts_and_stops_runtime(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -297,6 +335,7 @@ class TestBootstrap:
 
     async def test_bootstrap_returns_error_on_unexpected_exception(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -319,6 +358,7 @@ class TestBootstrap:
 
     async def test_bootstrap_returns_error_on_config_error(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -337,6 +377,7 @@ class TestBootstrap:
 
     async def test_bootstrap_creates_event_bus_with_environment(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -344,6 +385,8 @@ class TestBootstrap:
     ) -> None:
         """Test that bootstrap creates event bus with correct environment."""
         monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
+        # Ensure InMemoryEventBus is used by unsetting KAFKA_BOOTSTRAP_SERVERS
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
         with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
@@ -356,19 +399,57 @@ class TestBootstrap:
         call_kwargs = mock_event_bus.call_args[1]
         assert call_kwargs["environment"] == "test-env"
 
+    async def test_bootstrap_creates_kafka_event_bus_when_configured(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that bootstrap creates KafkaEventBus when KAFKA_BOOTSTRAP_SERVERS is set."""
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+
+        with (
+            patch("omnibase_infra.runtime.kernel.KafkaEventBus") as mock_kafka_bus,
+            patch(
+                "omnibase_infra.runtime.kernel.InMemoryEventBus"
+            ) as mock_inmemory_bus,
+            patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event,
+        ):
+            mock_kafka_instance = MagicMock()
+            mock_kafka_bus.return_value = mock_kafka_instance
+
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            await bootstrap()
+
+        # Verify KafkaEventBus was created, not InMemoryEventBus
+        mock_kafka_bus.assert_called_once()
+        mock_inmemory_bus.assert_not_called()
+
+        # Verify config was passed with correct parameters
+        call_kwargs = mock_kafka_bus.call_args[1]
+        config = call_kwargs["config"]
+        assert config.bootstrap_servers == "kafka:9092"
+        assert config.environment == "test-env"
+
     async def test_bootstrap_uses_contracts_dir_from_env(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """Test that bootstrap uses CONTRACTS_DIR from environment.
+        """Test that bootstrap uses ONEX_CONTRACTS_DIR from environment.
 
         Uses pytest's tmp_path fixture for automatic temporary directory cleanup.
         """
-        monkeypatch.setenv("CONTRACTS_DIR", str(tmp_path))
+        monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
         with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
@@ -380,6 +461,7 @@ class TestBootstrap:
 
     async def test_bootstrap_handles_windows_signal_setup(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -404,6 +486,7 @@ class TestBootstrap:
 
     async def test_bootstrap_shutdown_timeout_logs_warning(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -459,14 +542,12 @@ class TestBootstrap:
 
     async def test_bootstrap_uses_config_grace_period(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
     ) -> None:
         """Test that bootstrap uses grace_period_seconds from config."""
-        mock_instance = mock_runtime_host.return_value
-        mock_instance.stop = AsyncMock()
-
         # Create config with custom grace period
         from omnibase_infra.runtime.models import (
             ModelRuntimeConfig,
@@ -476,6 +557,12 @@ class TestBootstrap:
         test_config = ModelRuntimeConfig(
             shutdown=ModelShutdownConfig(grace_period_seconds=45),  # Custom timeout
         )
+
+        async def mock_wait_for_impl(
+            coro: Coroutine[object, object, None], *, timeout: float
+        ) -> None:
+            """Mock wait_for that properly closes the coroutine argument."""
+            coro.close()  # Close the coroutine to prevent RuntimeWarning
 
         with patch(
             "omnibase_infra.runtime.kernel.load_runtime_config",
@@ -488,15 +575,94 @@ class TestBootstrap:
 
                 with patch(
                     "omnibase_infra.runtime.kernel.asyncio.wait_for",
-                    new_callable=AsyncMock,
+                    side_effect=mock_wait_for_impl,
                 ) as mock_wait_for:
                     exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify wait_for was called with correct timeout
-        mock_wait_for.assert_called_once()
-        call_kwargs = mock_wait_for.call_args[1]
-        assert call_kwargs["timeout"] == 45
+        # Verify wait_for was called with correct timeout for shutdown
+        # Note: wait_for may be called multiple times (once for producer start,
+        # once for shutdown), so we check that at least one call used our timeout
+        assert mock_wait_for.call_count >= 1
+        # Find the shutdown call that used our configured grace period
+        shutdown_calls = [
+            call
+            for call in mock_wait_for.call_args_list
+            if call[1].get("timeout") == 45
+        ]
+        assert len(shutdown_calls) >= 1, (
+            f"Expected at least one wait_for call with timeout=45, "
+            f"got calls: {mock_wait_for.call_args_list}"
+        )
+
+    async def test_bootstrap_passes_container_to_service_health(
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+    ) -> None:
+        """Test that bootstrap passes container to ServiceHealth.
+
+        Verifies that the ModelONEXContainer instance created during bootstrap
+        is correctly passed to the ServiceHealth constructor.
+        """
+        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            exit_code = await bootstrap()
+
+        assert exit_code == 0
+        # Verify ServiceHealth was called with container parameter
+        mock_health_server.assert_called_once()
+        call_kwargs = mock_health_server.call_args.kwargs
+        assert "container" in call_kwargs, (
+            "Expected 'container' parameter to be passed to ServiceHealth"
+        )
+        # Verify the container is a ModelONEXContainer instance
+        container_arg = call_kwargs["container"]
+        assert isinstance(container_arg, ModelONEXContainer), (
+            f"Expected container to be ModelONEXContainer, got {type(container_arg)}"
+        )
+
+    async def test_bootstrap_passes_all_required_args_to_service_health(
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+    ) -> None:
+        """Test that bootstrap passes all required arguments to ServiceHealth.
+
+        Verifies that container, runtime, port, and version are all passed
+        to the ServiceHealth constructor.
+        """
+        from omnibase_infra.runtime.kernel import KERNEL_VERSION
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
+
+        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            exit_code = await bootstrap()
+
+        assert exit_code == 0
+        mock_health_server.assert_called_once()
+        call_kwargs = mock_health_server.call_args.kwargs
+
+        # Verify all required parameters are present
+        expected_params = {"container", "runtime", "port", "version"}
+        actual_params = set(call_kwargs.keys())
+        assert expected_params == actual_params, (
+            f"Expected ServiceHealth params {expected_params}, got {actual_params}"
+        )
+
+        # Verify specific values
+        assert isinstance(call_kwargs["container"], ModelONEXContainer)
+        assert call_kwargs["runtime"] == mock_runtime_host.return_value
+        assert call_kwargs["port"] == DEFAULT_HTTP_PORT
+        assert call_kwargs["version"] == KERNEL_VERSION
 
 
 class TestConfigureLogging:
@@ -530,10 +696,17 @@ class TestMain:
 
     def test_main_calls_bootstrap(self) -> None:
         """Test that main runs bootstrap and exits with code."""
-        with patch("omnibase_infra.runtime.kernel.configure_logging"):
-            with patch("omnibase_infra.runtime.kernel.asyncio.run") as mock_run:
-                mock_run.return_value = 0
 
+        def mock_asyncio_run(coro: Coroutine[object, object, int]) -> int:
+            """Mock asyncio.run that properly closes the unawaited coroutine."""
+            coro.close()  # Close the coroutine to prevent RuntimeWarning
+            return 0
+
+        with patch("omnibase_infra.runtime.kernel.configure_logging"):
+            with patch(
+                "omnibase_infra.runtime.kernel.asyncio.run",
+                side_effect=mock_asyncio_run,
+            ):
                 with pytest.raises(SystemExit) as exc_info:
                     main()
 
@@ -541,21 +714,32 @@ class TestMain:
 
     def test_main_exits_with_error_code(self) -> None:
         """Test that main exits with error code from bootstrap."""
-        with patch("omnibase_infra.runtime.kernel.configure_logging"):
-            with patch("omnibase_infra.runtime.kernel.asyncio.run") as mock_run:
-                mock_run.return_value = 1
 
+        def mock_asyncio_run(coro: Coroutine[object, object, int]) -> int:
+            """Mock asyncio.run that properly closes the unawaited coroutine."""
+            coro.close()  # Close the coroutine to prevent RuntimeWarning
+            return 1
+
+        with patch("omnibase_infra.runtime.kernel.configure_logging"):
+            with patch(
+                "omnibase_infra.runtime.kernel.asyncio.run",
+                side_effect=mock_asyncio_run,
+            ):
                 with pytest.raises(SystemExit) as exc_info:
                     main()
 
                 assert exc_info.value.code == 1
 
 
+@pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
 class TestIntegration:
     """Integration tests for kernel with real components."""
 
     async def test_full_bootstrap_with_real_event_bus(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        mock_wire_infrastructure: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """Test bootstrap with real InMemoryEventBus but mocked wait and health server.
 
@@ -563,9 +747,11 @@ class TestIntegration:
         This test uses real components except for the shutdown wait and health server.
         Health server is mocked to avoid port conflicts in parallel tests.
         """
-        monkeypatch.setenv("CONTRACTS_DIR", str(tmp_path))
+        monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
 
-        with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_health:
+        with patch(
+            "omnibase_infra.services.service_health.ServiceHealth"
+        ) as mock_health:
             mock_health_instance = MagicMock()
             mock_health_instance.start = AsyncMock()
             mock_health_instance.stop = AsyncMock()
@@ -581,17 +767,71 @@ class TestIntegration:
 
         assert exit_code == 0
 
+    async def test_bootstrap_passes_container_to_service_health_integration(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Integration test verifying container is passed to ServiceHealth.
 
+        This test uses real components (InMemoryEventBus, RuntimeHostProcess)
+        but mocks ServiceHealth to verify the container injection.
+        """
+        monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
+
+        with patch(
+            "omnibase_infra.services.service_health.ServiceHealth"
+        ) as mock_health:
+            mock_health_instance = MagicMock()
+            mock_health_instance.start = AsyncMock()
+            mock_health_instance.stop = AsyncMock()
+            mock_health.return_value = mock_health_instance
+
+            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+                event_instance = MagicMock()
+                event_instance.wait = AsyncMock(return_value=None)
+                event_instance.set = MagicMock()
+                mock_event.return_value = event_instance
+
+                exit_code = await bootstrap()
+
+        assert exit_code == 0
+
+        # Verify container was passed to ServiceHealth
+        mock_health.assert_called_once()
+        call_kwargs = mock_health.call_args.kwargs
+        assert "container" in call_kwargs, (
+            "Expected 'container' parameter to be passed to ServiceHealth"
+        )
+        # Verify the container is a ModelONEXContainer instance
+        container_arg = call_kwargs["container"]
+        assert isinstance(container_arg, ModelONEXContainer), (
+            f"Expected container to be ModelONEXContainer, got {type(container_arg)}"
+        )
+
+
+@pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
 class TestHttpPortValidation:
     """Tests for HTTP port validation in bootstrap."""
 
     @pytest.fixture
     def mock_runtime_host(self) -> Generator[MagicMock, None, None]:
-        """Create a mock RuntimeHostProcess."""
+        """Create a mock RuntimeHostProcess.
+
+        Uses side_effect with async no-op functions to ensure coroutines
+        created by AsyncMock are properly awaited and cleaned up, avoiding
+        'coroutine was never awaited' warnings when asyncio.wait_for wraps
+        the stop() call.
+        """
+
+        async def noop_start() -> None:
+            """Async no-op for start that completes immediately."""
+
+        async def noop_stop() -> None:
+            """Async no-op for stop that completes immediately."""
+
         with patch("omnibase_infra.runtime.kernel.RuntimeHostProcess") as mock_cls:
             mock_instance = MagicMock()
-            mock_instance.start = AsyncMock()
-            mock_instance.stop = AsyncMock()
+            mock_instance.start = AsyncMock(side_effect=noop_start)
+            mock_instance.stop = AsyncMock(side_effect=noop_stop)
             mock_instance.input_topic = "requests"
             mock_instance.output_topic = "responses"
             mock_cls.return_value = mock_instance
@@ -607,11 +847,22 @@ class TestHttpPortValidation:
 
     @pytest.fixture
     def mock_health_server(self) -> Generator[MagicMock, None, None]:
-        """Create a mock HealthServer."""
-        with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_cls:
+        """Create a mock ServiceHealth.
+
+        Uses side_effect with async no-op functions to ensure coroutines
+        are properly awaited and cleaned up.
+        """
+
+        async def noop_start() -> None:
+            """Async no-op for start that completes immediately."""
+
+        async def noop_stop() -> None:
+            """Async no-op for stop that completes immediately."""
+
+        with patch("omnibase_infra.services.service_health.ServiceHealth") as mock_cls:
             mock_instance = MagicMock()
-            mock_instance.start = AsyncMock()
-            mock_instance.stop = AsyncMock()
+            mock_instance.start = AsyncMock(side_effect=noop_start)
+            mock_instance.stop = AsyncMock(side_effect=noop_stop)
             mock_instance.is_running = True
             mock_cls.return_value = mock_instance
             yield mock_cls
@@ -623,13 +874,14 @@ class TestHttpPortValidation:
 
     async def test_bootstrap_rejects_port_zero(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that port 0 is rejected and falls back to default."""
-        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "0")
 
@@ -642,7 +894,7 @@ class TestHttpPortValidation:
                 exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with default port
+        # Verify ServiceHealth was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
@@ -657,13 +909,14 @@ class TestHttpPortValidation:
 
     async def test_bootstrap_rejects_port_above_max(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that port 65536 is rejected and falls back to default."""
-        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "65536")
 
@@ -676,7 +929,7 @@ class TestHttpPortValidation:
                 exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with default port
+        # Verify ServiceHealth was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
@@ -691,6 +944,7 @@ class TestHttpPortValidation:
 
     async def test_bootstrap_accepts_min_port(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -707,13 +961,14 @@ class TestHttpPortValidation:
             exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with port 1
+        # Verify ServiceHealth was created with port 1
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == 1
 
     async def test_bootstrap_accepts_max_port(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -730,20 +985,21 @@ class TestHttpPortValidation:
             exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with port 65535
+        # Verify ServiceHealth was created with port 65535
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == 65535
 
     async def test_bootstrap_rejects_negative_port(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that negative port is rejected and falls back to default."""
-        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "-1")
 
@@ -756,7 +1012,7 @@ class TestHttpPortValidation:
                 exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with default port
+        # Verify ServiceHealth was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
@@ -771,13 +1027,14 @@ class TestHttpPortValidation:
 
     async def test_bootstrap_rejects_very_large_port(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that very large port number is rejected."""
-        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "100000")
 
@@ -789,20 +1046,21 @@ class TestHttpPortValidation:
             exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with default port
+        # Verify ServiceHealth was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
 
     async def test_bootstrap_rejects_non_numeric_port(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that non-numeric port string is rejected and falls back to default."""
-        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "not_a_number")
 
@@ -815,7 +1073,7 @@ class TestHttpPortValidation:
                 exit_code = await bootstrap()
 
         assert exit_code == 0
-        # Verify HealthServer was created with default port
+        # Verify ServiceHealth was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT
@@ -841,6 +1099,7 @@ class TestHttpPortValidation:
     )
     async def test_bootstrap_rejects_non_numeric_port_edge_cases(
         self,
+        mock_wire_infrastructure: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -857,7 +1116,7 @@ class TestHttpPortValidation:
         - Mixed numeric/alphabetic ("12abc")
         - Decimal strings ("8080.5")
         """
-        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+        from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", invalid_port_value)
 
@@ -870,7 +1129,7 @@ class TestHttpPortValidation:
                 exit_code = await bootstrap()
 
         assert exit_code == 0, f"Expected success for {description}"
-        # Verify HealthServer was created with default port
+        # Verify ServiceHealth was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
         assert call_kwargs["port"] == DEFAULT_HTTP_PORT, (

@@ -6,6 +6,8 @@ This module exports Pydantic models for runtime configuration and events.
 All models are strongly typed to eliminate Any usage.
 
 Exports:
+    ModelComputeKey: Strongly-typed compute registry key model
+    ModelComputeRegistration: Compute plugin registration parameters model
     ModelEventBusConfig: Event bus configuration model
     ModelEnabledProtocolsConfig: Enabled protocols configuration model
     ModelProtocolRegistrationConfig: Individual protocol registration config model
@@ -24,12 +26,18 @@ Exports:
     ModelDuplicateResponse: Response for duplicate message detection
     ModelLifecycleResult: Result of individual handler lifecycle operation
     ModelBatchLifecycleResult: Result of batch handler lifecycle operations
+    ModelFailedComponent: Represents a component that failed during shutdown
     ModelShutdownBatchResult: Result of batch shutdown operation
     ModelHealthCheckResult: Result of component health check operation
+    ModelHealthCheckResponse: HTTP response model for health check endpoints
 """
 
 from omnibase_infra.runtime.models.model_batch_lifecycle_result import (
     ModelBatchLifecycleResult,
+)
+from omnibase_infra.runtime.models.model_compute_key import ModelComputeKey
+from omnibase_infra.runtime.models.model_compute_registration import (
+    ModelComputeRegistration,
 )
 from omnibase_infra.runtime.models.model_duplicate_response import (
     ModelDuplicateResponse,
@@ -38,6 +46,10 @@ from omnibase_infra.runtime.models.model_enabled_protocols_config import (
     ModelEnabledProtocolsConfig,
 )
 from omnibase_infra.runtime.models.model_event_bus_config import ModelEventBusConfig
+from omnibase_infra.runtime.models.model_failed_component import ModelFailedComponent
+from omnibase_infra.runtime.models.model_health_check_response import (
+    ModelHealthCheckResponse,
+)
 from omnibase_infra.runtime.models.model_health_check_result import (
     ModelHealthCheckResult,
 )
@@ -73,23 +85,27 @@ from omnibase_infra.runtime.models.model_shutdown_config import ModelShutdownCon
 
 __all__: list[str] = [
     "ModelBatchLifecycleResult",
+    "ModelComputeKey",
+    "ModelComputeRegistration",
     "ModelDuplicateResponse",
-    "ModelEventBusConfig",
     "ModelEnabledProtocolsConfig",
+    "ModelEventBusConfig",
+    "ModelFailedComponent",
+    "ModelHealthCheckResponse",
     "ModelHealthCheckResult",
     "ModelLifecycleResult",
-    "ModelProtocolRegistrationConfig",
     "ModelLoggingConfig",
-    "ModelShutdownBatchResult",
-    "ModelShutdownConfig",
+    "ModelOptionalCorrelationId",
+    "ModelOptionalString",
+    "ModelOptionalUUID",
+    "ModelPolicyKey",
+    "ModelPolicyRegistration",
+    "ModelPolicyTypeFilter",
+    "ModelProtocolRegistrationConfig",
     "ModelRuntimeConfig",
     "ModelRuntimeSchedulerConfig",
     "ModelRuntimeSchedulerMetrics",
     "ModelRuntimeTick",
-    "ModelOptionalString",
-    "ModelOptionalUUID",
-    "ModelOptionalCorrelationId",
-    "ModelPolicyTypeFilter",
-    "ModelPolicyRegistration",
-    "ModelPolicyKey",
+    "ModelShutdownBatchResult",
+    "ModelShutdownConfig",
 ]

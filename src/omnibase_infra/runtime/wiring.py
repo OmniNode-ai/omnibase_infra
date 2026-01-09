@@ -12,6 +12,15 @@ The wiring module is responsible for:
 - Validating that requested handler types are known and supported
 - Providing a summary of registered handlers for debugging
 
+Event Bus Support:
+    This module registers InMemoryEventBus as the default event bus. For production
+    deployments requiring KafkaEventBus, the event bus is selected at kernel bootstrap
+    time based on:
+    - KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses KafkaEventBus)
+    - config.event_bus.type field in runtime_config.yaml
+
+    See kernel.py for event bus selection logic during runtime bootstrap.
+
 Design Principles:
 - Explicit wiring: All handler registrations are explicit, not auto-discovered
 - Contract-driven: Supports wiring from contract configuration dicts
@@ -29,11 +38,11 @@ Adding New Handlers:
         class MyCustomHandler:
             '''Handler for custom protocol operations.'''
 
-            async def initialize(self, config: dict[str, JsonValue]) -> None:
+            async def initialize(self, config: dict[str, object]) -> None:
                 '''Initialize handler with configuration.'''
                 self._config = config
 
-            async def execute(self, envelope: dict[str, JsonValue]) -> dict[str, JsonValue]:
+            async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
                 '''Execute operation from envelope and return response.'''
                 # Handle the envelope and return response dict
                 return {"success": True, "data": ...}
@@ -105,14 +114,17 @@ Example Usage:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
-from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
-from omnibase_infra.handlers.handler_consul import ConsulHandler
-from omnibase_infra.handlers.handler_db import DbAdapter
-from omnibase_infra.handlers.handler_http import HttpRestAdapter
-from omnibase_infra.handlers.handler_vault import VaultAdapter
+from omnibase_infra.handlers.handler_consul import HandlerConsul
+from omnibase_infra.handlers.handler_db import HandlerDb
+from omnibase_infra.handlers.handler_http import HttpRestHandler
+from omnibase_infra.handlers.handler_vault import HandlerVault
+from omnibase_infra.models.types import JsonDict
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     HANDLER_TYPE_CONSUL,
@@ -127,7 +139,6 @@ from omnibase_infra.runtime.handler_registry import (
 
 if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
-    from omnibase_core.types import JsonValue
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
 logger = logging.getLogger(__name__)
@@ -152,18 +163,23 @@ logger = logging.getLogger(__name__)
 # 2. Import the handler class at the top of this module
 # 3. Add entry below: HANDLER_TYPE_XXX: (XxxHandler, "Description"),
 #
-# NOTE: HttpRestAdapter and DbAdapter use legacy execute(envelope: dict) signature.
+# NOTE: HttpRestHandler and HandlerDb use legacy execute(envelope: dict) signature.
 # They will be migrated to ProtocolHandler.execute(request, operation_config) in future.
 # Type ignore comments suppress MyPy errors during MVP phase.
 _KNOWN_HANDLERS: dict[str, tuple[type[ProtocolHandler], str]] = {
-    HANDLER_TYPE_CONSUL: (ConsulHandler, "HashiCorp Consul service discovery handler"),  # type: ignore[dict-item]
-    HANDLER_TYPE_DATABASE: (DbAdapter, "PostgreSQL database adapter"),  # type: ignore[dict-item]
-    HANDLER_TYPE_HTTP: (HttpRestAdapter, "HTTP REST protocol adapter"),  # type: ignore[dict-item]
-    HANDLER_TYPE_VAULT: (VaultAdapter, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]
+    HANDLER_TYPE_CONSUL: (HandlerConsul, "HashiCorp Consul service discovery handler"),  # type: ignore[dict-item]
+    HANDLER_TYPE_DATABASE: (HandlerDb, "PostgreSQL database handler"),  # type: ignore[dict-item]
+    HANDLER_TYPE_HTTP: (HttpRestHandler, "HTTP REST protocol handler"),  # type: ignore[dict-item]
+    HANDLER_TYPE_VAULT: (HandlerVault, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]
 }
 
-# Known event bus kinds that can be wired
+# Known event bus kinds that can be wired via this module.
 # Maps bus kind constant to (bus_class, description)
+#
+# Note: KafkaEventBus is NOT in this registry. It is selected at kernel bootstrap
+# time via environment variable (KAFKA_BOOTSTRAP_SERVERS) or runtime config
+# (event_bus.type = "kafka"). This registry handles only contract-based wiring
+# while production event bus selection is handled by kernel.py.
 _KNOWN_EVENT_BUSES: dict[str, tuple[type[ProtocolEventBus], str]] = {
     EVENT_BUS_INMEMORY: (InMemoryEventBus, "In-memory event bus for local/testing"),
 }
@@ -177,13 +193,22 @@ def wire_default_handlers() -> dict[str, list[str]]:
     way to initialize the handler ecosystem.
 
     Registered Handlers:
-        - CONSUL: ConsulHandler for HashiCorp Consul service discovery
-        - DB: DbAdapter for PostgreSQL database operations
-        - HTTP: HttpRestAdapter for HTTP/REST protocol operations
-        - VAULT: VaultAdapter for HashiCorp Vault secret management
+        - CONSUL: HandlerConsul for HashiCorp Consul service discovery
+        - DB: HandlerDb for PostgreSQL database operations
+        - HTTP: HttpRestHandler for HTTP/REST protocol operations
+        - VAULT: HandlerVault for HashiCorp Vault secret management
 
     Registered Event Buses:
         - INMEMORY: InMemoryEventBus for local/testing deployments
+
+    Event Bus Selection Note:
+        This function only registers InMemoryEventBus in the event bus registry.
+        For production deployments with KafkaEventBus:
+        - Set KAFKA_BOOTSTRAP_SERVERS environment variable, OR
+        - Configure event_bus.type = "kafka" in runtime_config.yaml
+
+        KafkaEventBus selection happens at kernel bootstrap time (see kernel.py),
+        not through this registry-based wiring mechanism.
 
     Returns:
         Summary dict with keys:
@@ -251,7 +276,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
 
 
 def wire_handlers_from_contract(
-    contract_config: JsonValue,
+    contract_config: Mapping[str, object],
 ) -> dict[str, list[str]]:
     """Register handlers and event buses based on contract configuration.
 
@@ -299,24 +324,38 @@ def wire_handlers_from_contract(
     registered_handlers: list[str] = []
     registered_buses: list[str] = []
 
+    # Create error context for configuration errors
+    def _make_error_context(
+        operation: str, target_name: str = "wiring"
+    ) -> ModelInfraErrorContext:
+        """Create standardized error context for configuration errors."""
+        return ModelInfraErrorContext(
+            operation=operation,
+            target_name=target_name,
+            correlation_id=uuid4(),
+        )
+
     # Process handler configurations
     handlers_config = contract_config.get("handlers")
     if handlers_config is not None:
         if not isinstance(handlers_config, list):
             raise ProtocolConfigurationError(
-                "Contract 'handlers' must be a list of handler configurations"
+                "Contract 'handlers' must be a list of handler configurations",
+                context=_make_error_context("validate_handlers_config"),
             )
 
         for handler_config in handlers_config:
             if not isinstance(handler_config, dict):
                 raise ProtocolConfigurationError(
-                    "Each handler configuration must be a dict"
+                    "Each handler configuration must be a dict",
+                    context=_make_error_context("validate_handler_entry"),
                 )
 
             handler_type = handler_config.get("type")
             if not isinstance(handler_type, str):
                 raise ProtocolConfigurationError(
-                    "Handler configuration missing required 'type' field"
+                    "Handler configuration missing required 'type' field",
+                    context=_make_error_context("validate_handler_type"),
                 )
 
             # Check if handler is enabled (default True)
@@ -333,7 +372,8 @@ def wire_handlers_from_contract(
                 known_types = sorted(_KNOWN_HANDLERS.keys())
                 raise ProtocolConfigurationError(
                     f"Unknown handler type: {handler_type!r}. "
-                    f"Known types: {known_types}"
+                    f"Known types: {known_types}",
+                    context=_make_error_context("validate_handler_type", handler_type),
                 )
 
             # Register the handler
@@ -356,13 +396,15 @@ def wire_handlers_from_contract(
     if event_bus_config is not None:
         if not isinstance(event_bus_config, dict):
             raise ProtocolConfigurationError(
-                "Contract 'event_bus' must be a configuration dict"
+                "Contract 'event_bus' must be a configuration dict",
+                context=_make_error_context("validate_event_bus_config"),
             )
 
         bus_kind = event_bus_config.get("kind")
         if not isinstance(bus_kind, str):
             raise ProtocolConfigurationError(
-                "Event bus configuration missing required 'kind' field"
+                "Event bus configuration missing required 'kind' field",
+                context=_make_error_context("validate_event_bus_kind"),
             )
 
         # Check if event bus is enabled (default True)
@@ -377,7 +419,8 @@ def wire_handlers_from_contract(
             if bus_kind not in _KNOWN_EVENT_BUSES:
                 known_kinds = sorted(_KNOWN_EVENT_BUSES.keys())
                 raise ProtocolConfigurationError(
-                    f"Unknown event bus kind: {bus_kind!r}. Known kinds: {known_kinds}"
+                    f"Unknown event bus kind: {bus_kind!r}. Known kinds: {known_kinds}",
+                    context=_make_error_context("validate_event_bus_kind", bus_kind),
                 )
 
             # Register the event bus (check if already registered first)
@@ -511,13 +554,13 @@ def wire_custom_event_bus(
 
 
 __all__: list[str] = [
+    "get_known_event_bus_kinds",
+    # Introspection functions
+    "get_known_handler_types",
+    "wire_custom_event_bus",
+    # Custom registration functions
+    "wire_custom_handler",
     # Primary wiring functions
     "wire_default_handlers",
     "wire_handlers_from_contract",
-    # Introspection functions
-    "get_known_handler_types",
-    "get_known_event_bus_kinds",
-    # Custom registration functions
-    "wire_custom_handler",
-    "wire_custom_event_bus",
 ]

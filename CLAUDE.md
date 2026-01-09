@@ -1,18 +1,18 @@
 # Claude Code Rules for ONEX Infrastructure
 
-**Quick Start**: Essential rules and references for ONEX development.
+**Quick Start**: Essential rules for ONEX development.
 
 **Detailed Patterns**: See `docs/patterns/` for implementation guides:
 - `container_dependency_injection.md` - Complete DI patterns
 - `error_handling_patterns.md` - Error hierarchy and usage
 - `error_recovery_patterns.md` - Backoff, circuit breakers, degradation
-- `retry_backoff_compensation_strategy.md` - Retry policies, compensation for partial failures
-- `correlation_id_tracking.md` - Request tracing
 - `circuit_breaker_implementation.md` - Circuit breaker details
+- `dispatcher_resilience.md` - Dispatcher-owned resilience pattern
+- `security_patterns.md` - Node introspection security, input validation, secrets
 
 ---
 
-## 🚨 MANDATORY: Agent-Driven Development
+## MANDATORY: Agent-Driven Development
 
 **ALL CODING TASKS MUST USE SUB-AGENTS - NO EXCEPTIONS**
 
@@ -22,259 +22,230 @@
 | Complex workflows | `agent-onex-coordinator` → `agent-workflow-coordinator` |
 | Multi-domain | `agent-ticket-manager` for planning, orchestrators for execution |
 
-## 🚫 NO BACKGROUND AGENTS
+**Prefer `subagent_type: "polymorphic-agent"`** for ONEX development workflows.
 
-**NEVER use `run_in_background: true` for Task tool invocations.**
+## CRITICAL POLICIES
 
-- All agents run in **foreground** (blocking until complete)
-- Parallel execution is achieved by calling multiple Task tools in a **single message** - they run concurrently and all complete before continuing
-- Background + polling wastes tokens and provides no benefit
-- If you need parallelism, launch multiple foreground agents in one turn
+### No Background Agents
+- **NEVER** use `run_in_background: true` for Task tool
+- Parallel execution: call multiple Task tools in a **single message**
 
-## 🔮 USE POLYMORPHIC AGENTS
+### No Backwards Compatibility
 
-**Prefer `subagent_type: "polymorphic-agent"` for all development tasks.**
+**ALL changes are breaking changes. NO backwards compatibility is maintained.**
 
-The polymorphic-agent is the primary agent for ONEX development workflows:
-- Intelligent routing and multi-agent orchestration
-- ONEX 4-node architecture navigation (Effect/Compute/Reducer/Orchestrator)
-- Workflow coordination with quality gates
+- Breaking changes are **always** acceptable and encouraged
+- Remove old patterns **immediately** - do not leave deprecated code
+- **NO** backwards compatibility documentation required
+- **NO** migration guides needed
+- **NO** deprecation periods - old APIs are simply removed
+- Downstream consumers are expected to update immediately
+- Version bumps may contain any breaking change without warning
 
-**Other specialized subagent_types:**
-- `Explore` - Fast codebase exploration and search
-- `Plan` - Architecture planning and implementation design
-- `claude-code-guide` - Claude Code documentation queries
-- `general-purpose` - Fallback for non-ONEX tasks
+This policy applies to:
+- API changes (function signatures, class interfaces)
+- Model changes (Pydantic field additions/removals/renames)
+- Import path changes (module reorganization)
+- Type changes (type aliases, generics)
+- Configuration changes (environment variables, settings)
 
-## 🚫 CRITICAL POLICY: NO BACKWARDS COMPATIBILITY
+### No Versioned Directories
+- **NEVER** create `v1_0_0/`, `v2/` directories
+- Version through `contract.yaml` fields only
 
-- Breaking changes are always acceptable
-- No deprecated code maintenance
-- Remove old patterns immediately
+## MANDATORY: Declarative Nodes
 
-## 🚫 CRITICAL POLICY: NO VERSIONED DIRECTORIES
+**ALL nodes MUST be declarative - no custom Python logic in node.py**
 
-**Versioning is logical, not structural.**
+```python
+# CORRECT - Declarative node (extends base, no custom logic)
+from omnibase_core.nodes import NodeOrchestrator
 
-- **NEVER create** directories like `v1_0_0/`, `v2/`, `v1/`, etc.
-- **Version through contracts**: Use `contract_version` field in `contract.yaml`
-- **Semantic versioning**: Version is metadata, not file structure
+class NodeRegistrationOrchestrator(NodeOrchestrator):
+    """Declarative orchestrator - all behavior defined in contract.yaml."""
+    pass  # No custom code - driven entirely by contract
+```
 
+**Declarative Pattern Requirements:**
+1. Extend base class from `omnibase_core.nodes`
+2. Use `container: ModelONEXContainer` for dependency injection
+3. Define all behavior in `contract.yaml` (handlers, routing, workflows)
+4. `node.py` contains ONLY the class definition extending base - no custom logic
+
+**Contract-Driven Handler Routing:**
 ```yaml
-# CORRECT: Version in contract.yaml
-meta:
-  contract_version: "1.0.0"
-  node_version: "1.2.3"
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model: "ModelNodeIntrospectionEvent"
+      handler_class: "HandlerNodeIntrospected"
 ```
 
-```
-# WRONG: Versioned directories
-nodes/postgres_adapter/v1_0_0/  # DO NOT CREATE
-nodes/postgres_adapter/v2/      # DO NOT CREATE
-```
-
-**Legacy Exception**: Any `v1_0_0/` directories (e.g., `nodes/<name>/v1_0_0/`) are legacy patterns from earlier architectural decisions that must be migrated to the flat structure. The omnibase_infra4 codebase has completed this migration. For migration guidance, see:
-- `docs/architecture/LEGACY_V1_MIGRATION.md` - Complete migration plan and verification steps
-- `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` - Ticket H1 (Legacy Component Refactor Plan)
-
-## 🎯 Core ONEX Principles
+## Core ONEX Principles
 
 ### Strong Typing & Models
-- **NEVER use `Any`** - Always use specific types
+- **NEVER use `Any`** - Use `object` for generic payloads
 - **Pydantic Models** - All data structures must be proper Pydantic models
 - **One model per file** - Each file contains exactly one `Model*` class
+- **PEP 604 unions** - Use `X | None` not `Optional[X]`
 
-### File & Class Naming Conventions
+### Any Type CI Enforcement
 
-| Type | File Pattern | Class Pattern | Example |
-|------|-------------|---------------|---------|
-| Model | `model_<name>.py` | `Model<Name>` | `model_kafka_message.py` → `ModelKafkaMessage` |
-| Enum | `enum_<name>.py` | `Enum<Name>` | `enum_handler_type.py` → `EnumHandlerType` |
-| Protocol | `protocol_<name>.py` or `protocols.py` | `Protocol<Name>` | See note below |
-| Mixin | `mixin_<name>.py` | `Mixin<Name>` | `mixin_health_check.py` → `MixinHealthCheck` |
-| Service | `service_<name>.py` | `Service<Name>` | `service_discovery.py` → `ServiceDiscovery` |
-| Util | `util_<name>.py` | (functions) | `util_retry.py` → `retry_with_backoff()` |
-| Error | In `errors/` | `<Domain><Type>Error` | `InfraConnectionError` |
-| Node | `node.py` | `Node<Name><Type>` | `NodePostgresAdapterEffect` |
+The `Any` type policy is enforced via pre-commit hook and CI check (`scripts/validate.py any_types`).
+
+**Enforcement Levels:**
+1. **Pre-commit Hook**: Runs `poetry run python scripts/validate.py any_types` before commit
+2. **CI Pipeline**: Runs as part of `ONEX Validators` job - blocks merge on violations (non-zero exit)
+
+| Context | Allowed | Enforcement |
+|---------|---------|-------------|
+| Function parameters | NO - use `object` | CI BLOCKED |
+| Return types | NO - use `object` | CI BLOCKED |
+| Pydantic `Field()` with `NOTE:` comment | YES | CI ALLOWED |
+| Pydantic `Field()` without `NOTE:` comment | NO | CI BLOCKED |
+| Variables, type aliases | NO | CI BLOCKED |
+
+**Pydantic Workaround** (only when technically required):
+```python
+from typing import Any
+from pydantic import Field
+
+class MyModel(BaseModel):
+    # NOTE: Any required for Pydantic discriminated union - see ADR
+    payload: Any = Field(...)
+```
+
+**Exemption Mechanisms**:
+- `@allow_any` decorator with documented reason
+- `ONEX_EXCLUDE: any_type` inline comment (use sparingly)
+
+**Related**: `docs/decisions/adr-any-type-pydantic-workaround.md`
+
+### Any Type Validator Detection and Limitations
+
+The AST-based Any type validator scans Python source files to detect `Any` usage.
+
+**What IS Detected** (will trigger violations):
+- Direct `Any` annotations: `def foo(x: Any) -> Any`
+- `Any` in Pydantic fields: `field: Any = Field(...)`
+- `Any` as generic argument: `list[Any]`, `dict[str, Any]`, `Callable[..., Any]`
+- Type aliases with `Any`: `MyType = dict[str, Any]`
+- String annotations: `from __future__ import annotations` - these ARE correctly resolved by the AST parser
+
+**What is NOT Detected** (validator limitations):
+1. **External type aliases**: When `Any` is hidden behind an imported alias:
+   ```python
+   from external_lib import DynamicType  # If DynamicType = Any, NOT detected
+   def process(data: DynamicType): ...   # Violation NOT caught
+   ```
+
+2. **Runtime type construction**: Factory patterns creating types dynamically:
+   ```python
+   def make_type() -> type:
+       return Any  # NOT detected - evaluated at runtime
+   DynamicType = make_type()
+   ```
+
+3. **Indirect imports**: `Any` re-exported through intermediate modules may not be traced.
+
+**Example @allow_any Usage**:
+```python
+from omnibase_infra.decorators import allow_any
+
+@allow_any("Required for legacy API compatibility - see OMN-1234")
+def legacy_handler(data: Any) -> Any:
+    """Handle legacy API payloads."""
+    return process_legacy(data)
+```
+
+The `@allow_any` decorator is recognized by the validator when applied to functions or classes. The decorator is a no-op at runtime - it only serves as an AST marker for the validator to skip the decorated definition.
+
+### File & Class Naming
+
+| Type | File Pattern | Class Pattern |
+|------|-------------|---------------|
+| Model | `model_<name>.py` | `Model<Name>` |
+| Enum | `enum_<name>.py` | `Enum<Name>` |
+| Protocol | `protocol_<name>.py` or `protocols.py` | `Protocol<Name>` |
+| Mixin | `mixin_<name>.py` | `Mixin<Name>` |
+| Service | `service_<name>.py` | `Service<Name>` |
+| Util | `util_<name>.py` | (functions) |
+| Error | In `errors/` | `<Domain><Type>Error` |
+| Node | `node.py` | `Node<Name><Type>` |
 
 **Protocol File Naming**:
-- **Single protocol**: Use `protocol_<name>.py` for standalone protocols (e.g., `protocol_event_bus.py` contains `ProtocolEventBus`)
-- **Domain-grouped protocols**: Use `protocols.py` when multiple cohesive protocols belong to a specific domain or node module (e.g., `nodes/<name>/protocols.py` containing `ProtocolNodeInput`, `ProtocolNodeOutput`, `ProtocolNodeConfig`)
-
-Domain grouping is preferred when:
-- Protocols are tightly coupled and always used together
-- Protocols define the complete interface for a single node or module
-- Protocols share common type dependencies within the same bounded context
+- Single protocol: `protocol_<name>.py`
+- Domain-grouped: `protocols.py` when protocols are tightly coupled
 
 ### Enum Usage: Message Routing vs Node Validation
 
-ONEX uses two distinct enums for message categorization with different purposes:
+| Enum | Values | Purpose |
+|------|--------|---------|
+| `EnumMessageCategory` | `EVENT`, `COMMAND`, `INTENT` | Message routing |
+| `EnumNodeOutputType` | `EVENT`, `COMMAND`, `INTENT`, `PROJECTION` | Node validation |
 
-| Enum | Values | Purpose | Location |
-|------|--------|---------|----------|
-| `EnumMessageCategory` | `EVENT`, `COMMAND`, `INTENT` | Message routing, topic parsing, dispatcher selection | `omnibase_infra.enums` |
-| `EnumNodeOutputType` | `EVENT`, `COMMAND`, `INTENT`, `PROJECTION` | Execution shape validation, handler return type validation | `omnibase_infra.enums` |
-
-**Quick Decision Guide**:
-- **Routing a message?** Use `EnumMessageCategory`
-- **Validating node output?** Use `EnumNodeOutputType`
-
-**Key Difference - PROJECTION**:
-- `PROJECTION` exists **only** in `EnumNodeOutputType`
-- `PROJECTION` is **only valid for REDUCER nodes** (state aggregation outputs)
-- Message routing never uses `PROJECTION` because projections are not routable messages
-
-**Usage Examples**:
+**Key Rule**: `PROJECTION` exists only in `EnumNodeOutputType` and is only valid for REDUCER nodes.
 
 ```python
-from omnibase_infra.enums import EnumMessageCategory, EnumNodeOutputType
+# MESSAGE ROUTING
+from omnibase_infra.enums import EnumMessageCategory
+category = EnumMessageCategory.EVENT  # For dispatcher selection
 
-# MESSAGE ROUTING - Use EnumMessageCategory
-def parse_topic(topic: str) -> EnumMessageCategory:
-    """Parse topic to determine message category for routing."""
-    if ".event." in topic:
-        return EnumMessageCategory.EVENT
-    elif ".command." in topic:
-        return EnumMessageCategory.COMMAND
-    return EnumMessageCategory.INTENT
-
-def select_dispatcher(category: EnumMessageCategory) -> ProtocolMessageDispatcher:
-    """Select dispatcher based on message category."""
-    return dispatcher_registry[category]
-
-# NODE VALIDATION - Use EnumNodeOutputType
-def validate_reducer_output(node_type: str, output_type: EnumNodeOutputType) -> bool:
-    """Validate that output type is valid for node type."""
-    if output_type == EnumNodeOutputType.PROJECTION:
-        # PROJECTION only valid for REDUCER nodes
-        return node_type == "REDUCER"
-    return True
-
-def get_handler_output_type(handler: ProtocolHandler) -> EnumNodeOutputType:
-    """Get the declared output type for handler validation."""
-    return handler.output_type  # May include PROJECTION for reducers
+# NODE VALIDATION
+from omnibase_infra.enums import EnumNodeOutputType
+output_type.is_routable()  # False for PROJECTION
 ```
 
-**Mapping Between Enums**:
-
-`EnumNodeOutputType` provides helper methods for safe conversion:
-
-```python
-from omnibase_infra.enums import EnumNodeOutputType, EnumMessageCategory
-
-# Convert node output type to message category (for routing after validation)
-output_type = EnumNodeOutputType.EVENT
-category = output_type.to_message_category()  # Returns EnumMessageCategory.EVENT
-
-# PROJECTION cannot be converted - raises ValueError
-projection = EnumNodeOutputType.PROJECTION
-projection.to_message_category()  # Raises ValueError: PROJECTION has no message category
-
-# Check if output type is routable
-output_type.is_routable()  # True for EVENT, COMMAND, INTENT; False for PROJECTION
-```
-
-**Related**:
-- ADR: `docs/decisions/adr-enum-message-category-vs-node-output-type.md`
-- Ticket: OMN-974
+**Related**: `docs/decisions/adr-enum-message-category-vs-node-output-type.md`
 
 ### Registry Naming Conventions
 
-**Node-Specific Registries** (`nodes/<name>/registry/`):
-- File: `registry_infra_<node_name>.py`
-- Class: `RegistryInfra<NodeName>`
-- Examples: `registry_infra_postgres_adapter.py` → `RegistryInfraPostgresAdapter`
-- Note: Versioned paths like `nodes/<name>/v1_0_0/registry/` are prohibited (see `docs/architecture/LEGACY_V1_MIGRATION.md`)
+**Node-Specific**: `nodes/<name>/registry/registry_infra_<node_name>.py` → `RegistryInfra<NodeName>`
 
-**Standalone Registries** (in domain directories):
-- File: `registry_<purpose>.py`
-- Class: `Registry<Purpose>`
-- Examples: `registry_handler.py` → `RegistryHandler`, `registry_policy.py` → `RegistryPolicy`, `registry_compute.py` → `RegistryCompute`
+**Standalone**: `registry_<purpose>.py` → `Registry<Purpose>`
+
+### Custom `__bool__` for Result Models
+
+Result models may override `__bool__` to enable idiomatic conditional checks. This differs from standard Pydantic behavior where `bool(model)` always returns `True`.
+
+**Related**: `docs/decisions/adr-custom-bool-result-models.md`
+
+**Categories of implementations**:
+
+| Category | Models | Condition |
+|----------|--------|-----------|
+| Validity/Success | `ModelSecurityValidationResult`, `ModelValidationOutcome`, `ModelLifecycleResult` | Returns `True` when `valid`/`success`/`is_valid` is True |
+| Collection-Based | `ModelReducerExecutionResult`, `ModelDispatchOutputs` | Returns `True` when intents/topics non-empty |
+| Optional Wrappers | `ModelOptionalString`, `ModelOptionalUUID`, `ModelOptionalCorrelationId` | Returns `True` when value present |
+| Matching Results | `ModelCategoryMatchResult`, `ModelExecutionShapeValidationResult` | Returns `True` when `matched`/`passed` is True |
+
+**Usage pattern**:
+```python
+result = reducer.reduce(state, event)
+if result:  # True only if there are intents to process
+    execute_intents(result.intents)
+```
+
+**Documentation requirement**: Always include a `Warning` section in the `__bool__` docstring explaining the non-standard behavior.
 
 ### Type Annotation Conventions
 
-**Nullable Types: Use `X | None` (PEP 604) over `Optional[X]`**
-
-ONEX prefers the modern PEP 604 union syntax for nullable types. This is cleaner, more explicit, and aligns with Python 3.10+ best practices.
-
+**Nullable Types**: Use `X | None` (PEP 604), not `Optional[X]`
 ```python
-# PREFERRED - PEP 604 union syntax
-def get_user(id: str) -> User | None:
-    """Return user or None if not found."""
-    ...
-
-def process_data(value: str | None = None) -> Result:
-    """Process data with optional value."""
-    ...
-
-# Complex unions - also use pipe syntax
-def parse_input(data: str | int | None) -> ParsedResult:
-    """Parse string, int, or None input."""
-    ...
-
-# NOT PREFERRED - Optional syntax
-from typing import Optional, Union
-
-def get_user(id: str) -> Optional[User]:  # Avoid this
-    ...
-
-def parse_input(data: Optional[Union[str, int]]) -> ParsedResult:  # Avoid this
-    ...
+def get_user(id: str) -> User | None: ...
 ```
 
-**Rationale**:
-- `X | None` is visually clearer and more explicit about what the type represents
-- Reduces import clutter (no need for `from typing import Optional`)
-- Consistent with modern Python type annotation patterns
-- `Optional[X]` can be misleading - it suggests the parameter is optional, not that it can be None
-
-**Exception**: When maintaining compatibility with older codebases or when `typing.Optional` is already imported for other purposes, using `Optional` is acceptable but not preferred.
-
-**Envelope Typing: Use `ModelEventEnvelope[object]` for Generic Dispatchers**
-
-The dispatch engine and protocol dispatchers use `ModelEventEnvelope[object]` instead of `Any` for envelope parameters. This pattern satisfies the ONEX "no Any types" rule while maintaining the necessary flexibility for generic message handling.
-
+**Envelope Typing**: Use `ModelEventEnvelope[object]` for generic dispatchers
 ```python
-# CORRECT - Generic dispatcher (accepts any payload type)
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-
 async def process_event(envelope: ModelEventEnvelope[object]) -> str | None:
     """Process any event type - uses object for generic payloads."""
-    return "dev.processed.v1"
-
-# CORRECT - Specific dispatcher (knows the exact payload type)
-from my_models import UserCreatedEvent
-
-async def process_user_created(envelope: ModelEventEnvelope[UserCreatedEvent]) -> str:
-    """Process UserCreatedEvent - uses specific type when known."""
-    user = envelope.payload  # Type-safe: UserCreatedEvent
-    return f"dev.user.{user.user_id}.processed"
-
-# WRONG - Never use Any
-from typing import Any
-
-async def process_event(envelope: ModelEventEnvelope[Any]) -> str:  # Avoid
-    ...
 ```
 
-**When to use each pattern**:
-
-| Context | Type Parameter | Rationale |
-|---------|----------------|-----------|
-| Protocol definitions | `object` | Protocols define structural interfaces; payload type varies |
-| Dispatch engine internals | `object` | Routes based on topic/category, not payload shape |
-| Generic dispatcher functions | `object` | Must accept any payload type within a category |
-| Concrete implementations | Specific type | When dispatcher knows exact payload type (e.g., `UserCreatedEvent`) |
-| Test fixtures | Specific type | Tests create envelopes with known payload types |
-
-**Rationale for `object` over `Any`**:
-- `object` explicitly says "any Python object" - clearer intent than `Any`
-- Type checkers treat `object` as the root of the type hierarchy
-- Satisfies ONEX "no Any types" coding guideline
-- Same runtime behavior as `Any` but with documented semantics
-- Encourages narrowing to specific types where possible
-
-**See also**: `src/omnibase_infra/runtime/message_dispatch_engine.py` for the complete design note.
+**Type Alias Pattern**: Use underscore-prefixed unions for Pydantic, protocols for type hints
+```python
+_IntentUnion = ModelCommandIntent | ModelEventIntent  # Pydantic validation
+def process(intent: ProtocolRegistrationIntent): ...  # Function signature
+```
 
 ### ONEX Architecture
 - **Contract-Driven** - All tools/services follow contract patterns
@@ -282,38 +253,20 @@ async def process_event(envelope: ModelEventEnvelope[Any]) -> str:  # Avoid
 - **Protocol Resolution** - Duck typing through protocols, never isinstance
 - **OnexError Only** - `raise OnexError(...) from e`
 
-### Node Archetypes & Core Models (from `omnibase_core`)
+### Node Archetypes (from `omnibase_core`)
 
-**Architecture Rule**: `omnibase_infra` extends base archetypes from `omnibase_core`. Never define new node archetypes in infra - they belong in core. This ensures consistent node contracts across the ONEX ecosystem.
-
-| Layer | Responsibility | Example |
-|-------|---------------|---------|
-| `omnibase_core` | Node archetypes, I/O models, enums | `NodeReducer`, `ModelReducerInput` |
-| `omnibase_spi` | Protocol definitions | `ProtocolReducerNode` |
-| `omnibase_infra` | Infrastructure implementations | `NodeDualRegistrationReducer` |
-
-**All node base classes and their I/O models come from `omnibase_core.nodes`:**
+| Layer | Responsibility |
+|-------|---------------|
+| `omnibase_core` | Node archetypes, I/O models, enums |
+| `omnibase_spi` | Protocol definitions |
+| `omnibase_infra` | Infrastructure implementations |
 
 ```python
 from omnibase_core.nodes import (
-    # Node base classes (archetypes)
-    NodeEffect,           # External I/O operations
-    NodeCompute,          # Pure transformations
-    NodeReducer,          # State aggregation (FSM-driven)
-    NodeOrchestrator,     # Workflow coordination
-
-    # I/O models for each archetype
-    ModelEffectInput, ModelEffectOutput, ModelEffectTransaction,
-    ModelComputeInput, ModelComputeOutput,
-    ModelReducerInput, ModelReducerOutput,
-    ModelOrchestratorInput, ModelOrchestratorOutput,
-
-    # Enums for node behavior
-    EnumReductionType,      # sum, count, avg, min, max, custom
-    EnumConflictResolution, # last_write_wins, merge, error
-    EnumStreamingMode,      # batch, streaming, hybrid
-    EnumExecutionMode,      # sequential, parallel, conditional
-    EnumWorkflowState,      # pending, running, completed, failed
+    NodeEffect,        # External I/O operations
+    NodeCompute,       # Pure transformations
+    NodeReducer,       # State aggregation (FSM-driven)
+    NodeOrchestrator,  # Workflow coordination
 )
 ```
 
@@ -323,947 +276,200 @@ from omnibase_core.nodes import (
 
 ```python
 from omnibase_core.container import ModelONEXContainer
-from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+from omnibase_core.nodes import NodeOrchestrator
 
-# Bootstrap and resolve
-container = ModelONEXContainer()
-wire_infrastructure_services(container)
-service = container.service_registry.resolve_service(ServiceType)
+class MyOrchestrator(NodeOrchestrator):
+    def __init__(self, container: ModelONEXContainer) -> None:
+        super().__init__(container)
 ```
 
-**See**: `docs/patterns/container_dependency_injection.md` for complete patterns and examples
+## Infrastructure Error Patterns
 
-## 🚨 Infrastructure Error Patterns
+### Error Class Selection
 
-### Error Class Selection (Quick Reference)
+| Scenario | Error Class |
+|----------|-------------|
+| Config invalid | `ProtocolConfigurationError` |
+| Connection failed | `InfraConnectionError` |
+| Timeout | `InfraTimeoutError` |
+| Auth failed | `InfraAuthenticationError` |
+| Unavailable | `InfraUnavailableError` |
 
-| Scenario | Error Class | Transport Code |
-|----------|-------------|----------------|
-| Config invalid | `ProtocolConfigurationError` | N/A |
-| Secret not found | `SecretResolutionError` | N/A |
-| Connection failed | `InfraConnectionError` | `DATABASE_CONNECTION_ERROR` / `NETWORK_ERROR` / `SERVICE_UNAVAILABLE` |
-| Timeout | `InfraTimeoutError` | Same as connection |
-| Auth failed | `InfraAuthenticationError` | Same as connection |
-| Unavailable | `InfraUnavailableError` | `SERVICE_UNAVAILABLE` |
-
-### Error Context Example
-
+### Error Context
 ```python
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 
 context = ModelInfraErrorContext(
     transport_type=EnumInfraTransportType.DATABASE,
     operation="execute_query",
-    target_name="postgresql-primary",
     correlation_id=request.correlation_id,
 )
-raise InfraConnectionError("Failed to connect", context=context) from original_error
+raise InfraConnectionError("Failed to connect", context=context) from e
 ```
 
-**See Also**:
-- `docs/patterns/error_handling_patterns.md` - Complete error hierarchy and usage
-- `docs/patterns/error_recovery_patterns.md` - Recovery strategies (backoff, circuit breaker, degradation)
-- `docs/patterns/retry_backoff_compensation_strategy.md` - Retry policies, backoff formulas, compensation for partial failures
-- `docs/patterns/correlation_id_tracking.md` - Request tracing patterns
-- `docs/patterns/circuit_breaker_implementation.md` - Circuit breaker details
+### Error Hierarchy
+```
+ModelOnexError (omnibase_core)
+└── RuntimeHostError
+    ├── ProtocolConfigurationError
+    ├── InfraConnectionError (transport-aware codes)
+    ├── InfraTimeoutError
+    ├── InfraAuthenticationError
+    └── InfraUnavailableError
+```
 
-## 🏗️ Infrastructure Architecture
+### Error Sanitization
+**NEVER include**: passwords, API keys, PII, connection strings with credentials
+**SAFE to include**: service names, operation names, correlation IDs, ports
 
-### Correlation ID Assignment Rules
+## Infrastructure Patterns
 
-Correlation IDs enable distributed tracing across infrastructure components:
+### Correlation ID Rules
+1. Always propagate from incoming requests
+2. Auto-generate with `uuid4()` if missing
+3. Include in all error context
 
-1. **Always propagate**: Pass `correlation_id` from incoming requests to error context
-2. **Auto-generation**: If no `correlation_id` exists, generate one using `uuid4()`
-3. **UUID format**: Use UUID4 format for all new correlation IDs
-4. **Include everywhere**: Add `correlation_id` in all error context for tracing
+### Circuit Breaker
 
+Use `MixinAsyncCircuitBreaker` for external service integrations:
 ```python
-from uuid import UUID, uuid4
-
-# Pattern 1: Propagate from request
-correlation_id = request.correlation_id or uuid4()
-
-# Pattern 2: Generate if not available
-context = ModelInfraErrorContext(
-    transport_type=EnumInfraTransportType.KAFKA,
-    operation="produce_message",
-    correlation_id=correlation_id,
-)
-
-# Pattern 3: Extract from incoming event
-correlation_id = event.metadata.get("correlation_id")
-if isinstance(correlation_id, str):
-    correlation_id = UUID(correlation_id)
-```
-
-### Error Sanitization Guidelines
-
-**NEVER include in error messages or context**:
-- Passwords, API keys, tokens, secrets
-- Full connection strings with credentials
-- PII (names, emails, SSNs, phone numbers)
-- Internal IP addresses (in production logs)
-- Private keys or certificates
-- Session tokens or cookies
-
-**SAFE to include**:
-- Service names (e.g., "postgresql", "kafka")
-- Operation names (e.g., "connect", "query", "authenticate")
-- Correlation IDs (always include for tracing)
-- Error codes (e.g., `EnumCoreErrorCode.DATABASE_CONNECTION_ERROR`)
-- Sanitized hostnames (e.g., "db.example.com")
-- Port numbers
-- Retry counts and timeout values
-- Resource identifiers (non-sensitive)
-
-```python
-# BAD - Exposes credentials
-raise InfraConnectionError(
-    f"Failed to connect with password={password}",  # NEVER DO THIS
-    context=context,
-)
-
-# GOOD - Sanitized error message
-raise InfraConnectionError(
-    "Failed to connect to database",
-    context=context,
-    host="db.example.com",
-    port=5432,
-    retry_count=3,
-)
-
-# BAD - Full connection string
-raise InfraConnectionError(
-    f"Connection failed: {connection_string}",  # May contain credentials
-    context=context,
-)
-
-# GOOD - Sanitized connection info
-raise InfraConnectionError(
-    "Connection failed",
-    context=context,
-    host=parsed_host,
-    port=parsed_port,
-    database=database_name,
-)
-```
-
-### Error Hierarchy Reference
-
-```
-ModelOnexError (from omnibase_core)
-└── RuntimeHostError (base infrastructure error)
-    ├── ProtocolConfigurationError  # Config validation failures
-    ├── SecretResolutionError       # Secret/credential resolution
-    ├── InfraConnectionError        # Connection failures
-    ├── InfraTimeoutError           # Operation timeouts
-    ├── InfraAuthenticationError    # Auth/authz failures
-    └── InfraUnavailableError           # Resource unavailable
-```
-
-### Error Code Mapping Reference
-
-| Error Class | EnumCoreErrorCode | HTTP Equivalent |
-|-------------|-------------------|-----------------|
-| `ProtocolConfigurationError` | `INVALID_CONFIGURATION` | 400 Bad Request |
-| `SecretResolutionError` | `RESOURCE_NOT_FOUND` | 404 Not Found |
-| `InfraConnectionError` | **Transport-aware** (see below) | 503 Service Unavailable |
-| `InfraTimeoutError` | `TIMEOUT_ERROR` | 504 Gateway Timeout |
-| `InfraAuthenticationError` | `AUTHENTICATION_ERROR` | 401 Unauthorized |
-| `InfraUnavailableError` | `SERVICE_UNAVAILABLE` | 503 Service Unavailable |
-
-#### InfraConnectionError Transport-Aware Error Codes
-
-`InfraConnectionError` automatically selects the appropriate error code based on `context.transport_type`:
-
-| Transport Type | EnumCoreErrorCode | Rationale |
-|----------------|-------------------|-----------|
-| `DATABASE` | `DATABASE_CONNECTION_ERROR` | Specific database connection error |
-| `HTTP` | `NETWORK_ERROR` | Network-level transport failure |
-| `GRPC` | `NETWORK_ERROR` | Network-level transport failure |
-| `KAFKA` | `SERVICE_UNAVAILABLE` | Message broker service unavailable |
-| `CONSUL` | `SERVICE_UNAVAILABLE` | Service discovery unavailable |
-| `VAULT` | `SERVICE_UNAVAILABLE` | Secret management service unavailable |
-| `VALKEY` | `SERVICE_UNAVAILABLE` | Cache service unavailable |
-| `None` (no context) | `SERVICE_UNAVAILABLE` | Generic fallback |
-
-```python
-# Example: Transport-aware error code selection
-from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
-from omnibase_infra.enums import EnumInfraTransportType
-
-# Database connection -> DATABASE_CONNECTION_ERROR
-db_context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.DATABASE)
-db_error = InfraConnectionError("DB failed", context=db_context)
-assert db_error.model.error_code.name == "DATABASE_CONNECTION_ERROR"
-
-# HTTP connection -> NETWORK_ERROR
-http_context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.HTTP)
-http_error = InfraConnectionError("API failed", context=http_context)
-assert http_error.model.error_code.name == "NETWORK_ERROR"
-
-# Kafka connection -> SERVICE_UNAVAILABLE
-kafka_context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.KAFKA)
-kafka_error = InfraConnectionError("Kafka failed", context=kafka_context)
-assert kafka_error.model.error_code.name == "SERVICE_UNAVAILABLE"
-```
-
-### Error Recovery Patterns
-
-Infrastructure errors often require recovery strategies. Here are common patterns for handling infrastructure failures:
-
-#### Retry with Exponential Backoff (Connection Errors)
-
-Use exponential backoff for transient connection failures. This pattern is ideal for `InfraConnectionError` when services are temporarily unavailable:
-
-```python
-import time
-from uuid import uuid4
-from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
-from omnibase_infra.enums import EnumInfraTransportType
-
-def connect_with_retry(host: str, port: int, max_retries: int = 3) -> Connection:
-    """Connect to database with exponential backoff retry strategy."""
-    correlation_id = uuid4()
-    context = ModelInfraErrorContext(
-        transport_type=EnumInfraTransportType.DATABASE,
-        operation="connect",
-        target_name="postgresql-primary",
-        correlation_id=correlation_id,
-    )
-
-    for attempt in range(max_retries):
-        try:
-            return create_connection(host, port)
-        except ConnectionError as e:
-            if attempt == max_retries - 1:
-                raise InfraConnectionError(
-                    f"Failed to connect after {max_retries} attempts",
-                    context=context,
-                    host=host,
-                    port=port,
-                    retry_count=attempt + 1,
-                ) from e
-
-            # Exponential backoff: 1s, 2s, 4s
-            wait_time = 2 ** attempt
-            time.sleep(wait_time)
-```
-
-#### Circuit Breaker Pattern (Unavailable Services)
-
-Use the circuit breaker pattern for `InfraUnavailableError` to prevent cascading failures and give services time to recover:
-
-```python
-import time
-from enum import Enum
-from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
-from omnibase_infra.enums import EnumInfraTransportType
-
-class CircuitState(str, Enum):
-    """Circuit breaker state machine."""
-    CLOSED = "closed"        # Normal operation
-    OPEN = "open"            # Blocking requests
-    HALF_OPEN = "half_open"  # Testing recovery
-
-class CircuitBreaker:
-    """Prevents cascading failures with configurable circuit breaker."""
-
-    def __init__(
-        self,
-        failure_threshold: int = 5,
-        reset_timeout: float = 30.0,
-        context: ModelInfraErrorContext = None,
-    ):
-        self.failure_count = 0
-        self.threshold = failure_threshold
-        self.reset_timeout = reset_timeout
-        self.last_failure_time = 0.0
-        self.state = CircuitState.CLOSED
-        self.context = context or ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.HTTP,
-            operation="circuit_breaker",
-            target_name="service",
-        )
-
-    def call(self, func, *args, **kwargs):
-        """Execute function through circuit breaker protection."""
-        if self.state == CircuitState.OPEN:
-            # Check if reset timeout has passed
-            if time.time() - self.last_failure_time > self.reset_timeout:
-                self.state = CircuitState.HALF_OPEN
-                self.failure_count = 0
-            else:
-                raise InfraUnavailableError(
-                    "Circuit breaker is open - service temporarily unavailable",
-                    context=self.context,
-                    circuit_state=self.state.value,
-                    retry_after_seconds=int(
-                        self.reset_timeout - (time.time() - self.last_failure_time)
-                    ),
-                )
-
-        try:
-            result = func(*args, **kwargs)
-
-            # Success - reset circuit
-            if self.state == CircuitState.HALF_OPEN:
-                self.state = CircuitState.CLOSED
-            self.failure_count = 0
-            return result
-
-        except Exception as e:
-            self.failure_count += 1
-            self.last_failure_time = time.time()
-
-            # Open circuit if threshold exceeded
-            if self.failure_count >= self.threshold:
-                self.state = CircuitState.OPEN
-
-            raise
-```
-
-#### Graceful Degradation (Timeout Errors)
-
-Use graceful degradation for `InfraTimeoutError` to maintain service availability with reduced functionality:
-
-```python
-from collections.abc import Callable
-from types import FrameType
-from typing import TypeVar
-from uuid import UUID
-
-from pydantic import BaseModel
-
-from omnibase_infra.errors import InfraTimeoutError, ModelInfraErrorContext
-from omnibase_infra.enums import EnumInfraTransportType
-
-# TypeVar for generic data types in fetch operations
-T = TypeVar("T", bound=BaseModel)
-
-
-class ModelFetchResult(BaseModel):
-    """Result model for fetch operations with graceful degradation."""
-
-    data: BaseModel
-    source: str  # "primary" or "fallback"
-    degraded: bool
-    warning: str | None = None
-
-
-def fetch_with_timeout_fallback(
-    primary_func: Callable[[], T],
-    fallback_func: Callable[[], T],
-    timeout_seconds: float = 5.0,
-    correlation_id: UUID | None = None,
-) -> ModelFetchResult:
-    """Fetch from primary source with graceful degradation to fallback."""
-    import signal
-
-    context = ModelInfraErrorContext(
-        transport_type=EnumInfraTransportType.DATABASE,
-        operation="fetch",
-        target_name="primary-source",
-        correlation_id=correlation_id,
-    )
-
-    def timeout_handler(signum: int, frame: FrameType | None) -> None:
-        raise TimeoutError("Operation exceeded timeout")
-
-    # Set timeout handler
-    signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(int(timeout_seconds))
-
-    try:
-        # Try primary data source
-        return ModelFetchResult(
-            data=primary_func(),
-            source="primary",
-            degraded=False,
-        )
-
-    except TimeoutError:
-        # Log timeout but continue with fallback
-        context_with_fallback = ModelInfraErrorContext(
-            transport_type=context.transport_type,
-            operation=context.operation,
-            target_name=context.target_name,
-            correlation_id=context.correlation_id,
-        )
-
-        try:
-            # Use fallback source (cache, secondary database, etc.)
-            return ModelFetchResult(
-                data=fallback_func(),
-                source="fallback",
-                degraded=True,
-                warning="Primary source timed out, using fallback data",
-            )
-
-        except Exception as fallback_error:
-            raise InfraTimeoutError(
-                "Primary timeout and fallback failed",
-                context=context_with_fallback,
-                timeout_seconds=timeout_seconds,
-            ) from fallback_error
-
-    finally:
-        signal.alarm(0)  # Cancel alarm
-```
-
-#### Credential Refresh (Authentication Errors)
-
-Use credential refresh for `InfraAuthenticationError` to handle token expiration gracefully:
-
-```python
-from omnibase_infra.errors import InfraAuthenticationError, ModelInfraErrorContext
-from omnibase_infra.enums import EnumInfraTransportType
-import time
-
-class CredentialRefreshManager:
-    """Manages credential refresh with automatic token renewal."""
-
-    def __init__(
-        self,
-        credential_provider,
-        refresh_threshold_seconds: float = 300.0,
-    ):
-        self.provider = credential_provider
-        self.refresh_threshold = refresh_threshold_seconds
-        self.current_credential = None
-        self.credential_expires_at = 0.0
-        self.context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            operation="credential_refresh",
-            target_name="vault-server",
-        )
-
-    def get_valid_credential(self):
-        """Get credential, refreshing if near expiration."""
-        current_time = time.time()
-
-        # Check if credential exists and is still valid
-        if (
-            self.current_credential is not None
-            and current_time < self.credential_expires_at - self.refresh_threshold
-        ):
-            return self.current_credential
-
-        # Credential missing, expired, or approaching expiration - refresh
-        try:
-            credential = self.provider.refresh_credential()
-            self.current_credential = credential
-            self.credential_expires_at = (
-                current_time + credential.get("ttl_seconds", 3600)
-            )
-            return credential
-
-        except Exception as e:
-            raise InfraAuthenticationError(
-                "Failed to refresh authentication credentials",
-                context=self.context,
-                provider="vault",
-            ) from e
-
-    def call_with_auth(self, func, *args, **kwargs):
-        """Execute function with automatic credential refresh on auth failure."""
-        max_retries = 2
-
-        for attempt in range(max_retries):
-            try:
-                credential = self.get_valid_credential()
-                return func(*args, credential=credential, **kwargs)
-
-            except InfraAuthenticationError as e:
-                if attempt == max_retries - 1:
-                    # Last attempt failed - propagate error
-                    raise
-
-                # Force refresh and retry
-                self.current_credential = None
-                self.credential_expires_at = 0.0
-```
-
-### Transport Type Reference
-
-Use `EnumInfraTransportType` for transport identification in error context:
-
-| Transport Type | Value | Usage |
-|---------------|-------|-------|
-| `HTTP` | `"http"` | REST API transport |
-| `DATABASE` | `"db"` | PostgreSQL, etc. |
-| `KAFKA` | `"kafka"` | Kafka message broker |
-| `CONSUL` | `"consul"` | Service discovery |
-| `VAULT` | `"vault"` | Secret management |
-| `VALKEY` | `"valkey"` | Cache/message transport |
-| `GRPC` | `"grpc"` | gRPC protocol |
-
-## 🏗️ Infrastructure-Specific Patterns
-
-### Accepted Pattern Exceptions
-
-**KafkaEventBus Complexity** (Documented Exception):
-The KafkaEventBus intentionally violates pattern validator thresholds:
-- **14 methods** (threshold: 10) - Required for event bus pattern implementation
-- **10 __init__ parameters** (threshold: 5) - Backwards compatibility during config migration
-
-This complexity is acceptable and documented because:
-1. **Event Bus Pattern Requirements**: Lifecycle, pub/sub, circuit breaker, protocol compatibility
-2. **Backwards Compatibility**: Gradual migration from direct parameters to config objects
-3. **Infrastructure Cohesion**: Keeping related event bus operations together improves maintainability
-4. **Well-Documented**: Design rationale documented in class and method docstrings
-
-The violations are **intentional infrastructure patterns**, not code smells. See:
-- `src/omnibase_infra/event_bus/kafka_event_bus.py` - Full design documentation
-- `src/omnibase_infra/validation/infra_validators.py` - Validation notes
-
-### Circuit Breaker Pattern (MixinAsyncCircuitBreaker)
-
-All infrastructure adapters and services should use `MixinAsyncCircuitBreaker` for fault tolerance and automatic recovery.
-
-**When to Use**:
-- External service integrations (Kafka, Consul, Vault, Redis, PostgreSQL)
-- Network operations that can fail transiently
-- Any infrastructure component requiring automatic fault recovery
-- Services with configurable failure thresholds and reset timeouts
-
-**Integration Pattern**:
-```python
-from omnibase_infra.mixins import MixinAsyncCircuitBreaker
-from omnibase_infra.enums import EnumInfraTransportType
-from uuid import uuid4
-
-class MyInfrastructureAdapter(MixinAsyncCircuitBreaker):
-    def __init__(self, config: MyConfig):
-        # Initialize circuit breaker with service-specific settings
-        # This creates self._circuit_breaker_lock automatically
+class MyAdapter(MixinAsyncCircuitBreaker):
+    def __init__(self, config):
         self._init_circuit_breaker(
-            threshold=5,                    # Max failures before opening
-            reset_timeout=60.0,             # Seconds until auto-reset
-            service_name=f"my-service.{environment}",
-            transport_type=EnumInfraTransportType.HTTP,  # Or KAFKA, CONSUL, etc.
+            threshold=5, reset_timeout=60.0,
+            service_name="my-service",
+            transport_type=EnumInfraTransportType.HTTP,
         )
 
-    async def connect(self) -> None:
-        """Connect to external service with circuit breaker protection."""
-        correlation_id = uuid4()
-
-        # Check circuit breaker before operation (caller-held lock pattern)
+    async def connect(self):
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("connect", correlation_id)
-
-        try:
-            # Attempt connection (outside lock for I/O operations)
-            await self._do_connect()
-
-            # Record success (resets circuit breaker)
-            async with self._circuit_breaker_lock:
-                await self._reset_circuit_breaker()
-
-        except Exception as e:
-            # Record failure (may open circuit)
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure("connect", correlation_id)
-            raise
+        # ... operation ...
 ```
 
-**Thread Safety**:
-- Circuit breaker methods REQUIRE caller to hold `self._circuit_breaker_lock`
-- The lock is created automatically by `_init_circuit_breaker()`
-- Always use `async with self._circuit_breaker_lock:` before calling circuit breaker methods
-- Never call circuit breaker methods without lock protection
+**States**: CLOSED → OPEN (after failures) → HALF_OPEN → CLOSED (on success)
 
-**State Transitions**:
-- **CLOSED**: Normal operation, requests allowed
-- **OPEN**: Too many failures, requests blocked (raises `InfraUnavailableError`)
-- **HALF_OPEN**: After timeout, testing if service recovered
-- **CLOSED**: Service recovered, normal operation resumed
+**See**: `docs/patterns/circuit_breaker_implementation.md` for full implementation details
 
-**Error Context**:
-- Blocked requests raise `InfraUnavailableError` with proper `ModelInfraErrorContext`
-- Includes correlation_id, operation, service_name, circuit state
-- Provides retry_after_seconds for clients
-- All errors follow infrastructure error sanitization guidelines
+### Transport Types
+| Type | Value |
+|------|-------|
+| `DATABASE` | `"db"` |
+| `KAFKA` | `"kafka"` |
+| `HTTP` | `"http"` |
+| `CONSUL` | `"consul"` |
+| `VAULT` | `"vault"` |
+| `VALKEY` | `"valkey"` |
 
-**Configuration Guidelines**:
-```python
-# High-reliability service (strict failure tolerance)
-self._init_circuit_breaker(
-    threshold=3,              # Open after 3 failures
-    reset_timeout=120.0,      # 2 minutes recovery
-    service_name="critical-service",
-    transport_type=EnumInfraTransportType.DATABASE,
-)
-
-# Best-effort service (lenient failure tolerance)
-self._init_circuit_breaker(
-    threshold=10,             # Open after 10 failures
-    reset_timeout=30.0,       # 30 seconds recovery
-    service_name="cache-service",
-    transport_type=EnumInfraTransportType.VALKEY,
-)
-```
-
-**Integration with Error Recovery**:
-```python
-from pydantic import BaseModel
-
-async def publish_with_retry(self, message: BaseModel) -> None:
-    """Publish message with circuit breaker and retry logic."""
-    correlation_id = uuid4()
-    max_retries = 3
-
-    for attempt in range(max_retries):
-        # Check circuit breaker before each attempt
-        async with self._circuit_breaker_lock:
-            try:
-                await self._check_circuit_breaker("publish", correlation_id)
-            except InfraUnavailableError:
-                # Circuit open - fail fast without retrying
-                raise
-
-        try:
-            # Attempt publish (outside lock for I/O)
-            await self._kafka_producer.send(message)
-
-            # Record success
-            async with self._circuit_breaker_lock:
-                await self._reset_circuit_breaker()
-            return  # Success
-
-        except Exception as e:
-            # Record failure
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure("publish", correlation_id)
-
-            if attempt == max_retries - 1:
-                raise  # Last attempt failed
-
-            # Exponential backoff before retry
-            await asyncio.sleep(2 ** attempt)
-```
-
-**Monitoring and Observability**:
-```python
-# Circuit breaker exposes state for monitoring (access under lock)
-async with self._circuit_breaker_lock:
-    is_open = self._circuit_breaker_open           # bool: True if circuit open
-    failure_count = self._circuit_breaker_failures  # int: consecutive failures
-    open_until = self._circuit_breaker_open_until   # float: timestamp for auto-reset
-
-# Log state transitions for operational insights
-if is_open:
-    logger.warning(
-        "Circuit breaker opened",
-        extra={
-            "service_name": self.service_name,
-            "failure_count": failure_count,
-            "open_until": open_until,
-            "correlation_id": str(correlation_id),
-        },
-    )
-```
-
-**Related Work**:
-- Protocol definition: OMN-861 (Phase 2 - omnibase_spi)
-- Implementation: `src/omnibase_infra/mixins/mixin_async_circuit_breaker.py`
-- Thread safety docs: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`
-- Example usage: VaultAdapter, KafkaEventBus integration
-- Error handling: See "Error Recovery Patterns" section above
-
-**Best Practices**:
-- Always propagate correlation_id through circuit breaker calls
-- Use descriptive operation names ("connect", "publish", "query")
-- Configure threshold and timeout based on service characteristics
-- Monitor circuit breaker state transitions for operational insights
-- Combine with retry logic for transient failures
-- Use circuit breaker for fail-fast behavior when service is down
-- Never call circuit breaker methods without holding `_circuit_breaker_lock`
-- Never suppress InfraUnavailableError from circuit breaker
-- Never use circuit breaker for non-transient errors
-
-### Dispatcher Resilience Pattern
+### Dispatcher Resilience
 
 **Dispatchers own their own resilience** - the `MessageDispatchEngine` does NOT wrap dispatchers with circuit breakers.
 
-**Design Rationale**:
-- **Separation of concerns**: Each dispatcher knows its specific failure modes and recovery strategies
-- **Transport-specific tuning**: Kafka dispatchers need different thresholds than HTTP dispatchers
-- **No hidden behavior**: Engine users see exactly what resilience each dispatcher provides
-- **Composability**: Dispatchers can combine circuit breakers with retry, backoff, or degradation
-
-**Dispatcher Implementation Pattern**:
-```python
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.mixins import MixinAsyncCircuitBreaker
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.models.dispatch import ModelDispatchResult
-from omnibase_infra.runtime import ProtocolMessageDispatcher
-
-
-class MyDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
-    """Dispatcher with built-in circuit breaker resilience."""
-
-    def __init__(self, config: DispatcherConfig):
-        self._init_circuit_breaker(
-            threshold=config.failure_threshold,
-            reset_timeout=config.reset_timeout_seconds,
-            service_name=f"dispatcher.{config.target_service}",
-            transport_type=config.transport_type,
-        )
-
-    # NOTE: ModelEventEnvelope[object] is used instead of Any to satisfy ONEX "no Any types"
-    # rule. Dispatchers must accept envelopes with any payload type since the dispatch
-    # engine routes based on topic/category, not payload shape. Using `object` provides
-    # the same flexibility as Any but with explicit semantics.
-    async def handle(self, envelope: ModelEventEnvelope[object]) -> ModelDispatchResult:
-        """Handle message with circuit breaker protection."""
-        async with self._circuit_breaker_lock:
-            await self._check_circuit_breaker("handle", envelope.correlation_id)
-
-        try:
-            result = await self._do_handle(envelope)
-            async with self._circuit_breaker_lock:
-                await self._reset_circuit_breaker()
-            return result
-        except Exception as e:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure("handle", envelope.correlation_id)
-            raise
-```
-
-**What the Engine Does NOT Do**:
-- Does not wrap dispatcher calls with circuit breakers
-- Does not implement retry logic around dispatchers
-- Does not catch and suppress dispatcher errors (except for error aggregation)
-
-**What Dispatchers Should Do**:
+Each dispatcher should:
 - Implement `MixinAsyncCircuitBreaker` for external service calls
 - Configure thresholds appropriate to their transport type
-- Raise `InfraUnavailableError` when circuit opens (engine will capture this)
-- Optionally combine with retry logic for transient failures
+- Raise `InfraUnavailableError` when circuit opens
 
-### Node Introspection Security Considerations
+**See**: `docs/patterns/dispatcher_resilience.md` for full pattern details
 
-The `MixinNodeIntrospection` mixin uses Python reflection (via the `inspect` module) to automatically discover node capabilities. This provides powerful service discovery but has security implications that developers should understand.
+### Handler No-Publish Constraint
 
-**Threat Model**:
+**Handlers MUST NOT have direct event bus access** - only orchestrators may publish events.
 
-Introspection data could be valuable to an attacker for:
-- **Reconnaissance**: Learning what operations a node supports to identify attack vectors (e.g., discovering `decrypt_*`, `admin_*` methods)
-- **Architecture mapping**: Understanding system topology through protocol and mixin discovery
-- **Version fingerprinting**: Identifying outdated versions with known vulnerabilities
-- **State inference**: Deducing system state or health from FSM state values
+| Constraint | Verification |
+|------------|--------------|
+| No bus parameters | `__init__`, `handle()` signatures |
+| No bus attributes | No `_bus`, `_event_bus`, `_publisher` |
+| No publish methods | No `publish()`, `emit()`, `send_event()` |
+| Protocol compliance | `ProtocolHandler` has no bus methods |
 
-**What Gets Exposed via Introspection**:
-- Public method names (potential operations a node can perform)
-- Method signatures (parameter names and type annotations - names like `api_key`, `decrypt_key` reveal sensitive purposes)
-- Protocol and mixin implementations (discovered capabilities)
-- FSM state information (if `MixinFSM` is present)
-- Endpoint URLs (health, API, metrics paths)
-- Node metadata (name, version, type from contract)
+**Integration Tests**: `tests/integration/handlers/test_handler_no_publish_constraint.py`
 
-**What is NOT Exposed**:
-- Private methods (prefixed with `_`) - completely excluded from discovery
-- Method implementations or source code - only signatures, not logic
-- Configuration values - secrets, connection strings, etc. are not exposed
-- Environment variables or runtime parameters
-- Request/response payloads or historical data
+| Test Class | Coverage |
+|------------|----------|
+| `TestHttpRestHandlerBusIsolation` | HTTP handler bus isolation |
+| `TestHandlerNodeIntrospectedBusIsolation` | Introspection handler isolation |
+| `TestHandlerProtocolCompliance` | Protocol-level constraints |
+| `TestOrchestratorBusAccessVerification` | Orchestrator-only bus access |
+| `TestHandlerNoPublishConstraintCrossValidation` | Cross-handler constraint validation |
+
+### Node Introspection Security
+
+The `MixinNodeIntrospection` mixin uses Python reflection for service discovery. This has security implications:
+
+**What Gets Exposed**: Public method names, signatures, protocol implementations, FSM state
+**What is NOT Exposed**: Private methods (`_` prefix), source code, configuration values, secrets
 
 **Built-in Protections**:
-The mixin includes several filtering mechanisms to limit exposure:
-- **Private method exclusion**: Methods prefixed with `_` are excluded from capability discovery
-- **Utility method filtering**: Common utility prefixes (`get_*`, `set_*`, `initialize*`, `start_*`, `stop_*`) are filtered out
-- **Operation keyword matching**: Only methods matching operation keywords (`execute`, `handle`, `process`, `run`, `invoke`, `call`) are reported as capabilities. Node-type-specific keywords (e.g., `fetch`, `compute`, `aggregate`, `orchestrate`) are also available.
-- **Configurable exclusions**: The `exclude_prefixes` parameter allows additional filtering
-- **Caching with TTL**: Introspection data is cached to reduce reflection frequency
+- Private method exclusion
+- Utility method filtering (`get_*`, `set_*`, etc.)
+- Operation keyword matching
 
-**Best Practices for Node Developers**:
-- Prefix internal/sensitive methods with `_` to exclude them from introspection
-- Avoid exposing sensitive business logic in public method names
-- Use generic operation names that don't reveal implementation details (e.g., `process_request` instead of `decrypt_and_forward_to_payment_gateway`)
-- Use generic parameter names (e.g., `data` instead of `user_credentials`, `payload` instead of `encrypted_secret`)
-- Review exposed capabilities before deploying to production environments
-- Consider network segmentation for introspection event topics in multi-tenant environments
-- Use the `exclude_prefixes` parameter to filter additional method patterns if needed
+**Best Practices**:
+- Prefix internal/sensitive methods with `_`
+- Use generic parameter names (e.g., `data` not `user_credentials`)
+- Configure Kafka topic ACLs for introspection topics
 
-**Example - Reviewing Exposed Capabilities**:
-
-> **Note on Example Models**: The following example uses simplified `NodeInput` and `NodeOutput`
-> placeholder models for demonstration purposes only. These are **not** production model names.
-> In production ONEX nodes, input/output models follow the `Model<NodeName>Input` and
-> `Model<NodeName>Output` naming convention (e.g., `ModelVaultAdapterInput`, `ModelKafkaAdapterOutput`).
-> See the "File & Class Naming Conventions" section above for complete naming rules.
-
-```python
-from pydantic import BaseModel
-
-from omnibase_infra.mixins import MixinNodeIntrospection
-
-
-# Simplified placeholder models for demonstration purposes.
-# In production ONEX nodes, these would be named following the convention:
-# - Model<NodeName>Input (e.g., ModelVaultAdapterInput, ModelConsulAdapterInput)
-# - Model<NodeName>Output (e.g., ModelVaultAdapterOutput, ModelConsulAdapterOutput)
-# See docs/architecture/CURRENT_NODE_ARCHITECTURE.md for full examples.
-
-
-class NodeInput(BaseModel):
-    """Placeholder input model for demonstration.
-
-    Represents the typed input payload for a node operation.
-    ONEX nodes use strongly-typed Pydantic models to ensure
-    type safety and enable contract-driven validation.
-    """
-
-    value: str
-
-
-class NodeOutput(BaseModel):
-    """Placeholder output model for demonstration.
-
-    Represents the typed output result from a node operation.
-    All ONEX nodes return strongly-typed Pydantic models,
-    never raw dictionaries or untyped data.
-    """
-
-    processed: bool
-
-
-class MyNode(MixinNodeIntrospection):
-    def execute_operation(self, data: NodeInput) -> NodeOutput:
-        """Public operation - WILL be exposed."""
-        return self._internal_process(data)
-
-    def _internal_process(self, data: NodeInput) -> NodeOutput:
-        """Private method - will NOT be exposed."""
-        return NodeOutput(processed=True)
-
-    def get_status(self) -> str:
-        """Utility method - will NOT be exposed (get_* prefix filtered)."""
-        return "healthy"
-
-
-# Review what gets exposed
-node = MyNode()
-capabilities = node.get_capabilities()
-# capabilities will only include "execute_operation"
-```
-
-**Network Security Considerations**:
-- Introspection data is published to Kafka topics (`node.introspection`, `node.heartbeat`, `node.request_introspection`)
-- In multi-tenant environments, ensure proper topic ACLs are configured
-- Consider whether introspection topics should be accessible outside the cluster boundary
-- Monitor introspection topic consumers for unauthorized access
-- The registry listener responds to ANY request on the request topic without authentication - secure the topic with Kafka ACLs
-
-**Production Deployment Checklist**:
-1. Review `get_capabilities()` output for each node before deployment
-2. Verify no sensitive method names or parameter names are exposed
-3. Configure Kafka topic ACLs to restrict introspection topic access
-4. Consider disabling `enable_registry_listener` if not needed
-5. Monitor introspection topic consumer groups for unexpected consumers
-6. Use network segmentation to isolate introspection traffic if required
-
-**Related**:
-- Implementation: `src/omnibase_infra/mixins/mixin_node_introspection.py`
-- Ticket: OMN-893
-- See `MixinNodeIntrospection.get_capabilities()` for filtering logic details
+**See**: `docs/patterns/security_patterns.md#introspection-security` for complete threat model and deployment checklist
 
 ### Service Integration Architecture
-- **Adapter Pattern** - External services wrapped in ONEX adapters (Consul, Kafka, Vault)
-- **Connection Pooling** - Database connections managed through dedicated pool managers
+- **Adapter Pattern** - External services wrapped in ONEX adapters
+- **Connection Pooling** - Database connections managed through pool managers
 - **Event-Driven Communication** - Infrastructure events flow through Kafka adapters
 - **Service Discovery** - Consul integration for dynamic service resolution
 - **Secret Management** - Vault integration for secure credential handling
 
 ### Infrastructure 4-Node Pattern
-Infrastructure tools follow ONEX 4-node architecture:
-- **EFFECT** - External service interactions (Consul, Kafka, Vault adapters)
+- **EFFECT** - External service interactions (adapters)
 - **COMPUTE** - Message processing and transformation
 - **REDUCER** - State consolidation and decision making
 - **ORCHESTRATOR** - Workflow coordination
 
-### Service Adapters
-| Adapter | Purpose |
-|---------|---------|
-| `consul_adapter` | Service discovery |
-| `kafka_adapter` | Event streaming |
-| `vault_adapter` | Secret management |
-| `postgres_adapter` | Database operations |
+## Node Structure
 
-## 🤖 Agent Architecture
+**Canonical Structure:**
+```
+nodes/<adapter>/
+├── contract.yaml     # ONEX contract (handlers, routing, version)
+├── node.py          # Declarative node extending base class
+├── models/          # Node-specific models
+└── registry/        # registry_infra_<name>.py
+```
 
-### Orchestration Agents
+**Contract Requirements:**
+- Semantic versioning (`contract_version`, `node_version`)
+- Node type (EFFECT/COMPUTE/REDUCER/ORCHESTRATOR)
+- Strongly typed I/O (`input_model`, `output_model`)
+- Handler routing (for orchestrators)
+- Zero `Any` types
 
-| Agent | Purpose |
-|-------|---------|
-| `agent-onex-coordinator` | Primary routing and workflow orchestration |
-| `agent-workflow-coordinator` | Multi-step execution, sub-agent fleet coordination |
-| `agent-ticket-manager` | Ticket lifecycle, dependency analysis |
-
-### Specialist Agents
+## Agent Architecture
 
 | Category | Agents |
 |----------|--------|
-| Development | `agent-contract-validator`, `agent-contract-driven-generator`, `agent-ast-generator`, `agent-commit` |
-| DevOps | `agent-devops-infrastructure`, `agent-security-audit`, `agent-performance`, `agent-production-monitor` |
-| Quality | `agent-pr-review`, `agent-pr-create`, `agent-address-pr-comments`, `agent-testing` |
-| Intelligence | `agent-research`, `agent-debug-intelligence`, `agent-rag-query`, `agent-rag-update` |
+| Orchestration | `agent-onex-coordinator`, `agent-workflow-coordinator` |
+| Development | `agent-contract-validator`, `agent-commit`, `agent-testing` |
+| DevOps | `agent-devops-infrastructure`, `agent-security-audit` |
+| Quality | `agent-pr-review`, `agent-pr-create` |
 
-## 🔒 Zero Tolerance Policies
+## Zero Tolerance
 
 - `Any` types forbidden
-- Direct coding without agent delegation prohibited
+- Direct coding without agent delegation
 - Hand-written Pydantic models (must be contract-generated)
 - Hardcoded service configurations
+- Imperative nodes with custom routing logic
 
-## 🔧 DevOps Quick Reference
-
-**Container Troubleshooting**: `docker logs <container>` first, then `docker inspect` for exit codes
-- **Exit 0 OK**: Init containers (topic creation, migrations, SSL cert gen)
-- **Should run**: Services (web, brokers, databases, load balancers)
-
-
-## 📦 Service Ports
+## Service Ports
 
 | Service | Port |
 |---------|------|
 | Event Bus | 8083 |
-| Infrastructure Hub | 8085 |
-| Consul | 8500 (HTTP), 8600 (DNS) |
-| Kafka | 9092 (plaintext), 9093 (SSL) |
+| Consul | 8500 |
+| Kafka | 9092 |
 | Vault | 8200 |
 | PostgreSQL | 5432 |
-| Debug Dashboard | 8096 |
-
-## 🚀 Node Structure Pattern
-
-**Canonical Structure** (all components):
-```
-nodes/<adapter>/
-├── contract.yaml          # ONEX contract definition (includes version)
-├── node.py               # Node<Name><Type> implementation
-├── models/               # Node-specific models
-└── registry/             # registry_infra_<name>.py
-```
-
-**Prohibited Structure** (versioned directories):
-```
-nodes/<adapter>/v1_0_0/   # PROHIBITED - never create versioned directories
-nodes/<adapter>/v2/       # PROHIBITED - version goes in contract.yaml, not path
-```
-
-See "CRITICAL POLICY: NO VERSIONED DIRECTORIES" above and `docs/architecture/LEGACY_V1_MIGRATION.md` for details.
-
-**Contract Requirements**:
-- Semantic versioning in contract (`contract_version`, `node_version` fields)
-- Node type (EFFECT/COMPUTE/REDUCER/ORCHESTRATOR)
-- Strongly typed I/O (`input_model`, `output_model`)
-- Protocol-based dependencies
-- Zero `Any` types, use `omnibase_core.*` imports
 
 ---
 
-**Bottom Line**: Agent-driven development. Route through orchestrators, delegate to specialists. Strong typing, contract-driven configuration, no backwards compatibility.
+**Bottom Line**: Declarative nodes, container injection, agent-driven development. No backwards compatibility, no custom node logic.

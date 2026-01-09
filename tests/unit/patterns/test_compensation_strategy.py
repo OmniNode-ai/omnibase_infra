@@ -359,7 +359,8 @@ class MockOrderService:
             "status": "created",
         }
         self.db.write_count += 1
-        return self.db.records[order_id]
+        # self.db.records[order_id] returns object but we know it's dict[str, object]
+        return self.db.records[order_id]  # type: ignore[return-value]
 
     async def delete_order(self, order_id: str) -> None:
         """Delete an order (compensation for create_order)."""
@@ -374,8 +375,9 @@ class MockOrderService:
             "event_type": "OrderCreated",
             "order_id": order_id,
         }
-        self.event_store.events.append(event)
-        return event
+        # dict[str, str] is compatible with dict[str, object] at runtime
+        self.event_store.events.append(event)  # type: ignore[arg-type]
+        return event  # type: ignore[return-value]
 
     def create_order_cancelled_event(self, order_id: str) -> CompensationEvent:
         """Create OrderCancelled compensating event factory."""

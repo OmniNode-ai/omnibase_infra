@@ -48,9 +48,10 @@ class ProtocolEffectIdempotencyStore(Protocol):
     Defines the interface for tracking completed backends per correlation_id.
     Implementations must be async-safe and support bounded memory usage.
 
-    Thread Safety:
-        Implementations MUST be safe for concurrent async access.
-        Use asyncio.Lock or equivalent synchronization.
+    Concurrency Safety:
+        Implementations MUST be safe for concurrent coroutine access.
+        Use asyncio.Lock or equivalent async synchronization primitives.
+        Note: asyncio.Lock provides coroutine-safety, not thread-safety.
 
     Memory Bounds:
         Implementations SHOULD support:

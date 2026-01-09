@@ -21,13 +21,12 @@ from typing import cast
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
-from omnibase_core.types import JsonValue
 
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (
-    PluginContext,
-    PluginInputData,
-    PluginOutputData,
+    ModelPluginContext,
+    ModelPluginInputData,
+    ModelPluginOutputData,
 )
 
 
@@ -41,8 +40,8 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
     __slots__ = ()  # Enforce statelessness - no instance attributes
 
     def execute(
-        self, input_data: PluginInputData, context: PluginContext
-    ) -> PluginOutputData:
+        self, input_data: ModelPluginInputData, context: ModelPluginContext
+    ) -> ModelPluginOutputData:
         """Execute JSON normalization with comprehensive error handling.
 
         Args:
@@ -82,14 +81,14 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
 
         try:
             # Retrieve JSON data with safe default
-            json_data = cast(JsonValue, input_data.get("json", {}))
+            json_data = cast(object, input_data.get("json", {}))
 
             # Perform pure deterministic computation
             normalized = self._sort_keys_recursively(json_data)
 
             # Return result with correlation_id for tracing
             return cast(
-                PluginOutputData,
+                ModelPluginOutputData,
                 {
                     "normalized": normalized,
                     "correlation_id": correlation_id,
@@ -114,7 +113,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
                 error_code=EnumCoreErrorCode.INTERNAL_ERROR,
                 correlation_id=correlation_id,
                 plugin_name=self.__class__.__name__,
-                input_keys=list(input_data.keys()),
+                input_keys=list(input_data.model_dump().keys()),
             ) from e
 
         except Exception as e:
@@ -124,11 +123,11 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
                 error_code=EnumCoreErrorCode.INTERNAL_ERROR,
                 correlation_id=correlation_id,
                 plugin_name=self.__class__.__name__,
-                input_keys=list(input_data.keys()),
+                input_keys=list(input_data.model_dump().keys()),
                 exception_type=type(e).__name__,
             ) from e
 
-    def _sort_keys_recursively(self, obj: JsonValue) -> JsonValue:
+    def _sort_keys_recursively(self, obj: object) -> object:
         """Recursively sort dictionary keys.
 
         Args:
@@ -162,7 +161,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
         # Primitive values (str, int, float, bool, None) returned unchanged
         return obj
 
-    def validate_input(self, input_data: PluginInputData) -> None:
+    def validate_input(self, input_data: ModelPluginInputData) -> None:
         """Validate that input contains JSON-compatible data.
 
         Args:

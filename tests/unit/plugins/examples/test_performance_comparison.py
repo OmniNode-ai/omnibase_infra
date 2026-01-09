@@ -8,10 +8,16 @@ Key Optimizations:
 2. Efficient sorted() usage (Timsort O(n log n))
 3. Single-pass dictionary comprehension
 4. Eliminated redundant type checks
+
+Note on Type Annotations:
+    This test module intentionally passes raw dict types to plugin.execute() instead of
+    ModelPluginInputData/ModelPluginContext to test the plugin's behavior with raw dict
+    inputs. The specific call site in _measure_execution() has a narrowed type: ignore
+    annotation for this intentional pattern.
 """
 
 import time
-from typing import Any
+from collections.abc import Mapping
 
 import pytest
 
@@ -20,6 +26,7 @@ from omnibase_infra.plugins.examples.plugin_json_normalizer import (
 )
 
 
+@pytest.mark.performance
 class TestPerformanceAnalysis:
     """Detailed performance analysis for PluginJsonNormalizer optimizations."""
 
@@ -31,14 +38,14 @@ class TestPerformanceAnalysis:
     def _measure_execution(
         self,
         plugin: PluginJsonNormalizer,
-        test_data: dict[str, Any],
+        test_data: Mapping[str, object],
         iterations: int = 10,
     ) -> float:
         """Measure average execution time over multiple iterations.
 
         Args:
             plugin: Plugin instance to test
-            test_data: Input data for the plugin
+            test_data: Input data for the plugin (Mapping is covariant, accepting nested dicts)
             iterations: Number of iterations to average
 
         Returns:
@@ -47,7 +54,8 @@ class TestPerformanceAnalysis:
         times = []
         for _ in range(iterations):
             start = time.perf_counter()
-            plugin.execute(test_data, {})
+            # Intentionally passing raw dicts to test plugin behavior with untyped inputs
+            plugin.execute(test_data, {})  # type: ignore[arg-type]
             elapsed = time.perf_counter() - start
             times.append(elapsed)
 
@@ -143,7 +151,7 @@ class TestPerformanceAnalysis:
     ) -> None:
         """Demonstrate reduced isinstance calls with early exit pattern.
 
-        Optimization: Single isinstance(obj, dict | list) check followed by
+        Optimization: Single isinstance(obj, (dict, list)) check followed by
         early return for primitives eliminates redundant type checks.
 
         Expected Improvement: ~15-25% for mixed structures.

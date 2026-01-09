@@ -11,11 +11,14 @@ This module provides node implementations for the ONEX 4-node architecture:
 Available Submodules:
 - effects: Effect nodes for external I/O operations
 - reducers: Reducer nodes for state aggregation
+- node_registration_reducer: Declarative FSM-driven registration reducer
+- node_registration_orchestrator: Registration workflow orchestrator
 
 Available Classes:
-- RegistrationReducer: Pure reducer for dual registration to Consul
-  and PostgreSQL backends.
+- NodeRegistrationReducer: Declarative FSM-driven reducer (ONEX pattern)
+- RegistrationReducer: Pure function reducer (legacy interface)
 - NodeRegistryEffect: Effect node for dual-backend registration execution.
+- NodeRegistrationOrchestrator: Workflow orchestrator for registration.
 """
 
 from omnibase_infra.nodes.effects import (
@@ -24,12 +27,22 @@ from omnibase_infra.nodes.effects import (
     ModelRegistryResponse,
     NodeRegistryEffect,
 )
+from omnibase_infra.nodes.node_registration_orchestrator import (
+    NodeRegistrationOrchestrator,
+)
+from omnibase_infra.nodes.node_registration_reducer import (
+    NodeRegistrationReducer,
+    RegistryInfraNodeRegistrationReducer,
+)
 from omnibase_infra.nodes.reducers import RegistrationReducer
 
-__all__ = [
+__all__: list[str] = [
     "ModelBackendResult",
     "ModelRegistryRequest",
     "ModelRegistryResponse",
+    "NodeRegistrationOrchestrator",
+    "NodeRegistrationReducer",
     "NodeRegistryEffect",
     "RegistrationReducer",
+    "RegistryInfraNodeRegistrationReducer",
 ]

@@ -30,9 +30,10 @@ class ProtocolIdempotencyStore(Protocol):
         - mark_processed: Explicitly mark a message as processed
         - cleanup_expired: Remove old records based on TTL
 
-    Thread Safety:
-        All implementations MUST be thread-safe. The check_and_record method
-        MUST provide atomic check-and-set semantics to prevent race conditions.
+    Concurrency Safety:
+        All implementations MUST be safe for concurrent coroutine access. The
+        check_and_record method MUST provide atomic check-and-set semantics to
+        prevent race conditions. Use asyncio.Lock for coroutine-safety.
 
     Domain Isolation:
         The optional `domain` parameter allows different message namespaces

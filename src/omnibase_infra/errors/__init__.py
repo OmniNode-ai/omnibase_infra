@@ -18,7 +18,10 @@ Exports:
     EnvelopeValidationError: Envelope validation errors (pre-dispatch)
     UnknownHandlerTypeError: Unknown handler type prefix errors
     PolicyRegistryError: Policy registry operation errors
+    ComputeRegistryError: Compute registry operation errors
+    EventBusRegistryError: Event bus registry operation errors
     ChainPropagationError: Correlation/causation chain validation errors
+    ArchitectureViolationError: Architecture validation errors (blocks startup)
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -84,15 +87,20 @@ Error Sanitization Guidelines:
         )
 """
 
+from omnibase_infra.errors.error_architecture_violation import (
+    ArchitectureViolationError,
+)
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
+from omnibase_infra.errors.error_compute_registry import ComputeRegistryError
 from omnibase_infra.errors.error_container_wiring import (
     ContainerValidationError,
     ContainerWiringError,
     ServiceRegistrationError,
+    ServiceRegistryUnavailableError,
     ServiceResolutionError,
 )
-from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
-from omnibase_infra.errors.infra_errors import (
+from omnibase_infra.errors.error_event_bus_registry import EventBusRegistryError
+from omnibase_infra.errors.error_infra import (
     EnvelopeValidationError,
     InfraAuthenticationError,
     InfraConnectionError,
@@ -103,26 +111,34 @@ from omnibase_infra.errors.infra_errors import (
     SecretResolutionError,
     UnknownHandlerTypeError,
 )
-from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
+from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 
 __all__: list[str] = [
-    # Configuration model
-    "ModelInfraErrorContext",
-    # Error classes
-    "RuntimeHostError",
-    "ProtocolConfigurationError",
-    "SecretResolutionError",
-    "InfraConnectionError",
-    "InfraTimeoutError",
-    "InfraAuthenticationError",
-    "InfraUnavailableError",
-    "EnvelopeValidationError",
-    "UnknownHandlerTypeError",
-    "PolicyRegistryError",
+    # Architecture validation errors
+    "ArchitectureViolationError",
     "ChainPropagationError",
+    "ComputeRegistryError",
+    "ContainerValidationError",
     # Container wiring errors
     "ContainerWiringError",
+    "EnvelopeValidationError",
+    "EventBusRegistryError",
+    "InfraAuthenticationError",
+    "InfraConnectionError",
+    "InfraTimeoutError",
+    "InfraUnavailableError",
+    # Configuration model
+    "ModelInfraErrorContext",
+    "PolicyRegistryError",
+    "ProtocolConfigurationError",
+    # Error classes
+    "RuntimeHostError",
+    "SecretResolutionError",
     "ServiceRegistrationError",
+    "ServiceRegistryUnavailableError",
     "ServiceResolutionError",
-    "ContainerValidationError",
+    "UnknownHandlerTypeError",
 ]

@@ -61,9 +61,18 @@ CREATE TABLE IF NOT EXISTS registration_projections (
     node_version VARCHAR(32) NOT NULL DEFAULT '1.0.0',
     capabilities JSONB NOT NULL DEFAULT '{}',
 
+    -- Capability fields for fast discovery queries (OMN-1134)
+    -- Denormalized from capabilities for GIN-indexed array queries
+    contract_type TEXT,  -- effect, compute, reducer, orchestrator
+    intent_types TEXT[] DEFAULT ARRAY[]::TEXT[],  -- Array of intent types this node handles
+    protocols TEXT[] DEFAULT ARRAY[]::TEXT[],  -- Array of protocols this node implements
+    capability_tags TEXT[] DEFAULT ARRAY[]::TEXT[],  -- Array of capability tags for discovery
+    contract_version TEXT,  -- Contract version string
+
     -- Timeout Deadlines (for durable timeout handling per C2)
     ack_deadline TIMESTAMPTZ,
     liveness_deadline TIMESTAMPTZ,
+    last_heartbeat_at TIMESTAMPTZ,
 
     -- Timeout Emission Markers (for deduplication per C2)
     -- These prevent emitting duplicate timeout events during replay
@@ -88,7 +97,15 @@ CREATE TABLE IF NOT EXISTS registration_projections (
     PRIMARY KEY (entity_id, domain),
     CONSTRAINT valid_offset CHECK (last_applied_offset >= 0),
     CONSTRAINT valid_sequence CHECK (last_applied_sequence IS NULL OR last_applied_sequence >= 0),
-    CONSTRAINT valid_node_type CHECK (node_type IN ('effect', 'compute', 'reducer', 'orchestrator'))
+    -- Node types MUST match omnibase_core.enums.EnumNodeKind values (lowercase serialized form)
+    -- Source of truth: omnibase_core/enums/enum_node_kind.py
+    -- When EnumNodeKind changes, this constraint MUST be updated to match
+    CONSTRAINT valid_node_type CHECK (node_type IN ('effect', 'compute', 'reducer', 'orchestrator')),
+    -- Contract type validation (same valid values as node_type, but nullable)
+    CONSTRAINT valid_contract_type CHECK (
+        contract_type IS NULL
+        OR contract_type IN ('effect', 'compute', 'reducer', 'orchestrator')
+    )
 );
 
 -- =============================================================================
@@ -138,6 +155,34 @@ CREATE INDEX IF NOT EXISTS idx_registration_last_event_id
 CREATE INDEX IF NOT EXISTS idx_registration_capabilities
     ON registration_projections USING GIN (capabilities);
 
+-- =============================================================================
+-- GIN INDEXES FOR CAPABILITY ARRAY QUERIES (OMN-1134)
+-- =============================================================================
+
+-- GIN index for capability_tags array queries
+-- Query pattern: SELECT * FROM registration_projections
+--                WHERE capability_tags @> ARRAY['postgres.storage']
+CREATE INDEX IF NOT EXISTS idx_registration_capability_tags
+    ON registration_projections USING GIN (capability_tags);
+
+-- GIN index for intent_types array queries
+-- Query pattern: SELECT * FROM registration_projections
+--                WHERE intent_types @> ARRAY['postgres.upsert']
+CREATE INDEX IF NOT EXISTS idx_registration_intent_types
+    ON registration_projections USING GIN (intent_types);
+
+-- GIN index for protocols array queries
+-- Query pattern: SELECT * FROM registration_projections
+--                WHERE protocols @> ARRAY['ProtocolDatabaseAdapter']
+CREATE INDEX IF NOT EXISTS idx_registration_protocols
+    ON registration_projections USING GIN (protocols);
+
+-- B-tree index for contract_type + state queries
+-- Query pattern: SELECT * FROM registration_projections
+--                WHERE contract_type = 'effect' AND current_state = 'active'
+CREATE INDEX IF NOT EXISTS idx_registration_contract_type_state
+    ON registration_projections (contract_type, current_state);
+
 -- Composite index for deadline + emission marker scans
 -- Optimizes the most common timeout check query
 CREATE INDEX IF NOT EXISTS idx_registration_ack_timeout_scan
@@ -171,6 +216,9 @@ COMMENT ON COLUMN registration_projections.ack_deadline IS
 COMMENT ON COLUMN registration_projections.liveness_deadline IS
     'Deadline for next heartbeat. Orchestrator emits liveness expired event when passed.';
 
+COMMENT ON COLUMN registration_projections.last_heartbeat_at IS
+    'Timestamp of last received heartbeat from the node. Updated on each HeartbeatReceived event.';
+
 COMMENT ON COLUMN registration_projections.ack_timeout_emitted_at IS
     'Marker indicating ack timeout event was already emitted. Prevents duplicates during replay.';
 
@@ -198,13 +246,13 @@ COMMENT ON COLUMN registration_projections.last_applied_partition IS
 --
 -- ACK DEADLINE INDEXES:
 -- ---------------------
--- 1. idx_registration_ack_deadline (line 104-106):
+-- 1. idx_registration_ack_deadline:
 --    - Single-column index on ack_deadline
 --    - WHERE: ack_deadline IS NOT NULL
 --    - Use case: General queries filtering by ack_deadline regardless of emission status
 --    - Example: SELECT * FROM registration_projections WHERE ack_deadline < :now
 --
--- 2. idx_registration_ack_timeout_scan (line 143-145):
+-- 2. idx_registration_ack_timeout_scan:
 --    - Composite index on (ack_deadline, ack_timeout_emitted_at)
 --    - WHERE: ack_deadline IS NOT NULL AND ack_timeout_emitted_at IS NULL
 --    - Use case: Timeout scanner queries that need un-emitted timeouts only

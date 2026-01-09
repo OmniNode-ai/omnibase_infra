@@ -6,7 +6,11 @@ Operational runbooks and guides for deploying and managing omnibase_infra in pro
 
 | Document | Description |
 |----------|-------------|
+| [Database Index Monitoring](DATABASE_INDEX_MONITORING_RUNBOOK.md) | GIN index performance monitoring, write overhead assessment, and alerting thresholds |
+| [DLQ Replay Guide](DLQ_REPLAY_RUNBOOK.md) | Dead Letter Queue replay mechanism: manual procedures, automated design, safety considerations |
+| [Event Bus Operations](EVENT_BUS_OPERATIONS_RUNBOOK.md) | Deployment, configuration, monitoring, and troubleshooting for KafkaEventBus |
 | [Thread Pool Tuning](THREAD_POOL_TUNING_RUNBOOK.md) | Guide for tuning thread pool configurations in VaultAdapter and other components |
+| [Database Migrations](../../docker/migrations/README.md) | Migration versioning conventions and execution guidelines |
 
 ## Purpose
 

@@ -9,14 +9,21 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
     EnumVaultOperationType,
 )
+from omnibase_infra.handlers.models.vault.model_payload_vault import (
+    ModelPayloadVault,
+)
+from omnibase_infra.handlers.models.vault.registry_payload_vault import (
+    RegistryPayloadVault,
+)
 
 
-class ModelVaultWritePayload(BaseModel):
+@RegistryPayloadVault.register("write_secret")
+class ModelVaultWritePayload(ModelPayloadVault):
     """Payload for vault.write_secret operation result.
 
     Contains confirmation of secret write operation with version information.

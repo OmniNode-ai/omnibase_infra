@@ -23,6 +23,21 @@ from __future__ import annotations
 import pytest
 from omnibase_core.container import ModelONEXContainer
 
+# Skip message for omnibase_core 0.6.2 circular import bug
+_SKIP_SERVICE_REGISTRY_NONE = (
+    "Skipped: omnibase_core circular import bug - service_registry is None. "
+    "See: model_onex_container.py -> container_service_registry.py -> "
+    "container/__init__.py -> container_service_resolver.py -> ModelONEXContainer. "
+    "Upgrade to omnibase_core >= 0.6.3 to run these tests."
+)
+
+
+def _skip_if_service_registry_none(container: ModelONEXContainer) -> None:
+    """Skip test if container.service_registry is None due to circular import bug."""
+    if container.service_registry is None:
+        pytest.skip(_SKIP_SERVICE_REGISTRY_NONE)
+
+
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.runtime.container_wiring import (
     get_handler_registry_from_container,
@@ -37,9 +52,21 @@ from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from tests.conftest import (
     assert_handler_registry_interface,
     assert_policy_registry_interface,
+    check_service_registry_available,
 )
 
+# Module-level markers - all tests in this file are integration tests
+pytestmark = [pytest.mark.integration]
 
+
+# Module-level flag for pytest.mark.skipif decorators
+_service_registry_available = check_service_registry_available()
+
+
+@pytest.mark.skipif(
+    not _service_registry_available,
+    reason="ServiceRegistry not available in omnibase_core (removed in 0.6.x)",
+)
 class TestPolicyRegistryContainerIntegration:
     """Integration tests for PolicyRegistry with real container."""
 
@@ -55,6 +82,9 @@ class TestPolicyRegistryContainerIntegration:
         """
         # Create real container
         container = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
 
         # Wire infrastructure services (async operation)
         summary = await wire_infrastructure_services(container)
@@ -82,6 +112,10 @@ class TestPolicyRegistryContainerIntegration:
         """
         # Wire container
         container = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
+
         await wire_infrastructure_services(container)
 
         # Resolve registry
@@ -137,11 +171,19 @@ class TestPolicyRegistryContainerIntegration:
         """
         # Create first container and wire it
         container1 = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container1)
+
         await wire_infrastructure_services(container1)
         registry1 = await get_policy_registry_from_container(container1)
 
         # Create second container and wire it
         container2 = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container2)
+
         await wire_infrastructure_services(container2)
         registry2 = await get_policy_registry_from_container(container2)
 
@@ -214,6 +256,9 @@ class TestPolicyRegistryContainerIntegration:
         # Create real container WITHOUT wiring
         container = ModelONEXContainer()
 
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
+
         # get_or_create should create and register PolicyRegistry
         registry1 = await get_or_create_policy_registry(container)
 
@@ -254,6 +299,10 @@ class TestPolicyRegistryContainerIntegration:
         """
         # Create and wire container
         container = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
+
         summary = await wire_infrastructure_services(container)
 
         # Verify both services are registered
@@ -281,6 +330,10 @@ class TestPolicyRegistryContainerIntegration:
         4. Verify same instances returned each time
         """
         container = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
+
         await wire_infrastructure_services(container)
 
         # Resolve PolicyRegistry twice
@@ -303,6 +356,10 @@ class TestPolicyRegistryContainerIntegration:
         3. Verify specific version can be retrieved
         """
         container = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
+
         await wire_infrastructure_services(container)
         registry = await get_policy_registry_from_container(container)
 
@@ -363,6 +420,10 @@ class TestPolicyRegistryContainerIntegration:
         assert v2 is PolicyV2
 
 
+@pytest.mark.skipif(
+    not _service_registry_available,
+    reason="ServiceRegistry not available in omnibase_core (removed in 0.6.x)",
+)
 class TestContainerWiringErrorHandling:
     """Integration tests for error handling with real containers."""
 
@@ -373,6 +434,9 @@ class TestContainerWiringErrorHandling:
         This verifies proper error handling when services not wired.
         """
         container = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
 
         # Attempt to resolve without wiring should fail
         with pytest.raises(RuntimeError, match="PolicyRegistry not registered"):
@@ -387,6 +451,9 @@ class TestContainerWiringErrorHandling:
         This is the expected behavior for global-scoped services.
         """
         container = ModelONEXContainer()
+
+        # Skip if service_registry is None (circular import bug)
+        _skip_if_service_registry_none(container)
 
         # First wire
         await wire_infrastructure_services(container)
@@ -415,6 +482,10 @@ class TestContainerWiringErrorHandling:
         assert registry2.get("before_rewire") is TestPolicy
 
 
+@pytest.mark.skipif(
+    not _service_registry_available,
+    reason="ServiceRegistry not available in omnibase_core (removed in 0.6.x)",
+)
 class TestContainerWithRegistriesFixture:
     """Tests using the container_with_registries fixture."""
 

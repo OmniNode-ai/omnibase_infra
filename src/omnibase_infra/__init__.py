@@ -76,4 +76,23 @@ See Also
 - Runtime kernel: omnibase_infra.runtime.kernel
 """
 
-__all__: list[str] = []
+from . import (
+    enums,
+    models,
+    nodes,
+    utils,
+)
+
+# Public API exports - only stable, documented modules are exposed at package level.
+# Internal modules (dlq, errors, event_bus, handlers, idempotency, mixins, plugins,
+# projectors, protocols, runtime, services, shared, testing, validation) are
+# intentionally excluded from the public API. These modules should be imported
+# directly from their specific subpackage paths when needed, e.g.:
+#   from omnibase_infra.errors import InfraConnectionError
+#   from omnibase_infra.runtime import PolicyRegistry
+__all__: list[str] = [
+    "enums",
+    "models",
+    "nodes",
+    "utils",
+]

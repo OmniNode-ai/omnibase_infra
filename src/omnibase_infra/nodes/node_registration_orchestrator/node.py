@@ -2,8 +2,15 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Registration Orchestrator - Declarative workflow coordinator.
 
-This orchestrator uses the declarative pattern where workflow behavior
-is 100% driven by contract.yaml, not Python code.
+This orchestrator follows the ONEX declarative pattern:
+    - DECLARATIVE orchestrator driven by contract.yaml
+    - Zero custom routing logic - all behavior from workflow_definition
+    - Lightweight shell that delegates to TimeoutCoordinator and HeartbeatHandler
+    - Used for ONEX-compliant runtime execution via RuntimeHostProcess
+    - Pattern: "Contract-driven, handlers wired externally"
+
+Extends NodeOrchestrator from omnibase_core for workflow-driven coordination.
+All workflow logic is 100% driven by contract.yaml, not Python code.
 
 Workflow Pattern:
     1. Receive introspection event (consumed_events in contract)
@@ -27,11 +34,11 @@ Timeout Coordination (OMN-932):
         NodeRegistrationOrchestrator,
         TimeoutCoordinator,
     )
-    from omnibase_infra.services import TimeoutScanner, TimeoutEmitter
+    from omnibase_infra.services import ServiceTimeoutScanner, ServiceTimeoutEmitter
 
     # Wire dependencies
-    timeout_query = TimeoutScanner(projection_reader)
-    timeout_emission = TimeoutEmitter(
+    timeout_query = ServiceTimeoutScanner(projection_reader)
+    timeout_emission = ServiceTimeoutEmitter(
         timeout_query=timeout_query,
         event_bus=event_bus,
         projector=projector,
@@ -46,14 +53,40 @@ Timeout Coordination (OMN-932):
     result = await orchestrator.handle_runtime_tick(tick)
     ```
 
+Heartbeat Handling (OMN-1006):
+    The orchestrator handles node heartbeat events for liveness tracking.
+    When a heartbeat is received:
+    1. The heartbeat_handler updates last_heartbeat_at in the projection
+    2. Extends the liveness_deadline based on the configured liveness window
+    3. Returns a result with the updated timestamps
+
+    To wire heartbeat handling:
+    ```python
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import HandlerNodeHeartbeat
+
+    # Wire heartbeat handler with projection dependencies
+    heartbeat_handler = HandlerNodeHeartbeat(
+        projection_reader=projection_reader,
+        projector=projector,
+        liveness_window_seconds=90.0,
+    )
+
+    # Create orchestrator with heartbeat handler
+    orchestrator = NodeRegistrationOrchestrator(container)
+    orchestrator.set_heartbeat_handler(heartbeat_handler)
+
+    # Handle heartbeat events
+    result = await orchestrator.handle_heartbeat(heartbeat_event)
+    ```
+
 Design Decisions:
     - 100% Contract-Driven: All workflow logic in YAML, not Python
     - Zero Custom Methods: Base class handles everything
     - Declarative Execution: Workflow steps defined in execution_graph
     - Retry at Base Class: NodeOrchestrator owns retry policy
 
-Thread Safety:
-    This orchestrator is NOT thread-safe. Each instance should handle one
+Coroutine Safety:
+    This orchestrator is NOT coroutine-safe. Each instance should handle one
     workflow at a time. For concurrent workflows, create multiple instances.
 
 Implemented Features:
@@ -80,9 +113,16 @@ from typing import TYPE_CHECKING
 
 from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
 
+from omnibase_infra.errors import ProtocolConfigurationError
+
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
+    from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeHeartbeat,
+        ModelHeartbeatHandlerResult,
+    )
     from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
         ModelTimeoutCoordinationResult,
         TimeoutCoordinator,
@@ -169,6 +209,7 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
         """
         super().__init__(container)
         self._timeout_coordinator: TimeoutCoordinator | None = None
+        self._heartbeat_handler: HandlerNodeHeartbeat | None = None
 
     def set_timeout_coordinator(self, coordinator: TimeoutCoordinator) -> None:
         """Set the timeout coordinator for RuntimeTick coordination.
@@ -208,7 +249,7 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
             ModelTimeoutCoordinationResult with coordination details.
 
         Raises:
-            RuntimeError: If no timeout coordinator is configured.
+            ProtocolConfigurationError: If no timeout coordinator is configured.
             InfraConnectionError: If database/Kafka connection fails.
             InfraTimeoutError: If operations time out.
             InfraUnavailableError: If circuit breaker is open.
@@ -218,12 +259,75 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
             >>> print(f"Emitted {result.total_emitted} timeout events")
         """
         if self._timeout_coordinator is None:
-            raise RuntimeError(
+            raise ProtocolConfigurationError(
                 "Timeout coordinator not configured. "
                 "Call set_timeout_coordinator() before handling RuntimeTick events."
             )
 
         return await self._timeout_coordinator.coordinate(tick, domain=domain)
+
+    def set_heartbeat_handler(self, handler: HandlerNodeHeartbeat) -> None:
+        """Set the heartbeat handler for processing node heartbeat events.
+
+        The heartbeat handler is used to update last_heartbeat_at and extend
+        liveness_deadline when heartbeat events are received from active nodes.
+
+        Args:
+            handler: Configured HandlerNodeHeartbeat instance.
+
+        Example:
+            >>> heartbeat_handler = HandlerNodeHeartbeat(
+            ...     projection_reader=reader,
+            ...     projector=projector,
+            ... )
+            >>> orchestrator.set_heartbeat_handler(heartbeat_handler)
+        """
+        self._heartbeat_handler = handler
+
+    @property
+    def has_heartbeat_handler(self) -> bool:
+        """Check if heartbeat handler is configured."""
+        return self._heartbeat_handler is not None
+
+    async def handle_heartbeat(
+        self,
+        event: ModelNodeHeartbeatEvent,
+        domain: str = "registration",
+    ) -> ModelHeartbeatHandlerResult:
+        """Handle a node heartbeat event for liveness tracking.
+
+        Delegates to the configured heartbeat handler to update the registration
+        projection with the heartbeat timestamp and extended liveness deadline.
+
+        Args:
+            event: The heartbeat event from an active node.
+            domain: Domain namespace for projection lookup (default: "registration").
+
+        Returns:
+            ModelHeartbeatHandlerResult with processing outcome including:
+            - success: Whether the heartbeat was processed successfully
+            - last_heartbeat_at: Updated heartbeat timestamp
+            - liveness_deadline: Extended liveness deadline
+            - node_not_found: True if no projection exists for this node
+
+        Raises:
+            ProtocolConfigurationError: If no heartbeat handler is configured.
+            InfraConnectionError: If database connection fails.
+            InfraTimeoutError: If database operation times out.
+            RuntimeHostError: For other infrastructure errors.
+
+        Example:
+            >>> result = await orchestrator.handle_heartbeat(heartbeat_event)
+            >>> if result.success:
+            ...     print(f"Heartbeat processed, deadline: {result.liveness_deadline}")
+        """
+        if self._heartbeat_handler is None:
+            raise ProtocolConfigurationError(
+                "Heartbeat handler not configured. "
+                "Call set_heartbeat_handler() before handling heartbeat events."
+            )
+
+        return await self._heartbeat_handler.handle(event, domain=domain)
 
 
 __all__ = ["NodeRegistrationOrchestrator"]

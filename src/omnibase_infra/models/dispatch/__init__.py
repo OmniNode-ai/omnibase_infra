@@ -53,6 +53,7 @@ Usage:
     >>> from omnibase_infra.enums import EnumMessageCategory
     >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
     >>> from uuid import uuid4
+    >>> from datetime import datetime, UTC
     >>>
     >>> # Register a dispatcher
     >>> dispatcher = ModelDispatcherRegistration(
@@ -60,6 +61,7 @@ Usage:
     ...     dispatcher_name="User Event Dispatcher",
     ...     node_kind=EnumNodeKind.REDUCER,
     ...     supported_categories=[EnumMessageCategory.EVENT],
+    ...     registered_at=datetime.now(UTC),
     ... )
     >>>
     >>> # Create a route
@@ -75,12 +77,15 @@ Usage:
     True
     >>>
     >>> # Create a dispatch result
+    >>> # NOTE: Per ONEX guidelines, always include correlation_id (generate with uuid4() if not propagated)
     >>> result = ModelDispatchResult(
     ...     dispatch_id=uuid4(),
     ...     status=EnumDispatchStatus.SUCCESS,
     ...     topic="dev.user.events.v1",
     ...     route_id="user-route",
     ...     dispatcher_id="user-dispatcher",
+    ...     started_at=datetime.now(UTC),
+    ...     correlation_id=uuid4(),  # Always generate if not propagating from incoming message
     ... )
 
 See Also:
@@ -92,6 +97,7 @@ See Also:
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
+from omnibase_infra.models.dispatch.model_dispatch_error import ModelDispatchError
 from omnibase_infra.models.dispatch.model_dispatch_log_context import (
     ModelDispatchLogContext,
 )
@@ -109,31 +115,34 @@ from omnibase_infra.models.dispatch.model_dispatcher_registration import (
 )
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
 from omnibase_infra.models.dispatch.model_topic_parser import (
-    CacheInfo,
     ModelTopicParser,
+    TypeCacheInfo,
     clear_topic_parse_cache,
     get_topic_parse_cache_info,
 )
+from omnibase_infra.models.dispatch.model_tracing_context import ModelTracingContext
 
 __all__ = [
+    # Cache utilities
+    "TypeCacheInfo",
     # Enums
     "EnumDispatchStatus",
     "EnumTopicStandard",
     # Models
     "ModelDispatchContext",
+    "ModelDispatchError",
+    "ModelDispatchLogContext",
     "ModelDispatchMetadata",
     "ModelDispatchMetrics",
+    "ModelDispatchOutcome",
     "ModelDispatchOutputs",
     "ModelDispatchResult",
     "ModelDispatchRoute",
     "ModelDispatcherMetrics",
     "ModelDispatcherRegistration",
-    "ModelDispatchLogContext",
-    "ModelDispatchOutcome",
     "ModelParsedTopic",
     "ModelTopicParser",
-    # Cache utilities
-    "CacheInfo",
-    "get_topic_parse_cache_info",
+    "ModelTracingContext",
     "clear_topic_parse_cache",
+    "get_topic_parse_cache_info",
 ]

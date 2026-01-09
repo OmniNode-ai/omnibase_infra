@@ -26,15 +26,15 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
-from omnibase_infra.runtime.dispatcher_registry import (
-    DispatcherRegistry,
+from omnibase_infra.runtime.registry_dispatcher import (
+    RegistryDispatcher,
 )
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
 
@@ -146,6 +146,7 @@ class ContextCapturingDispatcher:
             topic="test.events.v1",
             dispatcher_id=self._dispatcher_id,
             message_type=type(envelope).__name__ if envelope else None,
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
     def reset(self) -> None:
@@ -192,6 +193,7 @@ class DeterministicResultDispatcher(ContextCapturingDispatcher):
             topic="test.events.v1",
             dispatcher_id=self._dispatcher_id,
             output_count=len(self.processed_user_ids),
+            started_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
     def reset(self) -> None:
@@ -207,7 +209,7 @@ class DeterministicResultDispatcher(ContextCapturingDispatcher):
 @pytest.fixture
 def deterministic_clock() -> DeterministicClock:
     """Create a deterministic clock for predictable time testing."""
-    return DeterministicClock(start=datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC))
+    return DeterministicClock(start=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC))
 
 
 @pytest.fixture
@@ -266,9 +268,9 @@ def compute_dispatcher() -> ContextCapturingDispatcher:
 
 
 @pytest.fixture
-def dispatcher_registry() -> DispatcherRegistry:
-    """Create a fresh DispatcherRegistry."""
-    return DispatcherRegistry()
+def dispatcher_registry() -> RegistryDispatcher:
+    """Create a fresh RegistryDispatcher."""
+    return RegistryDispatcher()
 
 
 # =============================================================================
@@ -1001,7 +1003,7 @@ class TestEdgeCasesAndErrorHandling:
             envelope=envelope,
         )
 
-        with pytest.raises(Exception):  # ValidationError for frozen models
+        with pytest.raises(ValidationError):
             ctx.now = datetime.now(UTC)  # type: ignore[misc]
 
     @pytest.mark.asyncio

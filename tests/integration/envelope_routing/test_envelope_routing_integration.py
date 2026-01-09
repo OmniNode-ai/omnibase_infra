@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -39,8 +39,6 @@ from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 # =============================================================================
 # Test Configuration
 # =============================================================================
-
-pytestmark = [pytest.mark.integration]
 
 # Test timing constants
 MESSAGE_WAIT_TIMEOUT = 2.0
@@ -80,6 +78,29 @@ def handler_registry() -> ProtocolBindingRegistry:
     # Create minimal mock handler class for testing
     class MockHandler:
         """Mock handler for testing envelope routing."""
+
+        async def handle(
+            self,
+            envelope: dict[str, object],
+            correlation_id: str | None = None,
+        ) -> dict[str, object]:
+            """Handle the envelope and return response.
+
+            This method implements the ProtocolHandler protocol requirement.
+
+            Args:
+                envelope: The envelope dictionary containing operation and payload.
+                correlation_id: Optional correlation ID for tracing.
+
+            Returns:
+                Response dictionary with status and processed data.
+            """
+            return {
+                "status": "handled",
+                "operation": envelope.get("operation"),
+                "payload": envelope.get("payload"),
+                "correlation_id": correlation_id or envelope.get("correlation_id"),
+            }
 
         async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
             """Execute the envelope and return success response."""
@@ -133,7 +154,7 @@ class TestEnvelopeRoutingE2E:
         """
         await event_bus.start()
 
-        received_envelopes: list[dict[str, Any]] = []
+        received_envelopes: list[dict[str, object]] = []
         envelope_received = asyncio.Event()
 
         async def envelope_handler(msg: ModelEventMessage) -> None:
@@ -367,7 +388,7 @@ class TestEnvelopePayloadExtraction:
         """
         await event_bus.start()
 
-        extracted_payloads: list[dict[str, Any]] = []
+        extracted_payloads: list[dict[str, object]] = []
         all_extracted = asyncio.Event()
         expected_count = 3
 
@@ -464,7 +485,7 @@ class TestEnvelopePayloadExtraction:
         """
         await event_bus.start()
 
-        received_payload: dict[str, Any] | None = None
+        received_payload: dict[str, object] | None = None
         payload_received = asyncio.Event()
 
         async def nested_payload_handler(msg: ModelEventMessage) -> None:
@@ -871,6 +892,7 @@ class TestCorrelationIdPropagation:
             source="integration-test",
             event_type="envelope.test",
             correlation_id=correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         envelope = {
@@ -1045,7 +1067,7 @@ class TestEnvelopeRoutingEdgeCases:
         """
         await event_bus.start()
 
-        received_payload: dict[str, Any] | None = None
+        received_payload: dict[str, object] | None = None
         payload_received = asyncio.Event()
 
         async def none_handler(msg: ModelEventMessage) -> None:

@@ -30,6 +30,7 @@ class ModelReducerState(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        strict=True,
     )
 
     last_event_timestamp: str | None = Field(

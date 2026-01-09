@@ -1,72 +1,83 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Handler Type Enumeration for ONEX 4-Node Architecture.
+"""Handler Type Enumeration - Architectural Role Classification.
 
-Defines the canonical handler types for the ONEX execution shape validator.
-Each handler type corresponds to a node category in the ONEX 4-node architecture
-and has specific constraints on allowed output types and operations.
+Defines the architectural role of handlers in the ONEX system.
+Each handler type drives lifecycle management, protocol selection, and runtime
+invocation pattern. This is orthogonal to behavioral classification (EnumHandlerTypeCategory).
 
-Handler Type Output Constraints (see EnumNodeOutputType for output types):
-    - EFFECT: External interactions (API calls, DB queries, file I/O).
-              Can output EVENT, COMMAND but not PROJECTION.
-    - COMPUTE: Pure data processing and business logic transformations.
-               Can output EVENT, COMMAND, INTENT. No side effects.
-    - REDUCER: State management and persistence operations.
-               TARGET DESIGN (post-OMN-914): Can output PROJECTION only.
-               Cannot output EVENT. Cannot access system time (must be deterministic).
-               MVP INTERIM: Current reducers (e.g., RegistrationReducer) may emit
-               intents that become EVENTs/COMMANDs. This will be enforced once
-               full purity gates are in place per OMN-914.
-    - ORCHESTRATOR: Workflow coordination and step sequencing.
-                    Can output COMMAND, EVENT but not INTENT or PROJECTION.
+Architectural Role Semantics:
+    - INFRA_HANDLER: Protocol/transport handlers that manage external connections.
+        Examples: HTTP adapters, database connectors, Consul clients, Vault clients.
+        Lifecycle: Connection pooling, health checks, circuit breakers.
+    - NODE_HANDLER: Event processing handlers bound to ONEX nodes.
+        Examples: Effect handlers, orchestrator step handlers.
+        Lifecycle: Node registration, event subscription, capability advertisement.
+    - PROJECTION_HANDLER: Handlers for projection read/write operations.
+        Examples: State projection writers, read model updaters.
+        Lifecycle: Projection versioning, consistency guarantees.
+    - COMPUTE_HANDLER: Pure computation handlers with no side effects.
+        Examples: Validation handlers, transformation handlers.
+        Lifecycle: Stateless, idempotent, cacheable.
 
-Note on PROJECTION:
-    PROJECTION is a node output type (EnumNodeOutputType.PROJECTION), not a
-    message routing category (not in EnumMessageCategory). Only REDUCERs may
-    produce PROJECTION outputs for state consolidation.
+Design Principle:
+    Handler descriptors must specify BOTH:
+    1. EnumHandlerType (architectural role - this enum)
+    2. EnumHandlerTypeCategory (behavioral classification)
+
+    This separation enables:
+    - Architectural role: Drives infrastructure binding and lifecycle
+    - Behavioral category: Drives execution shape validation and output constraints
 
 See Also:
-    - EnumNodeOutputType: Defines valid node output types (includes PROJECTION)
-    - EnumMessageCategory: Defines message categories for routing (excludes PROJECTION)
-    - EnumExecutionShapeViolation: Defines validation violation types
+    - EnumHandlerTypeCategory: Behavioral classification (EFFECT, COMPUTE, NONDETERMINISTIC_COMPUTE)
+    - EnumNodeArchetype: Node archetypes for execution shape validation
+    - EnumNodeOutputType: Valid node output types
+    - EnumMessageCategory: Message categories for routing
+    - HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md: Full handler architecture documentation
+
+Future Considerations (TODO):
+    Handler descriptor validation should verify that:
+    - Handler type and category are consistent (e.g., INFRA_HANDLER typically has EFFECT category)
+    - ADAPTER tag is only applied to EFFECT handlers (adapters do I/O)
+    See HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md "ADAPTER Validation" section.
 """
 
 from enum import Enum
 
 
 class EnumHandlerType(str, Enum):
-    """Handler types for ONEX 4-node architecture execution shape validation.
+    """Handler architectural role - selects interface and lifecycle.
 
-    These represent the four canonical node types in the ONEX architecture.
-    Each type has specific constraints on what operations are allowed and
-    what output types can be produced (see EnumNodeOutputType).
+    These represent the architectural classification of handlers in ONEX.
+    Each type drives lifecycle management, protocol selection, and runtime invocation pattern.
+
+    Note: This is orthogonal to EnumHandlerTypeCategory which represents behavioral classification.
+    Both must be specified on handler descriptors.
 
     Attributes:
-        EFFECT: External interaction handlers (API calls, DB operations).
-            Responsible for side effects and external system integration.
-            Can output: EVENT, COMMAND. Cannot output: PROJECTION.
-        COMPUTE: Pure data processing and transformation handlers.
-            No side effects, deterministic transformations.
-            Can output: EVENT, COMMAND, INTENT.
-        REDUCER: State management and persistence handlers.
-            Manages state consolidation and projections.
-            TARGET DESIGN (post-OMN-914): Can output PROJECTION only.
-            Cannot output: EVENT. Cannot access system time (must be deterministic).
-            MVP INTERIM: Current reducers may emit intents that become EVENTs/COMMANDs
-            until full purity gates are enforced per OMN-914.
-        ORCHESTRATOR: Workflow coordination handlers.
-            Coordinates multi-step workflows and routing.
-            Can output: COMMAND, EVENT. Cannot output: INTENT, PROJECTION.
-
-    Note:
-        Output types refer to EnumNodeOutputType values. PROJECTION is a node
-        output type, not a message routing category (not in EnumMessageCategory).
+        INFRA_HANDLER: Protocol/transport handlers (HTTP, DB, Consul, Vault).
+            Manages external connections and protocol-specific operations.
+            Lifecycle: Connection pooling, health checks, circuit breakers.
+            Examples: DatabaseAdapter, ConsulClient, VaultClient, HttpGateway.
+        NODE_HANDLER: Event processing handlers bound to nodes.
+            Handles event routing and processing within the ONEX node graph.
+            Lifecycle: Node registration, event subscription, capability advertisement.
+            Examples: RegistrationHandler, IntrospectionHandler, RoutingHandler.
+        PROJECTION_HANDLER: Projection read/write handlers.
+            Manages projection state and read model operations.
+            Lifecycle: Projection versioning, consistency guarantees, snapshot management.
+            Examples: StateProjectionWriter, ReadModelUpdater, SnapshotHandler.
+        COMPUTE_HANDLER: Pure computation handlers.
+            Performs stateless, deterministic transformations.
+            Lifecycle: Stateless, idempotent, cacheable - no external dependencies.
+            Examples: ValidationHandler, TransformationHandler, SerializationHandler.
     """
 
-    EFFECT = "effect"
-    COMPUTE = "compute"
-    REDUCER = "reducer"
-    ORCHESTRATOR = "orchestrator"
+    INFRA_HANDLER = "infra_handler"
+    NODE_HANDLER = "node_handler"
+    PROJECTION_HANDLER = "projection_handler"
+    COMPUTE_HANDLER = "compute_handler"
 
 
 __all__ = ["EnumHandlerType"]

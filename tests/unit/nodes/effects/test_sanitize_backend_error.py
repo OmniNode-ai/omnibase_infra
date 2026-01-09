@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for _sanitize_backend_error function.
+"""Unit tests for sanitize_backend_error function.
 
 Tests validate that the error sanitization function correctly:
 1. Extracts safe error patterns from raw error messages
@@ -25,11 +25,11 @@ Related:
 
 import pytest
 
-from omnibase_infra.nodes.effects.registry_effect import _sanitize_backend_error
+from omnibase_infra.utils import sanitize_backend_error
 
 
 class TestSanitizeBackendError:
-    """Test suite for _sanitize_backend_error function."""
+    """Test suite for sanitize_backend_error function."""
 
     # =====================================================================
     # Safe Pattern Detection Tests
@@ -79,7 +79,7 @@ class TestSanitizeBackendError:
         self, raw_error: str, expected_suffix: str
     ) -> None:
         """Verify safe error patterns are correctly extracted."""
-        result = _sanitize_backend_error("TestBackend", raw_error)
+        result = sanitize_backend_error("TestBackend", raw_error)
         assert result == f"TestBackend operation failed: {expected_suffix}"
 
     # =====================================================================
@@ -114,7 +114,7 @@ class TestSanitizeBackendError:
         CRITICAL: These tests ensure that raw error messages containing
         potentially sensitive information are sanitized to generic messages.
         """
-        result = _sanitize_backend_error("Backend", raw_error)
+        result = sanitize_backend_error("Backend", raw_error)
 
         # Should NOT contain the raw error
         assert raw_error.lower() not in result.lower()
@@ -129,7 +129,7 @@ class TestSanitizeBackendError:
             "db-primary.prod.internal:5432/production_db"
         )
 
-        result = _sanitize_backend_error("PostgreSQL", raw_error)
+        result = sanitize_backend_error("PostgreSQL", raw_error)
 
         # Must not contain any part of the credentials or hostname
         assert "admin" not in result
@@ -146,24 +146,24 @@ class TestSanitizeBackendError:
 
     def test_none_error(self) -> None:
         """Verify None error produces generic message."""
-        result = _sanitize_backend_error("Consul", None)
+        result = sanitize_backend_error("Consul", None)
         assert result == "Consul operation failed"
 
     def test_empty_string_error(self) -> None:
         """Verify empty string error produces generic message."""
-        result = _sanitize_backend_error("Consul", "")
+        result = sanitize_backend_error("Consul", "")
         assert result == "Consul operation failed"
 
     def test_whitespace_only_error(self) -> None:
         """Verify whitespace-only error produces generic message."""
-        result = _sanitize_backend_error("Consul", "   ")
+        result = sanitize_backend_error("Consul", "   ")
         assert result == "Consul operation failed"
 
     def test_dict_error_converted(self) -> None:
         """Verify dict errors are converted to string for analysis."""
         raw_error = {"code": "TIMEOUT", "message": "Operation timeout"}
 
-        result = _sanitize_backend_error("Kafka", raw_error)
+        result = sanitize_backend_error("Kafka", raw_error)
 
         # Should detect "timeout" in the string representation
         assert result == "Kafka operation failed: timeout"
@@ -172,7 +172,7 @@ class TestSanitizeBackendError:
         """Verify exception objects are handled correctly."""
         raw_error = ConnectionError("Connection refused by remote host")
 
-        result = _sanitize_backend_error("Redis", raw_error)
+        result = sanitize_backend_error("Redis", raw_error)
 
         # Should detect "connection refused" in the exception message
         assert result == "Redis operation failed: connection refused"
@@ -180,15 +180,15 @@ class TestSanitizeBackendError:
     def test_case_insensitive_matching(self) -> None:
         """Verify pattern matching is case-insensitive."""
         assert (
-            _sanitize_backend_error("Backend", "CONNECTION REFUSED")
+            sanitize_backend_error("Backend", "CONNECTION REFUSED")
             == "Backend operation failed: connection refused"
         )
         assert (
-            _sanitize_backend_error("Backend", "Timeout")
+            sanitize_backend_error("Backend", "Timeout")
             == "Backend operation failed: timeout"
         )
         assert (
-            _sanitize_backend_error("Backend", "SERVICE UNAVAILABLE")
+            sanitize_backend_error("Backend", "SERVICE UNAVAILABLE")
             == "Backend operation failed: service unavailable"
         )
 
@@ -202,7 +202,7 @@ class TestSanitizeBackendError:
     )
     def test_backend_name_preserved(self, backend_name: str) -> None:
         """Verify backend name is correctly included in sanitized message."""
-        result = _sanitize_backend_error(backend_name, "timeout error")
+        result = sanitize_backend_error(backend_name, "timeout error")
         assert result.startswith(f"{backend_name} operation failed")
 
     # =====================================================================
@@ -216,7 +216,7 @@ class TestSanitizeBackendError:
             "Service registration failed: service unavailable at consul.internal:8500"
         )
 
-        result = _sanitize_backend_error("Consul", raw_error)
+        result = sanitize_backend_error("Consul", raw_error)
 
         # Should extract "service unavailable" but not expose hostname/port
         assert result == "Consul operation failed: service unavailable"
@@ -232,7 +232,7 @@ class TestSanitizeBackendError:
             "TCP/IP connections on port 5432?"
         )
 
-        result = _sanitize_backend_error("PostgreSQL", raw_error)
+        result = sanitize_backend_error("PostgreSQL", raw_error)
 
         # Should extract "connection refused" but not expose details
         assert result == "PostgreSQL operation failed: connection refused"
@@ -242,7 +242,7 @@ class TestSanitizeBackendError:
         """Test realistic Kafka broker failure scenario."""
         raw_error = "NoBrokersAvailable: unable to connect to kafka-0.internal:9092"
 
-        result = _sanitize_backend_error("Kafka", raw_error)
+        result = sanitize_backend_error("Kafka", raw_error)
 
         # No safe pattern matches, should be generic
         # (NoBrokersAvailable is not in safe list)

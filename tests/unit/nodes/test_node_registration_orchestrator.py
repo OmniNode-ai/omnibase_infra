@@ -12,58 +12,25 @@ is 100% driven by contract.yaml. These tests verify:
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
-import yaml
+from omnibase_core.enums import EnumNodeKind
 
 from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 # =============================================================================
 # Test Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def mock_container() -> MagicMock:
-    """Create a mock ONEX container."""
-    container = MagicMock()
-    container.config = MagicMock()
-    return container
-
-
-@pytest.fixture
-def contract_path() -> Path:
-    """Return path to contract.yaml.
-
-    Raises:
-        pytest.skip: If contract file doesn't exist (allows tests to be skipped gracefully).
-    """
-    path = Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
-    if not path.exists():
-        pytest.skip(f"Contract file not found: {path}")
-    return path
-
-
-@pytest.fixture
-def contract_data(contract_path: Path) -> dict:
-    """Load and return contract.yaml as dict.
-
-    Raises:
-        pytest.skip: If contract file doesn't exist (allows tests to be skipped gracefully).
-        pytest.fail: If contract file contains invalid YAML.
-    """
-    if not contract_path.exists():
-        pytest.skip(f"Contract file not found: {contract_path}")
-
-    with open(contract_path, encoding="utf-8") as f:
-        try:
-            return yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            pytest.fail(f"Invalid YAML in contract file: {e}")
+# Note: simple_mock_container, contract_path, and contract_data fixtures are
+# provided by tests/unit/nodes/conftest.py - no local definition needed.
 
 
 # =============================================================================
@@ -74,14 +41,16 @@ def contract_data(contract_path: Path) -> dict:
 class TestDeclarativeOrchestratorPattern:
     """Tests verifying the declarative pattern is correctly implemented."""
 
-    def test_inherits_from_node_orchestrator(self, mock_container: MagicMock) -> None:
+    def test_inherits_from_node_orchestrator(
+        self, simple_mock_container: MagicMock
+    ) -> None:
         """Test that orchestrator inherits from NodeOrchestrator."""
         from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
 
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
         assert isinstance(orchestrator, NodeOrchestrator)
 
-    def test_no_custom_workflow_methods(self, mock_container: MagicMock) -> None:
+    def test_no_custom_workflow_methods(self, simple_mock_container: MagicMock) -> None:
         """Test that no custom workflow methods exist (declarative purity).
 
         The refactored orchestrator should not have the old imperative methods:
@@ -94,7 +63,7 @@ class TestDeclarativeOrchestratorPattern:
 
         These methods were removed in favor of contract-driven behavior.
         """
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # These methods should NOT exist (were removed in refactor)
         assert not hasattr(orchestrator, "execute_registration_workflow")
@@ -104,26 +73,28 @@ class TestDeclarativeOrchestratorPattern:
         assert not hasattr(orchestrator, "set_reducer")
         assert not hasattr(orchestrator, "set_effect")
 
-    def test_no_custom_config_attributes(self, mock_container: MagicMock) -> None:
+    def test_no_custom_config_attributes(
+        self, simple_mock_container: MagicMock
+    ) -> None:
         """Test that old custom config attributes were removed.
 
         The declarative pattern uses contract.yaml for configuration,
         not instance attributes for config, reducer, effect, etc.
         """
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # Old imperative pattern attributes should not exist
         assert not hasattr(orchestrator, "_config")
         assert not hasattr(orchestrator, "_reducer")
         assert not hasattr(orchestrator, "_effect")
 
-    def test_no_custom_state_properties(self, mock_container: MagicMock) -> None:
+    def test_no_custom_state_properties(self, simple_mock_container: MagicMock) -> None:
         """Test that old state properties were removed.
 
         The declarative pattern handles state through the base class,
         not through custom properties like reducer_state.
         """
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # Old state properties should not exist
         assert not hasattr(orchestrator, "reducer_state")
@@ -136,7 +107,9 @@ class TestDeclarativeOrchestratorPattern:
         """
         assert not hasattr(NodeRegistrationOrchestrator, "create")
 
-    def test_only_minimal_methods_defined(self, mock_container: MagicMock) -> None:
+    def test_only_minimal_methods_defined(
+        self, simple_mock_container: MagicMock
+    ) -> None:
         """Test that only minimal methods are defined in the class.
 
         The declarative pattern should have minimal code - just __init__
@@ -155,14 +128,14 @@ class TestDeclarativeOrchestratorPattern:
             and name in NodeRegistrationOrchestrator.__dict__
         ]
 
-        # Expected methods for timeout handling (OMN-932)
-        # These are intentional extensions for RuntimeTick processing
+        # Expected methods for timeout handling (OMN-932) and heartbeat handling (OMN-1006)
+        # These are intentional extensions for RuntimeTick and heartbeat processing
         expected_timeout_methods = {"set_timeout_coordinator", "handle_runtime_tick"}
+        expected_heartbeat_methods = {"set_heartbeat_handler", "handle_heartbeat"}
 
-        # Filter out expected timeout methods
-        unexpected_methods = [
-            m for m in own_methods if m not in expected_timeout_methods
-        ]
+        # Filter out expected timeout and heartbeat methods
+        allowed_methods = expected_timeout_methods | expected_heartbeat_methods
+        unexpected_methods = [m for m in own_methods if m not in allowed_methods]
 
         # Should have no unexpected public methods defined directly on the class
         # (all other behavior inherited from NodeOrchestrator)
@@ -175,6 +148,13 @@ class TestDeclarativeOrchestratorPattern:
             f"Found: {present_timeout_methods}"
         )
 
+        # Verify the heartbeat methods are present (OMN-1006 requirement)
+        present_heartbeat_methods = set(own_methods) & expected_heartbeat_methods
+        assert present_heartbeat_methods == expected_heartbeat_methods, (
+            f"Missing heartbeat methods. Expected: {expected_heartbeat_methods}, "
+            f"Found: {present_heartbeat_methods}"
+        )
+
 
 # =============================================================================
 # TestInheritedBehavior
@@ -184,17 +164,17 @@ class TestDeclarativeOrchestratorPattern:
 class TestInheritedBehavior:
     """Tests for behavior inherited from NodeOrchestrator base class."""
 
-    def test_has_container_reference(self, mock_container: MagicMock) -> None:
+    def test_has_container_reference(self, simple_mock_container: MagicMock) -> None:
         """Test that container is stored (from base class)."""
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # Base class should store container reference
         # The exact attribute name depends on NodeOrchestrator implementation
         assert hasattr(orchestrator, "_container") or hasattr(orchestrator, "container")
 
-    def test_is_node_instance(self, mock_container: MagicMock) -> None:
+    def test_is_node_instance(self, simple_mock_container: MagicMock) -> None:
         """Test that orchestrator is a valid ONEX node instance."""
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         # Should be a proper class instance
         assert orchestrator is not None
@@ -218,7 +198,7 @@ class TestContractValidation:
         assert contract_data is not None
         assert "name" in contract_data
         assert "node_type" in contract_data
-        assert contract_data["node_type"] == "ORCHESTRATOR"
+        assert contract_data["node_type"] == EnumNodeKind.ORCHESTRATOR.name
 
     def test_contract_has_required_metadata(self, contract_data: dict) -> None:
         """Test that contract has required metadata fields."""
@@ -397,9 +377,11 @@ class TestModelsExport:
 class TestNodeInstantiation:
     """Tests for node instantiation."""
 
-    def test_instantiation_with_container(self, mock_container: MagicMock) -> None:
+    def test_instantiation_with_container(
+        self, simple_mock_container: MagicMock
+    ) -> None:
         """Test that node can be instantiated with a container."""
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
         assert orchestrator is not None
 
     def test_instantiation_requires_container(self) -> None:
@@ -407,10 +389,12 @@ class TestNodeInstantiation:
         with pytest.raises(TypeError):
             NodeRegistrationOrchestrator()  # type: ignore[call-arg]
 
-    def test_multiple_instances_independent(self, mock_container: MagicMock) -> None:
+    def test_multiple_instances_independent(
+        self, simple_mock_container: MagicMock
+    ) -> None:
         """Test that multiple instances are independent."""
-        orch1 = NodeRegistrationOrchestrator(mock_container)
-        orch2 = NodeRegistrationOrchestrator(mock_container)
+        orch1 = NodeRegistrationOrchestrator(simple_mock_container)
+        orch2 = NodeRegistrationOrchestrator(simple_mock_container)
 
         assert orch1 is not orch2
 
@@ -424,18 +408,18 @@ class TestTimeoutHandling:
     """Tests for RuntimeTick timeout handling (OMN-932)."""
 
     def test_has_timeout_coordinator_initially_false(
-        self, mock_container: MagicMock
+        self, simple_mock_container: MagicMock
     ) -> None:
         """Test that has_timeout_coordinator is False initially."""
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
         assert orchestrator.has_timeout_coordinator is False
 
     def test_set_timeout_coordinator_updates_property(
-        self, mock_container: MagicMock
+        self, simple_mock_container: MagicMock
     ) -> None:
         """Test that set_timeout_coordinator updates has_timeout_coordinator."""
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
         mock_coordinator = MagicMock()
 
         orchestrator.set_timeout_coordinator(mock_coordinator)
@@ -444,11 +428,12 @@ class TestTimeoutHandling:
 
     @pytest.mark.asyncio
     async def test_handle_runtime_tick_raises_without_coordinator(
-        self, mock_container: MagicMock
+        self, simple_mock_container: MagicMock
     ) -> None:
-        """Test that handle_runtime_tick raises RuntimeError without coordinator."""
+        """Test that handle_runtime_tick raises ProtocolConfigurationError without coordinator."""
         from datetime import UTC, datetime
-        from uuid import uuid4
+
+        from omnibase_infra.errors import ProtocolConfigurationError
 
         # Create a minimal tick mock
         tick = MagicMock()
@@ -456,21 +441,20 @@ class TestTimeoutHandling:
         tick.tick_id = uuid4()
         tick.correlation_id = uuid4()
 
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
 
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await orchestrator.handle_runtime_tick(tick)
 
         assert "Timeout coordinator not configured" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_handle_runtime_tick_delegates_to_coordinator(
-        self, mock_container: MagicMock
+        self, simple_mock_container: MagicMock
     ) -> None:
         """Test that handle_runtime_tick delegates to the configured coordinator."""
         from datetime import UTC, datetime
         from unittest.mock import AsyncMock
-        from uuid import uuid4
 
         # Create a mock tick
         tick = MagicMock()
@@ -483,7 +467,7 @@ class TestTimeoutHandling:
         mock_result = MagicMock()
         mock_coordinator.coordinate = AsyncMock(return_value=mock_result)
 
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
         orchestrator.set_timeout_coordinator(mock_coordinator)
 
         result = await orchestrator.handle_runtime_tick(tick)
@@ -493,12 +477,11 @@ class TestTimeoutHandling:
 
     @pytest.mark.asyncio
     async def test_handle_runtime_tick_passes_custom_domain(
-        self, mock_container: MagicMock
+        self, simple_mock_container: MagicMock
     ) -> None:
         """Test that handle_runtime_tick passes custom domain to coordinator."""
         from datetime import UTC, datetime
         from unittest.mock import AsyncMock
-        from uuid import uuid4
 
         tick = MagicMock()
         tick.now = datetime.now(UTC)
@@ -508,7 +491,7 @@ class TestTimeoutHandling:
         mock_coordinator = MagicMock()
         mock_coordinator.coordinate = AsyncMock(return_value=MagicMock())
 
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
         orchestrator.set_timeout_coordinator(mock_coordinator)
 
         await orchestrator.handle_runtime_tick(tick, domain="custom_domain")

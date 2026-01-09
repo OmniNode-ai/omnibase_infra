@@ -7,9 +7,13 @@ Implements projection persistence for the registration domain with:
 - Parameterized queries for SQL injection protection
 - Circuit breaker resilience pattern
 
-Thread Safety:
-    This implementation is thread-safe for concurrent persist calls.
-    Uses asyncpg connection pool for connection management.
+Concurrency Safety:
+    This implementation is coroutine-safe for concurrent async persist calls.
+    Uses asyncpg connection pool for connection management, and asyncio.Lock
+    (via MixinAsyncCircuitBreaker) for circuit breaker state protection.
+
+    Note: This is not thread-safe. For multi-threaded access, additional
+    synchronization would be required.
 
 Related Tickets:
     - OMN-944 (F1): Implement Registration Projection Schema
@@ -24,8 +28,13 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import asyncpg
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumContractType,
+    EnumInfraTransportType,
+    EnumRegistrationState,
+)
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -34,9 +43,12 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.projection import (
+    ModelCapabilityFields,
     ModelRegistrationProjection,
     ModelSequenceInfo,
 )
+from omnibase_infra.models.registration import ModelNodeCapabilities
+from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -85,15 +97,14 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
 
         Args:
             pool: asyncpg connection pool for database access.
-                  Pool should be created by the caller (e.g., from DbAdapter).
+                  Pool should be created by the caller (e.g., from HandlerDb).
         """
         self._pool = pool
-        self._init_circuit_breaker(
-            threshold=5,
-            reset_timeout=60.0,
+        config = ModelCircuitBreakerConfig.from_env(
             service_name="projector.registration",
             transport_type=EnumInfraTransportType.DATABASE,
         )
+        self._init_circuit_breaker_from_config(config)
 
     async def initialize_schema(self, correlation_id: UUID | None = None) -> None:
         """Initialize projection schema (create table if not exists).
@@ -259,13 +270,16 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         upsert_sql = """
             INSERT INTO registration_projections (
                 entity_id, domain, current_state, node_type, node_version,
-                capabilities, ack_deadline, liveness_deadline,
+                capabilities, contract_type, intent_types, protocols,
+                capability_tags, contract_version,
+                ack_deadline, liveness_deadline, last_heartbeat_at,
                 ack_timeout_emitted_at, liveness_timeout_emitted_at,
                 last_applied_event_id, last_applied_offset,
                 last_applied_sequence, last_applied_partition,
                 registered_at, updated_at, correlation_id
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                $15, $16, $17, $18, $19, $20, $21, $22, $23
             )
             ON CONFLICT (entity_id, domain) DO UPDATE SET
                 -- EXCLUDED.* refers to values from the INSERT that triggered conflict
@@ -273,8 +287,14 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                 node_type = EXCLUDED.node_type,
                 node_version = EXCLUDED.node_version,
                 capabilities = EXCLUDED.capabilities,
+                contract_type = EXCLUDED.contract_type,
+                intent_types = EXCLUDED.intent_types,
+                protocols = EXCLUDED.protocols,
+                capability_tags = EXCLUDED.capability_tags,
+                contract_version = EXCLUDED.contract_version,
                 ack_deadline = EXCLUDED.ack_deadline,
                 liveness_deadline = EXCLUDED.liveness_deadline,
+                last_heartbeat_at = EXCLUDED.last_heartbeat_at,
                 ack_timeout_emitted_at = EXCLUDED.ack_timeout_emitted_at,
                 liveness_timeout_emitted_at = EXCLUDED.liveness_timeout_emitted_at,
                 last_applied_event_id = EXCLUDED.last_applied_event_id,
@@ -314,10 +334,18 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             domain,
             projection.current_state.value,  # Convert enum to string
             projection.node_type,
-            projection.node_version,
+            str(
+                projection.node_version
+            ),  # ModelSemVer -> string for asyncpg (see util_semver.py)
             projection.capabilities.model_dump_json(),  # JSONB as JSON string
+            projection.contract_type,  # Capability fields (OMN-1134)
+            projection.intent_types,  # TEXT[]
+            projection.protocols,  # TEXT[]
+            projection.capability_tags,  # TEXT[]
+            projection.contract_version,
             projection.ack_deadline,
             projection.liveness_deadline,
+            projection.last_heartbeat_at,
             projection.ack_timeout_emitted_at,
             projection.liveness_timeout_emitted_at,
             projection.last_applied_event_id,
@@ -709,6 +737,464 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                 )
             raise RuntimeHostError(
                 f"Failed to update liveness timeout marker: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def update_heartbeat(
+        self,
+        entity_id: UUID,
+        domain: str,
+        last_heartbeat_at: datetime,
+        liveness_deadline: datetime,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Update heartbeat tracking fields for a node registration.
+
+        Updates the `last_heartbeat_at` and `liveness_deadline` columns
+        when a heartbeat is received from a node. This extends the node's
+        liveness window and records when the heartbeat was received.
+
+        This method is called by the heartbeat handler when processing
+        NodeHeartbeatReceived events.
+
+        Args:
+            entity_id: Node UUID to update.
+            domain: Domain namespace.
+            last_heartbeat_at: Timestamp when heartbeat was received.
+            liveness_deadline: New deadline for next heartbeat.
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            True if heartbeat was updated, False if entity not found.
+
+        Raises:
+            InfraConnectionError: If database connection fails.
+            InfraTimeoutError: If update times out.
+            RuntimeHostError: For other database errors.
+
+        Example:
+            >>> await projector.update_heartbeat(
+            ...     entity_id=node_id,
+            ...     domain="registration",
+            ...     last_heartbeat_at=datetime.now(UTC),
+            ...     liveness_deadline=datetime.now(UTC) + timedelta(seconds=90),
+            ... )
+
+        Related:
+            - OMN-1006: Add last_heartbeat_at for liveness expired event reporting
+            - handler_node_heartbeat.py: Handler that calls this method
+        """
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="update_heartbeat",
+            target_name="projector.registration",
+            correlation_id=corr_id,
+        )
+
+        # Check circuit breaker
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("update_heartbeat", corr_id)
+
+        update_sql = """
+            UPDATE registration_projections
+            SET last_heartbeat_at = $3,
+                liveness_deadline = $4,
+                updated_at = $3
+            WHERE entity_id = $1 AND domain = $2
+            RETURNING entity_id
+        """
+
+        try:
+            async with self._pool.acquire() as conn:
+                result = await conn.fetchrow(
+                    update_sql,
+                    entity_id,
+                    domain,
+                    last_heartbeat_at,
+                    liveness_deadline,
+                )
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            if result:
+                logger.debug(
+                    "Heartbeat updated",
+                    extra={
+                        "entity_id": str(entity_id),
+                        "domain": domain,
+                        "last_heartbeat_at": last_heartbeat_at.isoformat(),
+                        "liveness_deadline": liveness_deadline.isoformat(),
+                        "correlation_id": str(corr_id),
+                    },
+                )
+                return True
+
+            logger.warning(
+                "Entity not found for heartbeat update",
+                extra={
+                    "entity_id": str(entity_id),
+                    "domain": domain,
+                    "correlation_id": str(corr_id),
+                },
+            )
+            return False
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("update_heartbeat", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for heartbeat update",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("update_heartbeat", corr_id)
+            raise InfraTimeoutError(
+                "Heartbeat update timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("update_heartbeat", corr_id)
+            raise RuntimeHostError(
+                f"Failed to update heartbeat: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def persist_state_transition(
+        self,
+        entity_id: UUID,
+        domain: str,
+        new_state: EnumRegistrationState,
+        node_type: str,
+        node_version: ModelSemVer,
+        capabilities: ModelNodeCapabilities,
+        event_id: UUID,
+        now: datetime,
+        ack_deadline: datetime | None = None,
+        liveness_deadline: datetime | None = None,
+        correlation_id: UUID | None = None,
+        capability_fields: ModelCapabilityFields | None = None,
+        *,
+        allow_unknown_backfill: bool = False,
+    ) -> bool:
+        """Persist a state transition for a registration entity.
+
+        This is a simplified method for state transitions that creates or updates
+        a projection without the complex sequence checking of persist(). It is
+        intended for use by handlers when they emit state-changing events.
+
+        The method uses INSERT ON CONFLICT DO UPDATE to atomically create or
+        update the projection. Unlike persist(), it does not check sequence
+        ordering - it simply overwrites with the new state.
+
+        Use Cases:
+            - Initial registration (PENDING_REGISTRATION) when a new node introspects
+            - State transitions triggered by handler processing
+            - Re-registration from terminal states (LIVENESS_EXPIRED, REJECTED)
+
+        For full projection persistence with ordering guarantees (e.g., during
+        event replay), use persist() instead.
+
+        Warning:
+            This method does NOT check sequence ordering. If called concurrently
+            or during replay, older events may overwrite newer capability data.
+            Use persist() for replay scenarios where ordering matters.
+
+        Capability Fields Behavior:
+            The ``capability_fields`` parameter controls how capability metadata is
+            persisted. Understanding the semantics is important for queries and
+            backfill operations.
+
+            When ``capability_fields`` is None (default):
+                - A default ``ModelCapabilityFields()`` is created internally
+                - ``contract_type`` becomes NULL in database (never processed)
+                - ``contract_version`` becomes NULL in database
+                - ``intent_types``, ``protocols``, ``capability_tags`` become empty
+                  arrays ``[]`` (not NULL, due to ``or []`` coercion)
+
+            When ``capability_fields`` is provided:
+                - String fields (``contract_type``, ``contract_version``) are
+                  persisted as-is (None becomes NULL)
+                - Array fields are coerced: None becomes ``[]``, otherwise value
+                  is used
+
+        Three-State Semantics for contract_type:
+            The ``contract_type`` column follows a three-state semantic model that
+            distinguishes between different processing states:
+
+            1. **NULL** (database NULL):
+               Record has never been processed by capability extraction. This is
+               the initial state for new registrations when ``capability_fields``
+               is not provided or when ``contract_type=None`` is explicitly set.
+
+               Query: ``WHERE contract_type IS NULL``
+
+            2. **'unknown'** (EnumContractType.UNKNOWN):
+               Record WAS processed by capability extraction, but the contract
+               type could not be determined from available metadata. This value
+               should ONLY be set by backfill/migration scripts, never by normal
+               application flow.
+
+               Query: ``WHERE contract_type = 'unknown'``
+
+               See: ``EnumContractType.UNKNOWN`` documentation
+
+            3. **Valid types** ('effect', 'compute', 'reducer', 'orchestrator'):
+               Record was successfully processed and the contract type was
+               determined. These are the only valid types for new node
+               registrations.
+
+               Query: ``WHERE contract_type IN ('effect', 'compute', ...)``
+
+        Array Field Semantics:
+            Unlike ``contract_type``, array fields (``intent_types``, ``protocols``,
+            ``capability_tags``) are coerced from None to empty arrays ``[]``. This
+            means there is no NULL state for these fields in practice:
+
+            - ``[]`` (empty array): Processed but has no values
+            - Non-empty array: Has specific values
+
+            This coercion happens at persistence time (lines 996-998), not in
+            ``ModelCapabilityFields`` itself, which uses None as the default.
+
+        Args:
+            entity_id: Node UUID (partition key)
+            domain: Domain namespace (default: "registration")
+            new_state: Target FSM state for the transition
+            node_type: ONEX node type (effect, compute, reducer, orchestrator)
+            node_version: Semantic version of the node
+            capabilities: Node capabilities snapshot
+            event_id: ID of the event triggering this transition
+            now: Current timestamp (injected for consistency)
+            ack_deadline: Optional deadline for acknowledgment
+            liveness_deadline: Optional deadline for heartbeat
+            correlation_id: Optional correlation ID for tracing
+            capability_fields: Optional capability fields for GIN-indexed queries.
+                When None, defaults to ``ModelCapabilityFields()`` which sets
+                ``contract_type`` and ``contract_version`` to NULL and array
+                fields to empty arrays.
+            allow_unknown_backfill: If True, allows persisting 'unknown' as the
+                contract_type value. By default (False), attempting to persist
+                'unknown' raises ValueError. This flag should ONLY be used by
+                backfill/migration scripts when the contract type cannot be
+                determined from available metadata.
+
+        Returns:
+            True if the transition was persisted successfully
+
+        Raises:
+            ValueError: If contract_type is 'unknown' and allow_unknown_backfill
+                is False. The 'unknown' type is reserved for backfill operations.
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If operation times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> from omnibase_infra.models.projection import ModelCapabilityFields
+            >>> fields = ModelCapabilityFields(
+            ...     contract_type="effect",
+            ...     intent_types=["postgres.upsert"],
+            ... )
+            >>> await projector.persist_state_transition(
+            ...     entity_id=node_id,
+            ...     domain="registration",
+            ...     new_state=EnumRegistrationState.PENDING_REGISTRATION,
+            ...     node_type="effect",
+            ...     node_version=ModelSemVer(major=1, minor=0, patch=0),
+            ...     capabilities=ModelNodeCapabilities(),
+            ...     event_id=correlation_id,
+            ...     now=datetime.now(UTC),
+            ...     capability_fields=fields,
+            ... )
+
+        Example (backfill with unknown type):
+            >>> # Only for backfill scripts when type cannot be determined
+            >>> from omnibase_infra.enums import EnumContractType
+            >>> fields = ModelCapabilityFields(
+            ...     contract_type=EnumContractType.UNKNOWN.value,
+            ... )
+
+        Related:
+            - ``ModelCapabilityFields``: Container for capability field values
+            - ``EnumContractType``: Valid contract type enumeration
+            - ``EnumContractType.UNKNOWN``: Backfill-only fallback type
+        """
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="persist_state_transition",
+            target_name="projector.registration",
+            correlation_id=corr_id,
+        )
+
+        # Check circuit breaker
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("persist_state_transition", corr_id)
+
+        # Upsert query for state transition
+        # Uses INSERT ON CONFLICT DO UPDATE to atomically create or update
+        upsert_sql = """
+            INSERT INTO registration_projections (
+                entity_id, domain, current_state, node_type, node_version,
+                capabilities, contract_type, intent_types, protocols,
+                capability_tags, contract_version,
+                ack_deadline, liveness_deadline,
+                last_applied_event_id, last_applied_offset,
+                registered_at, updated_at, correlation_id
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, $15, $16
+            )
+            ON CONFLICT (entity_id, domain) DO UPDATE SET
+                current_state = EXCLUDED.current_state,
+                node_type = EXCLUDED.node_type,
+                node_version = EXCLUDED.node_version,
+                capabilities = EXCLUDED.capabilities,
+                contract_type = EXCLUDED.contract_type,
+                intent_types = EXCLUDED.intent_types,
+                protocols = EXCLUDED.protocols,
+                capability_tags = EXCLUDED.capability_tags,
+                contract_version = EXCLUDED.contract_version,
+                ack_deadline = EXCLUDED.ack_deadline,
+                liveness_deadline = EXCLUDED.liveness_deadline,
+                last_applied_event_id = EXCLUDED.last_applied_event_id,
+                updated_at = EXCLUDED.updated_at,
+                correlation_id = EXCLUDED.correlation_id
+            RETURNING entity_id
+        """
+
+        # Serialize capabilities to JSON for JSONB column
+        capabilities_json = capabilities.model_dump_json()
+
+        # ==========================================================================
+        # CAPABILITY FIELDS: THREE-STATE SEMANTIC MODEL
+        # ==========================================================================
+        # When capability_fields is None, we create a default ModelCapabilityFields()
+        # which has all fields set to None. The resulting database state:
+        #
+        #   - contract_type: NULL (record never processed by capability extraction)
+        #   - contract_version: NULL (never processed)
+        #   - intent_types: [] (coerced from None via "or []" below)
+        #   - protocols: [] (coerced from None via "or []" below)
+        #   - capability_tags: [] (coerced from None via "or []" below)
+        #
+        # This distinguishes from the 'unknown' contract_type which indicates
+        # "processed but type undeterminable" (used by backfill scripts only).
+        # See: EnumContractType.UNKNOWN and docstring above for full semantics.
+        # ==========================================================================
+        cap = capability_fields or ModelCapabilityFields()
+
+        # ==========================================================================
+        # CONTRACT TYPE VALIDATION: Reject 'unknown' unless explicitly allowed
+        # ==========================================================================
+        # The 'unknown' contract type is reserved for backfill/migration scripts
+        # where the actual type cannot be determined from available metadata.
+        # Normal application code should NEVER set 'unknown' - it should either
+        # provide a valid type or leave it as None (NULL in database).
+        #
+        # This validation provides defense-in-depth at the persistence layer,
+        # complementing the model-level validators which also allow 'unknown'
+        # construction but document it as backfill-only.
+        # ==========================================================================
+        if cap.contract_type == EnumContractType.UNKNOWN.value:
+            if not allow_unknown_backfill:
+                raise ValueError(
+                    f"Contract type '{EnumContractType.UNKNOWN.value}' is reserved "
+                    "for backfill/migration operations where the actual contract type "
+                    "cannot be determined. For normal operations, provide a valid "
+                    f"contract type ({', '.join(EnumContractType.valid_type_values())}) "
+                    "or leave it as None. To use 'unknown' in backfill scripts, "
+                    "pass allow_unknown_backfill=True."
+                )
+            logger.warning(
+                "Persisting 'unknown' contract type (backfill mode)",
+                extra={
+                    "entity_id": str(entity_id),
+                    "domain": domain,
+                    "correlation_id": str(corr_id),
+                },
+            )
+
+        params = (
+            entity_id,
+            domain,
+            new_state.value,  # Convert enum to string
+            node_type,
+            str(node_version),  # ModelSemVer -> string for asyncpg (see util_semver.py)
+            capabilities_json,
+            # Capability fields (OMN-1134) - order must match SQL column order:
+            # contract_type: None becomes NULL (never processed state)
+            cap.contract_type,
+            # Array fields: None is coerced to [] (no NULL state for arrays)
+            # This means [] indicates "processed but empty", not "never processed"
+            cap.intent_types or [],  # TEXT[]
+            cap.protocols or [],  # TEXT[]
+            cap.capability_tags or [],  # TEXT[]
+            # contract_version: None becomes NULL (never processed state)
+            cap.contract_version,
+            ack_deadline,
+            liveness_deadline,
+            event_id,
+            now,
+            corr_id,
+        )
+
+        try:
+            async with self._pool.acquire() as conn:
+                result = await conn.fetchrow(upsert_sql, *params)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            if result:
+                logger.debug(
+                    "State transition persisted",
+                    extra={
+                        "entity_id": str(entity_id),
+                        "domain": domain,
+                        "new_state": new_state.value,
+                        "event_id": str(event_id),
+                        "correlation_id": str(corr_id),
+                    },
+                )
+                return True
+
+            # Should not reach here since we always RETURNING, but handle it
+            logger.warning(
+                "State transition upsert returned no result",
+                extra={
+                    "entity_id": str(entity_id),
+                    "domain": domain,
+                    "correlation_id": str(corr_id),
+                },
+            )
+            return False
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("persist_state_transition", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for state transition",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("persist_state_transition", corr_id)
+            raise InfraTimeoutError(
+                "State transition timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("persist_state_transition", corr_id)
+            raise RuntimeHostError(
+                f"Failed to persist state transition: {type(e).__name__}",
                 context=ctx,
             ) from e
 

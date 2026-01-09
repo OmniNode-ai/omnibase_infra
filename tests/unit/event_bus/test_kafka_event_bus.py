@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID, uuid4
 
 import pytest
 from aiokafka.errors import KafkaError
+from pydantic import BaseModel
 
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -24,6 +27,11 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+
+# Test fixture constants - use these for assertions to avoid hardcoded values
+TEST_BOOTSTRAP_SERVERS: str = "localhost:9092"
+TEST_ENVIRONMENT: str = "test"
+TEST_GROUP: str = "test-group"
 
 
 class TestKafkaEventBusLifecycle:
@@ -46,11 +54,12 @@ class TestKafkaEventBusLifecycle:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
-                environment="test",
-                group="test-group",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                group=TEST_GROUP,
             )
+            bus = KafkaEventBus(config=config)
             yield bus
             # Cleanup: Ensure resources are freed even if test fails
             try:
@@ -172,8 +181,8 @@ class TestKafkaEventBusProperties:
         assert event_bus.adapter is event_bus
 
     def test_custom_properties(self) -> None:
-        """Test custom property values."""
-        event_bus = KafkaEventBus(
+        """Test custom property values via config."""
+        config = ModelKafkaEventBusConfig(
             bootstrap_servers="kafka.staging:9092",
             environment="staging",
             group="worker-group",
@@ -181,6 +190,7 @@ class TestKafkaEventBusProperties:
             max_retry_attempts=5,
             retry_backoff_base=2.0,
         )
+        event_bus = KafkaEventBus(config=config)
         assert event_bus.environment == "staging"
         assert event_bus.group == "worker-group"
         assert event_bus.adapter is event_bus
@@ -207,7 +217,7 @@ class TestKafkaEventBusPublish:
         mock_record_metadata.partition = 0
         mock_record_metadata.offset = 42
 
-        async def mock_send(*args, **kwargs):
+        async def mock_send(*args: object, **kwargs: object) -> asyncio.Future[object]:
             future = asyncio.get_running_loop().create_future()
             future.set_result(mock_record_metadata)
             return future
@@ -222,12 +232,13 @@ class TestKafkaEventBusPublish:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
-                environment="test",
-                group="test-group",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                group=TEST_GROUP,
                 max_retry_attempts=0,  # Disable retries for faster tests
             )
+            bus = KafkaEventBus(config=config)
             yield bus
             # Cleanup: Ensure resources are freed even if test fails
             try:
@@ -297,6 +308,7 @@ class TestKafkaEventBusPublish:
                 source="custom-source",
                 event_type="custom-event",
                 priority="high",
+                timestamp=datetime.now(UTC),
             )
             await kafka_event_bus.publish("test-topic", None, b"value", headers)
 
@@ -318,12 +330,13 @@ class TestKafkaEventBusPublish:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
-                environment="test",
-                group="test-group",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                group=TEST_GROUP,
                 circuit_breaker_threshold=1,  # Open after 1 failure
             )
+            event_bus = KafkaEventBus(config=config)
             await event_bus.start()
 
             # Record a failure to open the circuit
@@ -359,11 +372,12 @@ class TestKafkaEventBusSubscribe:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
-                environment="test",
-                group="test-group",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                group=TEST_GROUP,
             )
+            bus = KafkaEventBus(config=config)
             yield bus
             # Cleanup: Ensure resources are freed even if test fails
             try:
@@ -461,11 +475,12 @@ class TestKafkaEventBusHealthCheck:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
-                environment="test",
-                group="test-group",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                group=TEST_GROUP,
             )
+            bus = KafkaEventBus(config=config)
             yield bus
             # Cleanup: Ensure resources are freed even if test fails
             try:
@@ -482,9 +497,9 @@ class TestKafkaEventBusHealthCheck:
 
         assert health["healthy"] is False
         assert health["started"] is False
-        assert health["environment"] == "test"
-        assert health["group"] == "test-group"
-        assert health["bootstrap_servers"] == "localhost:9092"
+        assert health["environment"] == TEST_ENVIRONMENT
+        assert health["group"] == TEST_GROUP
+        assert health["bootstrap_servers"] == TEST_BOOTSTRAP_SERVERS
         assert health["subscriber_count"] == 0
         assert health["topic_count"] == 0
         assert health["consumer_count"] == 0
@@ -545,14 +560,18 @@ class TestKafkaEventBusCircuitBreaker:
         return producer
 
     def test_circuit_breaker_threshold_validation(self) -> None:
-        """Test that invalid circuit_breaker_threshold raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
+        """Test that invalid circuit_breaker_threshold raises validation error.
 
-        with pytest.raises(ProtocolConfigurationError, match="positive integer"):
-            KafkaEventBus(circuit_breaker_threshold=0)
+        Since KafkaEventBus now only accepts config-driven initialization,
+        we test the config model validation instead.
+        """
+        from pydantic import ValidationError
 
-        with pytest.raises(ProtocolConfigurationError, match="positive integer"):
-            KafkaEventBus(circuit_breaker_threshold=-1)
+        with pytest.raises(ValidationError, match="greater than or equal to 1"):
+            ModelKafkaEventBusConfig(circuit_breaker_threshold=0)
+
+        with pytest.raises(ValidationError, match="greater than or equal to 1"):
+            ModelKafkaEventBusConfig(circuit_breaker_threshold=-1)
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_opens_after_failures(
@@ -563,10 +582,11 @@ class TestKafkaEventBusCircuitBreaker:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 circuit_breaker_threshold=3,
             )
+            event_bus = KafkaEventBus(config=config)
 
             # Record failures
             async with event_bus._circuit_breaker_lock:
@@ -592,10 +612,11 @@ class TestKafkaEventBusCircuitBreaker:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 circuit_breaker_threshold=5,
             )
+            event_bus = KafkaEventBus(config=config)
 
             # Record some failures
             async with event_bus._circuit_breaker_lock:
@@ -613,31 +634,62 @@ class TestKafkaEventBusCircuitBreaker:
     async def test_circuit_breaker_half_open_state(
         self, mock_producer: AsyncMock
     ) -> None:
-        """Test circuit breaker transitions to half-open state."""
+        """Test circuit breaker full recovery cycle: CLOSED -> OPEN -> HALF_OPEN -> CLOSED.
+
+        This test validates the complete circuit breaker state machine:
+        1. CLOSED: Initial state, operations allowed
+        2. OPEN: After failure threshold reached, operations blocked
+        3. HALF_OPEN: After reset timeout, circuit allows test operations
+        4. CLOSED: After successful operation in HALF_OPEN, circuit fully recovers
+        """
 
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 circuit_breaker_threshold=1,
                 circuit_breaker_reset_timeout=0.1,  # Very short for testing
             )
+            event_bus = KafkaEventBus(config=config)
 
-            # Open the circuit
+            # Step 1: Verify initial state is CLOSED
+            async with event_bus._circuit_breaker_lock:
+                assert event_bus._circuit_breaker_open is False
+                assert event_bus._circuit_breaker_failures == 0
+
+            # Step 2: Trigger failure to transition CLOSED -> OPEN
             async with event_bus._circuit_breaker_lock:
                 await event_bus._record_circuit_failure(operation="test")
                 assert event_bus._circuit_breaker_open is True
+                assert event_bus._circuit_breaker_failures == 1
 
-            # Wait for reset timeout
+            # Step 3: Wait for reset timeout to allow OPEN -> HALF_OPEN transition
             await asyncio.sleep(0.15)
 
-            # Check circuit breaker - should transition to half-open (circuit closes)
+            # Step 4: Check circuit breaker - should transition to HALF_OPEN
+            # In HALF_OPEN state, _circuit_breaker_open is False but circuit is testing recovery
             async with event_bus._circuit_breaker_lock:
                 await event_bus._check_circuit_breaker(operation="test")
-                # After timeout, circuit transitions from OPEN to HALF_OPEN, which sets _circuit_breaker_open = False
+                # After timeout, circuit transitions from OPEN to HALF_OPEN
                 assert event_bus._circuit_breaker_open is False
+                # Failures are reset when transitioning to HALF_OPEN
+                assert event_bus._circuit_breaker_failures == 0
+
+            # Step 5: Simulate successful operation to complete HALF_OPEN -> CLOSED transition
+            # In production, this would be a real operation succeeding after the check
+            async with event_bus._circuit_breaker_lock:
+                await event_bus._reset_circuit_breaker()
+                # Circuit is now fully CLOSED - verify recovery is complete
+                assert event_bus._circuit_breaker_open is False
+                assert event_bus._circuit_breaker_failures == 0
+                assert event_bus._circuit_breaker_open_until == 0.0
+
+            # Step 6: Verify circuit allows operations after full recovery
+            async with event_bus._circuit_breaker_lock:
+                # This should not raise - circuit is fully closed
+                await event_bus._check_circuit_breaker(operation="test_after_recovery")
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_blocks_when_open(
@@ -648,11 +700,12 @@ class TestKafkaEventBusCircuitBreaker:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 circuit_breaker_threshold=1,
                 circuit_breaker_reset_timeout=60,  # Long timeout
             )
+            event_bus = KafkaEventBus(config=config)
 
             # Open the circuit
             async with event_bus._circuit_breaker_lock:
@@ -690,7 +743,8 @@ class TestKafkaEventBusErrors:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(bootstrap_servers="localhost:9092")
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = KafkaEventBus(config=config)
 
             with pytest.raises(InfraConnectionError) as exc_info:
                 await event_bus.start()
@@ -700,7 +754,8 @@ class TestKafkaEventBusErrors:
     @pytest.mark.asyncio
     async def test_unavailable_error_when_not_started(self) -> None:
         """Test InfraUnavailableError raised when bus not started."""
-        event_bus = KafkaEventBus(bootstrap_servers="localhost:9092")
+        config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+        event_bus = KafkaEventBus(config=config)
 
         with pytest.raises(InfraUnavailableError) as exc_info:
             await event_bus.publish("test-topic", None, b"test")
@@ -716,10 +771,11 @@ class TestKafkaEventBusErrors:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 timeout_seconds=5,
             )
+            event_bus = KafkaEventBus(config=config)
 
             with pytest.raises(InfraTimeoutError) as exc_info:
                 await event_bus.start()
@@ -750,7 +806,7 @@ class TestKafkaEventBusPublishRetry:
         mock_record_metadata.partition = 0
         mock_record_metadata.offset = 42
 
-        async def mock_send(*args, **kwargs):
+        async def mock_send(*args: object, **kwargs: object) -> asyncio.Future[object]:
             nonlocal call_count
             call_count += 1
             if call_count < 3:
@@ -765,11 +821,12 @@ class TestKafkaEventBusPublishRetry:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 max_retry_attempts=3,
                 retry_backoff_base=0.01,  # Fast retries for testing
             )
+            event_bus = KafkaEventBus(config=config)
             await event_bus.start()
 
             # This should succeed after retries
@@ -786,7 +843,7 @@ class TestKafkaEventBusPublishRetry:
     ) -> None:
         """Test publish fails after exhausting all retries."""
 
-        async def mock_send(*args, **kwargs):
+        async def mock_send(*args: object, **kwargs: object) -> None:
             raise KafkaError("Persistent error")
 
         mock_producer.send = AsyncMock(side_effect=mock_send)
@@ -795,11 +852,12 @@ class TestKafkaEventBusPublishRetry:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 max_retry_attempts=2,
                 retry_backoff_base=0.01,  # Fast retries for testing
             )
+            event_bus = KafkaEventBus(config=config)
             await event_bus.start()
 
             with pytest.raises(InfraConnectionError) as exc_info:
@@ -825,7 +883,7 @@ class TestKafkaEventBusPublishEnvelope:
         mock_record_metadata.partition = 0
         mock_record_metadata.offset = 42
 
-        async def mock_send(*args, **kwargs):
+        async def mock_send(*args: object, **kwargs: object) -> asyncio.Future[object]:
             future = asyncio.get_running_loop().create_future()
             future.set_result(mock_record_metadata)
             return future
@@ -838,7 +896,6 @@ class TestKafkaEventBusPublishEnvelope:
         self, mock_producer: AsyncMock
     ) -> None:
         """Test publish_envelope with a Pydantic model."""
-        from pydantic import BaseModel
 
         class TestEnvelope(BaseModel):
             message: str
@@ -848,10 +905,11 @@ class TestKafkaEventBusPublishEnvelope:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 max_retry_attempts=0,
             )
+            event_bus = KafkaEventBus(config=config)
             await event_bus.start()
 
             envelope = TestEnvelope(message="hello", count=42)
@@ -873,10 +931,11 @@ class TestKafkaEventBusPublishEnvelope:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 max_retry_attempts=0,
             )
+            event_bus = KafkaEventBus(config=config)
             await event_bus.start()
 
             envelope = {"message": "hello", "count": 42}
@@ -907,7 +966,7 @@ class TestKafkaEventBusBroadcast:
         mock_record_metadata.partition = 0
         mock_record_metadata.offset = 42
 
-        async def mock_send(*args, **kwargs):
+        async def mock_send(*args: object, **kwargs: object) -> asyncio.Future[object]:
             future = asyncio.get_running_loop().create_future()
             future.set_result(mock_record_metadata)
             return future
@@ -922,11 +981,12 @@ class TestKafkaEventBusBroadcast:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
-                environment="test",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
                 max_retry_attempts=0,
             )
+            event_bus = KafkaEventBus(config=config)
             await event_bus.start()
 
             await event_bus.broadcast_to_environment("test_cmd", {"key": "value"})
@@ -952,11 +1012,12 @@ class TestKafkaEventBusBroadcast:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
-                environment="test",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
                 max_retry_attempts=0,
             )
+            event_bus = KafkaEventBus(config=config)
             await event_bus.start()
 
             await event_bus.broadcast_to_environment(
@@ -976,11 +1037,12 @@ class TestKafkaEventBusBroadcast:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(
-                bootstrap_servers="localhost:9092",
-                environment="test",
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
                 max_retry_attempts=0,
             )
+            event_bus = KafkaEventBus(config=config)
             await event_bus.start()
 
             await event_bus.send_to_group("test_cmd", {"key": "value"}, "target-group")
@@ -1010,6 +1072,7 @@ class TestKafkaEventBusHeaderConversion:
             event_type="test-event",
             priority="high",
             routing_key="test.route",
+            timestamp=datetime.now(UTC),
         )
 
         kafka_headers = event_bus._model_headers_to_kafka(headers)
@@ -1193,7 +1256,8 @@ class TestKafkaEventBusConsumerManagement:
                 return_value=mock_consumer,
             ),
         ):
-            event_bus = KafkaEventBus(bootstrap_servers="localhost:9092")
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = KafkaEventBus(config=config)
             await event_bus.start()
 
             async def handler(msg: ModelEventMessage) -> None:
@@ -1221,7 +1285,8 @@ class TestKafkaEventBusConsumerManagement:
                 return_value=mock_consumer,
             ),
         ):
-            event_bus = KafkaEventBus(bootstrap_servers="localhost:9092")
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = KafkaEventBus(config=config)
             await event_bus.start()
 
             async def handler(msg: ModelEventMessage) -> None:
@@ -1253,7 +1318,8 @@ class TestKafkaEventBusStartConsuming:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(bootstrap_servers="localhost:9092")
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = KafkaEventBus(config=config)
 
             # Create a task that starts consuming
             async def consume_briefly() -> None:
@@ -1277,7 +1343,8 @@ class TestKafkaEventBusStartConsuming:
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
             return_value=mock_producer,
         ):
-            event_bus = KafkaEventBus(bootstrap_servers="localhost:9092")
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = KafkaEventBus(config=config)
             await event_bus.start()
 
             consuming_started = asyncio.Event()
@@ -1331,31 +1398,18 @@ class TestKafkaEventBusConfig:
         assert bus.config == config
         assert isinstance(bus.config, ModelKafkaEventBusConfig)
 
-    def test_backwards_compatibility_with_direct_params(self) -> None:
-        """Test that direct parameters still work for backwards compatibility."""
-        bus = KafkaEventBus(
-            bootstrap_servers="localhost:9092",
-            environment="test",
-            group="test-group",
+    def test_config_only_initialization(self) -> None:
+        """Test that KafkaEventBus only accepts config-driven initialization."""
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+            environment=TEST_ENVIRONMENT,
+            group=TEST_GROUP,
         )
+        bus = KafkaEventBus(config=config)
 
         assert bus.environment == "test"
         assert bus.group == "test-group"
-
-    def test_parameter_overrides_config(self) -> None:
-        """Test that explicit parameters override config values."""
-        config = ModelKafkaEventBusConfig(
-            bootstrap_servers="config:9092",
-            environment="config-env",
-            group="config-group",
-        )
-        bus = KafkaEventBus(
-            config=config,
-            environment="override-env",  # This should override
-        )
-
-        assert bus.environment == "override-env"
-        assert bus.group == "config-group"  # This should come from config
+        assert bus.config.bootstrap_servers == TEST_BOOTSTRAP_SERVERS
 
     def test_from_yaml_creates_bus(self, tmp_path: Path) -> None:
         """Test from_yaml() factory method with a temporary config file."""
@@ -1452,3 +1506,664 @@ enable_auto_commit: false
         assert bus.group == "prod-workers"
         assert bus.config.acks == "1"
         assert bus.config.enable_idempotence is False
+
+
+class TestKafkaEventBusDLQRouting:
+    """Test suite for Dead Letter Queue (DLQ) routing.
+
+    Verifies OMN-949 acceptance criteria: "No silent drops"
+    - Deserialization errors route to DLQ
+    - Handler failures with exhausted retries route to DLQ
+    - Handler failures with remaining retries do NOT route to DLQ
+    """
+
+    @pytest.fixture
+    def mock_producer(self) -> AsyncMock:
+        """Create mock Kafka producer with DLQ support."""
+        producer = AsyncMock()
+        producer.start = AsyncMock()
+        producer.stop = AsyncMock()
+        producer._closed = False
+
+        mock_record_metadata = MagicMock()
+        mock_record_metadata.partition = 0
+        mock_record_metadata.offset = 42
+
+        async def mock_send(*args, **kwargs):
+            future = asyncio.get_running_loop().create_future()
+            future.set_result(mock_record_metadata)
+            return future
+
+        producer.send = AsyncMock(side_effect=mock_send)
+        return producer
+
+    @pytest.fixture
+    def dlq_config(self) -> ModelKafkaEventBusConfig:
+        """Create config with DLQ enabled."""
+        return ModelKafkaEventBusConfig(
+            bootstrap_servers="localhost:9092",
+            environment="test",
+            group="test-group",
+            dead_letter_topic="dlq-events",
+        )
+
+    @pytest.mark.asyncio
+    async def test_deserialization_error_routes_to_dlq(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """Test that deserialization errors are routed to DLQ.
+
+        OMN-949: No silent drops - malformed messages must go to DLQ.
+        PR #90 feedback: Assert DLQ metrics are incremented.
+        """
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = KafkaEventBus(config=dlq_config)
+            await event_bus.start()
+
+            # Capture initial metrics
+            initial_metrics = event_bus.dlq_metrics
+            assert initial_metrics.total_publishes == 0
+            assert initial_metrics.successful_publishes == 0
+
+            # Simulate a raw Kafka message that will fail deserialization
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"test-key"
+            mock_raw_msg.value = b"malformed-data"
+            mock_raw_msg.offset = 100
+            mock_raw_msg.partition = 0
+
+            # Call the raw DLQ publish method directly
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            error = ValueError("Invalid message format")
+
+            await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="deserialization_error",
+            )
+
+            # Verify DLQ publish was called
+            assert mock_producer.send.called
+            call_args = mock_producer.send.call_args
+
+            # Verify the topic is the DLQ topic
+            assert call_args[0][0] == "dlq-events"
+
+            # Verify the value contains failure metadata
+            value = call_args[1]["value"]
+            payload = json.loads(value)
+            assert payload["original_topic"] == "source-topic"
+            assert payload["failure_type"] == "deserialization_error"
+            assert "Invalid message format" in payload["failure_reason"]
+            assert payload["error_type"] == "ValueError"
+
+            # Verify DLQ metrics were incremented (PR #90 feedback)
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.total_publishes == 1, (
+                "DLQ total_publishes should be incremented on publish"
+            )
+            assert final_metrics.successful_publishes == 1, (
+                "DLQ successful_publishes should be incremented on success"
+            )
+            assert final_metrics.failed_publishes == 0
+            assert final_metrics.get_topic_count("source-topic") == 1
+            assert final_metrics.get_error_type_count("ValueError") == 1
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_handler_failure_with_exhausted_retries_routes_to_dlq(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """Test that handler failures with exhausted retries are routed to DLQ.
+
+        OMN-949: When retry_count >= max_retries, message MUST go to DLQ.
+        PR #90 feedback: Assert DLQ metrics are incremented.
+        """
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = KafkaEventBus(config=dlq_config)
+            await event_bus.start()
+
+            # Capture initial metrics
+            initial_metrics = event_bus.dlq_metrics
+            assert initial_metrics.total_publishes == 0
+            assert initial_metrics.successful_publishes == 0
+
+            # Create a message with exhausted retries
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            headers = ModelEventHeaders(
+                source="test-source",
+                event_type="test-event",
+                correlation_id=correlation_id,
+                timestamp=datetime.now(UTC),
+                retry_count=3,  # Exhausted
+                max_retries=3,
+            )
+            failed_message = ModelEventMessage(
+                topic="source-topic",
+                key=b"test-key",
+                value=b"test-value",
+                headers=headers,
+            )
+            error = RuntimeError("Handler processing failed")
+
+            await event_bus._publish_to_dlq(
+                original_topic="source-topic",
+                failed_message=failed_message,
+                error=error,
+                correlation_id=correlation_id,
+            )
+
+            # Verify DLQ publish was called
+            assert mock_producer.send.called
+            call_args = mock_producer.send.call_args
+
+            # Verify the topic is the DLQ topic
+            assert call_args[0][0] == "dlq-events"
+
+            # Verify the value contains failure metadata
+            value = call_args[1]["value"]
+            payload = json.loads(value)
+            assert payload["original_topic"] == "source-topic"
+            assert payload["retry_count"] == 3
+            assert "Handler processing failed" in payload["failure_reason"]
+
+            # Verify DLQ metrics were incremented (PR #90 feedback)
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.total_publishes == 1, (
+                "DLQ total_publishes should be incremented on publish"
+            )
+            assert final_metrics.successful_publishes == 1, (
+                "DLQ successful_publishes should be incremented on success"
+            )
+            assert final_metrics.failed_publishes == 0
+            assert final_metrics.get_topic_count("source-topic") == 1
+            assert final_metrics.get_error_type_count("RuntimeError") == 1
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_handler_failure_without_exhausted_retries_skips_dlq(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """Test that handler failures with remaining retries do NOT route to DLQ.
+
+        Messages that can still be retried should not go to DLQ immediately.
+        """
+        with (
+            patch(
+                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaConsumer",
+            ) as mock_consumer_class,
+        ):
+            # Create async iterator for consumer
+            messages_received: list[ModelEventMessage] = []
+
+            mock_consumer = AsyncMock()
+            mock_consumer.start = AsyncMock()
+            mock_consumer.stop = AsyncMock()
+
+            # Create a mock message with remaining retries
+            mock_msg = MagicMock()
+            mock_msg.key = b"test-key"
+            mock_msg.value = b"test-value"
+            mock_msg.offset = 42
+            mock_msg.partition = 0
+            mock_msg.headers = [
+                ("source", b"test-source"),
+                ("event_type", b"test-event"),
+                ("retry_count", b"1"),  # Still has retries left
+                ("max_retries", b"3"),
+            ]
+
+            async def mock_consumer_iter() -> (
+                AsyncMock
+            ):  # Type hint doesn't matter for mock
+                yield mock_msg
+                # After first message, stop yielding
+                while True:
+                    await asyncio.sleep(10)  # Block forever
+
+            mock_consumer.__aiter__ = lambda self: mock_consumer_iter()
+            mock_consumer_class.return_value = mock_consumer
+
+            event_bus = KafkaEventBus(config=dlq_config)
+            await event_bus.start()
+
+            # Track handler call and DLQ publishes
+            handler_called = asyncio.Event()
+            dlq_publish_count_before = mock_producer.send.call_count
+
+            async def failing_handler(msg: ModelEventMessage) -> None:
+                messages_received.append(msg)
+                handler_called.set()
+                raise ValueError("Temporary failure")
+
+            await event_bus.subscribe("test-topic", "group1", failing_handler)
+
+            # Wait for handler to be called
+            await asyncio.wait_for(handler_called.wait(), timeout=2.0)
+
+            # Give time for potential DLQ publish
+            await asyncio.sleep(0.1)
+
+            # Verify handler was called
+            assert len(messages_received) == 1
+
+            # Verify NO DLQ publish was made (only the initial producer setup calls)
+            # Count only sends to DLQ topic
+            dlq_sends = [
+                call
+                for call in mock_producer.send.call_args_list[dlq_publish_count_before:]
+                if call[0][0] == "dlq-events"
+            ]
+            assert len(dlq_sends) == 0, "Should not publish to DLQ when retries remain"
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_dlq_not_configured_logs_only(self, mock_producer: AsyncMock) -> None:
+        """Test that when DLQ is not configured, errors are logged but not published.
+
+        This ensures graceful degradation when DLQ is not set up.
+        """
+        # Config without DLQ
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers="localhost:9092",
+            environment="test",
+            group="test-group",
+            dead_letter_topic=None,  # No DLQ configured
+        )
+
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = KafkaEventBus(config=config)
+            await event_bus.start()
+
+            # Create a failed message
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            headers = ModelEventHeaders(
+                source="test-source",
+                event_type="test-event",
+                correlation_id=correlation_id,
+                timestamp=datetime.now(UTC),
+                retry_count=3,
+                max_retries=3,
+            )
+            failed_message = ModelEventMessage(
+                topic="source-topic",
+                key=b"test-key",
+                value=b"test-value",
+                headers=headers,
+            )
+            error = RuntimeError("Handler failed")
+
+            send_count_before = mock_producer.send.call_count
+
+            # This should not raise and should not publish to DLQ
+            await event_bus._publish_to_dlq(
+                original_topic="source-topic",
+                failed_message=failed_message,
+                error=error,
+                correlation_id=correlation_id,
+            )
+
+            # Verify no additional send calls were made
+            assert mock_producer.send.call_count == send_count_before
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_dlq_publish_failure_does_not_crash_consumer(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """Test that DLQ publish failures do not crash the consumer.
+
+        Even if DLQ publishing fails, the consumer should continue operating.
+        PR #90 feedback: Assert DLQ failed_publishes metric is incremented.
+        """
+        # Make producer fail on DLQ publish
+        call_count = 0
+
+        async def mock_send(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # Fail when publishing to DLQ
+            if args[0] == "dlq-events":
+                raise RuntimeError("DLQ publish failed")
+            future = asyncio.get_running_loop().create_future()
+            mock_record_metadata = MagicMock()
+            mock_record_metadata.partition = 0
+            mock_record_metadata.offset = call_count
+            future.set_result(mock_record_metadata)
+            return future
+
+        mock_producer.send = AsyncMock(side_effect=mock_send)
+
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = KafkaEventBus(config=dlq_config)
+            await event_bus.start()
+
+            # Capture initial metrics
+            initial_metrics = event_bus.dlq_metrics
+            assert initial_metrics.total_publishes == 0
+            assert initial_metrics.failed_publishes == 0
+
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            headers = ModelEventHeaders(
+                source="test-source",
+                event_type="test-event",
+                correlation_id=correlation_id,
+                timestamp=datetime.now(UTC),
+                retry_count=3,
+                max_retries=3,
+            )
+            failed_message = ModelEventMessage(
+                topic="source-topic",
+                key=b"test-key",
+                value=b"test-value",
+                headers=headers,
+            )
+            error = RuntimeError("Handler failed")
+
+            # This should NOT raise even though DLQ publish fails
+            await event_bus._publish_to_dlq(
+                original_topic="source-topic",
+                failed_message=failed_message,
+                error=error,
+                correlation_id=correlation_id,
+            )
+
+            # Verify the bus is still healthy
+            health = await event_bus.health_check()
+            assert health["started"] is True
+
+            # Verify DLQ metrics track the failure (PR #90 feedback)
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.total_publishes == 1, (
+                "DLQ total_publishes should be incremented even on failure"
+            )
+            assert final_metrics.successful_publishes == 0, (
+                "DLQ successful_publishes should NOT be incremented on failure"
+            )
+            assert final_metrics.failed_publishes == 1, (
+                "DLQ failed_publishes should be incremented on failure"
+            )
+            # Error type is still tracked even when DLQ publish fails
+            assert final_metrics.get_error_type_count("RuntimeError") == 1
+
+            await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_raw_dlq_handles_decode_failures(
+        self, mock_producer: AsyncMock, dlq_config: ModelKafkaEventBusConfig
+    ) -> None:
+        """Test that _publish_raw_to_dlq handles decode failures gracefully.
+
+        Even corrupted binary data should be safely published to DLQ.
+        PR #90 feedback: Assert DLQ metrics are incremented.
+        """
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            event_bus = KafkaEventBus(config=dlq_config)
+            await event_bus.start()
+
+            # Capture initial metrics
+            initial_metrics = event_bus.dlq_metrics
+            assert initial_metrics.total_publishes == 0
+
+            # Simulate a raw Kafka message with invalid UTF-8
+            mock_raw_msg = MagicMock()
+            mock_raw_msg.key = b"\xff\xfe\xfd"  # Invalid UTF-8
+            mock_raw_msg.value = b"\x80\x81\x82"  # Invalid UTF-8
+            mock_raw_msg.offset = 100
+            mock_raw_msg.partition = 0
+
+            from uuid import uuid4
+
+            correlation_id = uuid4()
+            error = ValueError("Decode error")
+
+            # This should NOT raise
+            await event_bus._publish_raw_to_dlq(
+                original_topic="source-topic",
+                raw_msg=mock_raw_msg,
+                error=error,
+                correlation_id=correlation_id,
+                failure_type="deserialization_error",
+            )
+
+            # Verify DLQ publish was attempted
+            assert mock_producer.send.called
+            call_args = mock_producer.send.call_args
+            assert call_args[0][0] == "dlq-events"
+
+            # The payload should contain replacement characters for invalid UTF-8
+            value = call_args[1]["value"]
+            payload = json.loads(value)
+            # Check that decode didn't crash and we have some representation
+            assert payload["original_message"]["key"] is not None
+            assert payload["original_message"]["value"] is not None
+
+            # Verify DLQ metrics were incremented (PR #90 feedback)
+            final_metrics = event_bus.dlq_metrics
+            assert final_metrics.total_publishes == 1, (
+                "DLQ total_publishes should be incremented"
+            )
+            assert final_metrics.successful_publishes == 1, (
+                "DLQ successful_publishes should be incremented on success"
+            )
+            assert final_metrics.get_error_type_count("ValueError") == 1
+
+            await event_bus.close()
+
+
+class TestKafkaEventBusTopicValidation:
+    """Test suite for topic name validation.
+
+    Tests the _validate_topic_name method which enforces Kafka topic naming rules:
+    - Not empty
+    - Max 255 characters
+    - Only alphanumeric, period (.), underscore (_), hyphen (-)
+    - Not reserved names ("." or "..")
+    """
+
+    @pytest.fixture
+    def event_bus(self) -> KafkaEventBus:
+        """Create KafkaEventBus for validation testing."""
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+            environment=TEST_ENVIRONMENT,
+        )
+        return KafkaEventBus(config=config)
+
+    @pytest.fixture
+    def correlation_id(self) -> UUID:
+        """Create a correlation ID for tests."""
+        return uuid4()
+
+    def test_valid_topic_name_simple(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid simple topic name passes validation."""
+        # Should not raise any exception
+        event_bus._validate_topic_name("my-topic", correlation_id)
+
+    def test_valid_topic_name_with_dots(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name with dots passes validation."""
+        event_bus._validate_topic_name("dev.events.user-created", correlation_id)
+
+    def test_valid_topic_name_with_underscores(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name with underscores passes validation."""
+        event_bus._validate_topic_name("my_topic_name", correlation_id)
+
+    def test_valid_topic_name_with_hyphens(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name with hyphens passes validation."""
+        event_bus._validate_topic_name("my-topic-name", correlation_id)
+
+    def test_valid_topic_name_with_numbers(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name with numbers passes validation."""
+        event_bus._validate_topic_name("topic123", correlation_id)
+
+    def test_valid_topic_name_mixed_characters(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name with mixed valid characters."""
+        event_bus._validate_topic_name("prod.user-events_v2.created", correlation_id)
+
+    def test_valid_topic_name_uppercase(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name with uppercase letters."""
+        event_bus._validate_topic_name("MyTopicName", correlation_id)
+
+    def test_valid_topic_name_max_length(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name at exactly 255 characters."""
+        topic = "a" * 255
+        # Should not raise
+        event_bus._validate_topic_name(topic, correlation_id)
+
+    def test_empty_topic_name_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test empty topic name raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="cannot be empty"):
+            event_bus._validate_topic_name("", correlation_id)
+
+    def test_topic_name_exceeds_max_length(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name exceeding 255 chars raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        topic = "a" * 256
+        with pytest.raises(
+            ProtocolConfigurationError, match="exceeds maximum length of 255"
+        ):
+            event_bus._validate_topic_name(topic, correlation_id)
+
+    def test_reserved_topic_name_dot(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test reserved topic name '.' raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="reserved"):
+            event_bus._validate_topic_name(".", correlation_id)
+
+    def test_reserved_topic_name_double_dot(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test reserved topic name '..' raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="reserved"):
+            event_bus._validate_topic_name("..", correlation_id)
+
+    def test_topic_with_space_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name with space raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
+            event_bus._validate_topic_name("my topic", correlation_id)
+
+    def test_topic_with_at_symbol_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name with @ symbol raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
+            event_bus._validate_topic_name("topic@name", correlation_id)
+
+    def test_topic_with_special_chars_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name with special characters raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        invalid_topics = [
+            "topic#name",
+            "topic$name",
+            "topic%name",
+            "topic&name",
+            "topic*name",
+            "topic!name",
+            "topic/name",
+            "topic\\name",
+            "topic:name",
+            "topic;name",
+            "topic<name",
+            "topic>name",
+            "topic|name",
+        ]
+        for topic in invalid_topics:
+            with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
+                event_bus._validate_topic_name(topic, correlation_id)
+
+    def test_topic_with_unicode_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name with unicode characters raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
+            event_bus._validate_topic_name("topic\u00e9name", correlation_id)
+
+    def test_topic_with_newline_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name with newline raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
+            event_bus._validate_topic_name("topic\nname", correlation_id)
+
+    def test_topic_with_tab_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name with tab raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
+            event_bus._validate_topic_name("topic\tname", correlation_id)

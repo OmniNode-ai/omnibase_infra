@@ -210,7 +210,7 @@ class TestErrorHierarchy:
         """Test that error classes inherit correctly."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
-        from omnibase_infra.errors.infra_errors import RuntimeHostError
+        from omnibase_infra.errors.error_infra import RuntimeHostError
 
         # ContainerWiringError extends RuntimeHostError
         error = ContainerWiringError("test")

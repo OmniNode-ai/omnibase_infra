@@ -22,9 +22,10 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 from uuid import UUID
 
+from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -81,12 +82,13 @@ class ModelRegistrationSnapshot(BaseModel):
     Example:
         >>> from datetime import datetime, timezone
         >>> from uuid import uuid4
+        >>> from omnibase_core.enums import EnumNodeKind
         >>> now = datetime.now(timezone.utc)
         >>> entity_id = uuid4()
         >>> snapshot = ModelRegistrationSnapshot(
         ...     entity_id=entity_id,
         ...     current_state=EnumRegistrationState.ACTIVE,
-        ...     node_type="effect",
+        ...     node_type=EnumNodeKind.EFFECT,
         ...     node_name="PostgresAdapter",
         ...     last_state_change_at=now,
         ...     snapshot_version=1,
@@ -94,6 +96,11 @@ class ModelRegistrationSnapshot(BaseModel):
         ... )
         >>> snapshot.to_kafka_key()  # Returns 'registration:<uuid>'
         'registration:...'
+
+    Note:
+        When serialized to JSON via ``model_dump(mode="json")``, the ``node_type``
+        field is serialized as its string value (e.g., ``"effect"``). When
+        deserializing, both ``EnumNodeKind.EFFECT`` and ``"effect"`` are accepted.
     """
 
     model_config = ConfigDict(
@@ -121,7 +128,7 @@ class ModelRegistrationSnapshot(BaseModel):
     )
 
     # Node Information (cached from introspection/registration)
-    node_type: Literal["effect", "compute", "reducer", "orchestrator"] | None = Field(
+    node_type: EnumNodeKind | None = Field(
         default=None,
         description="ONEX node type (cached from introspection)",
     )

@@ -16,8 +16,8 @@ Supported transport types:
     - RUNTIME: Runtime host internal transport
 
 Each transport type has a corresponding handler implementation:
-    - ConsulHandler: Service registration, health checks, KV store operations
-    - VaultHandler: Secret retrieval, token management, lease renewal
+    - HandlerConsul: Service registration, health checks, KV store operations
+    - HandlerVault: Secret retrieval, token management, lease renewal
     - KafkaEventBus: Event publishing/subscription, consumer groups
     - PostgresConnectionManager: Connection pooling, query execution
 """

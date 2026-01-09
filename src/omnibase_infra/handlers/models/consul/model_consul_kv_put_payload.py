@@ -9,10 +9,18 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from omnibase_infra.handlers.models.consul.model_payload_consul import (
+    ModelPayloadConsul,
+)
+from omnibase_infra.handlers.models.consul.registry_payload_consul import (
+    RegistryPayloadConsul,
+)
 
 
-class ModelConsulKVPutPayload(BaseModel):
+@RegistryPayloadConsul.register("kv_put")
+class ModelConsulKVPutPayload(ModelPayloadConsul):
     """Payload for consul.kv_put result.
 
     Attributes:

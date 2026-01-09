@@ -22,7 +22,8 @@ import asyncio
 import json
 import os
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable, Coroutine
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -41,7 +42,6 @@ KAFKA_AVAILABLE = KAFKA_BOOTSTRAP_SERVERS is not None
 
 # Module-level markers - skip all tests if Kafka is not available
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.skipif(
         not KAFKA_AVAILABLE,
         reason="Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)",
@@ -86,8 +86,9 @@ async def kafka_event_bus(
     Yields a started KafkaEventBus instance and ensures cleanup after test.
     """
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
-    bus = KafkaEventBus(
+    config = ModelKafkaEventBusConfig(
         bootstrap_servers=kafka_bootstrap_servers,
         environment="integration-test",
         group="test-default",
@@ -97,6 +98,7 @@ async def kafka_event_bus(
         circuit_breaker_threshold=5,
         circuit_breaker_reset_timeout=10.0,
     )
+    bus = KafkaEventBus(config=config)
 
     yield bus
 
@@ -200,7 +202,7 @@ class TestKafkaEventBusE2E:
     async def test_publish_subscribe_roundtrip(
         self,
         started_kafka_bus: KafkaEventBus,
-        unique_topic: str,
+        created_unique_topic: str,
         unique_group: str,
     ) -> None:
         """Verify message can be published and received through Kafka.
@@ -219,7 +221,7 @@ class TestKafkaEventBusE2E:
 
         # Subscribe first
         unsubscribe = await started_kafka_bus.subscribe(
-            unique_topic,
+            created_unique_topic,
             unique_group,
             handler,
         )
@@ -230,7 +232,7 @@ class TestKafkaEventBusE2E:
         # Publish message
         test_key = b"test-key"
         test_value = b"test-value-roundtrip"
-        await started_kafka_bus.publish(unique_topic, test_key, test_value)
+        await started_kafka_bus.publish(created_unique_topic, test_key, test_value)
 
         # Wait for message delivery with timeout
         try:
@@ -246,7 +248,7 @@ class TestKafkaEventBusE2E:
         # Verify received message
         assert len(received_messages) >= 1
         received = received_messages[0]
-        assert received.topic == unique_topic
+        assert received.topic == created_unique_topic
         assert received.key == test_key
         assert received.value == test_value
 
@@ -257,7 +259,7 @@ class TestKafkaEventBusE2E:
     async def test_multiple_subscribers_receive_messages(
         self,
         started_kafka_bus: KafkaEventBus,
-        unique_topic: str,
+        created_unique_topic: str,
     ) -> None:
         """Verify multiple subscribers on same topic all receive messages.
 
@@ -281,15 +283,19 @@ class TestKafkaEventBusE2E:
         group1 = f"group1-{uuid.uuid4().hex[:8]}"
         group2 = f"group2-{uuid.uuid4().hex[:8]}"
 
-        unsubscribe1 = await started_kafka_bus.subscribe(unique_topic, group1, handler1)
-        unsubscribe2 = await started_kafka_bus.subscribe(unique_topic, group2, handler2)
+        unsubscribe1 = await started_kafka_bus.subscribe(
+            created_unique_topic, group1, handler1
+        )
+        unsubscribe2 = await started_kafka_bus.subscribe(
+            created_unique_topic, group2, handler2
+        )
 
         # Give consumers time to start
         await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
 
         # Publish message
         test_value = b"test-multiple-subscribers"
-        await started_kafka_bus.publish(unique_topic, None, test_value)
+        await started_kafka_bus.publish(created_unique_topic, None, test_value)
 
         # Wait for both subscribers to receive
         try:
@@ -314,7 +320,7 @@ class TestKafkaEventBusE2E:
     async def test_publish_envelope_roundtrip(
         self,
         started_kafka_bus: KafkaEventBus,
-        unique_topic: str,
+        created_unique_topic: str,
         unique_group: str,
     ) -> None:
         """Verify publish_envelope correctly serializes and publishes envelopes.
@@ -331,7 +337,7 @@ class TestKafkaEventBusE2E:
 
         # Subscribe
         unsubscribe = await started_kafka_bus.subscribe(
-            unique_topic,
+            created_unique_topic,
             unique_group,
             handler,
         )
@@ -344,7 +350,7 @@ class TestKafkaEventBusE2E:
             "payload": {"message": "hello", "count": 42},
             "metadata": {"source": "integration-test"},
         }
-        await started_kafka_bus.publish_envelope(test_envelope, unique_topic)
+        await started_kafka_bus.publish_envelope(test_envelope, created_unique_topic)
 
         # Wait for message
         try:
@@ -370,7 +376,7 @@ class TestKafkaEventBusE2E:
     async def test_publish_multiple_messages_ordering(
         self,
         started_kafka_bus: KafkaEventBus,
-        unique_topic: str,
+        created_unique_topic: str,
         unique_group: str,
     ) -> None:
         """Verify messages are received in order when using same partition key.
@@ -389,7 +395,7 @@ class TestKafkaEventBusE2E:
 
         # Subscribe
         unsubscribe = await started_kafka_bus.subscribe(
-            unique_topic,
+            created_unique_topic,
             unique_group,
             handler,
         )
@@ -400,7 +406,7 @@ class TestKafkaEventBusE2E:
         partition_key = b"ordering-key"
         for i in range(expected_count):
             await started_kafka_bus.publish(
-                unique_topic,
+                created_unique_topic,
                 partition_key,
                 f"message-{i}".encode(),
             )
@@ -428,7 +434,7 @@ class TestKafkaEventBusE2E:
     async def test_unsubscribe_stops_message_delivery(
         self,
         started_kafka_bus: KafkaEventBus,
-        unique_topic: str,
+        created_unique_topic: str,
         unique_group: str,
     ) -> None:
         """Verify unsubscribe stops message delivery to handler."""
@@ -441,7 +447,7 @@ class TestKafkaEventBusE2E:
 
         # Subscribe
         unsubscribe = await started_kafka_bus.subscribe(
-            unique_topic,
+            created_unique_topic,
             unique_group,
             handler,
         )
@@ -449,7 +455,7 @@ class TestKafkaEventBusE2E:
         await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
 
         # Publish first message
-        await started_kafka_bus.publish(unique_topic, None, b"first-message")
+        await started_kafka_bus.publish(created_unique_topic, None, b"first-message")
 
         # Wait for first message
         try:
@@ -470,7 +476,7 @@ class TestKafkaEventBusE2E:
         await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
 
         # Publish second message - should not be received
-        await started_kafka_bus.publish(unique_topic, None, b"second-message")
+        await started_kafka_bus.publish(created_unique_topic, None, b"second-message")
         await asyncio.sleep(MESSAGE_DELIVERY_WAIT_SECONDS)
 
         # Should not have received second message (or at most same count)
@@ -508,9 +514,10 @@ class TestKafkaEventBusResilience:
         reject new requests until the reset timeout.
         """
         from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+        from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
         # Create bus with invalid bootstrap servers to simulate failures
-        bus = KafkaEventBus(
+        config = ModelKafkaEventBusConfig(
             bootstrap_servers="invalid-host:9092",
             environment="test",
             group="test",
@@ -518,6 +525,7 @@ class TestKafkaEventBusResilience:
             circuit_breaker_threshold=2,
             circuit_breaker_reset_timeout=60.0,
         )
+        bus = KafkaEventBus(config=config)
 
         # First attempt should fail (connection error)
         from omnibase_infra.errors import InfraConnectionError, InfraTimeoutError
@@ -545,7 +553,7 @@ class TestKafkaEventBusResilience:
     async def test_subscriber_error_does_not_crash_bus(
         self,
         started_kafka_bus: KafkaEventBus,
-        unique_topic: str,
+        created_unique_topic: str,
     ) -> None:
         """Verify subscriber errors don't crash the event bus.
 
@@ -567,16 +575,16 @@ class TestKafkaEventBusResilience:
 
         # Subscribe both handlers
         unsub_fail = await started_kafka_bus.subscribe(
-            unique_topic, group1, failing_handler
+            created_unique_topic, group1, failing_handler
         )
         unsub_good = await started_kafka_bus.subscribe(
-            unique_topic, group2, good_handler
+            created_unique_topic, group2, good_handler
         )
 
         await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
 
         # Publish message - should not crash despite failing handler
-        await started_kafka_bus.publish(unique_topic, None, b"test-resilience")
+        await started_kafka_bus.publish(created_unique_topic, None, b"test-resilience")
 
         # Good handler should still receive message
         try:
@@ -620,7 +628,7 @@ class TestKafkaEventBusHeaders:
     async def test_headers_roundtrip(
         self,
         started_kafka_bus: KafkaEventBus,
-        unique_topic: str,
+        created_unique_topic: str,
         unique_group: str,
     ) -> None:
         """Verify custom headers are preserved through publish/subscribe cycle."""
@@ -634,7 +642,7 @@ class TestKafkaEventBusHeaders:
             message_received.set()
 
         unsubscribe = await started_kafka_bus.subscribe(
-            unique_topic,
+            created_unique_topic,
             unique_group,
             handler,
         )
@@ -648,10 +656,11 @@ class TestKafkaEventBusHeaders:
             priority="high",
             trace_id="trace-123",
             span_id="span-456",
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         await started_kafka_bus.publish(
-            unique_topic,
+            created_unique_topic,
             b"header-key",
             b"header-value",
             custom_headers,
@@ -680,7 +689,7 @@ class TestKafkaEventBusHeaders:
     async def test_correlation_id_preserved(
         self,
         started_kafka_bus: KafkaEventBus,
-        unique_topic: str,
+        created_unique_topic: str,
         unique_group: str,
     ) -> None:
         """Verify correlation_id is preserved through message flow."""
@@ -696,7 +705,7 @@ class TestKafkaEventBusHeaders:
             message_received.set()
 
         unsubscribe = await started_kafka_bus.subscribe(
-            unique_topic,
+            created_unique_topic,
             unique_group,
             handler,
         )
@@ -709,10 +718,11 @@ class TestKafkaEventBusHeaders:
             source="correlation-test",
             event_type="test.correlation",
             correlation_id=test_correlation_id,
+            timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         await started_kafka_bus.publish(
-            unique_topic,
+            created_unique_topic,
             None,
             b"correlation-test-value",
             headers,
@@ -751,6 +761,7 @@ class TestKafkaEventBusBroadcast:
         self,
         started_kafka_bus: KafkaEventBus,
         unique_group: str,
+        created_broadcast_topic: str,
     ) -> None:
         """Verify broadcast_to_environment sends to correct topic."""
         received_messages: list[ModelEventMessage] = []
@@ -761,9 +772,9 @@ class TestKafkaEventBusBroadcast:
             message_received.set()
 
         # Subscribe to broadcast topic for this environment
-        broadcast_topic = "integration-test.broadcast"
+        # Note: created_broadcast_topic is "integration-test.broadcast"
         unsubscribe = await started_kafka_bus.subscribe(
-            broadcast_topic,
+            created_broadcast_topic,
             unique_group,
             handler,
         )
@@ -799,6 +810,7 @@ class TestKafkaEventBusBroadcast:
         self,
         started_kafka_bus: KafkaEventBus,
         unique_group: str,
+        ensure_test_topic: Callable[[str, int], Coroutine[None, None, str]],
     ) -> None:
         """Verify send_to_group sends to correct topic."""
         received_messages: list[ModelEventMessage] = []
@@ -808,9 +820,10 @@ class TestKafkaEventBusBroadcast:
             received_messages.append(msg)
             message_received.set()
 
-        # Subscribe to group topic
+        # Subscribe to group topic (pre-create it first)
         target_group = f"target-{uuid.uuid4().hex[:8]}"
         group_topic = f"integration-test.{target_group}"
+        await ensure_test_topic(group_topic)
         unsubscribe = await started_kafka_bus.subscribe(
             group_topic,
             unique_group,

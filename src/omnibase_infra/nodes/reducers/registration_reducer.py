@@ -342,22 +342,27 @@ import hashlib
 import logging
 import os
 import time
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from omnibase_core.enums import EnumReductionType, EnumStreamingMode
-from omnibase_core.models.intents import (
-    ModelConsulRegisterIntent,
-    ModelPostgresUpsertRegistrationIntent,
-)
+from omnibase_core.enums import EnumNodeKind, EnumReductionType, EnumStreamingMode
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeRegistrationRecord,
+)
+from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
+    ModelPayloadConsulRegister,
+)
+from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
+    ModelPayloadPostgresUpsertRegistration,
+)
+from omnibase_infra.nodes.reducers.models.model_registration_confirmation import (
+    ModelRegistrationConfirmation,
 )
 from omnibase_infra.nodes.reducers.models.model_registration_state import (
     ModelRegistrationState,
@@ -417,25 +422,68 @@ ValidationErrorCode = Literal[
     "invalid_node_type",
 ]
 
+# Sentinel value for "not set" state
+_SENTINEL_STR: str = ""
 
-@dataclass(frozen=True)
-class ValidationResult:
+
+class ModelValidationResult(BaseModel):
     """Result of event validation with detailed error information.
+
+    This Pydantic model replaces the previous dataclass implementation
+    to comply with ONEX requirements for Pydantic-based data structures.
+
+    This model uses sentinel values (empty string) instead of nullable unions
+    to minimize union count in the codebase (OMN-1004).
+
+    Sentinel Values:
+        - Empty string ("") for field_name and error_message means "not set"
+        - None for error_code (unavoidable for Literal type safety)
+        - Use ``has_field_name``, ``has_error_message`` to check
+
+    Backwards Compatibility:
+        Constructors accept ``None`` for string fields and convert to sentinel.
 
     Attributes:
         is_valid: Whether the event passed validation.
         error_code: Distinct code identifying the validation failure (if any).
-        field_name: Name of the field that failed validation (if any).
-        error_message: Human-readable error message for logging (if any).
+        field_name: Name of the field that failed validation. Empty string if not set.
+        error_message: Human-readable error message for logging. Empty string if not set.
+
+    .. versionchanged:: 0.7.0
+        Refactored to use sentinel values for string fields (OMN-1004).
     """
+
+    model_config = ConfigDict(frozen=True)
 
     is_valid: bool
     error_code: ValidationErrorCode | None = None
-    field_name: str | None = None
-    error_message: str | None = None
+    field_name: str = _SENTINEL_STR
+    error_message: str = _SENTINEL_STR
+
+    # ---- Validators for None-to-Sentinel Conversion ----
+    @field_validator("field_name", "error_message", mode="before")
+    @classmethod
+    def _convert_none_to_str_sentinel(cls, v: object) -> str:
+        """Convert None to empty string sentinel for backwards compatibility."""
+        if v is None:
+            return _SENTINEL_STR
+        if isinstance(v, str):
+            return v
+        return str(v)
+
+    # ---- Sentinel Check Properties ----
+    @property
+    def has_field_name(self) -> bool:
+        """Check if field_name is set (not empty string)."""
+        return self.field_name != _SENTINEL_STR
+
+    @property
+    def has_error_message(self) -> bool:
+        """Check if error_message is set (not empty string)."""
+        return self.error_message != _SENTINEL_STR
 
     @classmethod
-    def success(cls) -> ValidationResult:
+    def success(cls) -> ModelValidationResult:
         """Create a successful validation result."""
         return cls(is_valid=True)
 
@@ -445,7 +493,7 @@ class ValidationResult:
         error_code: ValidationErrorCode,
         field_name: str,
         error_message: str,
-    ) -> ValidationResult:
+    ) -> ModelValidationResult:
         """Create a failed validation result with error details."""
         return cls(
             is_valid=False,
@@ -647,7 +695,7 @@ class RegistrationReducer:
                 extra={
                     "processing_time_ms": processing_time_ms,
                     "threshold_ms": PERF_THRESHOLD_REDUCE_MS,
-                    "node_type": event.node_type,
+                    "node_type": event.node_type.value,
                     "intent_count": len(intents),
                     "correlation_id": str(correlation_id),
                 },
@@ -674,7 +722,9 @@ class RegistrationReducer:
         """
         return self._validate_event(event).is_valid
 
-    def _validate_event(self, event: ModelNodeIntrospectionEvent) -> ValidationResult:
+    def _validate_event(
+        self, event: ModelNodeIntrospectionEvent
+    ) -> ModelValidationResult:
         """Validate introspection event with detailed error information.
 
         Validates that required fields are present for registration workflow.
@@ -704,7 +754,7 @@ class RegistrationReducer:
         """
         # Validate node_id: required for registration identity
         if event.node_id is None:
-            return ValidationResult.failure(
+            return ModelValidationResult.failure(
                 error_code="missing_node_id",
                 field_name="node_id",
                 error_message="node_id is required for registration identity",
@@ -712,16 +762,22 @@ class RegistrationReducer:
 
         # Validate node_type: must be present
         if not hasattr(event, "node_type") or event.node_type is None:
-            return ValidationResult.failure(
+            return ModelValidationResult.failure(
                 error_code="missing_node_type",
                 field_name="node_type",
                 error_message="node_type is required for service categorization",
             )
 
         # Validate node_type value is valid ONEX type
-        valid_node_types = {"effect", "compute", "reducer", "orchestrator"}
-        if event.node_type not in valid_node_types:
-            return ValidationResult.failure(
+        # Use EnumNodeKind values (excluding RUNTIME_HOST which is not a registration type)
+        valid_node_types = {
+            EnumNodeKind.EFFECT.value,
+            EnumNodeKind.COMPUTE.value,
+            EnumNodeKind.REDUCER.value,
+            EnumNodeKind.ORCHESTRATOR.value,
+        }
+        if event.node_type.value not in valid_node_types:
+            return ModelValidationResult.failure(
                 error_code="invalid_node_type",
                 field_name="node_type",
                 error_message=(
@@ -729,7 +785,7 @@ class RegistrationReducer:
                 ),
             )
 
-        return ValidationResult.success()
+        return ModelValidationResult.success()
 
     def _derive_deterministic_event_id(
         self, event: ModelNodeIntrospectionEvent
@@ -760,7 +816,7 @@ class RegistrationReducer:
         # Using ISO format for timestamp ensures string stability across serialization.
         # The pipe delimiter prevents ambiguity between field values.
         canonical_content = (
-            f"{event.node_id}|{event.node_type}|{event.timestamp.isoformat()}"
+            f"{event.node_id}|{event.node_type.value}|{event.timestamp.isoformat()}"
         )
 
         # Compute SHA-256 hash and convert to UUID format.
@@ -794,10 +850,10 @@ class RegistrationReducer:
         Returns:
             ModelIntent with intent_type="consul.register" and Consul payload.
         """
-        service_id = f"node-{event.node_type}-{event.node_id}"
-        service_name = f"onex-{event.node_type}"
+        service_id = f"onex-{event.node_type.value}-{event.node_id}"
+        service_name = f"onex-{event.node_type.value}"
         tags = [
-            f"node_type:{event.node_type}",
+            f"node_type:{event.node_type.value}",
             f"node_version:{event.node_version}",
         ]
 
@@ -811,8 +867,8 @@ class RegistrationReducer:
                 "Timeout": "5s",
             }
 
-        # Build typed Consul registration intent, then serialize for ModelIntent payload
-        consul_intent = ModelConsulRegisterIntent(
+        # Build typed Consul registration payload (implements ProtocolIntentPayload)
+        consul_payload = ModelPayloadConsulRegister(
             correlation_id=correlation_id,
             service_id=service_id,
             service_name=service_name,
@@ -820,10 +876,11 @@ class RegistrationReducer:
             health_check=health_check,
         )
 
+        # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
             intent_type="consul.register",
             target=f"consul://service/{service_name}",
-            payload=consul_intent.model_dump(mode="json"),
+            payload=consul_payload,
         )
 
     def _build_postgres_intent(
@@ -846,13 +903,13 @@ class RegistrationReducer:
         now = datetime.now(UTC)
 
         # Build the registration record using strongly-typed models
-        # event.capabilities and event.metadata are already typed as
+        # event.declared_capabilities and event.metadata are already typed as
         # ModelNodeCapabilities and ModelNodeMetadata respectively
         record = ModelNodeRegistrationRecord(
             node_id=event.node_id,
             node_type=event.node_type,
             node_version=event.node_version,
-            capabilities=event.capabilities,
+            capabilities=event.declared_capabilities,
             endpoints=dict(event.endpoints) if event.endpoints else {},
             metadata=event.metadata,
             health_endpoint=(
@@ -862,19 +919,17 @@ class RegistrationReducer:
             updated_at=now,
         )
 
-        # Build typed PostgreSQL upsert intent, then serialize for ModelIntent payload
-        postgres_intent = ModelPostgresUpsertRegistrationIntent(
+        # Build typed PostgreSQL upsert payload (implements ProtocolIntentPayload)
+        postgres_payload = ModelPayloadPostgresUpsertRegistration(
             correlation_id=correlation_id,
             record=record,
         )
 
-        # Use serialize_as_any=True because ModelPostgresUpsertRegistrationIntent.record
-        # is typed as BaseModel (for flexibility), but we need to serialize the actual
-        # subclass (ModelNodeRegistrationRecord) with all its fields
+        # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
             intent_type="postgres.upsert_registration",
             target=f"postgres://node_registrations/{event.node_id}",
-            payload=postgres_intent.model_dump(mode="json", serialize_as_any=True),
+            payload=postgres_payload,
         )
 
     # =========================================================================
@@ -895,14 +950,38 @@ class RegistrationReducer:
     # See module docstring section 6 for detailed implementation notes.
     # =========================================================================
 
+    def reduce_confirmation(
+        self,
+        state: ModelRegistrationState,
+        confirmation: ModelRegistrationConfirmation,
+    ) -> ModelReducerOutput[ModelRegistrationState]:
+        """Process confirmation event from Effect layer.
+
+        Not yet implemented. See OMN-996 for tracking.
+
+        Args:
+            state: Current registration state (immutable).
+            confirmation: Confirmation event from Effect layer.
+
+        Returns:
+            ModelReducerOutput with new state and no intents.
+
+        Raises:
+            NotImplementedError: Always raised until implementation is complete.
+        """
+        raise NotImplementedError(
+            "reduce_confirmation() is not yet implemented. "
+            "See ticket OMN-996: https://linear.app/omninode/issue/OMN-996"
+        )
+
     # TODO(OMN-996): Implement reduce_confirmation() using ModelRegistrationConfirmation
     # The model is now available at:
     #   from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
     #
-    # NOTE: reduce_confirmation() is not yet implemented. The stub below
-    # documents the expected interface and behavior.
+    # NOTE: The stub above raises NotImplementedError. The commented implementation
+    # below documents the expected behavior once implemented.
     #
-    # def reduce_confirmation(
+    # def _reduce_confirmation_impl(
     #     self,
     #     state: ModelRegistrationState,
     #     confirmation: "ModelRegistrationConfirmation",
@@ -1123,12 +1202,12 @@ class RegistrationReducer:
 
 
 __all__ = [
-    "RegistrationReducer",
-    # Validation types (for tests and custom validators)
-    "ValidationResult",
-    "ValidationErrorCode",
+    "PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS",
+    "PERF_THRESHOLD_INTENT_BUILD_MS",
     # Performance threshold constants (for tests and monitoring)
     "PERF_THRESHOLD_REDUCE_MS",
-    "PERF_THRESHOLD_INTENT_BUILD_MS",
-    "PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS",
+    # Validation types (for tests and custom validators)
+    "ModelValidationResult",
+    "RegistrationReducer",
+    "ValidationErrorCode",
 ]

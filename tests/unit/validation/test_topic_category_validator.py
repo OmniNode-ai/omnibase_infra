@@ -7,7 +7,7 @@ Validates that:
 - Topic patterns match message categories correctly
 - Static (AST) analysis detects topic/category mismatches
 - Runtime validation catches category violations
-- Handler type to category mappings are enforced
+- Node archetype to category mappings are enforced
 
 Note:
     This module uses pytest's tmp_path fixture for temporary file management.
@@ -21,11 +21,11 @@ from pathlib import Path
 from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
 )
-from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.validation.topic_category_validator import (
-    HANDLER_EXPECTED_CATEGORIES,
+    NODE_ARCHETYPE_EXPECTED_CATEGORIES,
     TOPIC_CATEGORY_PATTERNS,
     TOPIC_SUFFIXES,
     TopicCategoryASTVisitor,
@@ -108,19 +108,19 @@ class TestTopicSuffixes:
         assert TOPIC_SUFFIXES[EnumNodeOutputType.PROJECTION] == ""
 
 
-class TestHandlerExpectedCategories:
-    """Test the handler to expected categories mapping."""
+class TestNodeArchetypeExpectedCategories:
+    """Test the node archetype to expected categories mapping."""
 
     def test_effect_handler_categories(self) -> None:
         """Verify effect handlers can process commands and events."""
-        categories = HANDLER_EXPECTED_CATEGORIES[EnumHandlerType.EFFECT]
+        categories = NODE_ARCHETYPE_EXPECTED_CATEGORIES[EnumNodeArchetype.EFFECT]
         assert EnumMessageCategory.COMMAND in categories
         assert EnumMessageCategory.EVENT in categories
         assert EnumNodeOutputType.PROJECTION not in categories
 
     def test_compute_handler_categories(self) -> None:
         """Verify compute handlers can process all message types except projections."""
-        categories = HANDLER_EXPECTED_CATEGORIES[EnumHandlerType.COMPUTE]
+        categories = NODE_ARCHETYPE_EXPECTED_CATEGORIES[EnumNodeArchetype.COMPUTE]
         assert EnumMessageCategory.EVENT in categories
         assert EnumMessageCategory.COMMAND in categories
         assert EnumMessageCategory.INTENT in categories
@@ -131,14 +131,14 @@ class TestHandlerExpectedCategories:
         Note: PROJECTION is in EnumNodeOutputType because it's a node output type
         (REDUCERs produce projections), not a message category for routing.
         """
-        categories = HANDLER_EXPECTED_CATEGORIES[EnumHandlerType.REDUCER]
+        categories = NODE_ARCHETYPE_EXPECTED_CATEGORIES[EnumNodeArchetype.REDUCER]
         assert EnumMessageCategory.EVENT in categories
         assert EnumNodeOutputType.PROJECTION in categories
         assert EnumMessageCategory.COMMAND not in categories
 
     def test_orchestrator_handler_categories(self) -> None:
         """Verify orchestrator handlers can process events, commands, and intents."""
-        categories = HANDLER_EXPECTED_CATEGORIES[EnumHandlerType.ORCHESTRATOR]
+        categories = NODE_ARCHETYPE_EXPECTED_CATEGORIES[EnumNodeArchetype.ORCHESTRATOR]
         assert EnumMessageCategory.EVENT in categories
         assert EnumMessageCategory.COMMAND in categories
         assert EnumMessageCategory.INTENT in categories
@@ -252,7 +252,7 @@ class TestTopicCategoryValidatorValidateSubscription:
         """
         validator = TopicCategoryValidator()
         violations = validator.validate_subscription(
-            EnumHandlerType.REDUCER,
+            EnumNodeArchetype.REDUCER,
             ["order.events"],
             [EnumMessageCategory.EVENT, EnumNodeOutputType.PROJECTION],
         )
@@ -265,7 +265,7 @@ class TestTopicCategoryValidatorValidateSubscription:
         """
         validator = TopicCategoryValidator()
         violations = validator.validate_subscription(
-            EnumHandlerType.REDUCER,
+            EnumNodeArchetype.REDUCER,
             ["order.commands"],
             [EnumMessageCategory.EVENT, EnumNodeOutputType.PROJECTION],
         )
@@ -274,7 +274,7 @@ class TestTopicCategoryValidatorValidateSubscription:
             violations[0].violation_type
             == EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH
         )
-        assert violations[0].handler_type == EnumHandlerType.REDUCER
+        assert violations[0].node_archetype == EnumNodeArchetype.REDUCER
 
     def test_multiple_subscriptions_mixed_validity(self) -> None:
         """Verify multiple subscriptions with mixed validity.
@@ -283,7 +283,7 @@ class TestTopicCategoryValidatorValidateSubscription:
         """
         validator = TopicCategoryValidator()
         violations = validator.validate_subscription(
-            EnumHandlerType.REDUCER,
+            EnumNodeArchetype.REDUCER,
             ["order.events", "order.commands"],
             [EnumMessageCategory.EVENT, EnumNodeOutputType.PROJECTION],
         )
@@ -295,13 +295,15 @@ class TestTopicCategoryValidatorValidateSubscription:
         """Verify non-conforming topic names generate warnings."""
         validator = TopicCategoryValidator()
         violations = validator.validate_subscription(
-            EnumHandlerType.EFFECT,
+            EnumNodeArchetype.EFFECT,
             ["weird-topic-name"],
             [EnumMessageCategory.EVENT, EnumMessageCategory.COMMAND],
         )
         assert len(violations) == 1
         assert violations[0].severity == "warning"
-        assert "does not follow ONEX naming conventions" in violations[0].message
+        # Check for key terms without exact message coupling
+        msg_lower = violations[0].message.lower()
+        assert "naming" in msg_lower or "convention" in msg_lower or "onex" in msg_lower
 
 
 class TestTopicCategoryValidatorExtractDomain:
@@ -461,7 +463,7 @@ class TestValidateTopicCategoriesInFile:
         assert len(violations) == 1
         assert violations[0].violation_type == EnumExecutionShapeViolation.SYNTAX_ERROR
         # Can't determine handler type from unparseable file
-        assert violations[0].handler_type is None
+        assert violations[0].node_archetype is None
         assert "syntax error" in violations[0].message.lower()
 
     def test_valid_python_file(self, tmp_path: Path) -> None:

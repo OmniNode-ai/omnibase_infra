@@ -9,9 +9,13 @@ Tests verify:
 
 NOTE: Tests are marked as skipped until PluginComputeBase and PluginJsonNormalizer
 are implemented. Uncomment imports below once implementation is complete.
-"""
 
-from typing import Any
+Note on Type Annotations:
+    This test module intentionally uses dict types for test plugin implementations
+    and passes raw dict inputs to plugin.execute() for testing purposes.
+    The mypy directives below disable type errors for these intentional patterns.
+"""
+# mypy: disable-error-code="override, arg-type, attr-defined, index, return-value"
 
 import pytest
 
@@ -269,7 +273,7 @@ class TestPluginJsonNormalizer:
         """Handles empty dictionary edge case."""
         # Arrange
         plugin = PluginJsonNormalizer()
-        input_data: dict[str, Any] = {"json": {}}
+        input_data: dict[str, object] = {"json": {}}
         context = {"correlation_id": "test-123"}
 
         # Act
@@ -312,7 +316,7 @@ class TestPluginJsonNormalizer:
                     {"name": "Alice", "id": 2},
                     {"name": "Bob", "id": 1},
                 ],
-                "metadata": {"version": "1.0", "created": "2024-01-01"},
+                "metadata": {"version": "1.0", "created": "2025-01-01"},
             }
         }
         context = {"correlation_id": "test-123"}
@@ -338,17 +342,17 @@ class TestValidationHookIntegration:
         execution_order: list[str] = []
 
         class TrackedNormalizer(PluginJsonNormalizer):
-            def validate_input(self, input_data: dict[str, Any]) -> None:
+            def validate_input(self, input_data: dict[str, object]) -> None:
                 execution_order.append("validate_input")
                 super().validate_input(input_data)
 
-            def validate_output(self, output_data: dict[str, Any]) -> None:
+            def validate_output(self, output_data: dict[str, object]) -> None:
                 execution_order.append("validate_output")
                 super().validate_output(output_data)
 
             def execute(
-                self, input_data: dict[str, Any], context: dict
-            ) -> dict[str, Any]:
+                self, input_data: dict[str, object], context: dict[str, object]
+            ) -> dict[str, object]:
                 execution_order.append("execute")
                 return super().execute(input_data, context)
 
@@ -369,7 +373,7 @@ class TestValidationHookIntegration:
 
         # Arrange: Plugin with strict input validation
         class StrictNormalizer(PluginJsonNormalizer):
-            def validate_input(self, input_data: dict[str, Any]) -> None:
+            def validate_input(self, input_data: dict[str, object]) -> None:
                 if not input_data.get("json"):
                     raise ValueError("Input must not be empty")
 
@@ -384,9 +388,9 @@ class TestValidationHookIntegration:
 
         # Arrange: Plugin with strict output validation
         class StrictNormalizer(PluginJsonNormalizer):
-            def validate_output(self, output_data: dict[str, Any]) -> None:
+            def validate_output(self, output_data: dict[str, object]) -> None:
                 normalized = output_data.get("normalized", output_data)
-                if len(normalized) > 5:
+                if isinstance(normalized, dict) and len(normalized) > 5:
                     raise ValueError("Output too large")
 
         plugin = StrictNormalizer()
@@ -415,14 +419,14 @@ class TestContextPropagation:
                 return {"correlation_id": context.get("correlation_id")}
 
         plugin = ContextTrackingPlugin()
-        test_context = {"correlation_id": "test-789", "timestamp": "2024-01-01"}
+        test_context = {"correlation_id": "test-789", "timestamp": "2025-01-01"}
 
         # Act
         result = plugin.execute({}, test_context)
 
         # Assert: Context was received
         assert context_received["correlation_id"] == "test-789"
-        assert context_received["timestamp"] == "2024-01-01"
+        assert context_received["timestamp"] == "2025-01-01"
         assert result["correlation_id"] == "test-789"
 
     def test_context_available_in_validation_hooks(self) -> None:

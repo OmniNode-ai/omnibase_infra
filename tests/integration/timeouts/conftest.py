@@ -18,8 +18,8 @@ Fixture Categories:
         - runtime_tick_factory: Creates ModelRuntimeTick with controlled time
 
     Services:
-        - timeout_query_service: TimeoutScanner with mock reader
-        - timeout_emission_service: TimeoutEmitter with mocks
+        - timeout_query_service: ServiceTimeoutScanner with mock reader
+        - timeout_emission_service: ServiceTimeoutEmitter with mocks
 
 Design Notes:
     These fixtures enable testing restart-safe behavior by allowing:
@@ -38,11 +38,17 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 from omnibase_infra.models.projection import (
     ModelRegistrationProjection,
     ModelSequenceInfo,
@@ -51,6 +57,18 @@ from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
+
+# =============================================================================
+# Type Aliases
+# =============================================================================
+
+
+class RawEventDict(TypedDict):
+    """TypedDict for raw bytes events from publish method."""
+
+    key: bytes | None
+    value: bytes
+
 
 # =============================================================================
 # Mock Event Bus
@@ -65,22 +83,26 @@ class MockEventBus:
         Uses asyncio.Lock for concurrent publish safety.
 
     Attributes:
-        published_events: List of (topic, envelope) tuples captured
+        published_events: List of (topic, envelope) tuples for structured events.
+            Uses BaseModel for type safety since all event envelopes are Pydantic models.
+        published_raw_events: List of (topic, raw_event) tuples for raw bytes events.
         _lock: Async lock for thread-safe access
     """
 
-    published_events: list[tuple[str, object]] = field(default_factory=list)
+    published_events: list[tuple[str, BaseModel]] = field(default_factory=list)
+    published_raw_events: list[tuple[str, RawEventDict]] = field(default_factory=list)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def publish_envelope(
         self,
-        envelope: object,
+        envelope: BaseModel,
         topic: str,
     ) -> None:
         """Capture published event for later verification.
 
         Args:
-            envelope: The event envelope/model being published
+            envelope: The event envelope/model being published.
+                Uses BaseModel for type safety.
             topic: The topic to publish to
         """
         async with self._lock:
@@ -100,16 +122,17 @@ class MockEventBus:
             value: Message value as bytes
         """
         async with self._lock:
-            self.published_events.append((topic, {"key": key, "value": value}))
+            raw_event: RawEventDict = {"key": key, "value": value}
+            self.published_raw_events.append((topic, raw_event))
 
-    def get_events_for_topic(self, topic_pattern: str) -> list[object]:
-        """Get all events published to topics matching pattern.
+    def get_events_for_topic(self, topic_pattern: str) -> list[BaseModel]:
+        """Get all structured events published to topics matching pattern.
 
         Args:
             topic_pattern: Substring to match in topic names
 
         Returns:
-            List of envelopes published to matching topics
+            List of BaseModel envelopes published to matching topics
         """
         return [
             envelope
@@ -117,22 +140,53 @@ class MockEventBus:
             if topic_pattern in topic
         ]
 
+    def get_raw_events_for_topic(self, topic_pattern: str) -> list[RawEventDict]:
+        """Get all raw bytes events published to topics matching pattern.
+
+        Args:
+            topic_pattern: Substring to match in topic names
+
+        Returns:
+            List of RawEventDict events published to matching topics
+        """
+        return [
+            raw_event
+            for topic, raw_event in self.published_raw_events
+            if topic_pattern in topic
+        ]
+
     def count_events(self, topic_pattern: str | None = None) -> int:
-        """Count events, optionally filtered by topic pattern.
+        """Count structured events, optionally filtered by topic pattern.
 
         Args:
             topic_pattern: Optional substring to filter topics
 
         Returns:
-            Number of matching events
+            Number of matching structured events
         """
         if topic_pattern is None:
             return len(self.published_events)
         return len(self.get_events_for_topic(topic_pattern))
 
+    def count_all_events(self, topic_pattern: str | None = None) -> int:
+        """Count all events (structured + raw), optionally filtered by topic pattern.
+
+        Args:
+            topic_pattern: Optional substring to filter topics
+
+        Returns:
+            Number of matching events (both structured and raw)
+        """
+        if topic_pattern is None:
+            return len(self.published_events) + len(self.published_raw_events)
+        return len(self.get_events_for_topic(topic_pattern)) + len(
+            self.get_raw_events_for_topic(topic_pattern)
+        )
+
     def clear(self) -> None:
-        """Clear all captured events."""
+        """Clear all captured events (both structured and raw)."""
         self.published_events.clear()
+        self.published_raw_events.clear()
 
 
 # =============================================================================
@@ -476,7 +530,7 @@ def create_runtime_tick(
 def create_test_projection(
     entity_id: UUID | None = None,
     state: EnumRegistrationState = EnumRegistrationState.AWAITING_ACK,
-    node_type: str = "effect",
+    node_type: EnumNodeKind = EnumNodeKind.EFFECT,
     ack_deadline: datetime | None = None,
     liveness_deadline: datetime | None = None,
     ack_timeout_emitted_at: datetime | None = None,
@@ -488,7 +542,7 @@ def create_test_projection(
     Args:
         entity_id: Node UUID (generated if not provided)
         state: FSM state
-        node_type: ONEX node type
+        node_type: ONEX node type (EnumNodeKind)
         ack_deadline: Optional ack deadline
         liveness_deadline: Optional liveness deadline
         ack_timeout_emitted_at: Optional ack timeout emission marker
@@ -504,7 +558,7 @@ def create_test_projection(
         domain="registration",
         current_state=state,
         node_type=node_type,
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         capabilities=ModelNodeCapabilities(postgres=True, read=True, write=True),
         ack_deadline=ack_deadline,
         liveness_deadline=liveness_deadline,

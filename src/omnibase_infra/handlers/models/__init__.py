@@ -5,14 +5,17 @@
 This module exports Pydantic models for handler request/response structures.
 All models are strongly typed to eliminate Any usage.
 
+Common Models:
+    ModelRetryState: Encapsulates retry state for handler operations
+    ModelOperationContext: Encapsulates operation context for handler tracking
+
 Generic Response Model:
     ModelHandlerResponse: Generic handler response envelope (parameterized by payload type)
 
 Database Models:
     ModelDbQueryPayload: Payload containing database query results
     ModelDbQueryResponse: Full database query response envelope
-    ModelDbHealthResponse: Database adapter health check response
-    ModelDbDescribeResponse: Database adapter metadata and capabilities
+    ModelDbDescribeResponse: Database handler metadata and capabilities
 
 Consul Models:
     ModelConsulHandlerPayload: Payload containing Consul operation results
@@ -25,7 +28,6 @@ Consul Models:
     ModelConsulKVPutPayload: Payload for consul.kv_put result
     ModelConsulRegisterPayload: Payload for consul.register result
     ModelConsulDeregisterPayload: Payload for consul.deregister result
-    ModelConsulHealthCheckPayload: Payload for consul.health_check result
     ConsulPayload: Discriminated union of all Consul payload types
 
 Vault Models:
@@ -37,7 +39,6 @@ Vault Models:
     ModelVaultDeletePayload: Payload for vault.delete_secret result
     ModelVaultListPayload: Payload for vault.list_secrets result
     ModelVaultRenewTokenPayload: Payload for vault.renew_token result
-    ModelVaultHealthCheckPayload: Payload for vault.health_check result
     VaultPayload: Discriminated union of all Vault payload types
 
 HTTP Models:
@@ -46,7 +47,6 @@ HTTP Models:
     EnumHttpOperationType: Discriminator enum for HTTP operation types
     ModelHttpGetPayload: Payload for http.get result
     ModelHttpPostPayload: Payload for http.post result
-    ModelHttpHealthCheckPayload: Payload for HTTP health check result
     HttpPayload: Discriminated union of all HTTP payload types
 """
 
@@ -55,7 +55,6 @@ from omnibase_infra.handlers.models.consul import (
     EnumConsulOperationType,
     ModelConsulDeregisterPayload,
     ModelConsulHandlerPayload,
-    ModelConsulHealthCheckPayload,
     ModelConsulKVGetFoundPayload,
     ModelConsulKVGetNotFoundPayload,
     ModelConsulKVGetRecursePayload,
@@ -66,9 +65,9 @@ from omnibase_infra.handlers.models.consul import (
 from omnibase_infra.handlers.models.http import (
     EnumHttpOperationType,
     HttpPayload,
+    ModelHttpBodyContent,
     ModelHttpGetPayload,
     ModelHttpHandlerPayload,
-    ModelHttpHealthCheckPayload,
     ModelHttpPostPayload,
 )
 from omnibase_infra.handlers.models.model_consul_handler_response import (
@@ -76,9 +75,6 @@ from omnibase_infra.handlers.models.model_consul_handler_response import (
 )
 from omnibase_infra.handlers.models.model_db_describe_response import (
     ModelDbDescribeResponse,
-)
-from omnibase_infra.handlers.models.model_db_health_response import (
-    ModelDbHealthResponse,
 )
 from omnibase_infra.handlers.models.model_db_query_payload import ModelDbQueryPayload
 from omnibase_infra.handlers.models.model_db_query_response import ModelDbQueryResponse
@@ -88,6 +84,10 @@ from omnibase_infra.handlers.models.model_handler_response import (
 from omnibase_infra.handlers.models.model_http_handler_response import (
     ModelHttpHandlerResponse,
 )
+from omnibase_infra.handlers.models.model_operation_context import (
+    ModelOperationContext,
+)
+from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
 from omnibase_infra.handlers.models.model_vault_handler_response import (
     ModelVaultHandlerResponse,
 )
@@ -95,7 +95,6 @@ from omnibase_infra.handlers.models.vault import (
     EnumVaultOperationType,
     ModelVaultDeletePayload,
     ModelVaultHandlerPayload,
-    ModelVaultHealthCheckPayload,
     ModelVaultListPayload,
     ModelVaultRenewTokenPayload,
     ModelVaultSecretPayload,
@@ -104,46 +103,48 @@ from omnibase_infra.handlers.models.vault import (
 )
 
 __all__: list[str] = [
-    # Generic response model
-    "ModelHandlerResponse",
+    "ConsulPayload",
     # Consul payload types (discriminated union)
     "EnumConsulOperationType",
-    "ModelConsulKVItem",
-    "ModelConsulKVGetFoundPayload",
-    "ModelConsulKVGetNotFoundPayload",
-    "ModelConsulKVGetRecursePayload",
-    "ModelConsulKVPutPayload",
-    "ModelConsulRegisterPayload",
+    # HTTP payload types (discriminated union)
+    "EnumHttpOperationType",
+    # Vault payload types (discriminated union)
+    "EnumVaultOperationType",
+    "HttpPayload",
     "ModelConsulDeregisterPayload",
-    "ModelConsulHealthCheckPayload",
-    "ConsulPayload",
     # Consul wrapper models
     "ModelConsulHandlerPayload",
     "ModelConsulHandlerResponse",
+    "ModelConsulKVGetFoundPayload",
+    "ModelConsulKVGetNotFoundPayload",
+    "ModelConsulKVGetRecursePayload",
+    "ModelConsulKVItem",
+    "ModelConsulKVPutPayload",
+    "ModelConsulRegisterPayload",
     # Database models
     "ModelDbQueryPayload",
     "ModelDbQueryResponse",
-    "ModelDbHealthResponse",
     "ModelDbDescribeResponse",
-    # Vault payload types (discriminated union)
-    "EnumVaultOperationType",
-    "ModelVaultSecretPayload",
-    "ModelVaultWritePayload",
-    "ModelVaultDeletePayload",
-    "ModelVaultListPayload",
-    "ModelVaultRenewTokenPayload",
-    "ModelVaultHealthCheckPayload",
-    "VaultPayload",
-    # Vault wrapper models
-    "ModelVaultHandlerPayload",
-    "ModelVaultHandlerResponse",
-    # HTTP payload types (discriminated union)
-    "EnumHttpOperationType",
+    # Generic response model
+    "ModelHandlerResponse",
+    # HTTP models
+    "ModelHttpBodyContent",
     "ModelHttpGetPayload",
-    "ModelHttpPostPayload",
-    "ModelHttpHealthCheckPayload",
-    "HttpPayload",
     # HTTP wrapper models
     "ModelHttpHandlerPayload",
     "ModelHttpHandlerResponse",
+    "ModelHttpPostPayload",
+    # Common models for retry and operation tracking
+    "ModelOperationContext",
+    "ModelRetryState",
+    # Vault models
+    "ModelVaultDeletePayload",
+    # Vault wrapper models
+    "ModelVaultHandlerPayload",
+    "ModelVaultHandlerResponse",
+    "ModelVaultListPayload",
+    "ModelVaultRenewTokenPayload",
+    "ModelVaultSecretPayload",
+    "ModelVaultWritePayload",
+    "VaultPayload",
 ]
