@@ -22,6 +22,16 @@ from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import ModelHandlerIdentifier
 from omnibase_infra.models.health import ModelHealthCheckResult
 from omnibase_infra.models.logging import ModelLogContext
+from omnibase_infra.models.model_retry_error_classification import (
+    ModelRetryErrorClassification,
+)
+
+# ModelSemVer and SEMVER_DEFAULT must be imported from omnibase_core.models.primitives.model_semver
+# The local model_semver.py has been REMOVED and raises ImportError on import.
+# Import directly from omnibase_core:
+#   from omnibase_core.models.primitives.model_semver import ModelSemVer
+# To create SEMVER_DEFAULT:
+#   SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 from omnibase_infra.models.projection import (
     ModelRegistrationProjection,
     ModelRegistrationSnapshot,
@@ -37,6 +47,10 @@ from omnibase_infra.models.registration import (
     ModelNodeRegistration,
 )
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+from omnibase_infra.models.security import (
+    ModelEnvironmentPolicy,
+    ModelHandlerSecurityPolicy,
+)
 from omnibase_infra.models.validation import (
     ModelCoverageMetrics,
     ModelExecutionShapeRule,
@@ -80,6 +94,11 @@ __all__: list[str] = [
     # Projection models
     "ModelRegistrationProjection",
     "ModelRegistrationSnapshot",
+    # Retry models
+    "ModelRetryErrorClassification",
+    # Security models
+    "ModelEnvironmentPolicy",
+    "ModelHandlerSecurityPolicy",
     "ModelSequenceInfo",
     "ModelSnapshotTopicConfig",
     "ModelTopicParser",

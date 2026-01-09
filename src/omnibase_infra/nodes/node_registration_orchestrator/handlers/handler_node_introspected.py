@@ -31,13 +31,13 @@ Projection Persistence:
     for testing or when projection persistence is handled elsewhere.
 
 Consul Registration (Dual Registration):
-    When the handler initiates registration and a ConsulHandler is provided,
+    When the handler initiates registration and a HandlerConsul is provided,
     it registers the node with Consul for service discovery AFTER persisting
     to PostgreSQL. This enables dual registration:
     - PostgreSQL: Projection state for orchestrator FSM
     - Consul: Service discovery for runtime lookup
 
-    If ConsulHandler is not provided or Consul registration fails, the handler
+    If HandlerConsul is not provided or Consul registration fails, the handler
     logs the failure but continues (PostgreSQL is the source of truth).
 
 Coroutine Safety:
@@ -61,10 +61,9 @@ from uuid import UUID, uuid4
 from omnibase_infra.enums import EnumRegistrationState
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
     from pydantic import BaseModel
 
-    from omnibase_infra.handlers import ConsulHandler
+    from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.projectors import ProjectorRegistration
 from omnibase_infra.models.registration.events.model_node_registration_initiated import (
     ModelNodeRegistrationInitiated,
@@ -120,7 +119,7 @@ class HandlerNodeIntrospected:
         returns the updated projection immediately after event processing.
 
     Consul Registration (Dual Registration):
-        When a ConsulHandler is configured, the handler registers the node
+        When a HandlerConsul is configured, the handler registers the node
         with Consul AFTER persisting to PostgreSQL. This enables service
         discovery via Consul while maintaining PostgreSQL as source of truth.
 
@@ -178,7 +177,7 @@ class HandlerNodeIntrospected:
         projection_reader: ProjectionReaderRegistration,
         projector: ProjectorRegistration | None = None,
         ack_timeout_seconds: float | None = None,
-        consul_handler: ConsulHandler | None = None,
+        consul_handler: HandlerConsul | None = None,
     ) -> None:
         """Initialize the handler with a projection reader and optional components.
 
@@ -188,7 +187,7 @@ class HandlerNodeIntrospected:
                 If None, the handler operates in read-only mode (useful for testing).
             ack_timeout_seconds: Timeout in seconds for node acknowledgment.
                 Default: 30 seconds. Used to calculate ack_deadline when persisting.
-            consul_handler: Optional ConsulHandler for Consul service registration.
+            consul_handler: Optional HandlerConsul for Consul service registration.
                 If provided, nodes will be registered with Consul for service discovery.
                 If None or not initialized, Consul registration is skipped.
         """
@@ -208,7 +207,7 @@ class HandlerNodeIntrospected:
 
     @property
     def has_consul_handler(self) -> bool:
-        """Check if ConsulHandler is configured for Consul registration."""
+        """Check if HandlerConsul is configured for Consul registration."""
         return self._consul_handler is not None
 
     async def handle(
@@ -321,19 +320,19 @@ class HandlerNodeIntrospected:
             ack_deadline = now + timedelta(seconds=self._ack_timeout_seconds)
 
             # Extract node type and version from introspection event
-            # node_type is Literal["effect", "compute", "reducer", "orchestrator"]
+            # node_type is EnumNodeKind (enum with values: effect, compute, reducer, orchestrator)
             node_type = event.node_type
             node_version = event.node_version
 
-            # Use capabilities directly from the introspection event
-            # ModelNodeIntrospectionEvent.capabilities is already ModelNodeCapabilities
-            capabilities = event.capabilities
+            # Use declared_capabilities directly from the introspection event
+            # ModelNodeIntrospectionEvent.declared_capabilities is already ModelNodeCapabilities
+            capabilities = event.declared_capabilities
 
             await self._projector.persist_state_transition(
                 entity_id=node_id,
                 domain="registration",
                 new_state=EnumRegistrationState.PENDING_REGISTRATION,
-                node_type=node_type,
+                node_type=node_type.value,
                 node_version=node_version,
                 capabilities=capabilities,
                 event_id=registration_attempt_id,
@@ -364,7 +363,7 @@ class HandlerNodeIntrospected:
         # This happens AFTER PostgreSQL persistence (source of truth)
         await self._register_with_consul(
             node_id=node_id,
-            node_type=event.node_type,
+            node_type=event.node_type.value,
             endpoints=event.endpoints,
             correlation_id=correlation_id,
         )
@@ -406,7 +405,7 @@ class HandlerNodeIntrospected:
         """
         if self._consul_handler is None:
             logger.debug(
-                "No ConsulHandler configured, skipping Consul registration",
+                "No HandlerConsul configured, skipping Consul registration",
                 extra={
                     "node_id": str(node_id),
                     "correlation_id": str(correlation_id),
@@ -483,7 +482,7 @@ class HandlerNodeIntrospected:
                     )
 
         # Build Consul registration payload
-        consul_payload: dict[str, JsonType] = {
+        consul_payload: dict[str, object] = {
             "name": service_name,
             "service_id": service_id,
             "tags": ["onex", f"node-type:{node_type}"],
@@ -494,8 +493,8 @@ class HandlerNodeIntrospected:
             consul_payload["port"] = port
 
         try:
-            # Build envelope for ConsulHandler.execute()
-            envelope: dict[str, JsonType] = {
+            # Build envelope for HandlerConsul.execute()
+            envelope: dict[str, object] = {
                 "operation": "consul.register",
                 "payload": consul_payload,
                 "correlation_id": str(correlation_id),

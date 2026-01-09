@@ -326,19 +326,6 @@ class ModelSnapshotTopicConfig(BaseModel):
 
         return topic
 
-    @field_validator("min_compaction_lag_ms", "max_compaction_lag_ms", mode="after")
-    @classmethod
-    def validate_compaction_lag_values(cls, v: int) -> int:
-        """Validate individual compaction lag values.
-
-        Individual field validation is handled by Pydantic's Field constraints
-        (ge=0, le=604800000). This validator exists for extensibility if
-        additional per-field validation is needed in the future.
-
-        Note: Cross-field validation (min <= max) is done in model_validator.
-        """
-        return v
-
     @model_validator(mode="after")
     def validate_compaction_lag_order(self) -> ModelSnapshotTopicConfig:
         """Validate that min_compaction_lag_ms <= max_compaction_lag_ms.

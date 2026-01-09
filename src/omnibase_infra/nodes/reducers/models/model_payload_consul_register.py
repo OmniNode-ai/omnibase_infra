@@ -9,7 +9,6 @@ It contains the same data as ModelConsulRegisterIntent but with an
 Related:
     - ModelConsulRegisterIntent: Core intent model (uses `kind` discriminator)
     - ProtocolIntentPayload: Protocol requiring `intent_type` property
-    - OMN-1260: Fix JsonValue/JsonType and validation import migration
 """
 
 from __future__ import annotations
@@ -17,15 +16,16 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from omnibase_core.models.reducer.payloads import ModelIntentPayloadBase
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
+
+# NOTE: ModelIntentPayloadBase was removed in omnibase_core 0.6.2
+# Using pydantic.BaseModel directly as the base class
 
 
-class ModelPayloadConsulRegister(ModelIntentPayloadBase):
+class ModelPayloadConsulRegister(BaseModel):
     """Payload for Consul service registration intents.
 
-    This payload extends ModelIntentPayloadBase to satisfy ProtocolIntentPayload,
-    enabling use with ModelIntent for reducer output.
+    This payload follows the ONEX intent payload pattern for use with ModelIntent.
 
     Attributes:
         intent_type: Discriminator literal for intent routing. Always "consul.register".
@@ -35,6 +35,8 @@ class ModelPayloadConsulRegister(ModelIntentPayloadBase):
         tags: Service tags for filtering and categorization.
         health_check: Optional health check configuration.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     intent_type: Literal["consul.register"] = Field(
         default="consul.register",

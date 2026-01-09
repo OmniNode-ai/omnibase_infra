@@ -24,6 +24,54 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
+# Service Registry Availability Check
+# =============================================================================
+
+
+def check_service_registry_available() -> bool:
+    """Check if ServiceRegistry is available in ModelONEXContainer.
+
+    Creates a temporary container to check for service_registry availability,
+    then explicitly cleans up the container to prevent resource leaks.
+
+    This function is used by test modules to determine whether to skip tests
+    that require ServiceRegistry. The check is needed because omnibase_core 0.6.x
+    has a circular import issue that causes ServiceRegistry to be None when
+    the container is initialized.
+
+    Returns:
+        True if service_registry is available and not None, False otherwise.
+
+    Note:
+        The circular import path in omnibase_core 0.6.2 is:
+        model_onex_container.py -> container_service_registry.py ->
+        container/__init__.py -> container_service_resolver.py ->
+        ModelONEXContainer (still loading)
+
+        Tests requiring ServiceRegistry should skip gracefully when this
+        function returns False. Upgrade to omnibase_core >= 0.6.3 to resolve.
+    """
+    container = None
+    try:
+        from omnibase_core.container import ModelONEXContainer
+
+        container = ModelONEXContainer()
+        return container.service_registry is not None
+    except AttributeError:
+        # service_registry attribute removed in omnibase_core 0.6.x
+        return False
+    except TypeError:
+        # ModelONEXContainer.__init__ signature changed (new required params)
+        return False
+    except ImportError:
+        # omnibase_core not installed or import failed
+        return False
+    finally:
+        # Explicit cleanup of temporary container
+        del container
+
+
+# =============================================================================
 # Duck Typing Conformance Helpers
 # =============================================================================
 
@@ -393,7 +441,7 @@ def container_with_policy_registry(mock_container: MagicMock) -> PolicyRegistry:
 
 
 @pytest.fixture
-async def container_with_registries() -> AsyncGenerator[ModelONEXContainer, None]:
+async def container_with_registries() -> ModelONEXContainer:
     """Create real ONEX container with wired infrastructure services.
 
     Provides a fully wired ModelONEXContainer with PolicyRegistry and
@@ -408,7 +456,7 @@ async def container_with_registries() -> AsyncGenerator[ModelONEXContainer, None
         - The ServiceRegistry module is not installed/available
         This fixture explicitly enables service_registry and validates it.
 
-    Yields:
+    Returns:
         ModelONEXContainer instance with infrastructure services wired.
 
     Raises:
@@ -476,10 +524,8 @@ async def container_with_registries() -> AsyncGenerator[ModelONEXContainer, None
     except ServiceRegistryUnavailableError as e:
         pytest.skip(f"ServiceRegistry unavailable: {e}")
 
-    # Yield container for proper fixture teardown semantics.
-    # ModelONEXContainer doesn't have explicit cleanup methods currently,
-    # but using yield allows for future cleanup needs and ensures proper
-    # pytest async fixture lifecycle management.
+    # Return container. Note: ModelONEXContainer doesn't have explicit cleanup
+    # methods currently. If future cleanup needs arise, change this to yield.
     return container
 
 
@@ -529,7 +575,7 @@ async def container_with_handler_registry(
 
 
 @pytest.fixture
-async def cleanup_consul_test_services():
+async def cleanup_consul_test_services() -> AsyncGenerator[None, None]:
     """Clean up orphaned Consul service registrations after each test.
 
     This fixture provides comprehensive Consul cleanup by:
@@ -583,9 +629,9 @@ async def cleanup_consul_test_services():
 
     # Import and create handler for cleanup
     try:
-        from omnibase_infra.handlers import ConsulHandler
+        from omnibase_infra.handlers import HandlerConsul
 
-        handler = ConsulHandler()
+        handler = HandlerConsul()
         await handler.initialize(
             {
                 "host": consul_host,
@@ -597,7 +643,7 @@ async def cleanup_consul_test_services():
 
         try:
             # Get all registered services
-            # NOTE: consul.list_services is not yet implemented in ConsulHandler.
+            # NOTE: consul.list_services is not yet implemented in HandlerConsul.
             # When implemented, it should return ModelHandlerOutput with services data.
             # For now, this will raise RuntimeHostError for unsupported operation,
             # which is caught by the outer exception handler.
@@ -679,7 +725,7 @@ async def cleanup_consul_test_services():
 
 
 @pytest.fixture
-async def cleanup_postgres_test_projections():
+async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
     """Clean up stale PostgreSQL projection rows after tests.
 
     This fixture provides comprehensive PostgreSQL cleanup by:
@@ -781,7 +827,7 @@ async def cleanup_postgres_test_projections():
 
 
 @pytest.fixture
-async def cleanup_kafka_test_consumer_groups():
+async def cleanup_kafka_test_consumer_groups() -> AsyncGenerator[None, None]:
     """Reset Kafka consumer group offsets for test consumer groups after tests.
 
     This fixture provides Kafka consumer group cleanup by:
@@ -871,10 +917,10 @@ async def cleanup_kafka_test_consumer_groups():
 
 @pytest.fixture
 async def full_infrastructure_cleanup(
-    cleanup_consul_test_services,
-    cleanup_postgres_test_projections,
-    cleanup_kafka_test_consumer_groups,
-):
+    cleanup_consul_test_services: None,
+    cleanup_postgres_test_projections: None,
+    cleanup_kafka_test_consumer_groups: None,
+) -> None:
     """Combined fixture that provides cleanup for all infrastructure components.
 
     This is a convenience fixture that combines all infrastructure cleanup

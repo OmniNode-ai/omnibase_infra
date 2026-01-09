@@ -1,0 +1,225 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeRegistrationStorageEffect
+#
+# Capability-oriented effect node for registration storage operations.
+# Named by capability ("registration.storage"), not by vendor (e.g., PostgreSQL).
+# Principle: "I'm interested in what you do, not what you are"
+#
+# This contract defines the interface for storage operations with pluggable backends.
+# Handlers implementing ProtocolRegistrationStorageHandler can be swapped without
+# changing the node interface.
+# Contract identifiers
+name: "node_registration_storage_effect"
+contract_name: "node_registration_storage_effect"
+node_name: "node_registration_storage_effect"
+# Version (semantic versioning)
+version:
+  major: 1
+  minor: 0
+  patch: 0
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+# Node type
+node_type: "EFFECT"
+# Description
+description: >
+  Capability-oriented effect node for registration storage operations. Handles store, query, update, and delete operations for node registrations with pluggable backend handlers (e.g., PostgreSQL).
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelStorageQuery"
+  module: "omnibase_infra.nodes.node_registration_storage_effect.models"
+  description: "Input model for storage query operations."
+output_model:
+  name: "ModelStorageResult"
+  module: "omnibase_infra.nodes.node_registration_storage_effect.models"
+  description: "Output model containing query results and metadata."
+# Capability declaration (capability-oriented naming)
+capabilities:
+  - name: "registration.storage"
+    description: "Store, query, update, and delete node registration records"
+    version: "1.0.0"
+  - name: "registration.storage.query"
+    description: "Query registration records with filtering and pagination"
+  - name: "registration.storage.upsert"
+    description: "Insert or update registration records idempotently"
+  - name: "registration.storage.delete"
+    description: "Delete registration records by node ID"
+  - name: "registration.storage.health"
+    description: "Health check for storage backend connectivity"
+# IO operations (EFFECT node specific)
+# Note: correlation_id is optional (UUID | None) for all operations.
+# If not provided, implementations should generate one for tracing.
+io_operations:
+  - operation: "store_registration"
+    description: "Store a new registration record or update existing"
+    input_fields:
+      - record: "ModelRegistrationRecord"
+      - correlation_id: "UUID | None"
+    output_fields:
+      - result: "ModelUpsertResult"
+    idempotent: true
+  - operation: "query_registrations"
+    description: "Query registration records with optional filters"
+    input_fields:
+      - query: "ModelStorageQuery"
+      - correlation_id: "UUID | None"
+    output_fields:
+      - result: "ModelStorageResult"
+    idempotent: true
+  - operation: "update_registration"
+    description: "Update specific fields of a registration record"
+    input_fields:
+      - node_id: "UUID"
+      - updates: "ModelRegistrationUpdate"
+      - correlation_id: "UUID | None"
+    output_fields:
+      - result: "ModelUpsertResult"
+    idempotent: true
+  - operation: "delete_registration"
+    description: "Delete a registration record by node ID"
+    input_fields:
+      - node_id: "UUID"
+      - correlation_id: "UUID | None"
+    output_fields:
+      - success: "bool"
+    idempotent: true
+  - operation: "health_check"
+    description: "Check storage backend health and connectivity"
+    input_fields:
+      - correlation_id: "UUID | None"
+    output_fields:
+      - result: "ModelStorageHealthCheckResult"
+    idempotent: true
+# Database schema definition (for PostgreSQL backend)
+database_schema:
+  table_name: "node_registrations"
+  columns:
+    - name: "node_id"
+      type: "UUID"
+      constraints: "PRIMARY KEY"
+      description: "Unique identifier for the registered node"
+    - name: "node_type"
+      type: "VARCHAR(64)"
+      constraints: "NOT NULL"
+      description: "Node archetype (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)"
+    - name: "node_version"
+      type: "VARCHAR(32)"
+      constraints: "NOT NULL"
+      description: "Semantic version of the node"
+    - name: "capabilities"
+      type: "JSONB"
+      constraints: "NOT NULL DEFAULT '[]'"
+      description: "Array of capability identifiers the node provides"
+    - name: "endpoints"
+      type: "JSONB"
+      constraints: "NOT NULL DEFAULT '{}'"
+      description: "Map of endpoint names to URLs"
+    - name: "metadata"
+      type: "JSONB"
+      constraints: "NOT NULL DEFAULT '{}'"
+      description: "Additional key-value metadata"
+    - name: "created_at"
+      type: "TIMESTAMPTZ"
+      constraints: "NOT NULL DEFAULT NOW()"
+      description: "Timestamp when the registration was created"
+    - name: "updated_at"
+      type: "TIMESTAMPTZ"
+      constraints: "NOT NULL DEFAULT NOW()"
+      description: "Timestamp when the registration was last updated"
+  indexes:
+    - name: "idx_node_registrations_type"
+      columns: ["node_type"]
+      description: "Index for filtering by node type"
+    - name: "idx_node_registrations_updated"
+      columns: ["updated_at"]
+      description: "Index for ordering by recency"
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "protocol_registration_storage_handler"
+    type: "protocol"
+    class_name: "ProtocolRegistrationStorageHandler"
+    module: "omnibase_infra.nodes.node_registration_storage_effect.protocols"
+    description: "Protocol for registration storage backends (e.g., PostgreSQL, mock)"
+    pluggable: true
+    implementations:
+      - name: "postgresql"
+        description: "PostgreSQL implementation for registration storage"
+      - name: "mock"
+        description: "Mock implementation for testing and development"
+# Handler routing (for pluggable backends)
+handler_routing:
+  routing_strategy: "handler_type_match"
+  default_handler: "postgresql"
+  handlers:
+    - handler_type: "postgresql"
+      handler:
+        name: "HandlerPostgresRegistrationStorage"
+        module: "omnibase_infra.handlers.registration_storage.handler_postgres_registration_storage"
+      description: "PostgreSQL storage handler"
+    - handler_type: "mock"
+      handler:
+        name: "HandlerMockRegistrationStorage"
+        module: "omnibase_infra.handlers.registration_storage.handler_mock_registration_storage"
+      description: "Mock storage handler for testing"
+# Error handling configuration
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+  error_types:
+    - name: "StorageConnectionError"
+      description: "Unable to connect to storage backend"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "StorageTimeoutError"
+      description: "Storage operation timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "RecordNotFoundError"
+      description: "Registration record not found"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "ValidationError"
+      description: "Input validation failed"
+      recoverable: false
+      retry_strategy: "none"
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  timeout_ms: 5000
+  checks:
+    - name: "storage_backend"
+      type: "connection"
+      critical: true
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2025-01-06"
+  tags:
+    - effect
+    - registration
+    - storage
+    - capability-oriented
+    - pluggable-backend

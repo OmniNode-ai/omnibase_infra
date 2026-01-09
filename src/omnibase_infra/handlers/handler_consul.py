@@ -82,11 +82,8 @@ from omnibase_infra.mixins import (
     MixinAsyncCircuitBreaker,
     MixinEnvelopeExtraction,
     MixinRetryExecution,
-    RetryErrorClassification,
+    ModelRetryErrorClassification,
 )
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
 
 T = TypeVar("T")
 
@@ -120,7 +117,7 @@ class RetryContext(NamedTuple):
     operation_context: ModelOperationContext
 
 
-class ConsulHandler(
+class HandlerConsul(
     MixinAsyncCircuitBreaker,
     MixinRetryExecution,
     MixinEnvelopeExtraction,
@@ -189,7 +186,7 @@ class ConsulHandler(
 
     Error Context Design:
         Error contexts use static target_name="consul_handler" for consistency with
-        VaultHandler and other infrastructure handlers. This provides predictable
+        HandlerVault and other infrastructure handlers. This provides predictable
         error categorization and log filtering across all Consul operations.
 
         For multi-DC deployments, datacenter differentiation is achieved via:
@@ -207,7 +204,7 @@ class ConsulHandler(
     """
 
     def __init__(self) -> None:
-        """Initialize ConsulHandler in uninitialized state.
+        """Initialize HandlerConsul in uninitialized state.
 
         Note: Circuit breaker is initialized during initialize() call when
         configuration is available. The mixin's _init_circuit_breaker() method
@@ -289,7 +286,7 @@ class ConsulHandler(
 
     def _classify_error(
         self, error: Exception, operation: str
-    ) -> RetryErrorClassification:
+    ) -> ModelRetryErrorClassification:
         """Classify Consul-specific exceptions for retry handling.
 
         Args:
@@ -297,10 +294,10 @@ class ConsulHandler(
             operation: The operation name for context.
 
         Returns:
-            RetryErrorClassification with retry decision and error details.
+            ModelRetryErrorClassification with retry decision and error details.
         """
         if isinstance(error, TimeoutError):
-            return RetryErrorClassification(
+            return ModelRetryErrorClassification(
                 category=EnumRetryErrorCategory.TIMEOUT,
                 should_retry=True,
                 record_circuit_failure=True,
@@ -308,7 +305,7 @@ class ConsulHandler(
             )
 
         if isinstance(error, consul.ACLPermissionDenied):
-            return RetryErrorClassification(
+            return ModelRetryErrorClassification(
                 category=EnumRetryErrorCategory.AUTHENTICATION,
                 should_retry=False,
                 record_circuit_failure=True,
@@ -316,7 +313,7 @@ class ConsulHandler(
             )
 
         if isinstance(error, consul.Timeout):
-            return RetryErrorClassification(
+            return ModelRetryErrorClassification(
                 category=EnumRetryErrorCategory.TIMEOUT,
                 should_retry=True,
                 record_circuit_failure=True,
@@ -324,7 +321,7 @@ class ConsulHandler(
             )
 
         if isinstance(error, consul.ConsulException):
-            return RetryErrorClassification(
+            return ModelRetryErrorClassification(
                 category=EnumRetryErrorCategory.CONNECTION,
                 should_retry=True,
                 record_circuit_failure=True,
@@ -332,14 +329,14 @@ class ConsulHandler(
             )
 
         # Unknown error - retry eligible
-        return RetryErrorClassification(
+        return ModelRetryErrorClassification(
             category=EnumRetryErrorCategory.UNKNOWN,
             should_retry=True,
             record_circuit_failure=True,
             error_message=f"Unexpected error: {type(error).__name__}",
         )
 
-    async def initialize(self, config: dict[str, JsonType]) -> None:
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize Consul client with configuration.
 
         Args:
@@ -422,7 +419,7 @@ class ConsulHandler(
         self._config = None
         self._circuit_breaker_initialized = False
         logger.info(
-            "ConsulHandler shutdown complete",
+            "HandlerConsul shutdown complete",
             extra={
                 "correlation_id": str(shutdown_correlation_id),
             },
@@ -437,7 +434,7 @@ class ConsulHandler(
         """Build standardized ModelConsulHandlerResponse wrapped in ModelHandlerOutput.
 
         This helper method ensures consistent response formatting across all
-        Consul operations, matching the pattern used by DbHandler.
+        Consul operations, matching the pattern used by HandlerDb.
 
         Args:
             typed_payload: Strongly-typed payload from the discriminated union.
@@ -460,7 +457,7 @@ class ConsulHandler(
         )
 
     async def execute(
-        self, envelope: dict[str, JsonType]
+        self, envelope: dict[str, object]
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Execute Consul operation from envelope.
 
@@ -491,7 +488,7 @@ class ConsulHandler(
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "ConsulHandler not initialized. Call initialize() first.",
+                "HandlerConsul not initialized. Call initialize() first.",
                 context=ctx,
             )
 
@@ -710,7 +707,7 @@ class ConsulHandler(
 
             return None, new_state
 
-    def describe(self) -> dict[str, JsonType]:
+    def describe(self) -> dict[str, object]:
         """Return handler metadata and capabilities for introspection.
 
         This method exposes the handler's type classification along with its
@@ -754,4 +751,4 @@ class ConsulHandler(
         }
 
 
-__all__: list[str] = ["ConsulHandler", "RetryContext"]
+__all__: list[str] = ["HandlerConsul", "RetryContext"]

@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
-    from omnibase_infra.handlers import ConsulHandler
+    from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 
 async def verify_consul_registration(
-    consul_handler: ConsulHandler,
+    consul_handler: HandlerConsul,
     service_id: str,
     timeout_seconds: float = 5.0,
     *,
@@ -75,7 +75,7 @@ async def verify_consul_registration(
     timeout to handle async registration propagation.
 
     Args:
-        consul_handler: Initialized ConsulHandler instance.
+        consul_handler: Initialized HandlerConsul instance.
         service_id: The service ID to verify.
         timeout_seconds: Maximum time to wait for registration.
         correlation_id: Optional correlation ID for tracing.
@@ -134,7 +134,7 @@ async def verify_consul_registration(
 
 
 async def wait_for_consul_registration(
-    consul_handler: ConsulHandler,
+    consul_handler: HandlerConsul,
     service_id: str,
     timeout_seconds: float = 10.0,
     poll_interval: float = 0.5,
@@ -146,7 +146,7 @@ async def wait_for_consul_registration(
     Polls Consul until the service is registered or timeout is reached.
 
     Args:
-        consul_handler: Initialized ConsulHandler instance.
+        consul_handler: Initialized HandlerConsul instance.
         service_id: The service ID to wait for.
         timeout_seconds: Maximum time to wait.
         poll_interval: Time between poll attempts.
@@ -555,7 +555,7 @@ async def collect_registration_events(
 
 
 async def verify_dual_registration(
-    consul_handler: ConsulHandler,
+    consul_handler: HandlerConsul,
     projection_reader: ProjectionReaderRegistration,
     node_id: UUID,
     service_id: str,
@@ -569,7 +569,7 @@ async def verify_dual_registration(
     dual registration pattern completed successfully.
 
     Args:
-        consul_handler: Initialized ConsulHandler instance.
+        consul_handler: Initialized HandlerConsul instance.
         projection_reader: Initialized ProjectionReaderRegistration instance.
         node_id: UUID of the node.
         service_id: Consul service ID.
@@ -839,7 +839,7 @@ def assert_introspection_event_complete(event: ModelNodeIntrospectionEvent) -> N
     assert event.correlation_id is not None, "correlation_id is required"
     assert event.timestamp is not None, "timestamp is required"
     assert event.timestamp.tzinfo is not None, "timestamp must be timezone-aware"
-    assert event.capabilities is not None, "capabilities is required"
+    assert event.declared_capabilities is not None, "declared_capabilities is required"
 
 
 def assert_registration_initiated(event: ModelNodeRegistrationInitiated) -> None:
@@ -887,7 +887,7 @@ def assert_node_became_active(event: ModelNodeBecameActive) -> None:
     assert event.correlation_id is not None, "correlation_id is required"
     assert event.causation_id is not None, "causation_id is required"
     assert event.emitted_at is not None, "emitted_at is required"
-    assert event.capabilities is not None, "capabilities is required"
+    assert event.declared_capabilities is not None, "declared_capabilities is required"
 
 
 def assert_registration_accepted(event: ModelNodeRegistrationAccepted) -> None:

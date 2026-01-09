@@ -21,6 +21,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumNodeArchetype
 
@@ -50,6 +52,23 @@ from tests.helpers.ast_analysis import get_imported_root_modules
 
 # Alias for backward compatibility with existing test code in this file
 _get_imported_root_modules = get_imported_root_modules
+
+
+def _payload_to_dict(payload: object) -> dict[str, object]:
+    """Convert intent payload to dict, handling both dict and Pydantic model payloads.
+
+    The reducer may return payloads as either:
+    - dict: When payload is constructed inline or from model_dump()
+    - Pydantic model: When payload is a proper ModelPayload* instance
+
+    This helper normalizes both cases for test assertions.
+    """
+    if isinstance(payload, dict):
+        return payload
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump()
+    # Fallback: try to convert to dict
+    return dict(payload) if payload else {}
 
 
 # Forbidden I/O libraries that must NEVER appear in reducer imports
@@ -189,8 +208,8 @@ class TestDeterminismGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
@@ -244,8 +263,8 @@ class TestDeterminismGates:
         initial_state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
@@ -292,16 +311,16 @@ class TestDeterminismGates:
         # Create identical events with same correlation_id
         event1 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             timestamp=fixed_timestamp,
             correlation_id=fixed_correlation_id,
         )
         event2 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             timestamp=fixed_timestamp,
             correlation_id=fixed_correlation_id,
@@ -319,8 +338,8 @@ class TestDeterminismGates:
         # Different event should produce different ID
         event3 = ModelNodeIntrospectionEvent(
             node_id=UUID("99999999-9999-9999-9999-999999999999"),  # Different node_id
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             timestamp=fixed_timestamp,
             correlation_id=fixed_correlation_id,  # Same correlation_id
@@ -363,8 +382,8 @@ class TestDeterminismGates:
         # ---------------------------------------------------------------------
         event_empty_endpoints = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},  # Empty
             timestamp=fixed_timestamp,
             correlation_id=fixed_correlation_id,
@@ -383,8 +402,8 @@ class TestDeterminismGates:
         very_long_path = "/path" * 1000  # 5000 character path
         event_long_urls = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.COMPUTE.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={
                 "health": f"http://localhost:8080{very_long_path}",
                 "api": f"https://api.example.com{very_long_path}",
@@ -402,8 +421,8 @@ class TestDeterminismGates:
         # ---------------------------------------------------------------------
         event_special_chars = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.REDUCER.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.REDUCER,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={
                 "health": "http://localhost:8080/health?param=value&other=123",
                 "metrics": "http://localhost:9090/metrics#section",
@@ -424,8 +443,8 @@ class TestDeterminismGates:
         # ---------------------------------------------------------------------
         event_unicode = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.ORCHESTRATOR.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.ORCHESTRATOR,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={
                 "intl": "http://xn--n3h.example.com/api",  # Punycode for emoji domain
                 "path_unicode": "http://localhost:8080/%E4%B8%AD%E6%96%87",  # URL-encoded Chinese
@@ -446,16 +465,16 @@ class TestDeterminismGates:
         # ---------------------------------------------------------------------
         event_ts1 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             timestamp=fixed_timestamp,
             correlation_id=fixed_correlation_id,
         )
         event_ts2 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             timestamp=fixed_timestamp + timedelta(seconds=1),  # 1 second later
             correlation_id=fixed_correlation_id,
@@ -470,16 +489,16 @@ class TestDeterminismGates:
         # ---------------------------------------------------------------------
         event_same_ts_a = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             timestamp=fixed_timestamp,
             correlation_id=fixed_correlation_id,
         )
         event_same_ts_b = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             timestamp=fixed_timestamp,  # Same timestamp
             # Different correlation_id
@@ -497,16 +516,16 @@ class TestDeterminismGates:
         # Each node type should work correctly
         # ---------------------------------------------------------------------
         node_types = [
-            EnumNodeArchetype.EFFECT.value,
-            EnumNodeArchetype.COMPUTE.value,
-            EnumNodeArchetype.REDUCER.value,
-            EnumNodeArchetype.ORCHESTRATOR.value,
+            EnumNodeKind.EFFECT,
+            EnumNodeKind.COMPUTE,
+            EnumNodeKind.REDUCER,
+            EnumNodeKind.ORCHESTRATOR,
         ]
         for node_type in node_types:
             event_type = ModelNodeIntrospectionEvent(
                 node_id=fixed_node_id,
                 node_type=node_type,
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 endpoints={},
                 timestamp=fixed_timestamp,
                 correlation_id=fixed_correlation_id,
@@ -522,7 +541,7 @@ class TestDeterminismGates:
             event_type = ModelNodeIntrospectionEvent(
                 node_id=fixed_node_id,
                 node_type=node_type,
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 endpoints={},
                 timestamp=fixed_timestamp,
                 correlation_id=fixed_correlation_id,
@@ -549,8 +568,8 @@ class TestDeterminismGates:
         for version in version_test_cases:
             event_version = ModelNodeIntrospectionEvent(
                 node_id=fixed_node_id,
-                node_type=EnumNodeArchetype.EFFECT.value,
-                node_version=version,
+                node_type=EnumNodeKind.EFFECT,
+                node_version=ModelSemVer.parse(version),
                 endpoints={},
                 timestamp=fixed_timestamp,
                 correlation_id=fixed_correlation_id,
@@ -573,16 +592,16 @@ class TestDeterminismGates:
 
         event_micro1 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             timestamp=ts_base,
             correlation_id=fixed_correlation_id,
         )
         event_micro2 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             timestamp=ts_micro,
             correlation_id=fixed_correlation_id,
@@ -603,8 +622,8 @@ class TestDeterminismGates:
         }
         event_many = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints=many_endpoints,
             timestamp=fixed_timestamp,
             correlation_id=fixed_correlation_id,
@@ -641,8 +660,8 @@ class TestDeterminismGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
@@ -664,11 +683,11 @@ class TestDeterminismGates:
             assert i1.intent_type == i2.intent_type
             assert i1.target == i2.target
             # Compare payload structure (excluding runtime-generated fields)
-            # Use direct attribute access for typed payload models
-            assert i1.payload.correlation_id == i2.payload.correlation_id
-            # For Consul intents, compare service_id; skip for Postgres intents
-            if hasattr(i1.payload, "service_id"):
-                assert i1.payload.service_id == i2.payload.service_id
+            # Use _payload_to_dict() to handle both dict and Pydantic model payloads
+            i1_payload = _payload_to_dict(i1.payload)
+            i2_payload = _payload_to_dict(i2.payload)
+            assert i1_payload.get("correlation_id") == i2_payload.get("correlation_id")
+            assert i1_payload.get("service_id") == i2_payload.get("service_id")
 
     def test_reducer_input_state_is_not_mutated(self) -> None:
         """Verify reduce() does not mutate the input state object.
@@ -703,8 +722,8 @@ class TestDeterminismGates:
 
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
@@ -771,8 +790,8 @@ class TestDeterminismGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
@@ -838,14 +857,16 @@ class TestDeterminismGates:
                     f"{intent.target} != {first_intent.target}"
                 )
                 # Compare payload correlation_id and service_id
-                # Use direct attribute access for typed payload models
-                assert (
-                    intent.payload.correlation_id == first_intent.payload.correlation_id
+                # Use _payload_to_dict() to handle both dict and Pydantic model payloads
+                intent_payload = _payload_to_dict(intent.payload)
+                first_intent_payload = _payload_to_dict(first_intent.payload)
+                assert intent_payload.get("correlation_id") == first_intent_payload.get(
+                    "correlation_id"
                 ), f"Thread {i}, intent {j}: correlation_id mismatch"
                 # For Consul intents, compare service_id; skip for Postgres intents
-                if hasattr(intent.payload, "service_id"):
-                    assert (
-                        intent.payload.service_id == first_intent.payload.service_id
+                if intent_payload.get("service_id") is not None:
+                    assert intent_payload.get("service_id") == first_intent_payload.get(
+                        "service_id"
                     ), f"Thread {i}, intent {j}: service_id mismatch"
 
 
@@ -944,8 +965,8 @@ class TestBehavioralPurityGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             timestamp=datetime.now(UTC),
             correlation_id=uuid4(),
@@ -981,8 +1002,8 @@ class TestBehavioralPurityGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             timestamp=datetime.now(UTC),
             correlation_id=uuid4(),
@@ -1069,8 +1090,8 @@ class TestAdditionalBehavioralGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type=EnumNodeArchetype.COMPUTE.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.COMPUTE,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             timestamp=datetime.now(UTC),
             correlation_id=uuid4(),
@@ -1104,8 +1125,8 @@ class TestAdditionalBehavioralGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type=EnumNodeArchetype.REDUCER.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.REDUCER,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             timestamp=datetime.now(UTC),
             correlation_id=uuid4(),
@@ -1251,7 +1272,7 @@ class TestAdditionalBehavioralGates:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, property | classmethod | staticmethod)
+            and not isinstance(value, (property, classmethod, staticmethod))
         }
 
         # Check for mutable types
@@ -1302,7 +1323,7 @@ class TestAdditionalBehavioralGates:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, property | classmethod | staticmethod)
+            and not isinstance(value, (property, classmethod, staticmethod))
         }
 
         # Create first reducer instance and run reduce
@@ -1310,8 +1331,8 @@ class TestAdditionalBehavioralGates:
         state1 = ModelRegistrationState()
         event1 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
@@ -1323,8 +1344,8 @@ class TestAdditionalBehavioralGates:
         state2 = ModelRegistrationState()
         event2 = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
@@ -1337,7 +1358,7 @@ class TestAdditionalBehavioralGates:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, property | classmethod | staticmethod)
+            and not isinstance(value, (property, classmethod, staticmethod))
         }
 
         assert class_vars_before == class_vars_after, (
@@ -1571,8 +1592,8 @@ class TestSecurityGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             metadata=sensitive_metadata,
             correlation_id=fixed_correlation_id,
@@ -1592,14 +1613,9 @@ class TestSecurityGates:
         all_violations: list[str] = []
 
         for intent in result.intents:
-            # Convert payload to dict for inspection (handles ModelPayloadExtension)
-            payload_dict = (
-                intent.payload.model_dump()
-                if hasattr(intent.payload, "model_dump")
-                else intent.payload
-            )
+            # Use _payload_to_dict() to handle both dict and Pydantic model payloads
             intent_violations = self._check_dict_for_sensitive_fields(
-                payload_dict, f"intent[{intent.intent_type}]"
+                _payload_to_dict(intent.payload), f"intent[{intent.intent_type}]"
             )
             all_violations.extend(intent_violations)
 
@@ -1620,7 +1636,6 @@ class TestSecurityGates:
         - Health check URLs in Consul intents should not expose auth
         - PostgreSQL record endpoints should not contain connection strings
         """
-        import re
         from datetime import UTC, datetime
         from uuid import UUID
 
@@ -1636,8 +1651,8 @@ class TestSecurityGates:
         state = ModelRegistrationState()
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
-            node_type=EnumNodeArchetype.EFFECT.value,
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             # Safe endpoint - no embedded credentials
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=fixed_correlation_id,
@@ -1709,8 +1724,8 @@ class TestSecurityGates:
             # but that's not what we're testing here.
             event = ModelNodeIntrospectionEvent(
                 node_id=UUID("12345678-1234-1234-1234-123456789abc"),
-                node_type=EnumNodeArchetype.EFFECT.value,
-                node_version="1.0.0",
+                node_type=EnumNodeKind.EFFECT,
+                node_version=ModelSemVer.parse("1.0.0"),
                 endpoints={},
                 correlation_id=fixed_correlation_id,
                 timestamp=fixed_timestamp,

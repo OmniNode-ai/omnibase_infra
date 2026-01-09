@@ -113,6 +113,8 @@ from typing import TYPE_CHECKING
 
 from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
 
+from omnibase_infra.errors import ProtocolConfigurationError
+
 if TYPE_CHECKING:
     from omnibase_core.models.container import ModelONEXContainer
 
@@ -247,7 +249,7 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
             ModelTimeoutCoordinationResult with coordination details.
 
         Raises:
-            RuntimeError: If no timeout coordinator is configured.
+            ProtocolConfigurationError: If no timeout coordinator is configured.
             InfraConnectionError: If database/Kafka connection fails.
             InfraTimeoutError: If operations time out.
             InfraUnavailableError: If circuit breaker is open.
@@ -257,7 +259,7 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
             >>> print(f"Emitted {result.total_emitted} timeout events")
         """
         if self._timeout_coordinator is None:
-            raise RuntimeError(
+            raise ProtocolConfigurationError(
                 "Timeout coordinator not configured. "
                 "Call set_timeout_coordinator() before handling RuntimeTick events."
             )
@@ -309,7 +311,7 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
             - node_not_found: True if no projection exists for this node
 
         Raises:
-            RuntimeError: If no heartbeat handler is configured.
+            ProtocolConfigurationError: If no heartbeat handler is configured.
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If database operation times out.
             RuntimeHostError: For other infrastructure errors.
@@ -320,7 +322,7 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
             ...     print(f"Heartbeat processed, deadline: {result.liveness_deadline}")
         """
         if self._heartbeat_handler is None:
-            raise RuntimeError(
+            raise ProtocolConfigurationError(
                 "Heartbeat handler not configured. "
                 "Call set_heartbeat_handler() before handling heartbeat events."
             )

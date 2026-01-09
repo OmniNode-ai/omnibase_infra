@@ -26,8 +26,8 @@ Core intent definitions:
   - Implementation: `omnibase_infra3/src/omnibase_infra/nodes/node_registry_effect/v1_0_0/node.py`
 
 **Dependencies resolved by contract/container**:
-- Consul handler (`ConsulHandler`)
-- DB handler (`DbHandler`)
+- Consul handler (`HandlerConsul`)
+- DB handler (`HandlerDb`)
 - Event bus (`ProtocolEventBus` in the contract, implemented by KafkaEventBus/InMemoryEventBus)
 
 ### External systems (executed by the Effect node)

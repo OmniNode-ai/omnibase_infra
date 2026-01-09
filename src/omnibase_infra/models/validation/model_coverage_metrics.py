@@ -208,7 +208,7 @@ class ModelCoverageMetrics(BaseModel):
             raise TypeError("registered_types must be int")
         if not isinstance(unmapped_types, list):
             raise TypeError("unmapped_types must be list[str]")
-        if not isinstance(coverage_percent, int | float):
+        if not isinstance(coverage_percent, (int, float)):
             raise TypeError("coverage_percent must be int or float")
 
         return cls(

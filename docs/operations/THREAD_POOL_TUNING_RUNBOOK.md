@@ -8,7 +8,7 @@ The omnibase_infra project uses `ThreadPoolExecutor` from `concurrent.futures` t
 
 ## Thread Pool Locations
 
-### 1. VaultHandler Thread Pool
+### 1. HandlerVault Thread Pool
 
 **Location**: `src/omnibase_infra/handlers/handler_vault.py`
 
@@ -37,9 +37,9 @@ The Kafka Event Bus uses aiokafka which is natively async and does not use threa
 ### Method 1: Direct Configuration
 
 ```python
-from omnibase_infra.handlers.handler_vault import VaultHandler
+from omnibase_infra.handlers.handler_vault import HandlerVault
 
-adapter = VaultHandler()
+adapter = HandlerVault()
 await adapter.initialize({
     "url": "https://vault.example.com:8200",
     "token": "s.xxx",
@@ -156,7 +156,7 @@ Environment variables are not directly supported for thread pool configuration. 
 
 ### Health Check Metrics
 
-The VaultHandler `health_check()` method returns thread pool metrics:
+The HandlerVault `health_check()` method returns thread pool metrics:
 
 ```python
 health = await adapter.health_check()
@@ -201,7 +201,7 @@ thread_pool_max = Gauge(
     ['service']
 )
 
-async def collect_metrics(adapter: VaultHandler, service_name: str):
+async def collect_metrics(adapter: HandlerVault, service_name: str):
     health = await adapter.health_check()
     thread_pool_active.labels(service=service_name).set(
         health['thread_pool_active_workers']
@@ -221,7 +221,7 @@ logging.getLogger('omnibase_infra.handlers.handler_vault').setLevel(logging.DEBU
 ```
 
 Key log patterns to monitor:
-- `"VaultHandler initialized"` - Shows configuration values
+- `"HandlerVault initialized"` - Shows configuration values
 - `"Retrying Vault operation"` - Indicates transient failures
 - `"Circuit breaker opened"` - Pool may be overwhelmed
 
@@ -346,7 +346,7 @@ config = ModelVaultHandlerConfig(
 
 ### Retry Integration
 
-The VaultHandler uses exponential backoff with circuit breaker:
+The HandlerVault uses exponential backoff with circuit breaker:
 
 ```python
 # Retry configuration (ModelVaultRetryConfig)
@@ -422,5 +422,5 @@ Total = Thread Memory + Queue Memory + Base Memory
 - [Circuit Breaker Thread Safety](../architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md)
 - [Validation Performance Notes](../validation/performance_notes.md)
 - [Circuit Breaker Comparison](../analysis/CIRCUIT_BREAKER_COMPARISON.md)
-- [VaultHandler Source](../../src/omnibase_infra/handlers/handler_vault.py)
+- [HandlerVault Source](../../src/omnibase_infra/handlers/handler_vault.py)
 - [Configuration Model](../../src/omnibase_infra/handlers/models/vault/model_vault_handler_config.py)

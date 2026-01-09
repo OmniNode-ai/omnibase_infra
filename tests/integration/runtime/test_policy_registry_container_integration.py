@@ -52,9 +52,21 @@ from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from tests.conftest import (
     assert_handler_registry_interface,
     assert_policy_registry_interface,
+    check_service_registry_available,
 )
 
+# Module-level markers - all tests in this file are integration tests
+pytestmark = [pytest.mark.integration]
 
+
+# Module-level flag for pytest.mark.skipif decorators
+_service_registry_available = check_service_registry_available()
+
+
+@pytest.mark.skipif(
+    not _service_registry_available,
+    reason="ServiceRegistry not available in omnibase_core (removed in 0.6.x)",
+)
 class TestPolicyRegistryContainerIntegration:
     """Integration tests for PolicyRegistry with real container."""
 
@@ -408,6 +420,10 @@ class TestPolicyRegistryContainerIntegration:
         assert v2 is PolicyV2
 
 
+@pytest.mark.skipif(
+    not _service_registry_available,
+    reason="ServiceRegistry not available in omnibase_core (removed in 0.6.x)",
+)
 class TestContainerWiringErrorHandling:
     """Integration tests for error handling with real containers."""
 
@@ -470,6 +486,10 @@ class TestContainerWiringErrorHandling:
         assert registry2.get("before_rewire") is TestPolicy
 
 
+@pytest.mark.skipif(
+    not _service_registry_available,
+    reason="ServiceRegistry not available in omnibase_core (removed in 0.6.x)",
+)
 class TestContainerWithRegistriesFixture:
     """Tests using the container_with_registries fixture."""
 

@@ -34,16 +34,13 @@ Related:
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
 
 from omnibase_infra.models.registration import (
-    ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,
-    ModelNodeMetadata,
 )
 
 # =============================================================================

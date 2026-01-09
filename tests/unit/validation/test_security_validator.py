@@ -7,12 +7,10 @@ Tests the integration of ModelHandlerValidationError in security validation path
 
 import pytest
 
-from omnibase_infra.enums import EnumHandlerErrorType, EnumHandlerSourceType
+from omnibase_infra.enums import EnumHandlerErrorType
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import ModelHandlerIdentifier
 from omnibase_infra.validation.security_validator import (
-    SENSITIVE_METHOD_PATTERNS,
-    SENSITIVE_PARAMETER_NAMES,
     SecurityRuleId,
     has_sensitive_parameters,
     is_sensitive_method_name,

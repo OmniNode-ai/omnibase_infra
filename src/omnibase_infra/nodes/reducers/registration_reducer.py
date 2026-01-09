@@ -348,7 +348,6 @@ from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind, EnumReductionType, EnumStreamingMode
 from omnibase_core.models.reducer.model_intent import ModelIntent
-from omnibase_core.models.reducer.payloads import ModelPayloadExtension
 from omnibase_core.nodes import ModelReducerOutput
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -361,6 +360,9 @@ from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
 )
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
+)
+from omnibase_infra.nodes.reducers.models.model_registration_confirmation import (
+    ModelRegistrationConfirmation,
 )
 from omnibase_infra.nodes.reducers.models.model_registration_state import (
     ModelRegistrationState,
@@ -693,7 +695,7 @@ class RegistrationReducer:
                 extra={
                     "processing_time_ms": processing_time_ms,
                     "threshold_ms": PERF_THRESHOLD_REDUCE_MS,
-                    "node_type": event.node_type,
+                    "node_type": event.node_type.value,
                     "intent_count": len(intents),
                     "correlation_id": str(correlation_id),
                 },
@@ -774,7 +776,7 @@ class RegistrationReducer:
             EnumNodeKind.REDUCER.value,
             EnumNodeKind.ORCHESTRATOR.value,
         }
-        if event.node_type not in valid_node_types:
+        if event.node_type.value not in valid_node_types:
             return ModelValidationResult.failure(
                 error_code="invalid_node_type",
                 field_name="node_type",
@@ -814,7 +816,7 @@ class RegistrationReducer:
         # Using ISO format for timestamp ensures string stability across serialization.
         # The pipe delimiter prevents ambiguity between field values.
         canonical_content = (
-            f"{event.node_id}|{event.node_type}|{event.timestamp.isoformat()}"
+            f"{event.node_id}|{event.node_type.value}|{event.timestamp.isoformat()}"
         )
 
         # Compute SHA-256 hash and convert to UUID format.
@@ -848,10 +850,10 @@ class RegistrationReducer:
         Returns:
             ModelIntent with intent_type="consul.register" and Consul payload.
         """
-        service_id = f"onex-{event.node_type}-{event.node_id}"
-        service_name = f"onex-{event.node_type}"
+        service_id = f"onex-{event.node_type.value}-{event.node_id}"
+        service_name = f"onex-{event.node_type.value}"
         tags = [
-            f"node_type:{event.node_type}",
+            f"node_type:{event.node_type.value}",
             f"node_version:{event.node_version}",
         ]
 
@@ -874,6 +876,7 @@ class RegistrationReducer:
             health_check=health_check,
         )
 
+        # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
             intent_type="extension",
             target=f"consul://service/{service_name}",
@@ -900,13 +903,13 @@ class RegistrationReducer:
         now = datetime.now(UTC)
 
         # Build the registration record using strongly-typed models
-        # event.capabilities and event.metadata are already typed as
+        # event.declared_capabilities and event.metadata are already typed as
         # ModelNodeCapabilities and ModelNodeMetadata respectively
         record = ModelNodeRegistrationRecord(
             node_id=event.node_id,
             node_type=event.node_type,
             node_version=event.node_version,
-            capabilities=event.capabilities,
+            capabilities=event.declared_capabilities,
             endpoints=dict(event.endpoints) if event.endpoints else {},
             metadata=event.metadata,
             health_endpoint=(
@@ -922,6 +925,7 @@ class RegistrationReducer:
             record=record,
         )
 
+        # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
             intent_type="extension",
             target=f"postgres://node_registrations/{event.node_id}",
@@ -946,6 +950,30 @@ class RegistrationReducer:
     # See module docstring section 6 for detailed implementation notes.
     # =========================================================================
 
+    def reduce_confirmation(
+        self,
+        state: ModelRegistrationState,
+        confirmation: ModelRegistrationConfirmation,
+    ) -> ModelReducerOutput[ModelRegistrationState]:
+        """Process confirmation event from Effect layer.
+
+        Not yet implemented. See OMN-996 for tracking.
+
+        Args:
+            state: Current registration state (immutable).
+            confirmation: Confirmation event from Effect layer.
+
+        Returns:
+            ModelReducerOutput with new state and no intents.
+
+        Raises:
+            NotImplementedError: Always raised until implementation is complete.
+        """
+        raise NotImplementedError(
+            "reduce_confirmation() is not yet implemented. "
+            "See ticket OMN-996: https://linear.app/omninode/issue/OMN-996"
+        )
+
     # TODO(OMN-996): Implement reduce_confirmation() using ModelRegistrationConfirmation
     # Ticket: https://linear.app/omninode/issue/OMN-996
     # Status: Backlog - Phase 2 of dual registration event flow
@@ -956,10 +984,10 @@ class RegistrationReducer:
     # The model is now available at:
     #   from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
     #
-    # NOTE: reduce_confirmation() is not yet implemented. The stub below
-    # documents the expected interface and behavior.
+    # NOTE: The stub above raises NotImplementedError. The commented implementation
+    # below documents the expected behavior once implemented.
     #
-    # def reduce_confirmation(
+    # def _reduce_confirmation_impl(
     #     self,
     #     state: ModelRegistrationState,
     #     confirmation: "ModelRegistrationConfirmation",

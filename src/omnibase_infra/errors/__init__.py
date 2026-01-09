@@ -20,6 +20,7 @@ Exports:
     PolicyRegistryError: Policy registry operation errors
     ComputeRegistryError: Compute registry operation errors
     ChainPropagationError: Correlation/causation chain validation errors
+    ArchitectureViolationError: Architecture validation errors (blocks startup)
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -85,6 +86,9 @@ Error Sanitization Guidelines:
         )
 """
 
+from omnibase_infra.errors.error_architecture_violation import (
+    ArchitectureViolationError,
+)
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
 from omnibase_infra.errors.error_compute_registry import ComputeRegistryError
 from omnibase_infra.errors.error_container_wiring import (
@@ -111,6 +115,8 @@ from omnibase_infra.models.errors.model_infra_error_context import (
 )
 
 __all__: list[str] = [
+    # Architecture validation errors
+    "ArchitectureViolationError",
     "ChainPropagationError",
     "ComputeRegistryError",
     "ContainerValidationError",

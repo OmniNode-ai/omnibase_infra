@@ -17,6 +17,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumRegistrationState
+
 
 class ModelNodeRegistrationAckTimedOut(BaseModel):
     """Event emitted when a node's registration ack deadline has passed.
@@ -42,6 +44,7 @@ class ModelNodeRegistrationAckTimedOut(BaseModel):
         causation_id: UUID of the RuntimeTick that triggered this event
         emitted_at: When the timeout was detected (from tick.now)
         deadline_at: The original ack deadline that was exceeded
+        previous_state: State before timeout (ACCEPTED or AWAITING_ACK), optional
 
     Time Injection:
         The `emitted_at` field must be explicitly provided by the handler
@@ -97,6 +100,12 @@ class ModelNodeRegistrationAckTimedOut(BaseModel):
     deadline_at: datetime = Field(
         ...,
         description="The original ack deadline that was exceeded",
+    )
+
+    # State context (optional - provides additional context for FSM processing)
+    previous_state: EnumRegistrationState | None = Field(
+        default=None,
+        description="State before timeout (ACCEPTED or AWAITING_ACK)",
     )
 
 

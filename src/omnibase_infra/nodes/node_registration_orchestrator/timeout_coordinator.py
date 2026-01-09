@@ -156,7 +156,7 @@ class ModelTimeoutCoordinationResult(BaseModel):
         """
         if isinstance(v, tuple):
             return v  # type: ignore[return-value]
-        if isinstance(v, Sequence) and not isinstance(v, str | bytes):
+        if isinstance(v, Sequence) and not isinstance(v, (str, bytes)):
             return tuple(v)  # type: ignore[return-value]
         raise ValueError(
             f"errors must be a tuple or Sequence (excluding str/bytes), "

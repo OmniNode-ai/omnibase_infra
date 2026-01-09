@@ -80,7 +80,7 @@ class ModelNodeCapabilities(BaseModel):
     # Generic feature flag (used in tests)
     feature: bool = Field(default=False, description="Generic feature flag")
 
-    # Configuration (nested) - uses JsonType for strongly-typed JSON-serializable values.
+    # Configuration (nested) - uses JsonType for JSON-serializable values.
     # Supports primitives (str, int, float, bool, None), lists, and nested dicts.
     config: dict[str, JsonType] = Field(
         default_factory=dict,

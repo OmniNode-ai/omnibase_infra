@@ -27,15 +27,36 @@ Limitations:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Literal, cast
 from urllib.parse import parse_qs, unquote, urlparse
 from uuid import uuid4
 
-if TYPE_CHECKING:
-    from typing import Any
+from omnibase_infra.types import ModelParsedDSN
 
 
-def parse_and_validate_dsn(dsn: object) -> dict[str, Any]:
+def _assert_postgres_scheme(scheme: str) -> Literal["postgresql", "postgres"]:
+    """Type-safe scheme assertion for PostgreSQL DSN schemes.
+
+    This helper enables proper type narrowing for the Literal type
+    using typing.cast for explicit type assertion.
+
+    Args:
+        scheme: The scheme string to validate
+
+    Returns:
+        The scheme cast to the appropriate Literal type
+
+    Note:
+        This function should only be called AFTER validating
+        that scheme is one of the valid values.
+    """
+    if scheme not in ("postgresql", "postgres"):
+        msg = f"Invalid scheme: {scheme}"
+        raise ValueError(msg)
+    return cast(Literal["postgresql", "postgres"], scheme)
+
+
+def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
     """Parse and validate PostgreSQL DSN format using urllib.parse.
 
     This function provides comprehensive DSN validation that handles edge cases
@@ -46,22 +67,22 @@ def parse_and_validate_dsn(dsn: object) -> dict[str, Any]:
         dsn: PostgreSQL connection string (any type - validated)
 
     Returns:
-        Dictionary containing parsed components:
-            - scheme: "postgresql" or "postgres"
+        ModelParsedDSN with parsed components:
+            - scheme: "postgresql" or "postgres" (Literal type)
             - username: Username or None
             - password: Password (URL-decoded) or None
             - hostname: Hostname or IP address or None
             - port: Port number or None
             - database: Database name
-            - query: Dict of query parameters
+            - query: Dict of query parameters (str keys, str | list[str] values)
 
     Raises:
         ProtocolConfigurationError: If DSN format is invalid
 
     Example:
         >>> result = parse_and_validate_dsn("postgresql://user:pass@localhost:5432/mydb")
-        >>> assert result["hostname"] == "localhost"
-        >>> assert result["database"] == "mydb"
+        >>> assert result.hostname == "localhost"
+        >>> assert result.database == "mydb"
 
     Security Note:
         Error messages never contain the actual DSN value. Sensitive information
@@ -114,6 +135,23 @@ def parse_and_validate_dsn(dsn: object) -> dict[str, Any]:
             context=context,
             parameter="dsn",
             value="[REDACTED]",  # Never log DSN contents
+        )
+
+    # Check for multi-host DSN format (not supported)
+    # Multi-host format: postgresql://host1:port1,host2:port2/db
+    # We check for comma after :// and before / (in the host portion)
+    scheme_end = dsn_str.index("://") + 3
+    path_start = dsn_str.find("/", scheme_end)
+    host_portion = (
+        dsn_str[scheme_end:path_start] if path_start != -1 else dsn_str[scheme_end:]
+    )
+    if "," in host_portion:
+        raise ProtocolConfigurationError(
+            "Multi-host DSNs are not supported. Use a single host or consider "
+            "psycopg2.conninfo_to_dict for multi-host parsing.",
+            context=context,
+            parameter="dsn",
+            value="[REDACTED]",
         )
 
     # Parse DSN using urllib.parse
@@ -189,15 +227,15 @@ def parse_and_validate_dsn(dsn: object) -> dict[str, Any]:
     # Return parsed components
     # Note: urlparse does NOT decode URL-encoded passwords, so we use unquote()
     # Important: Check 'is not None' instead of truthiness to preserve empty strings
-    return {
-        "scheme": parsed.scheme,
-        "username": unquote(parsed.username) if parsed.username is not None else None,
-        "password": unquote(parsed.password) if parsed.password is not None else None,
-        "hostname": parsed.hostname,
-        "port": port,
-        "database": database,
-        "query": query_dict,
-    }
+    return ModelParsedDSN(
+        scheme=_assert_postgres_scheme(parsed.scheme),
+        username=unquote(parsed.username) if parsed.username is not None else None,
+        password=unquote(parsed.password) if parsed.password is not None else None,
+        hostname=parsed.hostname,
+        port=port,
+        database=database,
+        query=query_dict,
+    )
 
 
 def sanitize_dsn(dsn: str) -> str:
@@ -272,4 +310,4 @@ def sanitize_dsn(dsn: str) -> str:
         return "[INVALID_DSN]"
 
 
-__all__: list[str] = ["parse_and_validate_dsn", "sanitize_dsn"]
+__all__: list[str] = ["ModelParsedDSN", "parse_and_validate_dsn", "sanitize_dsn"]

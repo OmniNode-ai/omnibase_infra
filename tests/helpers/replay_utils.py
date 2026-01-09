@@ -36,6 +36,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, TypedDict
 from uuid import UUID, uuid4
 
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,
@@ -507,20 +510,20 @@ class EventFactory:
 
     def create_event(
         self,
-        node_type: NodeType = "effect",
+        node_type: NodeType | EnumNodeKind = EnumNodeKind.EFFECT,
         node_id: UUID | None = None,
         correlation_id: UUID | None = None,
-        node_version: str = "1.0.0",
+        node_version: str | ModelSemVer = "1.0.0",
         endpoints: dict[str, str] | None = None,
         advance_time_seconds: int = 0,
     ) -> ModelNodeIntrospectionEvent:
         """Create a deterministic introspection event.
 
         Args:
-            node_type: ONEX node type (effect, compute, reducer, orchestrator).
+            node_type: ONEX node type as EnumNodeKind or string literal.
             node_id: Optional fixed node ID (generates if not provided).
             correlation_id: Optional fixed correlation ID (generates if not provided).
-            node_version: Semantic version string.
+            node_version: Semantic version as ModelSemVer or parseable string.
             endpoints: Optional endpoints dict.
             advance_time_seconds: Seconds to advance clock before creating event.
 
@@ -530,21 +533,33 @@ class EventFactory:
         if advance_time_seconds > 0:
             self.clock.advance(advance_time_seconds)
 
+        # Convert string node_type to EnumNodeKind
+        if isinstance(node_type, str):
+            node_type_enum = EnumNodeKind(node_type)
+        else:
+            node_type_enum = node_type
+
+        # Convert string node_version to ModelSemVer
+        if isinstance(node_version, str):
+            version = ModelSemVer.parse(node_version)
+        else:
+            version = node_version
+
         return ModelNodeIntrospectionEvent(
             node_id=node_id or self.id_gen.next_uuid(),
-            node_type=node_type,
-            node_version=node_version,
+            node_type=node_type_enum,
+            node_version=version,
             correlation_id=correlation_id or self.id_gen.next_uuid(),
             timestamp=self.clock.now(),
             endpoints=endpoints or {},
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
         )
 
     def create_event_sequence(
         self,
         count: int,
-        node_type: NodeType = "effect",
+        node_type: NodeType | EnumNodeKind = EnumNodeKind.EFFECT,
         time_between_events: int = 60,
     ) -> list[ModelNodeIntrospectionEvent]:
         """Create a sequence of deterministic events.
@@ -587,8 +602,9 @@ def create_introspection_event(
     node_id: UUID | None = None,
     correlation_id: UUID | None = None,
     timestamp: datetime | None = None,
-    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
-    node_version: str = "1.0.0",
+    node_type: Literal["effect", "compute", "reducer", "orchestrator"]
+    | EnumNodeKind = EnumNodeKind.EFFECT,
+    node_version: str | ModelSemVer = "1.0.0",
     endpoints: dict[str, str] | None = None,
 ) -> ModelNodeIntrospectionEvent:
     """Create an introspection event with flexible parameters.
@@ -604,8 +620,8 @@ def create_introspection_event(
         node_id: UUID of the node being registered (generates if not provided).
         correlation_id: Correlation ID for the event (generates if not provided).
         timestamp: Event timestamp (generates if not provided).
-        node_type: Node type (effect, compute, reducer, orchestrator).
-        node_version: Semantic version of the node.
+        node_type: Node type as EnumNodeKind or string literal.
+        node_version: Semantic version as ModelSemVer or parseable string.
         endpoints: Optional endpoints dictionary.
 
     Returns:
@@ -621,18 +637,30 @@ def create_introspection_event(
 
         # Convenience testing (unit tests)
         >>> event = create_introspection_event()  # All defaults
-        >>> event = create_introspection_event(node_type="reducer")
+        >>> event = create_introspection_event(node_type=EnumNodeKind.REDUCER)
     """
+    # Convert string node_type to EnumNodeKind
+    if isinstance(node_type, str):
+        node_type_enum = EnumNodeKind(node_type)
+    else:
+        node_type_enum = node_type
+
+    # Convert string node_version to ModelSemVer
+    if isinstance(node_version, str):
+        version = ModelSemVer.parse(node_version)
+    else:
+        version = node_version
+
     return ModelNodeIntrospectionEvent(
         node_id=node_id if node_id is not None else uuid4(),
-        node_type=node_type,
-        node_version=node_version,
+        node_type=node_type_enum,
+        node_version=version,
         correlation_id=correlation_id if correlation_id is not None else uuid4(),
         timestamp=timestamp if timestamp is not None else datetime.now(UTC),
         endpoints=endpoints
         if endpoints is not None
         else {"health": "http://localhost:8080/health"},
-        capabilities=ModelNodeCapabilities(postgres=True, read=True),
+        declared_capabilities=ModelNodeCapabilities(postgres=True, read=True),
         metadata=ModelNodeMetadata(environment="test"),
     )
 

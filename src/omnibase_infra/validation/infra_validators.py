@@ -32,7 +32,8 @@ from functools import lru_cache
 from pathlib import Path
 
 # TypedDict for exemption pattern structure
-from typing import TypedDict
+# Forward migration type aliases for renamed types in omnibase_core 0.6.2
+from typing import Literal, TypedDict
 
 # Third-party imports
 import yaml
@@ -41,13 +42,22 @@ from omnibase_core.models.validation.model_union_pattern import ModelUnionPatter
 from omnibase_core.validation import (
     CircularImportValidator,
     ModelContractValidationResult,
-    ModelImportValidationResult,
+    ModelModuleImportResult,
     ModelValidationResult,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage_file,
     validate_yaml_file,
+)
+
+# Backwards compatibility alias for renamed type
+type ModelImportValidationResult = ModelModuleImportResult
+
+# NOTE: ServiceContractValidator was removed in omnibase_core 0.6.2
+# Using a stub that implements ProtocolContractValidator
+from omnibase_infra.validation.stub_contract_validator import (
+    ServiceContractValidator,
 )
 
 # Module-level initialization (AFTER all imports)

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for ConsulHandler against remote Consul infrastructure.
+"""Integration tests for HandlerConsul against remote Consul infrastructure.
 
-These tests validate ConsulHandler behavior against actual Consul infrastructure
+These tests validate HandlerConsul behavior against actual Consul infrastructure
 running on the remote infrastructure server. They require Consul to be available
 and will be skipped gracefully if Consul is not reachable.
 
@@ -55,8 +55,9 @@ import pytest
 from tests.integration.handlers.conftest import CONSUL_AVAILABLE
 
 if TYPE_CHECKING:
-    from omnibase_infra.handlers import ConsulHandler
-    from omnibase_infra.models.types import JsonType
+    from omnibase_core.types import JsonType
+
+    from omnibase_infra.handlers import HandlerConsul
 
 # =============================================================================
 # Test Configuration and Skip Conditions
@@ -76,12 +77,12 @@ pytestmark = [
 # =============================================================================
 
 
-class TestConsulHandlerMetadata:
-    """Tests for ConsulHandler metadata and describe functionality."""
+class TestHandlerConsulMetadata:
+    """Tests for HandlerConsul metadata and describe functionality."""
 
     @pytest.mark.asyncio
     async def test_handler_describe(
-        self, initialized_consul_handler: ConsulHandler
+        self, initialized_consul_handler: HandlerConsul
     ) -> None:
         """Test handler describe returns correct metadata.
 
@@ -104,13 +105,13 @@ class TestConsulHandlerMetadata:
 # =============================================================================
 
 
-class TestConsulHandlerKVStore:
-    """Tests for ConsulHandler KV store operations."""
+class TestHandlerConsulKVStore:
+    """Tests for HandlerConsul KV store operations."""
 
     @pytest.mark.asyncio
     async def test_consul_kv_put_and_get(
         self,
-        initialized_consul_handler: ConsulHandler,
+        initialized_consul_handler: HandlerConsul,
         unique_kv_key: str,
     ) -> None:
         """Test storing and retrieving a value from KV store.
@@ -158,7 +159,7 @@ class TestConsulHandlerKVStore:
     @pytest.mark.asyncio
     async def test_consul_kv_get_not_found(
         self,
-        initialized_consul_handler: ConsulHandler,
+        initialized_consul_handler: HandlerConsul,
     ) -> None:
         """Test retrieving a non-existent key from KV store.
 
@@ -189,7 +190,7 @@ class TestConsulHandlerKVStore:
     @pytest.mark.asyncio
     async def test_consul_kv_put_with_flags(
         self,
-        initialized_consul_handler: ConsulHandler,
+        initialized_consul_handler: HandlerConsul,
         unique_kv_key: str,
     ) -> None:
         """Test storing a value with custom flags.
@@ -230,7 +231,7 @@ class TestConsulHandlerKVStore:
     @pytest.mark.asyncio
     async def test_consul_kv_overwrite(
         self,
-        initialized_consul_handler: ConsulHandler,
+        initialized_consul_handler: HandlerConsul,
         unique_kv_key: str,
     ) -> None:
         """Test overwriting an existing KV entry.
@@ -274,13 +275,13 @@ class TestConsulHandlerKVStore:
 # =============================================================================
 
 
-class TestConsulHandlerServiceRegistration:
-    """Tests for ConsulHandler service registration operations."""
+class TestHandlerConsulServiceRegistration:
+    """Tests for HandlerConsul service registration operations."""
 
     @pytest.mark.asyncio
     async def test_consul_service_register_and_deregister(
         self,
-        initialized_consul_handler: ConsulHandler,
+        initialized_consul_handler: HandlerConsul,
         unique_service_name: str,
     ) -> None:
         """Test registering and deregistering a service.
@@ -330,7 +331,7 @@ class TestConsulHandlerServiceRegistration:
     @pytest.mark.asyncio
     async def test_consul_service_register_minimal(
         self,
-        initialized_consul_handler: ConsulHandler,
+        initialized_consul_handler: HandlerConsul,
         unique_service_name: str,
     ) -> None:
         """Test registering a service with minimal configuration.
@@ -374,7 +375,7 @@ class TestConsulHandlerServiceRegistration:
     @pytest.mark.asyncio
     async def test_consul_deregister_nonexistent_service(
         self,
-        initialized_consul_handler: ConsulHandler,
+        initialized_consul_handler: HandlerConsul,
     ) -> None:
         """Test deregistering a non-existent service.
 
@@ -400,7 +401,7 @@ class TestConsulHandlerServiceRegistration:
     @pytest.mark.asyncio
     async def test_consul_service_register_with_tags(
         self,
-        initialized_consul_handler: ConsulHandler,
+        initialized_consul_handler: HandlerConsul,
         unique_service_name: str,
     ) -> None:
         """Test registering a service with tags.
@@ -447,8 +448,8 @@ class TestConsulHandlerServiceRegistration:
 # =============================================================================
 
 
-class TestConsulHandlerErrorHandling:
-    """Tests for ConsulHandler error handling."""
+class TestHandlerConsulErrorHandling:
+    """Tests for HandlerConsul error handling."""
 
     @pytest.mark.asyncio
     async def test_execute_without_initialize_raises_error(
@@ -461,9 +462,9 @@ class TestConsulHandlerErrorHandling:
         - Error message indicates initialization is required
         """
         from omnibase_infra.errors import RuntimeHostError
-        from omnibase_infra.handlers import ConsulHandler
+        from omnibase_infra.handlers import HandlerConsul
 
-        handler = ConsulHandler()
+        handler = HandlerConsul()
         # Don't initialize
 
         envelope = {
@@ -476,7 +477,7 @@ class TestConsulHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_invalid_operation_raises_error(
-        self, initialized_consul_handler: ConsulHandler
+        self, initialized_consul_handler: HandlerConsul
     ) -> None:
         """Test that invalid operation raises appropriate error.
 
@@ -497,7 +498,7 @@ class TestConsulHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_missing_key_in_kv_get_raises_error(
-        self, initialized_consul_handler: ConsulHandler
+        self, initialized_consul_handler: HandlerConsul
     ) -> None:
         """Test that missing key parameter raises appropriate error.
 
@@ -518,7 +519,7 @@ class TestConsulHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_missing_value_in_kv_put_raises_error(
-        self, initialized_consul_handler: ConsulHandler
+        self, initialized_consul_handler: HandlerConsul
     ) -> None:
         """Test that missing value parameter raises appropriate error.
 
@@ -539,7 +540,7 @@ class TestConsulHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_missing_name_in_register_raises_error(
-        self, initialized_consul_handler: ConsulHandler
+        self, initialized_consul_handler: HandlerConsul
     ) -> None:
         """Test that missing name parameter in register raises error.
 
@@ -560,7 +561,7 @@ class TestConsulHandlerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_missing_service_id_in_deregister_raises_error(
-        self, initialized_consul_handler: ConsulHandler
+        self, initialized_consul_handler: HandlerConsul
     ) -> None:
         """Test that missing service_id parameter in deregister raises error.
 
@@ -585,8 +586,8 @@ class TestConsulHandlerErrorHandling:
 # =============================================================================
 
 
-class TestConsulHandlerLifecycle:
-    """Tests for ConsulHandler lifecycle management."""
+class TestHandlerConsulLifecycle:
+    """Tests for HandlerConsul lifecycle management."""
 
     @pytest.mark.asyncio
     async def test_shutdown_and_reinitialize(
@@ -599,9 +600,9 @@ class TestConsulHandlerLifecycle:
         - Handler can be reinitialized after shutdown
         - Handler reports initialized after reinitialization
         """
-        from omnibase_infra.handlers import ConsulHandler
+        from omnibase_infra.handlers import HandlerConsul
 
-        handler = ConsulHandler()
+        handler = HandlerConsul()
 
         # First initialization
         await handler.initialize(consul_config)
@@ -621,7 +622,7 @@ class TestConsulHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_multiple_shutdown_calls_safe(
-        self, initialized_consul_handler: ConsulHandler
+        self, initialized_consul_handler: HandlerConsul
     ) -> None:
         """Test that multiple shutdown calls are safe.
 

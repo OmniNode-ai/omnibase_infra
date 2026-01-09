@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for VaultHandler against remote Vault infrastructure.
+"""Integration tests for HandlerVault against remote Vault infrastructure.
 
-These tests validate VaultHandler behavior against a real HashiCorp Vault server.
+These tests validate HandlerVault behavior against a real HashiCorp Vault server.
 They require a running Vault instance and will be skipped gracefully if Vault
 is not available.
 
@@ -63,8 +63,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
-    from omnibase_infra.handlers import VaultHandler
-    from omnibase_infra.models.types import JsonType
+    from omnibase_core.types import JsonType
+
+    from omnibase_infra.handlers import HandlerVault
 
 # Import fixture availability flags from conftest
 from tests.integration.handlers.conftest import VAULT_AVAILABLE, VAULT_REACHABLE
@@ -107,7 +108,7 @@ def unique_secret_path() -> str:
 
 @pytest.fixture
 async def cleanup_secret(
-    vault_handler: VaultHandler,
+    vault_handler: HandlerVault,
     unique_secret_path: str,
 ) -> AsyncGenerator[str, None]:
     """Cleanup fixture to delete test secrets after test completion.
@@ -127,7 +128,7 @@ async def cleanup_secret(
         this guarantees no secret path conflicts between tests.
 
     Args:
-        vault_handler: Initialized VaultHandler fixture.
+        vault_handler: Initialized HandlerVault fixture.
         unique_secret_path: Unique secret path fixture.
 
     Yields:
@@ -156,15 +157,15 @@ async def cleanup_secret(
 # =============================================================================
 
 
-class TestVaultHandlerConnection:
-    """Tests for VaultHandler connection functionality."""
+class TestHandlerVaultConnection:
+    """Tests for HandlerVault connection functionality."""
 
     @pytest.mark.asyncio
     async def test_vault_describe(
         self,
-        vault_handler: VaultHandler,
+        vault_handler: HandlerVault,
     ) -> None:
-        """Test VaultHandler describe() returns handler metadata."""
+        """Test HandlerVault describe() returns handler metadata."""
         description = vault_handler.describe()
 
         assert description["handler_type"] == "vault"
@@ -181,13 +182,13 @@ class TestVaultHandlerConnection:
 # =============================================================================
 
 
-class TestVaultHandlerSecretCRUD:
-    """Tests for VaultHandler secret CRUD operations."""
+class TestHandlerVaultSecretCRUD:
+    """Tests for HandlerVault secret CRUD operations."""
 
     @pytest.mark.asyncio
     async def test_vault_write_and_read_secret(
         self,
-        vault_handler: VaultHandler,
+        vault_handler: HandlerVault,
         cleanup_secret: str,
     ) -> None:
         """Test writing and reading a secret from Vault.
@@ -240,7 +241,7 @@ class TestVaultHandlerSecretCRUD:
     @pytest.mark.asyncio
     async def test_vault_delete_secret(
         self,
-        vault_handler: VaultHandler,
+        vault_handler: HandlerVault,
         unique_secret_path: str,
     ) -> None:
         """Test deleting a secret from Vault.
@@ -294,7 +295,7 @@ class TestVaultHandlerSecretCRUD:
     @pytest.mark.asyncio
     async def test_vault_list_secrets(
         self,
-        vault_handler: VaultHandler,
+        vault_handler: HandlerVault,
         unique_secret_path: str,
     ) -> None:
         """Test listing secrets at a path in Vault.
@@ -361,7 +362,7 @@ class TestVaultHandlerSecretCRUD:
     @pytest.mark.asyncio
     async def test_vault_update_existing_secret(
         self,
-        vault_handler: VaultHandler,
+        vault_handler: HandlerVault,
         cleanup_secret: str,
     ) -> None:
         """Test updating an existing secret in Vault.
@@ -426,13 +427,13 @@ class TestVaultHandlerSecretCRUD:
 # =============================================================================
 
 
-class TestVaultHandlerErrors:
-    """Tests for VaultHandler error handling."""
+class TestHandlerVaultErrors:
+    """Tests for HandlerVault error handling."""
 
     @pytest.mark.asyncio
     async def test_vault_read_nonexistent_secret(
         self,
-        vault_handler: VaultHandler,
+        vault_handler: HandlerVault,
     ) -> None:
         """Test reading a non-existent secret raises SecretResolutionError.
 
@@ -464,7 +465,7 @@ class TestVaultHandlerErrors:
     @pytest.mark.asyncio
     async def test_vault_list_nonexistent_path(
         self,
-        vault_handler: VaultHandler,
+        vault_handler: HandlerVault,
     ) -> None:
         """Test listing a non-existent path raises SecretResolutionError.
 
@@ -495,13 +496,13 @@ class TestVaultHandlerErrors:
 # =============================================================================
 
 
-class TestVaultHandlerTokenRenewal:
-    """Tests for VaultHandler token renewal functionality."""
+class TestHandlerVaultTokenRenewal:
+    """Tests for HandlerVault token renewal functionality."""
 
     @pytest.mark.asyncio
     async def test_vault_renew_token(
         self,
-        vault_handler: VaultHandler,
+        vault_handler: HandlerVault,
     ) -> None:
         """Test token renewal operation.
 

@@ -25,8 +25,6 @@ from omnibase_infra.errors import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_core.types import JsonType
-
     from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
 
@@ -96,7 +94,7 @@ PAYLOAD_REQUIRED_OPERATIONS: frozenset[str] = frozenset(
 
 
 def validate_envelope(
-    envelope: dict[str, JsonType],
+    envelope: dict[str, object],
     registry: ProtocolBindingRegistry,
 ) -> None:
     """Validate envelope before dispatch to handler.

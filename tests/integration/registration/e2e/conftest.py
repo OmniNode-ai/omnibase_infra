@@ -48,7 +48,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -60,6 +60,7 @@ import pytest
 logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.utils import sanitize_error_message
 
@@ -87,9 +88,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from tests.infrastructure_config import (
     DEFAULT_CONSUL_PORT,
-    DEFAULT_KAFKA_PORT,
     DEFAULT_POSTGRES_PORT,
-    REMOTE_INFRA_HOST,
 )
 
 if TYPE_CHECKING:
@@ -97,7 +96,7 @@ if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
 
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
-    from omnibase_infra.handlers import ConsulHandler
+    from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
     )
@@ -108,7 +107,9 @@ if TYPE_CHECKING:
         ProjectionReaderRegistration,
         ProjectorRegistration,
     )
+    from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
     from omnibase_infra.services import TimeoutEmitter, TimeoutScanner
+    from tests.helpers.deterministic import DeterministicClock
 
 
 # =============================================================================
@@ -183,8 +184,19 @@ def _check_consul_reachable() -> bool:
 
 CONSUL_AVAILABLE = _check_consul_reachable()
 
+
+# Import shared service registry availability check
+from tests.conftest import check_service_registry_available
+
+SERVICE_REGISTRY_AVAILABLE = check_service_registry_available()
+
 # Combined availability check
-ALL_INFRA_AVAILABLE = KAFKA_AVAILABLE and CONSUL_AVAILABLE and POSTGRES_AVAILABLE
+ALL_INFRA_AVAILABLE = (
+    KAFKA_AVAILABLE
+    and CONSUL_AVAILABLE
+    and POSTGRES_AVAILABLE
+    and SERVICE_REGISTRY_AVAILABLE
+)
 
 
 # =============================================================================
@@ -201,7 +213,8 @@ pytestmark = [
             "Full infrastructure required for E2E tests. "
             f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS)'}. "
             f"Consul: {'available' if CONSUL_AVAILABLE else 'MISSING (set CONSUL_HOST or unreachable)'}. "
-            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set POSTGRES_HOST and POSTGRES_PASSWORD)'}."
+            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
+            f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
         ),
     ),
 ]
@@ -288,7 +301,7 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
 @pytest.fixture
 async def wired_container(
     postgres_pool: asyncpg.Pool,
-) -> AsyncGenerator[ModelONEXContainer, None]:
+) -> ModelONEXContainer:
     """Container with infrastructure services and registration handlers wired.
 
     This fixture creates a fully wired ModelONEXContainer with:
@@ -305,7 +318,7 @@ async def wired_container(
     Args:
         postgres_pool: Database connection pool.
 
-    Yields:
+    Returns:
         ModelONEXContainer: Fully wired container for dependency injection.
     """
     from omnibase_core.container import ModelONEXContainer
@@ -334,10 +347,8 @@ async def wired_container(
     # Wire registration handlers with database pool
     await wire_registration_handlers(container, postgres_pool)
 
-    # Yield container for proper fixture teardown semantics.
-    # ModelONEXContainer doesn't have explicit cleanup methods currently,
-    # but using yield allows for future cleanup needs and ensures proper
-    # pytest async fixture lifecycle management.
+    # Return container. Note: ModelONEXContainer doesn't have explicit cleanup
+    # methods currently. If future cleanup needs arise, change this to yield.
     return container
 
 
@@ -398,11 +409,12 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
         The event bus is stopped and cleaned up after each test.
     """
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
     if not KAFKA_AVAILABLE:
         pytest.skip("Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)")
 
-    bus = KafkaEventBus(
+    config = ModelKafkaEventBusConfig(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         environment="e2e-test",
         group="registration-e2e",
@@ -411,6 +423,7 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
         circuit_breaker_threshold=5,
         circuit_breaker_reset_timeout=60.0,
     )
+    bus = KafkaEventBus(config=config)
 
     await bus.start()
 
@@ -425,24 +438,24 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
 
 
 @pytest.fixture
-async def real_consul_handler() -> AsyncGenerator[ConsulHandler, None]:
-    """Connected ConsulHandler with cleanup.
+async def real_consul_handler() -> AsyncGenerator[HandlerConsul, None]:
+    """Connected HandlerConsul with cleanup.
 
-    This fixture creates a ConsulHandler connected to the real Consul
+    This fixture creates a HandlerConsul connected to the real Consul
     server on the infrastructure server.
 
     Yields:
-        ConsulHandler: Initialized handler ready for operations.
+        HandlerConsul: Initialized handler ready for operations.
 
     Note:
         The handler is shut down after each test.
     """
-    from omnibase_infra.handlers import ConsulHandler
+    from omnibase_infra.handlers import HandlerConsul
 
     if not CONSUL_AVAILABLE:
         pytest.skip("Consul not available (CONSUL_HOST not set or unreachable)")
 
-    handler = ConsulHandler()
+    handler = HandlerConsul()
     await handler.initialize(
         {
             "host": CONSUL_HOST,
@@ -463,7 +476,7 @@ async def real_consul_handler() -> AsyncGenerator[ConsulHandler, None]:
 
 @pytest.fixture
 async def cleanup_consul_services(
-    real_consul_handler: ConsulHandler,
+    real_consul_handler: HandlerConsul,
 ) -> AsyncGenerator[list[str], None]:
     """Track and cleanup test services from Consul.
 
@@ -774,7 +787,7 @@ IntrospectableTestNode = ProtocolIntrospectableTestNode
 def introspection_event_factory(
     unique_node_id: UUID,
     unique_correlation_id: UUID,
-):
+) -> Callable[..., ModelNodeIntrospectionEvent]:
     """Factory for creating ModelNodeIntrospectionEvent instances.
 
     Returns a callable that creates introspection events with the
@@ -795,17 +808,21 @@ def introspection_event_factory(
 
     def _create_event(
         node_type: EnumNodeKind = EnumNodeKind.EFFECT,
-        node_version: str = "1.0.0",
+        node_version: str | ModelSemVer = "1.0.0",
         endpoints: dict[str, str] | None = None,
         node_id: UUID | None = None,
         correlation_id: UUID | None = None,
     ) -> ModelNodeIntrospectionEvent:
         """Create an introspection event with test-specific IDs."""
+        # Convert string version to ModelSemVer if needed
+        if isinstance(node_version, str):
+            node_version = ModelSemVer.parse(node_version)
+
         return ModelNodeIntrospectionEvent(
             node_id=node_id or unique_node_id,
             node_type=node_type.value,
             node_version=node_version,
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             endpoints=endpoints or {"health": "http://localhost:8080/health"},
             metadata=ModelNodeMetadata(),
             correlation_id=correlation_id or unique_correlation_id,
@@ -818,7 +835,7 @@ def introspection_event_factory(
 @pytest.fixture
 def runtime_tick_factory(
     unique_correlation_id: UUID,
-):
+) -> Callable[..., ModelRuntimeTick]:
     """Factory for creating ModelRuntimeTick instances.
 
     Returns a callable that creates runtime tick events with
@@ -863,7 +880,7 @@ def runtime_tick_factory(
 
 
 @pytest.fixture
-def deterministic_clock():
+def deterministic_clock() -> DeterministicClock:
     """Create a deterministic clock for time control.
 
     Returns:
@@ -986,6 +1003,7 @@ __all__ = [
     "CONSUL_AVAILABLE",
     "KAFKA_AVAILABLE",
     "POSTGRES_AVAILABLE",
+    "SERVICE_REGISTRY_AVAILABLE",
     # Database fixtures
     "postgres_pool",
     # Container fixtures

@@ -13,10 +13,9 @@ Protocols:
       (tightly coupled to MixinAsyncCircuitBreaker)
 
 Note:
-    TypedDicts and model types used by mixins (e.g., CapabilitiesTypedDict,
-    ModelIntrospectionPerformanceMetrics) should be imported from their
-    canonical locations in omnibase_infra.models.discovery, not from this
-    module.
+    TypedDicts and model types used by mixins (e.g., ModelIntrospectionPerformanceMetrics,
+    ModelDiscoveredCapabilities) should be imported from their canonical locations
+    in omnibase_infra.models.discovery, not from this module.
 
     Configuration models for mixins:
     - ModelCircuitBreakerConfig: from omnibase_infra.models.resilience
@@ -27,34 +26,29 @@ Note:
     event bus abstraction). Import it from there, not from this package.
 """
 
+from omnibase_infra.enums import EnumCircuitState, EnumRetryErrorCategory
 from omnibase_infra.mixins.mixin_async_circuit_breaker import (
-    CircuitState,
     MixinAsyncCircuitBreaker,
     ModelCircuitBreakerConfig,
 )
 from omnibase_infra.mixins.mixin_envelope_extraction import MixinEnvelopeExtraction
-from omnibase_infra.mixins.mixin_node_introspection import (
-    MixinNodeIntrospection,
-    PerformanceMetricsCacheDict,
-)
-from omnibase_infra.mixins.mixin_retry_execution import (
-    EnumRetryErrorCategory,
-    MixinRetryExecution,
-    RetryErrorClassification,
-)
+from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
+from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
 from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
     ProtocolCircuitBreakerAware,
 )
+from omnibase_infra.models import ModelRetryErrorClassification
+from omnibase_infra.types.typed_dict import TypedDictPerformanceMetricsCache
 
 __all__: list[str] = [
-    "CircuitState",
+    "EnumCircuitState",
     "EnumRetryErrorCategory",
     "MixinAsyncCircuitBreaker",
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
     "MixinRetryExecution",
     "ModelCircuitBreakerConfig",
-    "PerformanceMetricsCacheDict",
+    "ModelRetryErrorClassification",
     "ProtocolCircuitBreakerAware",
-    "RetryErrorClassification",
+    "TypedDictPerformanceMetricsCache",
 ]

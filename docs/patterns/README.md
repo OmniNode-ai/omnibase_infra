@@ -11,6 +11,7 @@ This directory contains detailed implementation guides and best practices for ON
 - **[Retry, Backoff, and Compensation Strategy](./retry_backoff_compensation_strategy.md)** - Formal retry policies, backoff formulas, compensation for partial failures
 - **[Circuit Breaker Implementation](./circuit_breaker_implementation.md)** - Complete production-ready circuit breaker with state machine
 - **[Dispatcher Resilience](./dispatcher_resilience.md)** - Dispatcher-owned resilience pattern for message dispatch engine
+- **[Operation Routing](./operation_routing.md)** - Contract-driven operation dispatch with parallel execution and partial failure handling
 
 ### Observability
 - **[Correlation ID Tracking](./correlation_id_tracking.md)** - Request tracing, envelope pattern, distributed logging
@@ -18,6 +19,10 @@ This directory contains detailed implementation guides and best practices for ON
 
 ### Architecture
 - **[Container Dependency Injection](./container_dependency_injection.md)** - Service registration, resolution, and testing patterns
+- **[Utility Directory Structure](./utility_directory_structure.md)** - Distinction between `utils/` and `shared/utils/` directories
+
+### Infrastructure Integration
+- **[Consul Integration](./consul_integration.md)** - HashiCorp Consul connection, health checks, service registration, security patterns
 
 ### Security
 - **[Security Patterns](./security_patterns.md)** - Comprehensive security guide covering error sanitization, input validation, authentication, authorization, secret management, network security, and production checklists
@@ -38,18 +43,25 @@ This directory contains detailed implementation guides and best practices for ON
 | Auth failed | [Error Recovery](./error_recovery_patterns.md#credential-refresh-pattern) | `InfraAuthenticationError` |
 | Secret not found | [Error Handling](./error_handling_patterns.md#vault-secret-retrieval-error) | `SecretResolutionError` |
 | Partial failure | [Retry/Compensation](./retry_backoff_compensation_strategy.md#compensation-strategy-for-partial-failures) | Saga, Outbox Pattern |
+| Operation dispatch | [Operation Routing](./operation_routing.md) | `NodeRegistryEffect` |
+| Multi-backend registration | [Operation Routing](./operation_routing.md#parallel-execution-detail) | `ModelRegistryResponse` |
 
 ### Common Tasks
 
 | Task | Pattern Document | Section |
 |------|-----------------|---------|
+| Understand retry ownership | [Retry/Compensation](./retry_backoff_compensation_strategy.md#architectural-responsibility-orchestrator-owned-retries) | Orchestrator-Owned Retries |
 | Add retry logic | [Retry/Compensation](./retry_backoff_compensation_strategy.md) | Retry Policy, Backoff Strategy |
 | Configure per-effect retries | [Retry/Compensation](./retry_backoff_compensation_strategy.md#per-effect-type-configuration) | Effect-Specific Config |
 | Handle partial failures | [Retry/Compensation](./retry_backoff_compensation_strategy.md#compensation-strategy-for-partial-failures) | Compensation Patterns |
+| Route operations to handlers | [Operation Routing](./operation_routing.md#handler-selection-logic) | Handler Selection |
+| Configure parallel execution | [Operation Routing](./operation_routing.md#configuration-reference) | Contract Configuration |
+| Retry failed backends | [Operation Routing](./operation_routing.md#targeted-retry-flow) | Targeted Retry |
 | Prevent cascading failures | [Circuit Breaker](./circuit_breaker_implementation.md) | Complete Implementation |
 | Implement resilient dispatchers | [Dispatcher Resilience](./dispatcher_resilience.md) | Dispatcher Implementation Pattern |
 | Track requests across services | [Correlation ID](./correlation_id_tracking.md) | Correlation ID Flow |
 | Inject dependencies | [Container DI](./container_dependency_injection.md) | Constructor Injection |
+| Choose utility location | [Utility Directory Structure](./utility_directory_structure.md) | Decision Matrix |
 | Handle cache fallback | [Error Recovery](./error_recovery_patterns.md) | Graceful Degradation |
 | Refresh expired tokens | [Error Recovery](./error_recovery_patterns.md) | Credential Refresh |
 | Sanitize error messages | [Error Sanitization](./error_sanitization_patterns.md) | Implementation Patterns |
@@ -59,6 +71,9 @@ This directory contains detailed implementation guides and best practices for ON
 | Validate user input | [Security Patterns](./security_patterns.md) | Input Validation |
 | Configure TLS/SSL | [Security Patterns](./security_patterns.md) | Network Security |
 | Manage secrets with Vault | [Security Patterns](./security_patterns.md) | Secret Management |
+| Connect to Consul | [Consul Integration](./consul_integration.md) | Connection Patterns |
+| Register service with Consul | [Consul Integration](./consul_integration.md) | Service Registration |
+| Consul health checks | [Consul Integration](./consul_integration.md) | Health Checks |
 | Implement authentication | [Security Patterns](./security_patterns.md) | Authentication and Authorization |
 | Review production security | [Security Patterns](./security_patterns.md) | Production Security Checklist |
 | Write actionable assertions | [Testing Patterns](./testing_patterns.md) | The "HOW TO FIX" Pattern |
@@ -109,6 +124,12 @@ Dispatcher Resilience
     ├── Depends on: Circuit Breaker, Error Handling
     └── References: MixinAsyncCircuitBreaker, MessageDispatchEngine
 
+Operation Routing
+    ├── Contract-driven operation dispatch to handlers
+    ├── Depends on: Error Handling, Error Sanitization, Circuit Breaker
+    ├── Features: Parallel execution, partial failure handling, targeted retry
+    └── References: NodeRegistryEffect, ModelRegistryRequest/Response
+
 Correlation ID Tracking
     ├── Request tracing infrastructure
     ├── Used by: All patterns
@@ -118,6 +139,16 @@ Container Dependency Injection
     ├── Service management and resolution
     ├── Used by: All infrastructure services
     └── References: Bootstrap, testing patterns
+
+Utility Directory Structure
+    ├── Documents utils/ vs shared/utils/ distinction
+    ├── Provides decision matrix for utility placement
+    └── References: Error Sanitization, Correlation ID
+
+Consul Integration
+    ├── HashiCorp Consul connection and service discovery
+    ├── Depends on: Circuit Breaker, Error Handling, Security Patterns
+    └── References: HandlerConsul, Registration Orchestrator
 
 Policy Registry Trust Model
     ├── Documents security boundaries for policy registration

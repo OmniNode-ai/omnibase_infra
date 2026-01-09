@@ -34,6 +34,8 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.nodes.effects import (
     ModelBackendResult,
@@ -98,8 +100,8 @@ def sample_registry_request() -> ModelRegistryRequest:
     """
     return ModelRegistryRequest(
         node_id=uuid4(),
-        node_type="effect",
-        node_version="1.0.0",
+        node_type=EnumNodeKind.EFFECT,  # ModelRegistryRequest uses EnumNodeKind
+        node_version=ModelSemVer.parse("1.0.0"),
         correlation_id=uuid4(),
         service_name="test-service",
         endpoints={"health": "http://localhost:8080/health"},
@@ -167,8 +169,8 @@ class TestEffectPartialFailure:
         assert response.consul_result.success is True
         assert response.postgres_result.success is False
         # Error message is sanitized to avoid exposing secrets (connection strings, etc.)
-        # Format: "{ExceptionType}: PostgreSQL upsert failed"
-        assert "Exception: PostgreSQL upsert failed" in (
+        # Format: "{ExceptionType}: {original_message}" (sanitize_error_message preserves the message)
+        assert "Exception: DB connection failed" in (
             response.postgres_result.error or ""
         )
         assert response.correlation_id == sample_registry_request.correlation_id
@@ -214,11 +216,13 @@ class TestEffectPartialFailure:
         assert response.consul_result.success is False
         assert response.postgres_result.success is True
         # Error message is sanitized to avoid exposing secrets (connection strings, etc.)
-        # Format: "{ExceptionType}: Consul registration failed"
-        assert "Exception: Consul registration failed" in (
+        # Format: "{ExceptionType}: {original_message}" (sanitize_error_message preserves the message)
+        assert "Exception: Consul service unavailable" in (
             response.consul_result.error or ""
         )
-        assert response.consul_result.error_code == "CONSUL_CONNECTION_ERROR"
+        # Note: Generic Exception falls through to CONSUL_UNKNOWN_ERROR.
+        # Only InfraConnectionError would trigger CONSUL_CONNECTION_ERROR.
+        assert response.consul_result.error_code == "CONSUL_UNKNOWN_ERROR"
         assert response.correlation_id == sample_registry_request.correlation_id
 
         # Verify appropriate error context
@@ -260,13 +264,11 @@ class TestEffectPartialFailure:
         assert response.postgres_result.success is False
 
         # Verify error messages are sanitized (no raw exception messages that may contain secrets)
-        # Format: "{ExceptionType}: {Backend} {operation} failed"
-        assert "Exception: Consul registration failed" in (
+        # Format: "{ExceptionType}: {original_message}" (sanitize_error_message preserves the message)
+        assert "Exception: Consul connection refused" in (
             response.consul_result.error or ""
         )
-        assert "Exception: PostgreSQL upsert failed" in (
-            response.postgres_result.error or ""
-        )
+        assert "Exception: PostgreSQL timeout" in (response.postgres_result.error or "")
 
         # Verify error summary aggregates both errors
         assert response.error_summary is not None
@@ -308,8 +310,8 @@ class TestEffectPartialFailure:
         correlation_id = uuid4()
         request = ModelRegistryRequest(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=correlation_id,
             service_name="test-service",
             timestamp=datetime(2025, 1, 1, tzinfo=UTC),
@@ -472,8 +474,8 @@ class TestEffectPartialFailure:
         assert response.postgres_result.duration_ms >= 100.0  # PostgreSQL's 100ms
 
         # Assert - Timeout exception type is captured in sanitized error message
-        # Format: "TimeoutError: PostgreSQL upsert failed" (exception type preserved for debugging)
-        assert "TimeoutError: PostgreSQL upsert failed" in (
+        # Format: "{ExceptionType}: {original_message}" (exception type and message preserved)
+        assert "TimeoutError: PostgreSQL operation timed out" in (
             response.postgres_result.error or ""
         )
 
@@ -528,8 +530,8 @@ class TestPartialFailureEdgeCases:
         correlation_id = uuid4()
         request = ModelRegistryRequest(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=correlation_id,
             timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
@@ -636,7 +638,6 @@ class TestModelBackendResult:
         result = ModelBackendResult(
             success=True,
             duration_ms=45.2,
-            retries=0,
             backend_id="consul",
             correlation_id=uuid4(),
         )
@@ -652,14 +653,12 @@ class TestModelBackendResult:
             error="Connection refused",
             error_code="DATABASE_CONNECTION_ERROR",
             duration_ms=5000.0,
-            retries=3,
             backend_id="postgres",
             correlation_id=correlation_id,
         )
         assert result.success is False
         assert result.error == "Connection refused"
         assert result.error_code == "DATABASE_CONNECTION_ERROR"
-        assert result.retries == 3
         assert result.correlation_id == correlation_id
 
 

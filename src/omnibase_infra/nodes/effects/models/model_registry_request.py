@@ -28,6 +28,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -58,10 +59,11 @@ class ModelRegistryRequest(BaseModel):
         >>> from datetime import UTC, datetime
         >>> from uuid import uuid4
         >>> from omnibase_core.enums.enum_node_kind import EnumNodeKind
+        >>> from omnibase_core.models.primitives.model_semver import ModelSemVer
         >>> request = ModelRegistryRequest(
         ...     node_id=uuid4(),
         ...     node_type=EnumNodeKind.EFFECT,
-        ...     node_version="1.0.0",
+        ...     node_version=ModelSemVer(major=1, minor=0, patch=0),
         ...     correlation_id=uuid4(),
         ...     service_name="onex-effect",
         ...     endpoints={"health": "http://localhost:8080/health"},
@@ -81,7 +83,7 @@ class ModelRegistryRequest(BaseModel):
         ...,
         description="Type of ONEX node (effect, compute, reducer, orchestrator)",
     )
-    node_version: str = Field(
+    node_version: ModelSemVer = Field(
         ...,
         description="Semantic version of the node",
     )

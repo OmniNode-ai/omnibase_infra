@@ -82,7 +82,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import threading
-import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -710,43 +709,16 @@ class PolicyRegistry:
         """Convenience method to register a policy with individual parameters.
 
         Wraps parameters in ModelPolicyRegistration and calls register().
-        This method preserves the original API for backwards compatibility.
-
-        .. deprecated:: 1.1.0
-            Passing non-normalized version strings (e.g., "1", "1.0", "v1.0.0")
-            is deprecated. Use fully normalized version strings in "x.y.z" format
-            (e.g., "1.0.0") or use ModelPolicyRegistration directly with its
-            built-in normalization.
-
-            Deprecation Timeline:
-                - v1.1.0: Deprecation warning added for non-normalized versions
-                - v1.2.0: Warning will be upgraded to DeprecationWarning (visible by default)
-                - v2.0.0: Non-normalized versions will raise ValueError
-
-            Recommended migration:
-                # Instead of:
-                registry.register_policy(policy_id="my_policy", ..., version="1.0")
-
-                # Use normalized version:
-                registry.register_policy(policy_id="my_policy", ..., version="1.0.0")
-
-                # Or use ModelPolicyRegistration (preferred):
-                registration = ModelPolicyRegistration(
-                    policy_id="my_policy",
-                    policy_class=MyPolicy,
-                    policy_type=EnumPolicyType.ORCHESTRATOR,
-                    version="1.0",  # Auto-normalized to "1.0.0"
-                )
-                registry.register(registration)
+        Partial version strings (e.g., "1", "1.0") are auto-normalized to
+        "x.y.z" format by ModelPolicyRegistration.
 
         Args:
             policy_id: Unique identifier for the policy (e.g., 'exponential_backoff')
             policy_class: The policy class to register. Must implement ProtocolPolicy.
             policy_type: Whether this is orchestrator or reducer policy.
                         Can be EnumPolicyType or string literal.
-            version: Semantic version string (default: "1.0.0"). Should be in
-                    normalized "x.y.z" format. Non-normalized versions are
-                    deprecated and will raise ValueError in v2.0.0.
+            version: Semantic version string (default: "1.0.0"). Partial versions
+                    like "1" or "1.0" are auto-normalized to "1.0.0" or "1.0.0".
             allow_async: If True, allows async interface. MUST be explicitly
                                 flagged for policies with async methods.
 
@@ -764,23 +736,6 @@ class PolicyRegistry:
             ...     version="1.0.0",
             ... )
         """
-        # Check for non-normalized version and emit deprecation warning
-        # This implements the deprecation timeline documented in the docstring
-        try:
-            normalized = self._normalize_version(version)
-            if normalized != version:
-                warnings.warn(
-                    f"Passing non-normalized version '{version}' is deprecated. "
-                    f"Use normalized format '{normalized}' instead. "
-                    f"Deprecation timeline: v1.1.0 warning added, v1.2.0 visible by default, "
-                    f"v2.0.0 will raise ValueError.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-        except ProtocolConfigurationError:
-            # Invalid version format - let ModelPolicyRegistration handle the error
-            pass
-
         # Version normalization is handled by ModelPolicyRegistration validator
         # which normalizes partial versions and v-prefixed versions automatically
         try:

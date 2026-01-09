@@ -22,8 +22,8 @@ import aiohttp
 import pytest
 
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
-from omnibase_infra.runtime.health_server import HealthServer
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.services.service_health import ServiceHealth
 
 
 class TestShutdownHealthIntegration:
@@ -122,7 +122,7 @@ class TestShutdownHealthIntegration:
         event_bus = InMemoryEventBus()
         runtime = RuntimeHostProcess(event_bus=event_bus)
         # Use port 0 for automatic port assignment to avoid conflicts
-        health_server = HealthServer(runtime=runtime, port=0, version="test-1.0.0")
+        health_server = ServiceHealth(runtime=runtime, port=0, version="test-1.0.0")
 
         async def noop_populate() -> None:
             pass
@@ -181,7 +181,7 @@ class TestShutdownHealthIntegration:
         # Arrange
         event_bus = InMemoryEventBus()
         runtime = RuntimeHostProcess(event_bus=event_bus)
-        health_server = HealthServer(runtime=runtime, port=0, version="test-1.0.0")
+        health_server = ServiceHealth(runtime=runtime, port=0, version="test-1.0.0")
 
         async def noop_populate() -> None:
             pass
@@ -236,7 +236,7 @@ class TestShutdownHealthIntegration:
         # Arrange
         event_bus = InMemoryEventBus()
         runtime = RuntimeHostProcess(event_bus=event_bus)
-        health_server = HealthServer(runtime=runtime, port=0, version="test-1.0.0")
+        health_server = ServiceHealth(runtime=runtime, port=0, version="test-1.0.0")
 
         async def noop_populate() -> None:
             pass
@@ -375,8 +375,8 @@ class TestShutdownHealthIntegration:
             assert health_stopped["healthy"] is False
 
 
-class TestHealthServerShutdownBehavior:
-    """Tests for HealthServer behavior during various shutdown scenarios."""
+class TestServiceHealthShutdownBehavior:
+    """Tests for ServiceHealth behavior during various shutdown scenarios."""
 
     @pytest.mark.asyncio
     async def test_health_server_stop_idempotent(self) -> None:
@@ -387,7 +387,7 @@ class TestHealthServerShutdownBehavior:
         # Arrange
         event_bus = InMemoryEventBus()
         runtime = RuntimeHostProcess(event_bus=event_bus)
-        health_server = HealthServer(runtime=runtime, port=0)
+        health_server = ServiceHealth(runtime=runtime, port=0)
 
         async def noop_populate() -> None:
             pass
@@ -416,7 +416,7 @@ class TestHealthServerShutdownBehavior:
         # Arrange - runtime never started
         event_bus = InMemoryEventBus()
         runtime = RuntimeHostProcess(event_bus=event_bus)
-        health_server = HealthServer(runtime=runtime, port=0)
+        health_server = ServiceHealth(runtime=runtime, port=0)
 
         await health_server.start()
 
@@ -455,7 +455,7 @@ class TestHealthServerShutdownBehavior:
         # Arrange
         event_bus = InMemoryEventBus()
         runtime = RuntimeHostProcess(event_bus=event_bus)
-        health_server = HealthServer(runtime=runtime, port=0)
+        health_server = ServiceHealth(runtime=runtime, port=0)
 
         async def noop_populate() -> None:
             pass
@@ -503,5 +503,5 @@ class TestHealthServerShutdownBehavior:
 
 __all__: list[str] = [
     "TestShutdownHealthIntegration",
-    "TestHealthServerShutdownBehavior",
+    "TestServiceHealthShutdownBehavior",
 ]

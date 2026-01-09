@@ -14,7 +14,6 @@ Test categories:
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING

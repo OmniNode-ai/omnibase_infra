@@ -21,7 +21,7 @@ PRODUCTION SAFETY WARNING:
     - Running tests against a staging replica with production-like data
 
 Fixture Dependency Graph:
-    postgres_pool (session-scoped)
+    postgres_pool (module-scoped)
         -> schema_initialized
             -> seeded_test_data
                 -> query_analyzer
@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 from dotenv import load_dotenv
 
 from omnibase_infra.utils import sanitize_error_message
@@ -84,7 +85,34 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 if POSTGRES_PASSWORD and not POSTGRES_PASSWORD.strip():
     POSTGRES_PASSWORD = None
 
-POSTGRES_AVAILABLE = bool(POSTGRES_HOST and POSTGRES_PASSWORD)
+
+def _check_postgres_reachable() -> bool:
+    """Check if PostgreSQL server is reachable via TCP connection.
+
+    This function verifies actual network connectivity to the PostgreSQL server,
+    not just whether environment variables are set. This prevents tests from
+    failing with connection errors when the database is unreachable (e.g., when
+    running outside the Docker network where hostname resolution may fail).
+
+    Returns:
+        bool: True if PostgreSQL is reachable, False otherwise.
+    """
+    if not POSTGRES_HOST or not POSTGRES_PASSWORD:
+        return False
+
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(5.0)
+            result = sock.connect_ex((POSTGRES_HOST, POSTGRES_PORT))
+            return result == 0
+    except (OSError, TimeoutError, socket.gaierror):
+        return False
+
+
+# Check PostgreSQL reachability at module import time
+POSTGRES_AVAILABLE = _check_postgres_reachable()
 
 # =============================================================================
 # Module-Level Markers
@@ -95,9 +123,11 @@ pytestmark = [
     pytest.mark.skipif(
         not POSTGRES_AVAILABLE,
         reason=(
-            "PostgreSQL required for database performance tests. "
-            f"POSTGRES_HOST: {'set' if POSTGRES_HOST else 'MISSING'}. "
-            f"POSTGRES_PASSWORD: {'set' if POSTGRES_PASSWORD else 'MISSING'}."
+            "PostgreSQL not reachable for database performance tests. "
+            f"POSTGRES_HOST: {'set' if POSTGRES_HOST else 'MISSING'}, "
+            f"POSTGRES_PASSWORD: {'set' if POSTGRES_PASSWORD else 'MISSING'}, "
+            f"TCP connection to {POSTGRES_HOST}:{POSTGRES_PORT}: "
+            f"{'reachable' if POSTGRES_AVAILABLE else 'UNREACHABLE'}."
         ),
     ),
 ]
@@ -123,20 +153,17 @@ def _build_postgres_dsn() -> str:
     )
 
 
-@pytest.fixture(scope="session")
-def event_loop_policy() -> object:
-    """Use default event loop policy for session-scoped async fixtures."""
-    import asyncio
-
-    return asyncio.DefaultEventLoopPolicy()
-
-
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module")
 async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
     """Create asyncpg connection pool for database performance tests.
 
-    Module-scoped to share pool across tests in the same file while
-    avoiding event loop issues with session scope.
+    Module-scoped for performance: creating a connection pool is expensive, and
+    performance tests in the same module can safely share a single pool. This
+    avoids the overhead of creating a new pool for every test function.
+
+    Note:
+        Uses @pytest_asyncio.fixture(scope="module") to ensure proper event loop
+        handling with async fixtures at module scope.
 
     Yields:
         asyncpg.Pool: Connection pool for database operations.
@@ -172,7 +199,7 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
     await pool.close()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 async def schema_initialized(
     postgres_pool: asyncpg.Pool,
 ) -> asyncpg.Pool:
@@ -446,12 +473,18 @@ class QueryAnalyzer:
         self,
         query: str,
         *args: object,
+        force_index_scan: bool = False,
     ) -> ExplainResult:
         """Execute EXPLAIN ANALYZE on a query.
 
         Args:
             query: SQL query to analyze (must be a SELECT statement).
             *args: Query parameters (safely handled by asyncpg).
+            force_index_scan: If True, disable sequential scans to force index usage.
+                This is useful for verifying that indexes exist and are applicable,
+                regardless of whether the optimizer would normally choose them for
+                small datasets. PostgreSQL's optimizer correctly prefers seq scans
+                for small tables (~100 rows) since they're faster than index scans.
 
         Returns:
             ExplainResult with parsed plan information.
@@ -467,7 +500,14 @@ class QueryAnalyzer:
         explain_query = f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {query}"
 
         async with self.pool.acquire() as conn:
-            result = await conn.fetchval(explain_query, *args)
+            if force_index_scan:
+                # Disable sequential scans to force index usage for plan verification.
+                # We use an explicit transaction so SET LOCAL affects the EXPLAIN query.
+                async with conn.transaction():
+                    await conn.execute("SET LOCAL enable_seqscan = off")
+                    result = await conn.fetchval(explain_query, *args)
+            else:
+                result = await conn.fetchval(explain_query, *args)
 
         return ExplainResult(result)
 
@@ -475,6 +515,7 @@ class QueryAnalyzer:
         self,
         query: str,
         *args: object,
+        force_index_scan: bool = False,
     ) -> ExplainResult:
         """Execute EXPLAIN (without ANALYZE) on a query.
 
@@ -483,6 +524,11 @@ class QueryAnalyzer:
         Args:
             query: SQL query to analyze (must be a SELECT statement).
             *args: Query parameters (safely handled by asyncpg).
+            force_index_scan: If True, disable sequential scans to force index usage.
+                This is useful for verifying that indexes exist and are applicable,
+                regardless of whether the optimizer would normally choose them for
+                small datasets. PostgreSQL's optimizer correctly prefers seq scans
+                for small tables (~100 rows) since they're faster than index scans.
 
         Returns:
             ExplainResult with parsed plan information.
@@ -497,7 +543,14 @@ class QueryAnalyzer:
         explain_query = f"EXPLAIN (FORMAT JSON) {query}"
 
         async with self.pool.acquire() as conn:
-            result = await conn.fetchval(explain_query, *args)
+            if force_index_scan:
+                # Disable sequential scans to force index usage for plan verification.
+                # We use an explicit transaction so SET LOCAL affects the EXPLAIN query.
+                async with conn.transaction():
+                    await conn.execute("SET LOCAL enable_seqscan = off")
+                    result = await conn.fetchval(explain_query, *args)
+            else:
+                result = await conn.fetchval(explain_query, *args)
 
         return ExplainResult(result)
 
@@ -513,11 +566,14 @@ class ExplainResult:
         plan: Parsed plan dictionary.
     """
 
-    def __init__(self, raw_plan: list[dict] | None) -> None:
+    def __init__(self, raw_plan: list[dict[str, object]] | str | None) -> None:
         """Initialize with raw EXPLAIN JSON output.
 
         Args:
-            raw_plan: JSON output from EXPLAIN (FORMAT JSON).
+            raw_plan: JSON output from EXPLAIN (FORMAT JSON). Can be:
+                - A list of dicts (already parsed by asyncpg)
+                - A JSON string (needs parsing)
+                - None (error case)
 
         Raises:
             QueryAnalyzerError: If the raw_plan is malformed or missing expected structure.
@@ -527,6 +583,19 @@ class ExplainResult:
             raise QueryAnalyzerError(
                 "EXPLAIN returned None - query may have failed or returned no plan"
             )
+
+        # Defensive handling for string input:
+        # asyncpg typically returns JSON columns as already-parsed Python objects,
+        # but certain configurations (older asyncpg versions, custom type codecs,
+        # or connection poolers) may return raw JSON strings. This defensive check
+        # ensures compatibility across different asyncpg deployment scenarios.
+        if isinstance(raw_plan, str):
+            try:
+                raw_plan = json.loads(raw_plan)
+            except json.JSONDecodeError as e:
+                raise QueryAnalyzerError(
+                    f"EXPLAIN output is not valid JSON: {e}"
+                ) from e
 
         # Validate raw_plan is a list
         if not isinstance(raw_plan, list):
@@ -549,9 +618,9 @@ class ExplainResult:
 
     def _find_nodes(
         self,
-        node: dict | None = None,
+        node: dict[str, object] | None = None,
         node_type: str | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, object]]:
         """Recursively find all nodes in the plan tree.
 
         Args:

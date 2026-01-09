@@ -84,6 +84,7 @@ def _convert_intents_to_request(
     """
     # Note: event.node_type is a Literal string from ModelNodeIntrospectionEvent.
     # Convert to EnumNodeKind for ModelRegistryRequest which expects the enum type.
+    # Note: event.node_version is already ModelSemVer, pass directly.
     return ModelRegistryRequest(
         node_id=event.node_id,
         node_type=EnumNodeKind(event.node_type),
@@ -446,6 +447,7 @@ class TestA4IdempotentReplay:
         correlation_id, enabling safe retries.
         """
         event = sample_introspection_event
+        # Note: event.node_version is already ModelSemVer, pass directly.
         request = ModelRegistryRequest(
             node_id=event.node_id,
             node_type=EnumNodeKind(event.node_type),

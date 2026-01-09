@@ -31,6 +31,38 @@ Union Reduction:
     ``ModelDispatchError | None`` field in parent models, reducing union count
     by 2 per parent model that uses it.
 
+JsonType Recursion Fix (OMN-1274):
+    The ``error_details`` field uses ``dict[str, object]`` instead of the
+    recursive ``JsonType`` type alias. Here is why:
+
+    **The Original Problem:**
+    ``JsonType`` was a recursive type alias::
+
+        JsonType = dict[str, "JsonType"] | list["JsonType"] | str | int | float | bool | None
+
+    Pydantic 2.x performs eager schema generation at **class definition time**.
+    When building JSON schemas for validation, it recursively expands type aliases,
+    causing ``RecursionError: maximum recursion depth exceeded``::
+
+        JsonType -> dict[str, JsonType] | list[JsonType] | ...
+                 -> dict[str, dict[str, JsonType] | ...] | ...
+                 -> ... (infinite expansion in _generate_schema.py)
+
+    **Why dict[str, object] is Correct for error_details:**
+    Error details are structured diagnostic information, always represented as
+    key-value dictionaries (e.g., ``{"host": "db.example.com", "retry_count": 3}``).
+    They do NOT need to support arrays or primitives at the root level.
+
+    Using ``dict[str, object]`` provides:
+    - Correct semantics: Error details are always dictionaries
+    - Type safety: Pydantic validates the outer structure
+    - No recursion: ``object`` avoids the recursive type expansion
+
+    **Caveats:**
+    - Values are typed as ``object`` (no static type checking on values)
+    - For fields needing full JSON support (any JSON value), use ``JsonType``
+      from ``omnibase_core.types`` (now fixed via TypeAlias pattern)
+
 Example:
     >>> from omnibase_core.enums import EnumCoreErrorCode
     >>> from omnibase_infra.models.dispatch import ModelDispatchError
@@ -51,6 +83,8 @@ Example:
 See Also:
     omnibase_infra.models.dispatch.ModelDispatchResult: Uses this for error info
     omnibase_core.enums.EnumCoreErrorCode: Error code enumeration
+    ADR: ``docs/decisions/adr-any-type-pydantic-workaround.md`` (historical)
+    Pydantic issue: https://github.com/pydantic/pydantic/issues/3278
 
 .. versionadded:: 0.7.0
     Added as part of OMN-1004 Optional Field Audit (Task 4.2).
@@ -116,7 +150,7 @@ class ModelDispatchError(BaseModel):
         default=None,
         description="Typed error code from EnumCoreErrorCode. None if not set.",
     )
-    error_details: dict[str, JsonType] = Field(
+    error_details: dict[str, object] = Field(
         default_factory=dict,
         description="Additional JSON-serializable error context.",
     )
@@ -175,7 +209,7 @@ class ModelDispatchError(BaseModel):
         cls,
         exception: Exception,
         code: EnumCoreErrorCode | None = None,
-        details: dict[str, JsonType] | None = None,
+        details: dict[str, object] | None = None,
     ) -> ModelDispatchError:
         """Create error info from an exception.
 
@@ -211,7 +245,7 @@ class ModelDispatchError(BaseModel):
         cls,
         message: str,
         code: EnumCoreErrorCode | None = None,
-        details: dict[str, JsonType] | None = None,
+        details: dict[str, object] | None = None,
     ) -> ModelDispatchError:
         """Create error info from a message string.
 
@@ -242,7 +276,7 @@ class ModelDispatchError(BaseModel):
             error_details=details or {},
         )
 
-    def with_details(self, **kwargs: JsonType) -> ModelDispatchError:
+    def with_details(self, **kwargs: object) -> ModelDispatchError:
         """Create a copy with additional error details.
 
         Merges the provided kwargs with existing error_details.
@@ -264,7 +298,7 @@ class ModelDispatchError(BaseModel):
         merged_details = {**self.error_details, **kwargs}
         return self.model_copy(update={"error_details": merged_details})
 
-    def to_dict(self) -> dict[str, str | int | dict[str, JsonType]]:
+    def to_dict(self) -> dict[str, str | int | dict[str, object]]:
         """Convert to dictionary with only set fields.
 
         Returns a dictionary containing only fields that are set (non-sentinel),
@@ -287,7 +321,7 @@ class ModelDispatchError(BaseModel):
 
         .. versionadded:: 0.7.0
         """
-        result: dict[str, str | int | dict[str, JsonType]] = {}
+        result: dict[str, str | int | dict[str, object]] = {}
         if self.has_message:
             result["error_message"] = self.error_message
         if self.has_code:

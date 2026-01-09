@@ -3,7 +3,7 @@
 """Consul Service registration operations mixin.
 
 This mixin provides service registration and deregistration operations
-for ConsulHandler, extracted to reduce class complexity.
+for HandlerConsul, extracted to reduce class complexity.
 
 Operations:
     - consul.register: Register service with Consul agent
@@ -36,13 +36,12 @@ from omnibase_infra.handlers.models.model_consul_handler_response import (
 
 if TYPE_CHECKING:
     import consul as consul_lib
-    from omnibase_core.types import JsonType
 
 
 class ProtocolConsulServiceDependencies(Protocol):
     """Protocol defining required dependencies for service operations.
 
-    ConsulHandler must provide these attributes/methods for the mixin to work.
+    HandlerConsul must provide these attributes/methods for the mixin to work.
     """
 
     _client: consul_lib.Consul | None
@@ -70,7 +69,7 @@ class ProtocolConsulServiceDependencies(Protocol):
 class MixinConsulService:
     """Mixin providing Consul service registration operations.
 
-    This mixin extracts service operations from ConsulHandler to reduce
+    This mixin extracts service operations from HandlerConsul to reduce
     class complexity while maintaining full functionality.
 
     Required Dependencies (from host class):
@@ -104,7 +103,7 @@ class MixinConsulService:
 
     async def _register_service(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, object],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
@@ -152,7 +151,7 @@ class MixinConsulService:
             tags_list = [str(t) for t in tags]
 
         check = payload.get("check")
-        check_dict: dict[str, JsonType] | None = (
+        check_dict: dict[str, object] | None = (
             check if isinstance(check, dict) else None
         )
 
@@ -187,7 +186,7 @@ class MixinConsulService:
 
     async def _deregister_service(
         self,
-        payload: dict[str, JsonType],
+        payload: dict[str, object],
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:

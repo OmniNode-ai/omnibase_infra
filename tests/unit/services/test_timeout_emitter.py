@@ -39,11 +39,12 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -113,7 +114,7 @@ def create_mock_projection(
         domain="registration",
         current_state=state,
         node_type=EnumNodeKind.EFFECT,
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         capabilities=ModelNodeCapabilities(),
         ack_deadline=ack_deadline,
         liveness_deadline=liveness_deadline,
@@ -454,11 +455,11 @@ class TestServiceTimeoutEmitterAckTimeout:
         # Check topic
         assert "node-registration-ack-timed-out" in call_args.kwargs["topic"]
 
-        # Check event content
+        # Check event content - using canonical field names from consolidated model
         event = call_args.kwargs["envelope"]
         assert event.node_id == node_id
-        assert event.ack_deadline == past_deadline
-        assert event.detected_at == now
+        assert event.deadline_at == past_deadline  # Renamed from ack_deadline
+        assert event.emitted_at == now  # Renamed from detected_at
         assert event.previous_state == EnumRegistrationState.AWAITING_ACK
         assert event.correlation_id == correlation_id
         assert event.causation_id == tick_id

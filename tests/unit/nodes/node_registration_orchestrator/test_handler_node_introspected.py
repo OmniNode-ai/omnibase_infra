@@ -24,6 +24,8 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection import ModelRegistrationProjection
@@ -59,9 +61,9 @@ def create_projection(
         entity_id=entity_id,
         domain="registration",
         current_state=state,
-        node_type="effect",
-        node_version="1.0.0",
-        capabilities=ModelNodeCapabilities(),
+        node_type=EnumNodeKind.EFFECT,
+        node_version=ModelSemVer.parse("1.0.0"),
+        capabilities=ModelNodeCapabilities(),  # ModelRegistrationProjection uses capabilities
         last_applied_event_id=uuid4(),
         last_applied_offset=0,
         registered_at=TEST_NOW - timedelta(hours=1),
@@ -76,7 +78,7 @@ def create_introspection_event(
     """Create a test introspection event."""
     return ModelNodeIntrospectionEvent(
         node_id=node_id or uuid4(),
-        node_type="effect",
+        node_type=EnumNodeKind.EFFECT,
         correlation_id=uuid4(),
         timestamp=timestamp or TEST_NOW,
     )
@@ -358,7 +360,7 @@ class TestHandlerNodeIntrospectedEventFields:
         introspection_correlation_id = uuid4()
         introspection_event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             correlation_id=introspection_correlation_id,
             timestamp=TEST_NOW,
         )
@@ -584,9 +586,9 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         )
         introspection_event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="2.0.0",
-            capabilities=capabilities,
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("2.0.0"),
+            declared_capabilities=capabilities,
             correlation_id=uuid4(),
             timestamp=TEST_NOW,
         )
@@ -600,7 +602,7 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         # Verify capabilities were passed to projector
         call_kwargs = mock_projector.persist_state_transition.call_args[1]
         assert call_kwargs["capabilities"] == capabilities
-        assert call_kwargs["node_version"] == "2.0.0"
+        assert str(call_kwargs["node_version"]) == "2.0.0"
 
     @pytest.mark.asyncio
     async def test_projection_calculates_ack_deadline(self) -> None:
@@ -730,10 +732,10 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
 
 
 def create_mock_consul_handler() -> AsyncMock:
-    """Create a mock ConsulHandler."""
-    from omnibase_infra.handlers import ConsulHandler
+    """Create a mock HandlerConsul."""
+    from omnibase_infra.handlers import HandlerConsul
 
-    mock = AsyncMock(spec=ConsulHandler)
+    mock = AsyncMock(spec=HandlerConsul)
     mock.execute = AsyncMock(return_value=None)
     return mock
 
@@ -784,7 +786,7 @@ class TestHandlerNodeIntrospectedConsulRegistration:
         assert len(events) == 1
         assert isinstance(events[0], ModelNodeRegistrationInitiated)
 
-        # Should have called ConsulHandler.execute
+        # Should have called HandlerConsul.execute
         mock_consul.execute.assert_called_once()
 
         # Verify the call had correct structure
@@ -866,7 +868,7 @@ class TestHandlerNodeIntrospectedConsulRegistration:
 
         node_id = uuid4()
         # Service name follows ONEX convention: onex-{node_type}
-        # create_introspection_event uses node_type="effect" by default
+        # create_introspection_event uses node_type=EnumNodeKind.EFFECT by default
         expected_service_name = "onex-effect"
 
         introspection_event = create_introspection_event(node_id=node_id)
@@ -899,7 +901,7 @@ class TestHandlerNodeIntrospectedConsulRegistration:
         node_id = uuid4()
         introspection_event = ModelNodeIntrospectionEvent(
             node_id=node_id,
-            node_type="effect",
+            node_type=EnumNodeKind.EFFECT,
             endpoints={
                 "health": "http://test-node:8080/health",
                 "api": "http://test-node:8080/api",

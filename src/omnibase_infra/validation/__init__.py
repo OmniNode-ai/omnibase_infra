@@ -91,10 +91,6 @@ Security Design (Intentional Fail-Open Architecture):
     - routing_coverage_validator.py: Routing gap detection (module docstring)
 """
 
-from omnibase_core.models.validation.model_import_validation_result import (
-    ModelImportValidationResult,
-)
-from omnibase_core.services.service_contract_validator import ServiceContractValidator
 from omnibase_core.validation import (
     CircularImportValidator,
     validate_all,
@@ -102,6 +98,9 @@ from omnibase_core.validation import (
     validate_contracts,
     validate_patterns,
     validate_union_usage,
+)
+from omnibase_core.validation import (
+    ModelModuleImportResult as ModelImportValidationResult,
 )
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
@@ -150,6 +149,12 @@ from omnibase_infra.validation.infra_validators import (
     validate_infra_union_usage,
 )
 
+# Registration-time security validation for handlers (OMN-1098)
+from omnibase_infra.validation.registration_security_validator import (
+    RegistrationSecurityValidator,
+    validate_handler_registration,
+)
+
 # Routing coverage validation for startup fail-fast (OMN-958)
 from omnibase_infra.validation.routing_coverage_validator import (
     RoutingCoverageError,
@@ -180,6 +185,12 @@ from omnibase_infra.validation.security_validator import (
     is_sensitive_method_name,
     validate_handler_security,
     validate_method_exposure,
+)
+
+# NOTE: ServiceContractValidator was removed in omnibase_core 0.6.2
+# Using a stub that implements ProtocolContractValidator
+from omnibase_infra.validation.stub_contract_validator import (
+    ServiceContractValidator,
 )
 
 # Topic category validation for execution shape enforcement
@@ -237,6 +248,9 @@ __all__: list[str] = [
     "TopicCategoryValidator",
     # Validation error aggregation (OMN-1091)
     "ValidationAggregator",
+    # Registration-time security validation (OMN-1098)
+    "RegistrationSecurityValidator",
+    "validate_handler_registration",
     "check_routing_coverage_ci",
     "convert_to_validation_error",
     "detect_message_category",

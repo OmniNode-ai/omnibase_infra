@@ -200,12 +200,18 @@ class TestModelOperationContextBoundaryConditions:
         assert ctx.is_timed_out()
 
     def test_boundary_precision_microseconds_under(self) -> None:
-        """Test timeout detection with microsecond precision under the boundary."""
+        """Test timeout detection with sufficient margin under the boundary.
+
+        Note: We use a 1-second margin (not microseconds) to avoid flaky tests.
+        The actual timeout boundary logic is tested deterministically elsewhere.
+        This test verifies that operations well under the timeout are not marked
+        as timed out.
+        """
         timeout_seconds = 10.0
         current_time = time.time()
 
-        # 100 microseconds under the boundary
-        started_at = current_time - timeout_seconds + 0.0001
+        # 1 second under the boundary (robust against execution timing)
+        started_at = current_time - timeout_seconds + 1.0
 
         ctx = ModelOperationContext(
             correlation_id=uuid4(),

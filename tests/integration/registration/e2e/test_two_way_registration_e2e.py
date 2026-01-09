@@ -44,6 +44,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.discovery import (
@@ -57,6 +58,7 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
 )
 
+# Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
 from .performance_utils import (
     PerformanceThresholds,
     assert_heartbeat_interval,
@@ -72,8 +74,6 @@ from .verification_helpers import (
     verify_dual_registration,
     verify_postgres_registration,
     wait_for_consul_registration,
-    wait_for_heartbeat_update,
-    wait_for_kafka_event,
     wait_for_postgres_registration,
 )
 
@@ -81,12 +81,9 @@ if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
 
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
-    from omnibase_infra.handlers import ConsulHandler
+    from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
-    )
-    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-        HandlerNodeIntrospected,
     )
     from omnibase_infra.projectors import (
         ProjectionReaderRegistration,
@@ -97,6 +94,8 @@ if TYPE_CHECKING:
 
 
 # Module-level markers
+# Note: conftest.py already applies pytest.mark.e2e and skipif(not ALL_INFRA_AVAILABLE)
+# to all tests in this directory. We only add the e2e marker here for explicit clarity.
 pytestmark = [
     pytest.mark.e2e,
 ]
@@ -413,7 +412,7 @@ class TestSuite2RegistryDualRegistration:
     @pytest.mark.asyncio
     async def test_consul_registration_succeeds(
         self,
-        real_consul_handler: ConsulHandler,
+        real_consul_handler: HandlerConsul,
         cleanup_consul_services: list[str],
         unique_node_id: UUID,
     ) -> None:
@@ -423,7 +422,7 @@ class TestSuite2RegistryDualRegistration:
         for service discovery.
 
         Expected Behavior:
-            1. Registration intent is executed via ConsulHandler
+            1. Registration intent is executed via HandlerConsul
             2. Service appears in Consul KV store
             3. Service can be queried back
 
@@ -508,7 +507,7 @@ class TestSuite2RegistryDualRegistration:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
 
@@ -538,7 +537,7 @@ class TestSuite2RegistryDualRegistration:
     @pytest.mark.asyncio
     async def test_dual_registration_consul_and_postgres(
         self,
-        real_consul_handler: ConsulHandler,
+        real_consul_handler: HandlerConsul,
         projection_reader: ProjectionReaderRegistration,
         real_projector,
         cleanup_consul_services: list[str],
@@ -597,7 +596,7 @@ class TestSuite2RegistryDualRegistration:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
 
@@ -627,7 +626,7 @@ class TestSuite2RegistryDualRegistration:
     @pytest.mark.asyncio
     async def test_dual_registration_under_300ms(
         self,
-        real_consul_handler: ConsulHandler,
+        real_consul_handler: HandlerConsul,
         projection_reader: ProjectionReaderRegistration,
         real_projector,
         cleanup_consul_services: list[str],
@@ -685,7 +684,7 @@ class TestSuite2RegistryDualRegistration:
                 registered_at=now,
                 updated_at=now,
                 node_type=EnumNodeKind.EFFECT,
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 last_applied_event_id=unique_node_id,
             )
 
@@ -761,7 +760,7 @@ class TestSuite2RegistryDualRegistration:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
 
@@ -845,7 +844,7 @@ class TestSuite2RegistryDualRegistration:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
 
@@ -1405,7 +1404,7 @@ class TestSuite4HeartbeatPublishing:
             domain="registration",
             current_state=EnumRegistrationState.ACTIVE,
             node_type=introspectable_test_node.node_type,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             capabilities={"test": True},
             ack_deadline=None,
             liveness_deadline=now,  # Will be updated by heartbeat
@@ -1591,9 +1590,6 @@ class TestSuite5RegistryRecovery:
         from omnibase_infra.models.projection.model_registration_projection import (
             ModelRegistrationProjection,
         )
-        from omnibase_infra.nodes.node_registration_orchestrator import (
-            NodeRegistrationOrchestrator,
-        )
         from omnibase_infra.projectors import ProjectorRegistration
         from omnibase_infra.runtime.container_wiring import (
             get_projection_reader_from_container,
@@ -1612,7 +1608,7 @@ class TestSuite5RegistryRecovery:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
         await projector.persist(
@@ -1655,7 +1651,7 @@ class TestSuite5RegistryRecovery:
         assert recovered_projection.entity_id == unique_node_id
         assert recovered_projection.current_state == EnumRegistrationState.ACTIVE
         assert recovered_projection.node_type == EnumNodeKind.EFFECT
-        assert recovered_projection.node_version == "1.0.0"
+        assert str(recovered_projection.node_version) == "1.0.0"
 
     @pytest.mark.asyncio
     async def test_re_registration_after_recovery(
@@ -1704,7 +1700,7 @@ class TestSuite5RegistryRecovery:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
         await real_projector.persist(
@@ -1791,7 +1787,7 @@ class TestSuite5RegistryRecovery:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
         await real_projector.persist(
@@ -1811,7 +1807,7 @@ class TestSuite5RegistryRecovery:
             timeout_seconds=5.0,
         )
         assert first_result is not None
-        assert first_result.node_version == "1.0.0"
+        assert str(first_result.node_version) == "1.0.0"
 
         # Step 2: Update the same registration with new version (simulating UPSERT)
         updated_now = datetime.now(UTC)
@@ -1822,7 +1818,7 @@ class TestSuite5RegistryRecovery:
             registered_at=first_result.registered_at,  # Preserve original registration time
             updated_at=updated_now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="2.0.0",  # Updated version
+            node_version=ModelSemVer.parse("2.0.0"),  # Updated version
             last_applied_event_id=unique_node_id,
         )
         await real_projector.persist(
@@ -1846,7 +1842,7 @@ class TestSuite5RegistryRecovery:
         # Assertions
         assert final_result is not None, "Registration should exist"
         assert final_result.entity_id == unique_node_id, "Entity ID should be preserved"
-        assert final_result.node_version == "2.0.0", (
+        assert str(final_result.node_version) == "2.0.0", (
             f"Version should be updated to 2.0.0, got {final_result.node_version}"
         )
         assert final_result.current_state == EnumRegistrationState.ACTIVE, (
@@ -1885,7 +1881,7 @@ class TestSuite6MultipleNodes:
         wired_container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
         real_projector,
-        real_consul_handler: ConsulHandler,
+        real_consul_handler: HandlerConsul,
         cleanup_consul_services: list[str],
         cleanup_node_ids: list[UUID],
         introspection_event_factory,
@@ -1928,7 +1924,7 @@ class TestSuite6MultipleNodes:
                 registered_at=now,
                 updated_at=now,
                 node_type=EnumNodeKind.EFFECT,
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 last_applied_event_id=node_ids[idx],
             )
             await real_projector.persist(
@@ -2052,7 +2048,7 @@ class TestSuite6MultipleNodes:
         wired_container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
         real_projector,
-        real_consul_handler: ConsulHandler,
+        real_consul_handler: HandlerConsul,
         cleanup_consul_services: list[str],
         cleanup_node_ids: list[UUID],
         introspection_event_factory,
@@ -2169,7 +2165,7 @@ class TestSuite6MultipleNodes:
         ):
             pg_result = postgres_results[i]
             assert pg_result is not None
-            assert pg_result.node_version == f"1.{i}.0", (
+            assert str(pg_result.node_version) == f"1.{i}.0", (
                 f"PostgreSQL version mismatch for node {i}"
             )
 
@@ -2293,7 +2289,7 @@ class TestSuite7GracefulDegradation:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
 
@@ -2326,7 +2322,7 @@ class TestSuite7GracefulDegradation:
     @pytest.mark.asyncio
     async def test_registry_works_when_postgres_unavailable(
         self,
-        real_consul_handler: ConsulHandler,
+        real_consul_handler: HandlerConsul,
         introspection_event_factory,
         unique_node_id: UUID,
         cleanup_consul_services: list[str],
@@ -2413,14 +2409,12 @@ class TestSuite7GracefulDegradation:
         consul_success = ModelBackendResult(
             success=True,
             duration_ms=45.0,
-            retries=0,
         )
         postgres_failure = ModelBackendResult(
             success=False,
             error="Connection refused",
             error_code="DATABASE_CONNECTION_ERROR",
             duration_ms=5000.0,
-            retries=3,
         )
 
         response = ModelRegistryResponse.from_backend_results(
@@ -2458,12 +2452,10 @@ class TestSuite7GracefulDegradation:
             error="Service unavailable",
             error_code="SERVICE_UNAVAILABLE",
             duration_ms=3000.0,
-            retries=2,
         )
         postgres_success = ModelBackendResult(
             success=True,
             duration_ms=30.0,
-            retries=0,
         )
 
         response2 = ModelRegistryResponse.from_backend_results(
@@ -2530,12 +2522,10 @@ class TestSuite7GracefulDegradation:
         consul_result = ModelBackendResult(
             success=True,
             duration_ms=45.5,
-            retries=0,
         )
         postgres_result = ModelBackendResult(
             success=True,
             duration_ms=30.2,
-            retries=0,
         )
 
         response = ModelRegistryResponse.from_backend_results(
@@ -2575,7 +2565,7 @@ class TestSuite8RegistrySelfRegistration:
     @pytest.mark.asyncio
     async def test_registry_registers_itself(
         self,
-        real_consul_handler: ConsulHandler,
+        real_consul_handler: HandlerConsul,
         projection_reader: ProjectionReaderRegistration,
         real_projector,
         wired_container: ModelONEXContainer,
@@ -2643,7 +2633,7 @@ class TestSuite8RegistrySelfRegistration:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.ORCHESTRATOR,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=registry_node_id,
         )
 
@@ -2704,7 +2694,7 @@ class TestSuite8RegistrySelfRegistration:
             registered_at=now,
             updated_at=now,
             node_type=EnumNodeKind.ORCHESTRATOR,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=registry_node_id,
         )
 
@@ -2753,7 +2743,7 @@ class TestSuite8RegistrySelfRegistration:
         # Create introspection event for the registry itself
         registry_event = introspection_event_factory(
             node_type=EnumNodeKind.ORCHESTRATOR,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={
                 "health": "http://localhost:8085/health",
                 "api": "http://localhost:8085/api/v1/registry",
@@ -2814,7 +2804,7 @@ class TestSuite8RegistrySelfRegistration:
     @pytest.mark.asyncio
     async def test_registry_discoverable_by_other_nodes(
         self,
-        real_consul_handler: ConsulHandler,
+        real_consul_handler: HandlerConsul,
         unique_node_id: UUID,
         cleanup_consul_services: list[str],
     ) -> None:

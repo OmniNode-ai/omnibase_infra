@@ -21,7 +21,6 @@ from typing import cast
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
-from omnibase_core.types import JsonType
 
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (
@@ -82,7 +81,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
 
         try:
             # Retrieve JSON data with safe default
-            json_data = cast(JsonType, input_data.get("json", {}))
+            json_data = cast(object, input_data.get("json", {}))
 
             # Perform pure deterministic computation
             normalized = self._sort_keys_recursively(json_data)
@@ -128,7 +127,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
                 exception_type=type(e).__name__,
             ) from e
 
-    def _sort_keys_recursively(self, obj: JsonType) -> JsonType:
+    def _sort_keys_recursively(self, obj: object) -> object:
         """Recursively sort dictionary keys.
 
         Args:

@@ -31,6 +31,7 @@ Related Tickets:
 from __future__ import annotations
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.reducers import RegistrationReducer
@@ -259,7 +260,7 @@ class TestMultipleReconstructionScenarios:
             node_id=node_id,
             correlation_id=id_generator.next_uuid(),
             timestamp=clock.now(),
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
         )
 
         # Process first event
@@ -275,7 +276,7 @@ class TestMultipleReconstructionScenarios:
             node_id=node_id,
             correlation_id=id_generator.next_uuid(),
             timestamp=clock.now(),
-            node_version="1.1.0",  # Version update
+            node_version=ModelSemVer.parse("1.1.0"),  # Version update
         )
 
         # Process second event
@@ -473,7 +474,7 @@ class TestEventLogConsistency:
             node_id=node_id,
             correlation_id=id_generator.next_uuid(),
             timestamp=clock.now(),
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
         )
 
         clock.advance(60)
@@ -481,7 +482,7 @@ class TestEventLogConsistency:
             node_id=node_id,
             correlation_id=id_generator.next_uuid(),
             timestamp=clock.now(),
-            node_version="2.0.0",
+            node_version=ModelSemVer.parse("2.0.0"),
         )
 
         # Process in order: event1, then event2

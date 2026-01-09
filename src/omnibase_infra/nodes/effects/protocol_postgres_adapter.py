@@ -23,6 +23,7 @@ from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives import ModelSemVer
 
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 
@@ -54,7 +55,7 @@ class ProtocolPostgresAdapter(Protocol):
         self,
         node_id: UUID,
         node_type: EnumNodeKind,
-        node_version: str,
+        node_version: ModelSemVer,
         endpoints: dict[str, str],
         metadata: dict[str, str],
     ) -> ModelBackendResult:
@@ -66,6 +67,25 @@ class ProtocolPostgresAdapter(Protocol):
             node_version: Semantic version of the node.
             endpoints: Dict of endpoint type to URL.
             metadata: Additional metadata.
+
+        Returns:
+            ModelBackendResult with success status, optional error message,
+            timing information, and correlation context.
+        """
+        ...
+
+    async def deactivate(
+        self,
+        node_id: UUID,
+    ) -> ModelBackendResult:
+        """Deactivate a node registration record.
+
+        Marks the registration as inactive (soft delete) rather than
+        removing it entirely. This preserves historical data while
+        stopping the node from appearing in active registrations.
+
+        Args:
+            node_id: Unique identifier for the node to deactivate.
 
         Returns:
             ModelBackendResult with success status, optional error message,

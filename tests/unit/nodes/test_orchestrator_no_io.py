@@ -25,8 +25,6 @@ import ast
 import inspect
 from unittest.mock import MagicMock
 
-import pytest
-
 # Import shared AST analysis utilities from test helpers
 # See: tests/helpers/ast_analysis.py for implementation details.
 from tests.helpers.ast_analysis import (
@@ -346,7 +344,6 @@ class TestOrchestratorDelegatesToEffectProtocol:
         )
 
         # Verify it's a Protocol (runtime_checkable)
-        from typing import Protocol, runtime_checkable
 
         # Check it's marked as runtime_checkable
         assert hasattr(ProtocolEffect, "__protocol_attrs__") or hasattr(

@@ -5,7 +5,7 @@
 This module provides the Pydantic model for component health check operation results.
 
 Design Pattern:
-    ModelHealthCheckResult replaces tuple[str, JsonType] returns from
+    ModelHealthCheckResult replaces tuple[str, Any] returns from
     check_health() with a strongly-typed model that provides:
     - Component type identification
     - Typed health status with structured details
@@ -178,7 +178,7 @@ class ModelHealthCheckResult(BaseModel):
     def from_handler_response(
         cls,
         handler_type: str,
-        health_response: JsonType,
+        health_response: object,
     ) -> ModelHealthCheckResult:
         """Create a result from a raw handler health check response.
 
