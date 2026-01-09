@@ -110,9 +110,6 @@ from omnibase_infra.runtime.validation import validate_runtime_config
 from omnibase_infra.utils.correlation import generate_correlation_id
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
-# NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
-
 logger = logging.getLogger(__name__)
 
 # Kernel version - read from installed package metadata to avoid version drift

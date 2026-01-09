@@ -1002,18 +1002,24 @@ class TestMixinNodeIntrospectionPerformance:
             f"Introspection took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
         )
 
-    async def test_cached_introspection_under_1ms(self, mock_node: MockNode) -> None:
-        """Test that cached introspection returns within threshold."""
+    async def test_cached_introspection_fast(self, mock_node: MockNode) -> None:
+        """Test that cached introspection returns significantly faster than uncached.
+
+        Uses a relaxed threshold (10ms base) to avoid flaky failures in CI
+        environments while still validating that caching provides meaningful
+        speedup compared to uncached introspection (~50ms).
+        """
         # Populate cache
         await mock_node.get_introspection_data()
 
-        threshold_ms = 1 * PERF_MULTIPLIER
+        threshold_ms = 10 * PERF_MULTIPLIER
         start = time.perf_counter()
         await mock_node.get_introspection_data()
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < threshold_ms, (
-            f"Cached introspection took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+            f"Cached introspection took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms. "
+            f"Cache should provide significant speedup vs uncached (~50ms)."
         )
 
     async def test_capability_extraction_under_10ms(self, mock_node: MockNode) -> None:

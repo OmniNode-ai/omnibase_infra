@@ -139,9 +139,6 @@ from omnibase_infra.runtime.handler_registry import (
 
 if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
-
-    # NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
-    # recursion issues with recursive type aliases.
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
 logger = logging.getLogger(__name__)

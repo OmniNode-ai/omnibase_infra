@@ -41,9 +41,6 @@ import yaml
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
-# NOTE: Using object instead of JsonType from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases.
-
 # Topic name pattern: alphanumeric, underscores, hyphens, and periods
 # This matches Kafka/Redpanda topic naming conventions and ONEX naming
 # (e.g., "dev.onex.evt.node-introspection.v1")

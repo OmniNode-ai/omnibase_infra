@@ -1268,10 +1268,10 @@ pattern_exemptions:
       - CLAUDE.md (Model Field Naming - computed display names)
     ticket: OMN-1138
   # ==========================================================================
-  # Architecture Validator Model Exemptions (model_violation.py) [OMN-1263]
+  # Architecture Validator Model Exemptions (model_architecture_violation.py) [OMN-1263]
   # ==========================================================================
   # Architecture violation rule_id and rule_name are human-readable identifiers.
-  - file_pattern: 'model_violation\.py'
+  - file_pattern: 'model_architecture_violation\.py'
     violation_pattern: "Field 'rule_id' should use UUID"
     reason: >
       rule_id is a human-readable semantic identifier (e.g., "ARCH-001", "ARCH-002") for architecture validation rules. Used for CI output and developer reference. Not a UUID.
@@ -1279,7 +1279,7 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (ONEX Architecture - Handler Validation)
     ticket: OMN-1263
-  - file_pattern: 'model_violation\.py'
+  - file_pattern: 'model_architecture_violation\.py'
     violation_pattern: "Field 'rule_name' might reference an entity"
     reason: >
       rule_name is a human-readable descriptive label (e.g., "No Any Types", "One Model Per File") for architecture rules. It does not reference a rule entity - it is just a descriptive string for human consumption.

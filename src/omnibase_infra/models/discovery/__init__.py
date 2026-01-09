@@ -1,6 +1,11 @@
 # Copyright 2025 OmniNode Team. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Discovery models for node introspection and capability reporting."""
+"""Discovery models for node introspection and capability reporting.
+
+Note:
+    ModelNodeIntrospectionEvent has been moved to omnibase_infra.models.registration.
+    Import it from there for new code.
+"""
 
 from omnibase_infra.models.discovery.model_discovered_capabilities import (
     ModelDiscoveredCapabilities,
