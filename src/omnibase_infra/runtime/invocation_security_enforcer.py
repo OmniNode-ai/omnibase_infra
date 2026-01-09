@@ -277,7 +277,8 @@ class InvocationSecurityEnforcer:
             Tuple of compiled regex patterns (immutable).
 
         Raises:
-            ProtocolConfigurationError: If any pattern is invalid (see _validate_domain_pattern).
+            ProtocolConfigurationError: If any pattern is invalid (see _validate_domain_pattern)
+                or if regex compilation fails.
 
         Note:
             Wildcard patterns only match a single subdomain level.
@@ -289,14 +290,24 @@ class InvocationSecurityEnforcer:
             # Validate pattern before compilation
             self._validate_domain_pattern(domain)
 
-            if domain.startswith("*."):
-                # Convert *.example.com to regex: ^[^.]+\.example\.com$
-                # [^.]+ matches one or more non-dot characters (single subdomain)
-                suffix = re.escape(domain[2:])
-                pattern = re.compile(rf"^[^.]+\.{suffix}$")
-            else:
-                # Exact match
-                pattern = re.compile(rf"^{re.escape(domain)}$")
+            try:
+                if domain.startswith("*."):
+                    # Convert *.example.com to regex: ^[^.]+\.example\.com$
+                    # [^.]+ matches one or more non-dot characters (single subdomain)
+                    suffix = re.escape(domain[2:])
+                    pattern = re.compile(rf"^[^.]+\.{suffix}$")
+                else:
+                    # Exact match
+                    pattern = re.compile(rf"^{re.escape(domain)}$")
+            except re.error as e:
+                context = ModelInfraErrorContext(
+                    operation="compile_domain_pattern",
+                    correlation_id=self._correlation_id,
+                )
+                raise ProtocolConfigurationError(
+                    f"Failed to compile domain pattern '{domain}': {e}",
+                    context=context,
+                ) from e
             patterns.append(pattern)
         return tuple(patterns)  # Return immutable tuple
 
