@@ -3,46 +3,71 @@
 """Validator for ARCH-002: No Handler Publishing.
 
 This validator uses AST analysis to detect handlers that directly publish
-events to the event bus. Only orchestrators may publish events.
+events to the event bus. Only orchestrators may publish events. This enforces
+the ONEX architectural principle that handlers are pure processors that
+return results, while orchestrators own the event publishing lifecycle.
 
-Detection patterns:
-    - Handler class with event_bus, bus, or publisher in __init__ signature
-    - Handler class with _bus, _event_bus, _publisher attributes
-    - Handler class calling publish(), emit(), or send_event() methods
+Related:
+    - Ticket: OMN-1099 (Architecture Validator)
+    - PR: #124 (Protocol-Compliant Rule Classes)
+    - Rule: ARCH-002 (No Handler Publishing)
+    - See also: docs/patterns/dispatcher_resilience.md
 
-Handler identification:
+Detection Patterns:
+    1. **Constructor parameters**: event_bus, bus, or publisher in __init__ signature
+    2. **Instance attributes**: _bus, _event_bus, _publisher assigned in handler
+    3. **Method calls**: publish(), emit(), or send_event() invocations
+
+Handler Identification:
     - Classes with "Handler" in the name (case sensitive)
-    - Classes with "Orchestrator" in the name are NOT handlers
+    - Classes with "Orchestrator" in the name are NOT handlers (excluded)
 
-Example violations:
-    >>> # BAD: Handler with event bus access
-    >>> class HandlerBad:
-    ...     def __init__(self, container, event_bus):
-    ...         self._bus = event_bus
-    ...     def handle(self, event):
-    ...         self._bus.publish(SomeEvent())  # VIOLATION
+Example Violations::
 
-    >>> # GOOD: Handler returns event for orchestrator to publish
-    >>> class HandlerGood:
-    ...     def handle(self, event):
-    ...         return ModelEventEnvelope(payload=SomeEvent())  # OK
+    # VIOLATION: Handler with event bus in constructor
+    class HandlerBad:
+        def __init__(self, container, event_bus):  # Forbidden parameter
+            self._bus = event_bus  # Forbidden attribute
+        def handle(self, event):
+            self._bus.publish(SomeEvent())  # Forbidden method call
+
+    # VIOLATION: Handler calling publish directly
+    class HandlerAlsoBad:
+        def handle(self, event):
+            self.emit(SomeEvent())  # Forbidden method
+
+Allowed Patterns::
+
+    # OK: Handler returns event envelope for orchestrator to publish
+    class HandlerGood:
+        def handle(self, event):
+            return ModelEventEnvelope(payload=SomeEvent())  # Correct pattern
+
+    # OK: Orchestrator with event bus (orchestrators ARE allowed)
+    class OrchestratorGood:
+        def __init__(self, container, event_bus):  # Allowed for orchestrators
+            self._bus = event_bus
+        def orchestrate(self, event):
+            self._bus.publish(response)  # Allowed
 """
 
 from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+from omnibase_infra.nodes.architecture_validator.mixins import MixinFilePathRule
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
-)
-from omnibase_infra.nodes.architecture_validator.models.model_validation_request import (
-    ModelArchitectureValidationRequest,
 )
 from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
     ModelFileValidationResult,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.nodes.architecture_validator.models import ModelRuleCheckResult
 
 RULE_ID = "ARCH-002"
 RULE_NAME = "No Handler Publishing"
@@ -260,13 +285,21 @@ def validate_no_handler_publishing(file_path: str) -> ModelFileValidationResult:
         file_path: Path to the Python source file to validate.
 
     Returns:
-        ModelArchitectureValidationResult with validation status and any violations.
+        ModelFileValidationResult with:
+            - valid=True if no publishing patterns found in handlers
+            - valid=False with violations if publishing patterns detected
 
-    Example:
-        >>> result = validate_no_handler_publishing("path/to/handler.py")
-        >>> if not result.valid:
-        ...     for v in result.violations:
-        ...         print(f"{v.rule_id}: {v.message}")
+    Note:
+        Orchestrator classes are EXEMPT from this rule - they are allowed
+        to publish events. Only classes with "Handler" in the name (but not
+        "Orchestrator") are validated.
+
+    Example::
+
+        result = validate_no_handler_publishing("path/to/handler.py")
+        if not result.valid:
+            for v in result.violations:
+                print(f"{v.rule_id}: {v.message}")
     """
     path = Path(file_path)
 
@@ -303,6 +336,44 @@ def validate_no_handler_publishing(file_path: str) -> ModelFileValidationResult:
             files_checked=1,
             rules_checked=[RULE_ID],
         )
+    except (PermissionError, OSError) as e:
+        # Return WARNING violation for file I/O errors
+        return ModelFileValidationResult(
+            valid=True,  # Still valid (not a rule violation), but with warning
+            violations=[
+                ModelArchitectureViolation(
+                    rule_id=RULE_ID,
+                    rule_name=RULE_NAME,
+                    severity=EnumValidationSeverity.WARNING,
+                    target_type="file",
+                    target_name=Path(file_path).name,
+                    message=f"File could not be read: {e}",
+                    location=file_path,
+                    suggestion="Ensure file is readable and has correct permissions",
+                )
+            ],
+            files_checked=1,
+            rules_checked=[RULE_ID],
+        )
+    except UnicodeDecodeError as e:
+        # Return WARNING violation for encoding errors
+        return ModelFileValidationResult(
+            valid=True,  # Still valid (not a rule violation), but with warning
+            violations=[
+                ModelArchitectureViolation(
+                    rule_id=RULE_ID,
+                    rule_name=RULE_NAME,
+                    severity=EnumValidationSeverity.WARNING,
+                    target_type="file",
+                    target_name=Path(file_path).name,
+                    message=f"File has encoding error and could not be validated: {e.reason}",
+                    location=file_path,
+                    suggestion="Ensure file is valid UTF-8 encoded",
+                )
+            ],
+            files_checked=1,
+            rules_checked=[RULE_ID],
+        )
 
     # Analyze the AST
     visitor = PublishingConstraintVisitor(file_path)
@@ -316,4 +387,95 @@ def validate_no_handler_publishing(file_path: str) -> ModelFileValidationResult:
     )
 
 
-__all__ = ["validate_no_handler_publishing"]
+class RuleNoHandlerPublishing(MixinFilePathRule):
+    """Protocol-compliant rule: Handlers must not publish events directly.
+
+    This class wraps the file-based validator to implement ProtocolArchitectureRule,
+    enabling use with NodeArchitectureValidatorCompute.
+
+    Thread Safety:
+        This rule is stateless and safe for concurrent use.
+    """
+
+    @property
+    def rule_id(self) -> str:
+        """Return the canonical rule ID matching contract.yaml."""
+        return RULE_ID
+
+    @property
+    def name(self) -> str:
+        """Return human-readable rule name."""
+        return RULE_NAME
+
+    @property
+    def description(self) -> str:
+        """Return detailed rule description."""
+        return (
+            "Handlers must not have direct event bus access. Only orchestrators "
+            "may publish events. Handlers should return events for orchestrators to publish."
+        )
+
+    @property
+    def severity(self) -> EnumValidationSeverity:
+        """Return severity level for violations of this rule."""
+        return EnumValidationSeverity.ERROR
+
+    def check(self, target: object) -> ModelRuleCheckResult:
+        """Check target against this rule.
+
+        Args:
+            target: Target to validate. If a string, treated as file path.
+                   Other types return skipped=True with reason.
+
+        Returns:
+            ModelRuleCheckResult indicating pass/fail with details.
+
+        Note:
+            When multiple violations are found, only the first violation's
+            message and location are returned. The total count is available
+            in ``details["total_violations"]``. This fail-fast behavior is
+            intentional - fix the first violation and re-run to find others.
+        """
+        from omnibase_infra.nodes.architecture_validator.models import (
+            ModelRuleCheckResult,
+        )
+
+        file_path = self._extract_file_path(target)
+        if file_path is None:
+            return ModelRuleCheckResult(
+                passed=True,
+                rule_id=self.rule_id,
+                skipped=True,
+                reason="Target is not a valid file path",
+            )
+
+        # Delegate to existing file-based validator
+        result = validate_no_handler_publishing(file_path)
+
+        if result.valid:
+            return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
+
+        # Convert first violation to ModelRuleCheckResult
+        if result.violations:
+            violation = result.violations[0]
+            return ModelRuleCheckResult(
+                passed=False,
+                rule_id=self.rule_id,
+                message=violation.message,
+                details={
+                    "target_name": violation.target_name,
+                    "target_type": violation.target_type,
+                    "location": violation.location,
+                    "suggestion": violation.suggestion,
+                    "total_violations": len(result.violations),
+                },
+            )
+
+        return ModelRuleCheckResult(
+            passed=False,
+            rule_id=self.rule_id,
+            message="Handler publishing violation detected",
+        )
+
+
+__all__ = ["validate_no_handler_publishing", "RuleNoHandlerPublishing"]

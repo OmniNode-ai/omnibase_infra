@@ -189,8 +189,8 @@ class TestConsulFailureFlow:
         # Raw error "Service unavailable" is sanitized to "service unavailable" safe prefix
         # Backend name is lowercase as passed to sanitize_backend_error()
         assert response.consul_result.error is not None
-        assert "consul operation failed" in response.consul_result.error.lower()
-        assert "service unavailable" in response.consul_result.error.lower()
+        assert "consul operation failed" in response.consul_result.error
+        assert "service unavailable" in response.consul_result.error
         assert response.error_summary is not None
         assert "consul" in response.error_summary.lower()
 
@@ -287,8 +287,8 @@ class TestPostgresFailureFlow:
         # Raw error "Connection timeout" is sanitized to "timeout" safe prefix
         # Backend name is lowercase as passed to sanitize_backend_error()
         assert response.postgres_result.error is not None
-        assert "postgres operation failed" in response.postgres_result.error.lower()
-        assert "timeout" in response.postgres_result.error.lower()
+        assert "postgres operation failed" in response.postgres_result.error
+        assert "timeout" in response.postgres_result.error
         assert response.error_summary is not None
         assert "postgres" in response.error_summary.lower()
 
@@ -385,8 +385,8 @@ class TestBothFailFlow:
         # Backend names are lowercase as passed to sanitize_backend_error()
         assert response.consul_result.error is not None
         assert response.postgres_result.error is not None
-        assert "consul operation failed" in response.consul_result.error.lower()
-        assert "postgres operation failed" in response.postgres_result.error.lower()
+        assert "consul operation failed" in response.consul_result.error
+        assert "postgres operation failed" in response.postgres_result.error
 
         # Assert - Error summary contains both
         assert response.error_summary is not None
