@@ -44,6 +44,7 @@ Example Usage:
             self,
             patterns: list[str],
             correlation_id: str | None = None,
+            base_path: Path | None = None,
         ) -> list[ModelLoadedHandler]:
             # Match glob patterns and load discovered handlers
             ...
@@ -205,6 +206,7 @@ class ProtocolHandlerPluginLoader(Protocol):
         self,
         patterns: list[str],
         correlation_id: str | None = None,
+        base_path: Path | None = None,
     ) -> list[ModelLoadedHandler]:
         """Discover contracts matching glob patterns and load handlers.
 
@@ -212,8 +214,13 @@ class ProtocolHandlerPluginLoader(Protocol):
         deduplicates matches, loads each handler, and returns a list
         of successfully loaded handlers.
 
-        This method supports both absolute and relative glob patterns.
-        Relative patterns are resolved from the current working directory.
+        Working Directory Dependency:
+            By default, glob patterns are resolved relative to the current
+            working directory (``Path.cwd()``). This means results may vary
+            if the working directory changes between calls. For deterministic
+            behavior in environments where cwd may change (e.g., tests,
+            multi-threaded applications), provide an explicit ``base_path``
+            parameter.
 
         Args:
             patterns: List of glob patterns to match contract files.
@@ -228,6 +235,10 @@ class ProtocolHandlerPluginLoader(Protocol):
                 - ``handlers/*/contract.yaml`` - direct subdirs only
                 - ``**/*.handler.yaml`` - alternative naming convention
             correlation_id: Optional correlation ID for tracing and error context.
+            base_path: Optional base path for resolving glob patterns.
+                If not provided, defaults to ``Path.cwd()``. Providing an
+                explicit base path ensures deterministic behavior regardless
+                of the current working directory.
 
         Returns:
             list[ModelLoadedHandler]: List of successfully loaded handlers.
@@ -245,10 +256,19 @@ class ProtocolHandlerPluginLoader(Protocol):
             .. code-block:: python
 
                 loader: ProtocolHandlerPluginLoader = FileSystemHandlerPluginLoader()
+
+                # Using default cwd-based resolution
                 handlers = loader.discover_and_load([
                     "src/omnibase_infra/handlers/**/contract.yaml",
                     "src/omnibase_infra/nodes/**/contract.yaml",
                 ])
+
+                # Using explicit base path for deterministic behavior
+                handlers = loader.discover_and_load(
+                    ["src/**/contract.yaml"],
+                    base_path=Path("/app/project"),
+                )
+
                 print(f"Discovered and loaded {len(handlers)} handlers")
         """
         ...

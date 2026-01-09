@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-# NOTE: Update async tests to sync after handler_plugin_loader.py changes
 """Tests for HandlerPluginLoader import and instantiation.
 
 Part of OMN-1132: Handler Plugin Loader implementation.

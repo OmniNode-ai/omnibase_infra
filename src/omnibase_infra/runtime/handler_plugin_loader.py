@@ -268,7 +268,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         capability_tags = self._extract_capability_tags(raw_data)
 
         # Import and validate handler class
-        handler_class = self._import_handler_class(handler_class_path, contract_path)
+        handler_class = self._import_handler_class(
+            handler_class_path, contract_path, correlation_id
+        )
 
         # Validate handler implements protocol
         if not self._validate_handler_protocol(handler_class):
@@ -417,6 +419,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         self,
         patterns: list[str],
         correlation_id: str | None = None,
+        base_path: Path | None = None,
     ) -> list[ModelLoadedHandler]:
         """Discover contracts matching glob patterns and load handlers.
 
@@ -424,9 +427,22 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         deduplicates matches, loads each handler, and returns a list
         of successfully loaded handlers.
 
+        Working Directory Dependency:
+            By default, glob patterns are resolved relative to the current
+            working directory (``Path.cwd()``). This means results may vary
+            if the working directory changes between calls. For deterministic
+            behavior in environments where cwd may change (e.g., tests,
+            multi-threaded applications), provide an explicit ``base_path``
+            parameter.
+
         Args:
             patterns: List of glob patterns to match contract files.
                 Supports standard glob syntax including ** for recursive.
+            correlation_id: Optional correlation ID for tracing and error context.
+            base_path: Optional base path for resolving glob patterns.
+                If not provided, defaults to ``Path.cwd()``. Providing an
+                explicit base path ensures deterministic behavior regardless
+                of the current working directory.
 
         Returns:
             List of successfully loaded handlers. May be empty if no
@@ -436,6 +452,16 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             ProtocolConfigurationError: If patterns list is empty.
                 Error codes:
                 - HANDLER_LOADER_030: Empty patterns list
+
+        Example:
+            >>> # Using default cwd-based resolution
+            >>> handlers = loader.discover_and_load(["src/**/handler_contract.yaml"])
+            >>>
+            >>> # Using explicit base path for deterministic behavior
+            >>> handlers = loader.discover_and_load(
+            ...     ["src/**/handler_contract.yaml"],
+            ...     base_path=Path("/app/project"),
+            ... )
         """
         logger.debug(
             "Discovering handlers with patterns: %s",
@@ -458,9 +484,13 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         # Collect all matching contract files, deduplicated by resolved path
         discovered_paths: set[Path] = set()
 
+        # Use explicit base_path if provided, otherwise fall back to cwd
+        # Note: Using cwd can produce different results if the working directory
+        # changes between calls. For deterministic behavior, provide base_path.
+        glob_base = base_path if base_path is not None else Path.cwd()
+
         for pattern in patterns:
-            # Use Path.cwd() as base for glob patterns
-            matched_paths = list(Path.cwd().glob(pattern))
+            matched_paths = list(glob_base.glob(pattern))
             for path in matched_paths:
                 if path.is_file():
                     resolved = path.resolve()
@@ -528,24 +558,28 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         self,
         class_path: str,
         contract_path: Path,
+        correlation_id: str | None = None,
     ) -> type:
         """Dynamically import handler class from fully qualified path.
 
         Args:
             class_path: Fully qualified class path (e.g., 'myapp.handlers.AuthHandler').
             contract_path: Path to the contract file (for error context).
+            correlation_id: Optional correlation ID for tracing and error context.
 
         Returns:
             The imported class type.
 
         Raises:
             InfraConnectionError: If the module or class cannot be imported.
+                Error codes include correlation_id when provided for traceability.
         """
         # Split class path into module and class name
         if "." not in class_path:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="import_handler_class",
+                correlation_id=correlation_id,
             )
             raise InfraConnectionError(
                 f"Invalid class path '{class_path}': must be fully qualified "
@@ -565,6 +599,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="import_handler_class",
+                correlation_id=correlation_id,
             )
             raise InfraConnectionError(
                 f"Module not found: {module_path}",
@@ -578,6 +613,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="import_handler_class",
+                correlation_id=correlation_id,
             )
             raise InfraConnectionError(
                 f"Import error loading module {module_path}: {e}",
@@ -593,6 +629,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="import_handler_class",
+                correlation_id=correlation_id,
             )
             raise InfraConnectionError(
                 f"Class '{class_name}' not found in module '{module_path}'",
@@ -611,6 +648,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="import_handler_class",
+                correlation_id=correlation_id,
             )
             raise InfraConnectionError(
                 f"'{class_path}' is not a class",

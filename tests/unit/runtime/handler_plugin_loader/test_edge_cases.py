@@ -8,7 +8,7 @@ Part of OMN-1132: Handler Plugin Loader implementation.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -39,33 +39,14 @@ class TestHandlerPluginLoaderFileSizeLimit:
             )
         )
 
-        # Mock stat to return oversized file
-        oversized_bytes = MAX_CONTRACT_SIZE + 1
-        original_stat = Path.stat
-
-        class MockStatResult:
-            """Mock stat result with configurable st_size."""
-
-            st_size = oversized_bytes
-            st_mode = 0o100644
-            st_ino = 1
-            st_dev = 1
-            st_nlink = 1
-            st_uid = 1000
-            st_gid = 1000
-            st_atime = 0.0
-            st_mtime = 0.0
-            st_ctime = 0.0
-
-        def mock_stat(self: Path, **kwargs: object) -> object:
-            """Mock stat that returns oversized value for contract files."""
-            if self.name == "handler_contract.yaml":
-                return MockStatResult()
-            return original_stat(self, **kwargs)
+        # Create mock stat result with oversized file size
+        mock_stat_result = MagicMock()
+        mock_stat_result.st_size = MAX_CONTRACT_SIZE + 1
+        mock_stat_result.st_mode = 0o100644  # Regular file mode for is_file() check
 
         loader = HandlerPluginLoader()
 
-        with patch.object(Path, "stat", mock_stat):
+        with patch.object(Path, "stat", return_value=mock_stat_result):
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 loader.load_from_contract(contract_file)
 

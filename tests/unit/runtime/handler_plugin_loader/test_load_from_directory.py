@@ -120,13 +120,39 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         assert handler_names == {"handler.contract.handler", "contract.yaml.handler"}
 
     def test_load_with_correlation_id(self, valid_contract_directory: Path) -> None:
-        """Test loading with correlation_id parameter."""
+        """Test loading with correlation_id parameter.
+
+        Verifies that:
+        1. Handlers load successfully when correlation_id is provided
+        2. The correlation_id is propagated to error context when errors occur
+        """
+        from uuid import UUID
+
+        import pytest
+
+        from omnibase_infra.errors import ProtocolConfigurationError
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
-        loader = HandlerPluginLoader()
-        handlers = loader.load_from_directory(
-            valid_contract_directory, correlation_id="test-correlation-456"
-        )
+        # Use a valid UUID string that can be parsed by ModelInfraErrorContext
+        test_correlation_id = UUID("12345678-1234-5678-1234-567812345678")
+        correlation_id_str = str(test_correlation_id)
 
-        # Should load all handlers
+        loader = HandlerPluginLoader()
+
+        # Part 1: Verify happy path - handlers load successfully with correlation_id
+        handlers = loader.load_from_directory(
+            valid_contract_directory, correlation_id=correlation_id_str
+        )
         assert len(handlers) == 3
+
+        # Part 2: Verify correlation_id is propagated to error context
+        # Trigger an error by passing a non-existent directory
+        nonexistent_dir = valid_contract_directory / "does_not_exist_subdir"
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader.load_from_directory(
+                nonexistent_dir, correlation_id=correlation_id_str
+            )
+
+        # Verify the correlation_id was propagated to the error
+        assert exc_info.value.model.correlation_id == test_correlation_id
