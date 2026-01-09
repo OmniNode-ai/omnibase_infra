@@ -28,46 +28,20 @@ Expected Behavior:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, runtime_checkable
 
 import pytest
 
-# Protocol imports with fallback for compatibility
-# The protocols may be in different locations depending on omnibase_spi version
-try:
-    from omnibase_spi.protocols.handlers.protocol_handler_source import (
-        ProtocolHandlerSource,
-    )
-except ImportError:
-    # Fallback: define minimal protocol stub for testing
-    # This allows the test to run and fail on HandlerContractSource import
-
-    @runtime_checkable
-    class ProtocolHandlerSource(Protocol):
-        """Fallback protocol definition for testing."""
-
-        @property
-        def source_type(self) -> str:
-            """The type of handler source."""
-            ...
-
-        async def discover_handlers(self) -> list:
-            """Discover and return all handlers from this source."""
-            ...
-
-
-try:
-    from omnibase_spi.protocols.handlers.types import ProtocolHandlerDescriptor
-except ImportError:
-    # Fallback: import from our local protocol definition when omnibase_spi
-    # does not export ProtocolHandlerDescriptor. This is intentional for:
-    # 1. Backwards compatibility with older omnibase_spi versions
-    # 2. Running tests in isolation without full SPI installation
-    # The alias ensures the rest of the test file uses a consistent name.
-    from omnibase_infra.runtime.protocol_contract_descriptor import (
-        ProtocolContractDescriptor as ProtocolHandlerDescriptor,
-    )
-
+# Protocol imports from omnibase_infra - these are the actual protocols that
+# HandlerContractSource implements. The naming difference exists because:
+# - omnibase_spi has ProtocolHandlerSource/ProtocolHandlerDescriptor with different attributes
+# - omnibase_infra has ProtocolContractSource/ProtocolContractDescriptor that match the implementation
+# We use the local protocols and alias them to the names used in tests for clarity.
+from omnibase_infra.runtime.protocol_contract_descriptor import (
+    ProtocolContractDescriptor as ProtocolHandlerDescriptor,
+)
+from omnibase_infra.runtime.protocol_contract_source import (
+    ProtocolContractSource as ProtocolHandlerSource,
+)
 
 # =============================================================================
 # Constants for Test Contracts
@@ -2048,7 +2022,7 @@ output_model: "test.models.Output"
                 f"Error message should mention permission issue: {error}"
             )
             # Verify original error is preserved as __cause__
-            assert isinstance(error.__cause__, (PermissionError, OSError))
+            assert isinstance(error.__cause__, PermissionError | OSError)
         finally:
             # Restore permissions for cleanup
             unreadable_contract.chmod(stat.S_IRUSR | stat.S_IWUSR)
