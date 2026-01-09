@@ -854,7 +854,7 @@ def validate_any_types(
             try:
                 file_violations = validate_any_types_in_file(filepath)
                 violations.extend(file_violations)
-            except Exception as e:
+            except Exception as e:  # catch-all-ok: validation continues on file errors
                 logger.warning(
                     "Failed to validate file",
                     extra={
