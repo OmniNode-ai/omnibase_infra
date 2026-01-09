@@ -1,0 +1,46 @@
+handler_id: effect.filesystem.handler
+name: FileSystem Handler
+version: "1.0.0"
+description: >
+  Effect handler for filesystem operations including read, write, list, delete, and directory management.
+
+descriptor:
+  handler_kind: effect
+  purity: side_effecting
+  idempotent: false
+  timeout_ms: 30000
+  retry_policy:
+    enabled: true
+    max_retries: 3
+    backoff_strategy: exponential
+    base_delay_ms: 500
+    max_delay_ms: 10000
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    timeout_ms: 60000
+  concurrency_policy: serialized
+  isolation_policy: none
+  observability_level: standard
+capability_outputs:
+  - filesystem.read
+  - filesystem.write
+  - filesystem.list
+  - filesystem.delete
+  - filesystem.mkdir
+input_model: omnibase_infra.handlers.filesystem.ModelFileSystemRequest
+output_model: omnibase_infra.handlers.filesystem.ModelFileSystemResult
+supports_lifecycle: true
+supports_health_check: true
+supports_provisioning: false
+tags:
+  - filesystem
+  - effect
+  - infrastructure
+metadata:
+  author: OmniNode Team
+  ticket: OMN-1160
+  security:
+    allowed_paths:
+      - "${WORKSPACE_ROOT}"
+    max_file_size_bytes: 10485760
