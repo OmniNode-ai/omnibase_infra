@@ -21,6 +21,7 @@ Test Classes:
 
 from __future__ import annotations
 
+import base64
 import os
 import tempfile
 from pathlib import Path
@@ -385,17 +386,19 @@ class TestHandlerFileSystemWriteFile:
     async def test_write_file_with_binary_content(
         self, initialized_handler, temp_dir: Path
     ) -> None:
-        """Test write_file with binary content."""
+        """Test write_file with binary content using base64 encoding."""
         test_file = temp_dir / "binary_out.bin"
-        # Binary content as base64 or bytes representation
+        # Original binary content
         binary_content = b"\x00\x01\x02\x03"
+        # Encode as base64 string for the handler
+        base64_content = base64.b64encode(binary_content).decode("ascii")
 
         envelope: dict[str, object] = {
             "operation": "filesystem.write_file",
             "payload": {
                 "path": str(test_file),
-                "content": binary_content,
-                "binary": True,
+                "content": base64_content,  # Base64-encoded string
+                "binary": True,  # Use binary flag (handler decodes base64)
             },
             "correlation_id": str(uuid4()),
         }
@@ -406,6 +409,8 @@ class TestHandlerFileSystemWriteFile:
         # Assert
         assert result.result["status"] == "success"
         assert test_file.exists()
+        # Verify the file contains the original binary content
+        assert test_file.read_bytes() == binary_content
 
     @pytest.mark.asyncio
     async def test_write_file_with_create_dirs_true(

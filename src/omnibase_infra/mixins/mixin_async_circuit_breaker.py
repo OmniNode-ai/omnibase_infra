@@ -231,7 +231,9 @@ class MixinAsyncCircuitBreaker:
         self.circuit_breaker_threshold = threshold
         self.circuit_breaker_reset_timeout = reset_timeout
         self.service_name = service_name
-        self.transport_type = transport_type
+        self._cb_transport_type = (
+            transport_type  # Use private name to avoid property conflicts
+        )
 
         # Coroutine-safety lock (asyncio.Lock for concurrent async access, not thread-safe)
         self._circuit_breaker_lock = asyncio.Lock()
@@ -376,7 +378,7 @@ class MixinAsyncCircuitBreaker:
                 # Circuit still open - block request
                 retry_after = int(self._circuit_breaker_open_until - current_time)
                 context = ModelInfraErrorContext(
-                    transport_type=self.transport_type,
+                    transport_type=self._cb_transport_type,
                     operation=operation,
                     target_name=self.service_name,
                     correlation_id=correlation_id if correlation_id else uuid4(),

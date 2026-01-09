@@ -36,6 +36,7 @@ import logging
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.dispatch import ModelHandlerOutput
 
 from omnibase_infra.enums import (
@@ -50,7 +51,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 from omnibase_infra.utils import parse_env_int
 
 logger = logging.getLogger(__name__)
@@ -114,7 +115,7 @@ def _categorize_size(size: int) -> str:
         return "very_large"
 
 
-class HandlerFileSystem(MixinEnvelopeExtraction):
+class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
     """Filesystem handler with security features for ONEX infrastructure.
 
     Security Features:
@@ -122,15 +123,23 @@ class HandlerFileSystem(MixinEnvelopeExtraction):
         - File size limits to prevent DoS attacks via memory exhaustion
         - Symlink resolution and validation to prevent path traversal attacks
         - All paths are resolved to absolute canonical paths before validation
+        - Circuit breaker for resilient operation
 
     Configuration:
         Initialize with allowed_paths to define accessible directories.
         Configure max_read_size and max_write_size to control memory usage.
     """
 
-    def __init__(self) -> None:
-        """Initialize HandlerFileSystem in uninitialized state."""
-        self._allowed_paths: list[Path] = []
+    def __init__(self, container: ModelONEXContainer | None = None) -> None:
+        """Initialize HandlerFileSystem with optional container injection.
+
+        Args:
+            container: Optional ONEX container for dependency injection.
+                When provided, enables full ONEX integration. When None,
+                handler operates in standalone mode for testing.
+        """
+        self._container = container
+        self._allowed_paths: tuple[Path, ...] = ()
         self._max_read_size: int = _DEFAULT_MAX_READ_SIZE
         self._max_write_size: int = _DEFAULT_MAX_WRITE_SIZE
         self._initialized: bool = False
@@ -201,6 +210,20 @@ class HandlerFileSystem(MixinEnvelopeExtraction):
             - handler_category: Behavioral classification
         """
         return EnumInfraTransportType.FILESYSTEM
+
+    @transport_type.setter
+    def transport_type(self, value: EnumInfraTransportType) -> None:
+        """Allow setting transport_type for MixinAsyncCircuitBreaker compatibility.
+
+        This setter exists to support the MixinAsyncCircuitBreaker which assigns
+        to self.transport_type during initialization. The value is ignored since
+        the getter always returns FILESYSTEM.
+
+        Args:
+            value: The transport type value (ignored, property always returns FILESYSTEM)
+        """
+        # Intentionally no-op: property getter always returns FILESYSTEM
+        _ = value  # Acknowledge the parameter to satisfy linter
 
     async def initialize(self, config: dict[str, object]) -> None:
         """Initialize filesystem handler with path whitelist and size limits.
@@ -276,7 +299,8 @@ class HandlerFileSystem(MixinEnvelopeExtraction):
 
             resolved_paths.append(path)
 
-        self._allowed_paths = resolved_paths
+        # Store as immutable tuple after initialization
+        self._allowed_paths = tuple(resolved_paths)
 
         # Extract optional size limits
         max_read_raw = config.get("max_read_size")
@@ -305,6 +329,14 @@ class HandlerFileSystem(MixinEnvelopeExtraction):
                     },
                 )
 
+        # Initialize circuit breaker for resilient I/O operations
+        self._init_circuit_breaker(
+            threshold=5,
+            reset_timeout=60.0,
+            service_name="filesystem_handler",
+            transport_type=EnumInfraTransportType.FILESYSTEM,
+        )
+
         self._initialized = True
 
         logger.info(
@@ -321,7 +353,7 @@ class HandlerFileSystem(MixinEnvelopeExtraction):
 
     async def shutdown(self) -> None:
         """Shutdown filesystem handler and clear configuration."""
-        self._allowed_paths = []
+        self._allowed_paths = ()
         self._initialized = False
         logger.info("HandlerFileSystem shutdown complete")
 
@@ -352,15 +384,12 @@ class HandlerFileSystem(MixinEnvelopeExtraction):
             correlation_id=correlation_id,
         )
 
-        # Resolve to canonical path (follows symlinks)
+        # Resolve to canonical path using Path.resolve()
+        # Note: In Python 3.6+, resolve() defaults to strict=False, meaning it
+        # works for both existing and non-existing paths by resolving as much
+        # of the path as possible without requiring the full path to exist.
         try:
-            # For existing files/dirs, use resolve() which follows symlinks
-            if path.exists():
-                resolved = path.resolve()
-            else:
-                # For non-existent paths, resolve parent and append name
-                parent = path.parent.resolve() if path.parent.exists() else path.parent
-                resolved = parent / path.name
+            resolved = path.resolve()
         except OSError as e:
             raise ProtocolConfigurationError(
                 f"Cannot resolve path: {e}",
@@ -664,8 +693,8 @@ class HandlerFileSystem(MixinEnvelopeExtraction):
         Payload:
             - path: str (required) - File path to write
             - content: str (required) - Content to write.
-              For binary mode (wb), content should be base64-encoded string.
-            - mode: str (optional, "w" or "wb") - Write mode
+              For binary=True, content should be base64-encoded string.
+            - binary: bool (optional, default False) - Write as binary (expects base64 content)
             - create_dirs: bool (optional, default False) - Create parent directories
 
         Returns:
@@ -704,10 +733,10 @@ class HandlerFileSystem(MixinEnvelopeExtraction):
                 "Missing 'content' in payload", context=ctx
             )
 
-        # Extract mode first as it affects content processing
-        mode = payload.get("mode", "w")
-        if mode not in ("w", "wb"):
-            mode = "w"
+        # Extract binary flag (consistent with read_file API)
+        binary = payload.get("binary", False)
+        if not isinstance(binary, bool):
+            binary = False
 
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.FILESYSTEM,
@@ -716,11 +745,11 @@ class HandlerFileSystem(MixinEnvelopeExtraction):
             correlation_id=correlation_id,
         )
 
-        # Process content based on mode
+        # Process content based on binary flag
         content_bytes: bytes
         content_str: str
 
-        if mode == "wb":
+        if binary:
             # Binary mode: expect base64-encoded string or raw bytes
             if isinstance(content_raw, str):
                 try:
@@ -806,7 +835,7 @@ class HandlerFileSystem(MixinEnvelopeExtraction):
 
         # Write file content
         try:
-            if mode == "wb":
+            if binary:
                 resolved_path.write_bytes(content_bytes)
             else:
                 resolved_path.write_text(content_str)
