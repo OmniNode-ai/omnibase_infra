@@ -61,7 +61,25 @@ SAFETY_MARGIN = 0.5
 # Number of iterations for timing stability
 TIMING_ITERATIONS = 10
 
-# Fixed test timestamp for deterministic testing
+# =============================================================================
+# Timestamp Strategy
+# =============================================================================
+# Two timestamp approaches are used in this test suite:
+#
+# 1. TEST_TIMESTAMP (fixed): Used in fixtures (e.g., sample_event) for tests
+#    that measure single operations or reuse the same event. Provides
+#    deterministic behavior and consistent test data.
+#
+# 2. datetime.now(UTC) (dynamic): Used in iteration-based tests where fresh
+#    events are created per iteration. While UUIDs provide primary uniqueness,
+#    dynamic timestamps ensure events are temporally distinct and reflect
+#    realistic scenarios.
+#
+# The choice depends on whether test determinism or realistic event freshness
+# is more important for the specific performance measurement.
+# =============================================================================
+
+# Fixed test timestamp for deterministic testing (see strategy above)
 TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 

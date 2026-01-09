@@ -61,9 +61,6 @@ from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.registry_compute import RegistryCompute
 
-# Default semantic version for infrastructure components (from omnibase_core)
-SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
-
 if TYPE_CHECKING:
     import asyncpg
     from omnibase_core.container import ModelONEXContainer
@@ -79,6 +76,9 @@ if TYPE_CHECKING:
         ProjectorRegistration,
     )
     from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+
+# Default semantic version for infrastructure components (from omnibase_core)
+SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 
 logger = logging.getLogger(__name__)
 

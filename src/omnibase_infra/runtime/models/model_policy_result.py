@@ -20,8 +20,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.mixins import MixinDictLikeAccessors
 
-class ModelPolicyResult(BaseModel):
+
+class ModelPolicyResult(MixinDictLikeAccessors, BaseModel):
     """Base Pydantic model for policy evaluation results.
 
     This model provides structured results from policy evaluation including
@@ -96,71 +98,6 @@ class ModelPolicyResult(BaseModel):
     success: bool = True
     reason: str = ""
     metadata: dict[str, object] = Field(default_factory=dict)
-
-    def get(self, key: str, default: object = None) -> object:
-        """Get field value by key with optional default.
-
-        Provides dict-like access for backwards compatibility with
-        JsonType usage patterns in policy callers.
-
-        Args:
-            key: Field name to retrieve
-            default: Default value if field not found
-
-        Returns:
-            Field value or default
-
-        Example:
-            >>> result = ModelPolicyResult(should_retry=True, delay_seconds=4.0)
-            >>> result.get("should_retry", False)
-            True
-            >>> result.get("missing_key", "default")
-            'default'
-        """
-        return getattr(self, key, default)
-
-    def __getitem__(self, key: str) -> object:
-        """Get field value by key using bracket notation.
-
-        Provides dict-like access for backwards compatibility.
-
-        Args:
-            key: Field name to retrieve
-
-        Returns:
-            Field value
-
-        Raises:
-            KeyError: If field does not exist
-
-        Example:
-            >>> result = ModelPolicyResult(should_retry=True)
-            >>> result["should_retry"]
-            True
-        """
-        if hasattr(self, key):
-            return getattr(self, key)
-        raise KeyError(key)
-
-    def __contains__(self, key: str) -> bool:
-        """Check if field exists in model.
-
-        Provides dict-like membership testing.
-
-        Args:
-            key: Field name to check
-
-        Returns:
-            True if field exists and is not None
-
-        Example:
-            >>> result = ModelPolicyResult(should_retry=True)
-            >>> "should_retry" in result
-            True
-            >>> "missing" in result
-            False
-        """
-        return hasattr(self, key) and getattr(self, key) is not None
 
 
 __all__: list[str] = ["ModelPolicyResult"]

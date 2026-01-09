@@ -454,7 +454,7 @@ class TestEffectLayerRequestFormatting:
             correlation_id=payload.correlation_id,
             endpoints=dict(record.endpoints) if record.endpoints else {},
             metadata=clean_metadata,
-            timestamp=datetime.now(UTC),
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Verify request was built correctly
@@ -489,7 +489,7 @@ class TestEffectLayerRequestFormatting:
                 "Interval": "10s",
                 "Timeout": "5s",
             },
-            timestamp=datetime.now(UTC),
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Execute effect
@@ -535,7 +535,7 @@ class TestEffectLayerRequestFormatting:
             service_name=consul_payload.service_name,
             tags=consul_payload.tags,
             health_check_config=consul_payload.health_check,
-            timestamp=datetime.now(UTC),
+            timestamp=TEST_TIMESTAMP,
         )
 
         await effect.register_node(request, skip_postgres=True)
@@ -609,7 +609,7 @@ class TestEndToEndExtensionTypeFlow:
             endpoints=dict(record.endpoints) if record.endpoints else {},
             tags=consul_payload.tags,
             health_check_config=consul_payload.health_check,
-            timestamp=datetime.now(UTC),
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Step 4: Effect executes request
@@ -669,7 +669,7 @@ class TestEndToEndExtensionTypeFlow:
             endpoints=dict(record.endpoints) if record.endpoints else {},
             tags=consul_payload.tags,
             health_check_config=consul_payload.health_check,
-            timestamp=datetime.now(UTC),
+            timestamp=TEST_TIMESTAMP,
         )
 
         # Effect executes with partial failure

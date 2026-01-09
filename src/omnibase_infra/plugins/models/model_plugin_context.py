@@ -17,8 +17,10 @@ from __future__ import annotations
 from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.mixins import MixinDictLikeAccessors
 
-class ModelPluginContext(BaseModel):
+
+class ModelPluginContext(MixinDictLikeAccessors, BaseModel):
     """Base Pydantic model for plugin execution context.
 
     This model replaces PluginContext TypedDict and provides structured
@@ -70,31 +72,5 @@ class ModelPluginContext(BaseModel):
     plugin_config: dict[str, JsonType] = Field(default_factory=dict)
     metadata: dict[str, JsonType] = Field(default_factory=dict)
 
-    def get(self, key: str, default: object = None) -> object:
-        """Get field value by key with optional default.
 
-        Provides dict-like access for backwards compatibility with
-        TypedDict usage patterns.
-
-        Args:
-            key: Field name to retrieve
-            default: Default value if field not found
-
-        Returns:
-            Field value or default
-        """
-        return getattr(self, key, default)
-
-    def __getitem__(self, key: str) -> object:
-        """Get field value by key using bracket notation.
-
-        Raises:
-            KeyError: If field does not exist
-        """
-        if hasattr(self, key):
-            return getattr(self, key)
-        raise KeyError(key)
-
-    def __contains__(self, key: str) -> bool:
-        """Check if field exists in model."""
-        return hasattr(self, key) and getattr(self, key) is not None
+__all__: list[str] = ["ModelPluginContext"]

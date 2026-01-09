@@ -1,6 +1,6 @@
 """Test cryptography 46.x compatibility.
 
-Verifies cryptography package upgrade (46.0.3) doesn't break existing
+Verifies cryptography package upgrade (46.0.x) doesn't break existing
 functionality. This upgrade addresses security fixes from earlier versions:
   - CVE-2024-26130 (PKCS12 NULL pointer dereference): Fixed in 42.0.4
   - CVE-2024-12797 (OpenSSL RPK authentication bypass): Fixed in 44.0.1
@@ -15,6 +15,8 @@ See: pyproject.toml cryptography comment for upgrade rationale.
 import hashlib
 from uuid import UUID
 
+from packaging.version import Version
+
 
 class TestCryptographyCompatibility:
     """Verify cryptography package functions correctly after upgrade."""
@@ -24,16 +26,14 @@ class TestCryptographyCompatibility:
         import cryptography
 
         # Verify version meets minimum requirement (46.0.0) as specified in pyproject.toml.
-        # Using tuple comparison for proper semantic version checking - this allows
+        # Using packaging.version for proper semantic version comparison - this allows
         # any patch/minor updates (46.0.x, 46.x.y) while ensuring minimum is met.
-        version = cryptography.__version__
-        version_parts = version.split(".")
-        version_tuple = tuple(int(p) for p in version_parts[:3])
-        minimum_version = (46, 0, 0)
+        min_version = Version("46.0.0")
+        actual_version = Version(cryptography.__version__)
 
-        assert version_tuple >= minimum_version, (
-            f"Expected cryptography >= {'.'.join(map(str, minimum_version))}, "
-            f"got {version}. Update pyproject.toml constraint if intentional."
+        assert actual_version >= min_version, (
+            f"Expected cryptography >= {min_version}, got {actual_version}. "
+            "Update pyproject.toml constraint if intentional."
         )
 
     def test_cryptography_hazmat_primitives_available(self) -> None:

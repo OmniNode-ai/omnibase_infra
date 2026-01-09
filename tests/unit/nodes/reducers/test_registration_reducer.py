@@ -1196,10 +1196,10 @@ class TestPostgresIntentBuilding:
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
     ) -> None:
-        """Test that correlation_id is propagated via consul intent.
+        """Test that correlation_id is propagated to the PostgreSQL intent payload.
 
-        Note: The postgres payload now uses a typed record model without
-        correlation_id. Correlation is tracked in the consul intent.
+        Validates that the correlation_id from the input event is correctly
+        included in the PostgreSQL intent payload for request tracing.
         """
         correlation_id = uuid4()
         event = create_introspection_event(correlation_id=correlation_id)

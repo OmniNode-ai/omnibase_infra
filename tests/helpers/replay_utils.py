@@ -190,7 +190,10 @@ def compare_outputs(
                 )
             # Use direct attribute access for typed payload models
             if intent1.payload.correlation_id != intent2.payload.correlation_id:
-                differences.append(f"Intent {i} correlation_id mismatch")
+                differences.append(
+                    f"Intent {i} correlation_id mismatch: "
+                    f"{intent1.payload.correlation_id} != {intent2.payload.correlation_id}"
+                )
 
     return ModelOutputComparison(
         are_equal=len(differences) == 0,

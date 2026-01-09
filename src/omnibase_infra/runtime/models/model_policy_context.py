@@ -22,8 +22,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.mixins import MixinDictLikeAccessors
 
-class ModelPolicyContext(BaseModel):
+
+class ModelPolicyContext(MixinDictLikeAccessors, BaseModel):
     """Base Pydantic model for policy evaluation context.
 
     This model provides structured context for policy evaluation including
@@ -93,71 +95,6 @@ class ModelPolicyContext(BaseModel):
     attempt: int = 0
     timestamp_ms: int = 0
     metadata: dict[str, object] = Field(default_factory=dict)
-
-    def get(self, key: str, default: object = None) -> object:
-        """Get field value by key with optional default.
-
-        Provides dict-like access for backwards compatibility with
-        JsonType usage patterns in policy implementations.
-
-        Args:
-            key: Field name to retrieve
-            default: Default value if field not found
-
-        Returns:
-            Field value or default
-
-        Example:
-            >>> context = ModelPolicyContext(attempt=3)
-            >>> context.get("attempt", 0)
-            3
-            >>> context.get("missing_key", "default")
-            'default'
-        """
-        return getattr(self, key, default)
-
-    def __getitem__(self, key: str) -> object:
-        """Get field value by key using bracket notation.
-
-        Provides dict-like access for backwards compatibility.
-
-        Args:
-            key: Field name to retrieve
-
-        Returns:
-            Field value
-
-        Raises:
-            KeyError: If field does not exist
-
-        Example:
-            >>> context = ModelPolicyContext(attempt=3)
-            >>> context["attempt"]
-            3
-        """
-        if hasattr(self, key):
-            return getattr(self, key)
-        raise KeyError(key)
-
-    def __contains__(self, key: str) -> bool:
-        """Check if field exists in model.
-
-        Provides dict-like membership testing.
-
-        Args:
-            key: Field name to check
-
-        Returns:
-            True if field exists and is not None
-
-        Example:
-            >>> context = ModelPolicyContext(attempt=3)
-            >>> "attempt" in context
-            True
-            >>> "missing" in context
-            False
-        """
-        return hasattr(self, key) and getattr(self, key) is not None
 
 
 __all__: list[str] = ["ModelPolicyContext"]
