@@ -148,6 +148,12 @@ from omnibase_infra.validation.infra_validators import (
     validate_infra_union_usage,
 )
 
+# Registration-time security validation for handlers (OMN-1098)
+from omnibase_infra.validation.registration_security_validator import (
+    RegistrationSecurityValidator,
+    validate_handler_registration,
+)
+
 # Routing coverage validation for startup fail-fast (OMN-958)
 from omnibase_infra.validation.routing_coverage_validator import (
     RoutingCoverageError,
@@ -219,8 +225,10 @@ __all__: list[str] = [
     "ModelImportValidationResult",  # Import validation result
     # Validators
     "ChainPropagationValidator",  # Chain propagation validator (OMN-951)
+    "CircularImportValidator",  # Circular import validator
     "ContractLinter",  # Contract linter (PR #57)
     "ExecutionShapeValidator",  # AST-based shape validation (OMN-958)
+    "RegistrationSecurityValidator",  # Registration-time security (OMN-1098)
     "RoutingCoverageValidator",  # Routing coverage validator (OMN-958)
     "RuntimeShapeValidator",  # Runtime shape validator
     "TopicCategoryASTVisitor",  # Topic category AST visitor
@@ -246,6 +254,7 @@ __all__: list[str] = [
     "validate_contracts",  # Re-export from omnibase_core
     "validate_execution_shapes",  # Execution shape validation
     "validate_execution_shapes_ci",  # CI shape validation
+    "validate_handler_registration",  # Handler registration validation (OMN-1098)
     "validate_handler_security",  # Handler security validation
     "validate_infra_all",  # Infrastructure validation
     "validate_infra_architecture",  # Infrastructure architecture

@@ -189,8 +189,8 @@ class TestConsulFailureFlow:
         # Raw error "Service unavailable" is sanitized to "service unavailable" safe prefix
         # Backend name is lowercase as passed to sanitize_backend_error()
         assert response.consul_result.error is not None
-        assert "consul operation failed" in response.consul_result.error.lower()
-        assert "service unavailable" in response.consul_result.error.lower()
+        assert "consul operation failed" in response.consul_result.error
+        assert "service unavailable" in response.consul_result.error
         assert response.error_summary is not None
         assert "consul" in response.error_summary.lower()
 
@@ -234,7 +234,6 @@ class TestConsulFailureFlow:
         assert response.consul_result.success is False
         assert response.consul_result.error is not None
         assert "ConnectionError" in response.consul_result.error
-        # Note: Python's built-in ConnectionError (not InfraConnectionError) maps to UNKNOWN_ERROR
         assert response.consul_result.error_code == "CONSUL_UNKNOWN_ERROR"
 
         # Assert - PostgreSQL still succeeded
@@ -287,8 +286,8 @@ class TestPostgresFailureFlow:
         # Raw error "Connection timeout" is sanitized to "timeout" safe prefix
         # Backend name is lowercase as passed to sanitize_backend_error()
         assert response.postgres_result.error is not None
-        assert "postgres operation failed" in response.postgres_result.error.lower()
-        assert "timeout" in response.postgres_result.error.lower()
+        assert "postgres operation failed" in response.postgres_result.error
+        assert "timeout" in response.postgres_result.error
         assert response.error_summary is not None
         assert "postgres" in response.error_summary.lower()
 
@@ -327,7 +326,6 @@ class TestPostgresFailureFlow:
         assert response.postgres_result.success is False
         assert response.postgres_result.error is not None
         assert "TimeoutError" in response.postgres_result.error
-        # Note: TimeoutError maps to TIMEOUT_ERROR, not CONNECTION_ERROR
         assert response.postgres_result.error_code == "POSTGRES_TIMEOUT_ERROR"
 
         # Assert - Consul still succeeded
@@ -385,8 +383,8 @@ class TestBothFailFlow:
         # Backend names are lowercase as passed to sanitize_backend_error()
         assert response.consul_result.error is not None
         assert response.postgres_result.error is not None
-        assert "consul operation failed" in response.consul_result.error.lower()
-        assert "postgres operation failed" in response.postgres_result.error.lower()
+        assert "consul operation failed" in response.consul_result.error
+        assert "postgres operation failed" in response.postgres_result.error
 
         # Assert - Error summary contains both
         assert response.error_summary is not None

@@ -226,6 +226,7 @@ class TestEffectPartialFailure:
         assert response.postgres_result.success is True
         # Error message is sanitized to avoid exposing secrets (connection strings, etc.)
         # Format: "{ExceptionType}: {original_message}" (sanitize_error_message preserves the message)
+        # Using InfraConnectionError in mock setup triggers CONSUL_CONNECTION_ERROR
         consul_error = response.consul_result.error or ""
         assert "InfraConnectionError" in consul_error
         assert "Consul service unavailable" in consul_error

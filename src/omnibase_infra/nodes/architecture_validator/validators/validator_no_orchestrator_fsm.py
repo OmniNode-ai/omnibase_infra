@@ -13,9 +13,20 @@ KEY CLARIFICATION from ticket OMN-1099:
 
 Related:
     - Ticket: OMN-1099 (Architecture Validator - FSM Rule Clarified)
+    - PR: #124 (Protocol-Compliant Rule Classes)
     - Rule: ARCH-003 (No Workflow FSM in Orchestrators)
 
-Example Violations:
+Detection Patterns:
+    1. **Class-level FSM**: STATES, TRANSITIONS, STATE_MACHINE, FSM,
+       ALLOWED_TRANSITIONS
+    2. **State prefix**: STATE_* constants (e.g., STATE_PENDING)
+    3. **Instance attributes**: _state, _workflow_state, _current_step,
+       _fsm_state, _current_state
+    4. **FSM methods**: transition(), can_transition(), apply_transition(),
+       get_current_state(), set_state()
+
+Example Violations::
+
     # VIOLATION: Orchestrator with state transition table
     class OrchestratorOrder(NodeOrchestrator):
         STATES = ["pending", "processing", "completed"]
@@ -34,7 +45,8 @@ Example Violations:
         def apply_transition(self, transition):
             ...
 
-Allowed Patterns:
+Allowed Patterns::
+
     # OK: Reducers with FSM (this is what reducers do)
     class ReducerOrder(NodeReducer):
         STATES = ["created", "processing", "completed"]  # Allowed
@@ -59,14 +71,19 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+from omnibase_infra.nodes.architecture_validator.mixins import MixinFilePathRule
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
 )
 from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
     ModelFileValidationResult,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.nodes.architecture_validator.models import ModelRuleCheckResult
 
 RULE_ID = "ARCH-003"
 RULE_NAME = "No Workflow FSM in Orchestrators"
@@ -307,7 +324,7 @@ def validate_no_orchestrator_fsm(file_path: str) -> ModelFileValidationResult:
         )
 
     try:
-        source = path.read_text()
+        source = path.read_text(encoding="utf-8")
         tree = ast.parse(source)
     except SyntaxError as e:
         # Return WARNING violation for syntax error
@@ -329,6 +346,44 @@ def validate_no_orchestrator_fsm(file_path: str) -> ModelFileValidationResult:
             files_checked=1,
             rules_checked=[RULE_ID],
         )
+    except (PermissionError, OSError) as e:
+        # Return WARNING violation for file I/O errors
+        return ModelFileValidationResult(
+            valid=True,  # Still valid (not a rule violation), but with warning
+            violations=[
+                ModelArchitectureViolation(
+                    rule_id=RULE_ID,
+                    rule_name=RULE_NAME,
+                    severity=EnumValidationSeverity.WARNING,
+                    target_type="file",
+                    target_name=Path(file_path).name,
+                    message=f"File could not be read: {e}",
+                    location=file_path,
+                    suggestion="Ensure file is readable and has correct permissions",
+                )
+            ],
+            files_checked=1,
+            rules_checked=[RULE_ID],
+        )
+    except UnicodeDecodeError as e:
+        # Return WARNING violation for encoding errors
+        return ModelFileValidationResult(
+            valid=True,  # Still valid (not a rule violation), but with warning
+            violations=[
+                ModelArchitectureViolation(
+                    rule_id=RULE_ID,
+                    rule_name=RULE_NAME,
+                    severity=EnumValidationSeverity.WARNING,
+                    target_type="file",
+                    target_name=Path(file_path).name,
+                    message=f"File has encoding error and could not be validated: {e.reason}",
+                    location=file_path,
+                    suggestion="Ensure file is valid UTF-8 encoded",
+                )
+            ],
+            files_checked=1,
+            rules_checked=[RULE_ID],
+        )
 
     visitor = OrchestratorFSMVisitor(file_path)
     visitor.visit(tree)
@@ -341,4 +396,96 @@ def validate_no_orchestrator_fsm(file_path: str) -> ModelFileValidationResult:
     )
 
 
-__all__ = ["validate_no_orchestrator_fsm"]
+class RuleNoOrchestratorFSM(MixinFilePathRule):
+    """Protocol-compliant rule: No workflow FSM in orchestrators.
+
+    This class wraps the file-based validator to implement ProtocolArchitectureRule,
+    enabling use with NodeArchitectureValidatorCompute.
+
+    Thread Safety:
+        This rule is stateless and safe for concurrent use.
+    """
+
+    @property
+    def rule_id(self) -> str:
+        """Return the canonical rule ID matching contract.yaml."""
+        return RULE_ID
+
+    @property
+    def name(self) -> str:
+        """Return human-readable rule name."""
+        return RULE_NAME
+
+    @property
+    def description(self) -> str:
+        """Return detailed rule description."""
+        return (
+            "Orchestrators must not implement workflow FSMs that duplicate reducer "
+            "state transitions. Orchestrators are reaction planners, not state machine owners. "
+            "Reducers may legitimately implement aggregate state machines."
+        )
+
+    @property
+    def severity(self) -> EnumValidationSeverity:
+        """Return severity level for violations of this rule."""
+        return EnumValidationSeverity.ERROR
+
+    def check(self, target: object) -> ModelRuleCheckResult:
+        """Check target against this rule.
+
+        Args:
+            target: Target to validate. If a string, treated as file path.
+                   Other types return skipped=True with reason.
+
+        Returns:
+            ModelRuleCheckResult indicating pass/fail with details.
+
+        Note:
+            When multiple violations are found, only the first violation's
+            message and location are returned. The total count is available
+            in ``details["total_violations"]``. This fail-fast behavior is
+            intentional - fix the first violation and re-run to find others.
+        """
+        from omnibase_infra.nodes.architecture_validator.models import (
+            ModelRuleCheckResult,
+        )
+
+        file_path = self._extract_file_path(target)
+        if file_path is None:
+            return ModelRuleCheckResult(
+                passed=True,
+                rule_id=self.rule_id,
+                skipped=True,
+                reason="Target is not a valid file path",
+            )
+
+        # Delegate to existing file-based validator
+        result = validate_no_orchestrator_fsm(file_path)
+
+        if result.valid:
+            return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
+
+        # Convert first violation to ModelRuleCheckResult
+        if result.violations:
+            violation = result.violations[0]
+            return ModelRuleCheckResult(
+                passed=False,
+                rule_id=self.rule_id,
+                message=violation.message,
+                details={
+                    "target_name": violation.target_name,
+                    "target_type": violation.target_type,
+                    "location": violation.location,
+                    "suggestion": violation.suggestion,
+                    "total_violations": len(result.violations),
+                },
+            )
+
+        return ModelRuleCheckResult(
+            passed=False,
+            rule_id=self.rule_id,
+            message="Orchestrator FSM violation detected",
+        )
+
+
+__all__ = ["validate_no_orchestrator_fsm", "RuleNoOrchestratorFSM"]

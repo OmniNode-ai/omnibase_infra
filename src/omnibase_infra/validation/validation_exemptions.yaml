@@ -1029,6 +1029,14 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Registry Naming Conventions - semantic identifiers vs UUIDs)
     ticket: OMN-1097
+  - file_pattern: 'model_handler_security_policy\.py'
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ModelHandlerSecurityPolicy defines security policies for ONEX handlers. The "Handler" refers to ONEX handler security constraints, not an anti-pattern manager class. Part of the two-layer security validation system (OMN-1098).
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1098
   - file_pattern: 'validation_aggregator\.py'
     class_pattern: "Class 'ValidationAggregator'"
     violation_pattern: 'has \d+ methods'
@@ -1293,6 +1301,29 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (ONEX Architecture - Handler Validation)
     ticket: OMN-1263
+  # ==========================================================================
+  # Architecture Validator OMN-1099 Exemptions (AST Visitor Pattern)
+  # ==========================================================================
+  # OMN-1099 validators (no-direct-dispatch, no-handler-publishing, no-orchestrator-fsm)
+  # use Python AST visitor pattern which requires visit_* method names per Python stdlib.
+  # NOTE: model_architecture_violation.py exemptions for rule_id/rule_name are defined earlier
+  # in the "Architecture Violation Model Exemptions (OMN-1099)" section.
+  - file_pattern: 'validator_no_handler_publishing\.py'
+    violation_pattern: "Class name .* contains anti-pattern 'Handler'"
+    reason: >
+      HandlerPublishingVisitor is an AST visitor class that detects handler publishing patterns. The name correctly describes its purpose: visiting AST nodes to find handlers that incorrectly publish events.
+
+    documentation:
+      - Python ast module (NodeVisitor pattern)
+    ticket: OMN-1099
+  - file_pattern: 'validator_no_.*\.py'
+    violation_pattern: "Function name 'visit_.*' should use snake_case"
+    reason: >
+      AST visitor methods must follow Python's ast.NodeVisitor naming convention. visit_ClassDef, visit_FunctionDef, etc. are required method names for the AST visitor pattern from Python stdlib.
+
+    documentation:
+      - Python ast module documentation (NodeVisitor.visit_* methods)
+    ticket: OMN-1099
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

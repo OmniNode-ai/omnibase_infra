@@ -2034,6 +2034,7 @@ output_model: "test.models.Output"
             )
 
             # Strict mode should raise ModelOnexError with HANDLER_SOURCE_006 code
+            # The underlying PermissionError is preserved as __cause__
             with pytest.raises(ModelOnexError) as exc_info:
                 await source.discover_handlers()
 
@@ -2046,6 +2047,8 @@ output_model: "test.models.Output"
             assert "permission denied" in str(error).lower(), (
                 f"Error message should mention permission issue: {error}"
             )
+            # Verify original error is preserved as __cause__
+            assert isinstance(error.__cause__, (PermissionError, OSError))
         finally:
             # Restore permissions for cleanup
             unreadable_contract.chmod(stat.S_IRUSR | stat.S_IWUSR)
