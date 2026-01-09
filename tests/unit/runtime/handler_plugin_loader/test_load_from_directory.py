@@ -156,3 +156,118 @@ class TestHandlerPluginLoaderLoadFromDirectory:
 
         # Verify the correlation_id was propagated to the error
         assert exc_info.value.model.correlation_id == test_correlation_id
+
+    def test_correlation_id_propagated_to_helper_methods(self, tmp_path: Path) -> None:
+        """Test that correlation_id is propagated to internal helper methods.
+
+        Verifies correlation_id propagation for:
+        - _extract_handler_name (via missing handler_name)
+        - _extract_handler_class (via missing handler_class)
+        - _extract_handler_type (via missing handler_type)
+
+        Per ONEX coding guidelines: "Always propagate correlation_id from
+        incoming requests; include in all error context."
+        """
+        from uuid import UUID
+
+        import pytest
+
+        from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+        from .conftest import (
+            HANDLER_CONTRACT_WITHOUT_CLASS,
+            HANDLER_CONTRACT_WITHOUT_NAME,
+            MINIMAL_CONTRACT_WITHOUT_HANDLER_TYPE,
+        )
+
+        test_correlation_id = UUID("abcdef12-3456-7890-abcd-ef1234567890")
+        correlation_id_str = str(test_correlation_id)
+
+        loader = HandlerPluginLoader()
+
+        # Test 1: Verify correlation_id propagated to _extract_handler_name
+        # Error triggered by missing handler_name field in contract
+        handler_dir = tmp_path / "missing_name"
+        handler_dir.mkdir()
+        contract_path = handler_dir / "handler_contract.yaml"
+        contract_path.write_text(HANDLER_CONTRACT_WITHOUT_NAME)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader.load_from_contract(contract_path, correlation_id=correlation_id_str)
+
+        assert exc_info.value.model.correlation_id == test_correlation_id
+        # Verify error is about missing handler_name (from _extract_handler_name)
+        assert "handler_name" in str(exc_info.value).lower()
+
+        # Test 2: Verify correlation_id propagated to _extract_handler_class
+        # Error triggered by missing handler_class field in contract
+        handler_dir = tmp_path / "missing_class"
+        handler_dir.mkdir()
+        contract_path = handler_dir / "handler_contract.yaml"
+        contract_path.write_text(HANDLER_CONTRACT_WITHOUT_CLASS)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader.load_from_contract(contract_path, correlation_id=correlation_id_str)
+
+        assert exc_info.value.model.correlation_id == test_correlation_id
+        # Verify error is about missing handler_class (from _extract_handler_class)
+        assert "handler_class" in str(exc_info.value).lower()
+
+        # Test 3: Verify correlation_id propagated to _extract_handler_type
+        # Error triggered by missing handler_type field in contract
+        handler_dir = tmp_path / "missing_type"
+        handler_dir.mkdir()
+        contract_path = handler_dir / "handler_contract.yaml"
+        contract_path.write_text(
+            MINIMAL_CONTRACT_WITHOUT_HANDLER_TYPE.format(
+                handler_name="test.handler",
+                handler_class="tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler",
+            )
+        )
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader.load_from_contract(contract_path, correlation_id=correlation_id_str)
+
+        assert exc_info.value.model.correlation_id == test_correlation_id
+        # Verify error is about missing handler_type (from _extract_handler_type)
+        assert "handler_type" in str(exc_info.value).lower()
+
+    def test_correlation_id_propagated_to_import_handler_class(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that correlation_id is propagated to _import_handler_class.
+
+        Triggers an import error by specifying a non-existent module.
+        """
+        from uuid import UUID
+
+        import pytest
+
+        from omnibase_infra.errors import InfraConnectionError
+        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+        from .conftest import MINIMAL_HANDLER_CONTRACT_YAML
+
+        test_correlation_id = UUID("fedcba98-7654-3210-fedc-ba9876543210")
+        correlation_id_str = str(test_correlation_id)
+
+        loader = HandlerPluginLoader()
+
+        # Create contract with non-existent module
+        handler_dir = tmp_path / "bad_import"
+        handler_dir.mkdir()
+        contract_path = handler_dir / "handler_contract.yaml"
+        contract_path.write_text(
+            MINIMAL_HANDLER_CONTRACT_YAML.format(
+                handler_name="bad.import.handler",
+                handler_class="nonexistent.module.path.Handler",
+            )
+        )
+
+        with pytest.raises(InfraConnectionError) as exc_info:
+            loader.load_from_contract(contract_path, correlation_id=correlation_id_str)
+
+        assert exc_info.value.model.correlation_id == test_correlation_id
+        # Verify error is about module not found (from _import_handler_class)
+        assert "module not found" in str(exc_info.value).lower()
