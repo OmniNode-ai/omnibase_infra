@@ -135,18 +135,25 @@ class ModelFileSystemRequest(BaseModel):
         Performs security validation to prevent injection attacks and ensure
         cross-platform compatibility.
 
+        Path Separator Normalization:
+            Path separators are normalized to forward slashes before validation.
+            This ensures consistent handling of both Unix-style paths (data/file.txt)
+            and Windows-style paths (data\\file.txt), as well as mixed separators
+            (data/subdir\\file.txt). The original path string is preserved in the
+            return value; normalization is only used for validation logic.
+
         Validations:
             - No null bytes (prevents injection attacks)
             - No control characters (prevents terminal injection)
             - Max path length 4096 characters
             - Max filename length 255 characters
-            - No reserved Windows device names
+            - No reserved Windows device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
 
         Args:
             v: The path string to validate.
 
         Returns:
-            The validated path string.
+            The validated path string (unchanged from input).
 
         Raises:
             ValueError: If any security validation fails.
@@ -167,7 +174,10 @@ class ModelFileSystemRequest(BaseModel):
             )
 
         # Check max filename length (255 characters for last segment)
-        segments = v.split("/")
+        # Normalize path separators to handle both Unix (/) and Windows (\) styles,
+        # as well as mixed separators (data/subdir\file.txt)
+        normalized_path = v.replace("\\", "/")
+        segments = normalized_path.split("/")
         filename = segments[-1] if segments else v
         if len(filename) > 255:
             raise ValueError(

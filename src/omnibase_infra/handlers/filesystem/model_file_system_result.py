@@ -118,9 +118,11 @@ class ModelFileSystemResult(BaseModel):
     @field_validator("entries")
     @classmethod
     def validate_entries(cls, v: list[str] | None) -> list[str] | None:
-        """Validate directory entries are non-empty strings.
+        """Validate directory entries are non-empty and non-whitespace strings.
 
-        Catches handler implementation bugs where empty filenames are returned.
+        Catches handler implementation bugs where empty or whitespace-only
+        filenames are returned. Valid filenames with embedded whitespace
+        (e.g., "file name.txt") are accepted.
 
         Args:
             v: The entries list to validate, or None.
@@ -129,12 +131,13 @@ class ModelFileSystemResult(BaseModel):
             The validated entries list, or None.
 
         Raises:
-            ValueError: If any entry is an empty string.
+            ValueError: If any entry is empty or contains only whitespace.
         """
         if v is None:
             return v
-        if not all(v):  # Check no empty strings
-            raise ValueError("Directory entries cannot be empty strings")
+        for entry in v:
+            if not entry or not entry.strip():
+                raise ValueError("Directory entries cannot be empty or whitespace-only")
         return v
 
     error_message: str | None = Field(

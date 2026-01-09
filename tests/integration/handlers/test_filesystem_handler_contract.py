@@ -15,6 +15,7 @@ Related:
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import pytest
@@ -83,9 +84,9 @@ def contract_source() -> HandlerContractSource:
     return HandlerContractSource(contract_paths=[CONTRACTS_DIR])
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def raw_contract_data() -> dict:
-    """Load raw YAML data from the filesystem handler contract."""
+    """Load raw YAML data from the filesystem handler contract (module-scoped)."""
     with FILESYSTEM_CONTRACT_PATH.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
@@ -347,8 +348,6 @@ class TestFilesystemHandlerCapabilities:
         extra = capabilities - expected
         if extra:
             # Log but don't fail - additional capabilities may be intentional
-            import warnings
-
             warnings.warn(
                 f"Contract declares additional capabilities beyond expected: {extra}. "
                 "Update EXPECTED_CAPABILITIES if these are intentional.",
