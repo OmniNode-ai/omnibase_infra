@@ -153,3 +153,53 @@ handler_class: tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandle
         # Verify error message indicates missing handler_type
         error_msg = str(exc_info.value).lower()
         assert "handler_type" in error_msg
+
+    def test_whitespace_only_handler_type_raises_error(self, tmp_path: Path) -> None:
+        """Test that whitespace-only handler_type raises error.
+
+        PR #134 feedback: Whitespace-only strings like '   ' would pass
+        isinstance check but fail with unclear error during lookup.
+        """
+        from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+        contract_file = tmp_path / "handler_contract.yaml"
+        contract_file.write_text(
+            """
+handler_name: whitespace.type.handler
+handler_class: tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler
+handler_type: "   "
+"""
+        )
+
+        loader = HandlerPluginLoader()
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader.load_from_contract(contract_file)
+
+        # Verify error message indicates non-empty requirement
+        error_msg = str(exc_info.value).lower()
+        assert "non-empty" in error_msg
+
+    def test_empty_string_handler_type_raises_error(self, tmp_path: Path) -> None:
+        """Test that empty string handler_type raises error."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+        contract_file = tmp_path / "handler_contract.yaml"
+        contract_file.write_text(
+            """
+handler_name: empty.type.handler
+handler_class: tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler
+handler_type: ""
+"""
+        )
+
+        loader = HandlerPluginLoader()
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader.load_from_contract(contract_file)
+
+        # Verify error message indicates non-empty requirement
+        error_msg = str(exc_info.value).lower()
+        assert "non-empty" in error_msg

@@ -528,7 +528,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         self,
         class_path: str,
         contract_path: Path,
-    ) -> type[ProtocolHandler]:
+    ) -> type:
         """Dynamically import handler class from fully qualified path.
 
         Args:
@@ -536,7 +536,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             contract_path: Path to the contract file (for error context).
 
         Returns:
-            The imported handler class.
+            The imported class type.
 
         Raises:
             InfraConnectionError: If the module or class cannot be imported.
@@ -620,7 +620,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 contract_path=str(contract_path),
             )
 
-        return handler_class  # type: ignore[return-value]
+        return handler_class
 
     def _find_contract_files(self, directory: Path) -> list[Path]:
         """Find all handler contract files under a directory.
@@ -635,14 +635,11 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         """
         contract_files: list[Path] = []
 
-        # Search for handler_contract.yaml files (exact case-sensitive match)
-        for path in directory.rglob(HANDLER_CONTRACT_FILENAME):
-            if path.name == HANDLER_CONTRACT_FILENAME and path.is_file():
-                contract_files.append(path)
-
-        # Search for contract.yaml files (exact case-sensitive match)
-        for path in directory.rglob(CONTRACT_YAML_FILENAME):
-            if path.name == CONTRACT_YAML_FILENAME and path.is_file():
+        # Search for valid contract filenames in a single scan
+        # This consolidates two rglob() calls into one for better performance
+        valid_filenames = {HANDLER_CONTRACT_FILENAME, CONTRACT_YAML_FILENAME}
+        for path in directory.rglob("*.yaml"):
+            if path.name in valid_filenames and path.is_file():
                 contract_files.append(path)
 
         # Deduplicate by resolved path
@@ -787,13 +784,13 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 contract_path=str(contract_path),
             )
 
-        if not isinstance(handler_type, str):
+        if not isinstance(handler_type, str) or not handler_type.strip():
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="extract_handler_type",
             )
             raise ProtocolConfigurationError(
-                "Contract field 'handler_type' must be a string",
+                "Contract field 'handler_type' must be a non-empty string",
                 context=context,
                 loader_error="HANDLER_LOADER_003",
                 contract_path=str(contract_path),
@@ -824,11 +821,18 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
     ) -> list[str]:
         """Extract capability tags from contract data.
 
+        Supports both ``capability_tags`` and ``tags`` field names for
+        backwards compatibility. If both are present, ``capability_tags``
+        takes precedence.
+
         Args:
             raw_data: Parsed YAML contract data.
 
         Returns:
             List of capability tag strings. Empty list if not specified.
+
+        Note:
+            Field naming precedence: ``capability_tags`` > ``tags``
         """
         tags = raw_data.get("capability_tags") or raw_data.get("tags")
 
