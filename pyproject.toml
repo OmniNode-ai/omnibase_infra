@@ -30,7 +30,7 @@ python = "^3.12"
 # - service_registry is now properly initialized in ModelONEXContainer
 # - Handler security models and EnumHandlerTypeCategory (OMN-1137)
 omnibase-core = "^0.6.3"
-omnibase-spi = "^0.4.1"
+omnibase-spi = "^0.4.2"
 
 # ============================================================================
 # External Dependency Security Guidance
