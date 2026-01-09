@@ -1298,10 +1298,32 @@ union_exemptions:
 # (e.g., Vault secrets, database query parameters). These exemptions document
 # approved exceptions with explicit architectural rationale.
 #
-# Exemption criteria:
-# 1. Must have explicit NOTE comment in code documenting why Any is used
-# 2. Must be infrastructure payload handling (secrets, DB params, etc.)
-# 3. Must be reviewed and approved per OMN-1276
+# Exemption Approval Process:
+# ==============================================================================
+# 1. REQUIREMENT: Must have explicit NOTE comment in source code documenting
+#    why Any is required (e.g., "NOTE: Any required for Vault dynamic JSON")
+#
+# 2. VALID USE CASES (pre-approved patterns):
+#    - External system payloads (Vault secrets, database parameters)
+#    - Pydantic validator raw input handling
+#    - Dynamic JSON from APIs where schema is unknown
+#
+# 3. INVALID USE CASES (will be rejected):
+#    - Convenience to avoid proper typing
+#    - "I don't know the type" without investigation
+#    - Temporary workarounds (use proper types or create protocol)
+#
+# 4. APPROVAL WORKFLOW:
+#    a. Add NOTE comment in source code explaining requirement
+#    b. Add exemption entry below with:
+#       - file_pattern: Regex matching the specific file
+#       - reason: Clear explanation of why Any is architecturally required
+#       - documentation: Link to relevant docs/ADRs
+#       - ticket: Linear ticket ID (e.g., OMN-1276)
+#    c. Submit PR for review - exemptions require code review approval
+#
+# 5. PERIODIC REVIEW: Exemptions should be reviewed quarterly to determine
+#    if proper types can now be used (e.g., if external API added schema)
 # ==============================================================================
 any_type_exemptions:
   # ==========================================================================

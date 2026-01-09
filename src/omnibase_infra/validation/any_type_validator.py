@@ -66,7 +66,12 @@ _ONEX_EXCLUDE_PATTERN = "ONEX_EXCLUDE:"
 _ONEX_EXCLUDE_ANY_TYPE = "any_type"
 _NOTE_PATTERN = "NOTE:"
 
-# Number of lines to look back for NOTE comments
+# Number of lines to look back for NOTE comments.
+# 5 lines is sufficient because NOTE comments typically appear:
+# - Immediately above the field (1-2 lines)
+# - After blank lines and decorators (3-4 lines)
+# - With docstring gap (5 lines max)
+# Larger values would risk matching unrelated NOTE comments.
 _NOTE_LOOKBACK_LINES = 5
 
 
@@ -114,8 +119,14 @@ class AnyTypeDetector(ast.NodeVisitor):
 
         Returns:
             True if file has a valid file-level NOTE comment.
+
+        Note:
+            Only scans first 100 lines for performance. Imports should
+            always appear near the top of Python files per PEP 8.
         """
-        for i, line in enumerate(self.source_lines):
+        # Only scan first 100 lines - imports must be at top per PEP 8
+        max_lines = min(100, len(self.source_lines))
+        for i, line in enumerate(self.source_lines[:max_lines]):
             # Look for Any import
             if "from typing import" in line and "Any" in line:
                 # Check surrounding lines (5 before and 5 after)
@@ -422,6 +433,36 @@ class AnyTypeDetector(ast.NodeVisitor):
                 context_name=context_name,
             )
 
+    def _get_code_snippet(self, line_number: int, max_length: int = 80) -> str:
+        """Get a code snippet for a violation, with smart truncation.
+
+        Truncates at word/syntax boundaries to avoid cutting mid-identifier.
+
+        Args:
+            line_number: 1-based line number to extract.
+            max_length: Maximum length of the returned snippet.
+
+        Returns:
+            The code snippet, truncated smartly if necessary.
+        """
+        if not (0 < line_number <= len(self.source_lines)):
+            return ""
+
+        snippet = self.source_lines[line_number - 1].strip()
+        if len(snippet) <= max_length:
+            return snippet
+
+        # Find last space or punctuation before max_length
+        truncate_at = snippet.rfind(" ", 0, max_length - 3)
+        if truncate_at == -1:
+            # No space found, try common delimiters
+            for delim in [",", ":", "(", "[", "="]:
+                pos = snippet.rfind(delim, 0, max_length - 3)
+                truncate_at = max(pos, truncate_at)
+        if truncate_at > 0:
+            return snippet[:truncate_at] + "..."
+        return snippet[: max_length - 3] + "..."
+
     def _add_violation(
         self,
         line_number: int,
@@ -440,10 +481,8 @@ class AnyTypeDetector(ast.NodeVisitor):
         if line_number in self.allowed_lines:
             return
 
-        # Get code snippet
-        snippet = ""
-        if 0 < line_number <= len(self.source_lines):
-            snippet = self.source_lines[line_number - 1].strip()
+        # Get code snippet with smart truncation
+        snippet = self._get_code_snippet(line_number)
 
         # Get suggestion from enum
         suggestion = violation_type.suggestion

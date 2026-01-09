@@ -117,6 +117,44 @@ class MyModel(BaseModel):
 
 **Related**: `docs/decisions/adr-any-type-pydantic-workaround.md`
 
+### Any Type Validator Known Limitations
+
+The AST-based Any type validator has inherent limitations:
+
+**Detection Capabilities**:
+- Direct `Any` annotations in function signatures
+- `Any` in Pydantic `Field()` definitions
+- `Any` as generic type argument (`list[Any]`, `dict[str, Any]`)
+- Type aliases with `Any`
+
+**Known Limitations**:
+1. **String annotations not detected**: When using `from __future__ import annotations`, type hints become strings at parse time. The AST parser resolves these correctly in most cases.
+
+2. **External type aliases**: Cannot detect Any usage via type aliases imported from external modules:
+   ```python
+   from external_lib import DynamicType  # If DynamicType = Any, not detected
+   def process(data: DynamicType): ...  # NOT detected
+   ```
+
+3. **Dynamic type construction**: Factory patterns creating types at runtime are not detected:
+   ```python
+   def make_type() -> type:
+       return Any  # NOT detected
+   DynamicType = make_type()
+   ```
+
+**Example @allow_any Usage**:
+```python
+from omnibase_infra.decorators import allow_any
+
+@allow_any("Required for legacy API compatibility - see OMN-1234")
+def legacy_handler(data: Any) -> Any:
+    """Handle legacy API payloads."""
+    return process_legacy(data)
+```
+
+The `@allow_any` decorator is recognized by the validator when applied to functions or classes. Note: The decorator implementation should be provided in the `omnibase_infra.decorators` module.
+
 ### File & Class Naming
 
 | Type | File Pattern | Class Pattern |
