@@ -25,11 +25,101 @@ Architecture:
     registered. It validates that handler security policies match their
     declared behavioral category (handler_type_category).
 
+Usage in Handler Loading Flow:
+    The SecurityMetadataValidator is designed to integrate at the following
+    points in the handler loading flow:
+
+    1. **HandlerBootstrapSource (Recommended)**: During handler descriptor
+       registration in ``_register_handler()``. This is the earliest point
+       where handler metadata is available.
+
+       Location: ``omnibase_infra/runtime/handler_bootstrap_source.py``
+
+       Example integration::
+
+           from omnibase_infra.runtime import validate_handler_security
+           from omnibase_infra.models.security import ModelHandlerSecurityPolicy
+
+           def _register_handler(self, descriptor: ModelHandlerDescriptor) -> None:
+               # Extract security policy from descriptor (when available)
+               security_policy = descriptor.security_policy or ModelHandlerSecurityPolicy()
+               handler_type = EnumHandlerTypeCategory(descriptor.handler_kind.upper())
+
+               # Validate security metadata before registration
+               result = validate_handler_security(
+                   handler_name=descriptor.handler_id,
+                   handler_type=handler_type,
+                   security_policy=security_policy,
+               )
+
+               if not result.valid:
+                   for error in result.errors:
+                       logger.error(
+                           f"Security validation failed for {descriptor.handler_id}: "
+                           f"[{error.code}] {error.message}"
+                       )
+                   raise SecurityValidationError(result)
+
+               # Proceed with registration
+               self._descriptors[descriptor.handler_id] = descriptor
+
+    2. **wire_default_handlers() / wire_handlers_from_contract()**: During
+       handler class registration with the ProtocolBindingRegistry.
+
+       Location: ``omnibase_infra/runtime/wiring.py``
+
+       Example integration::
+
+           from omnibase_infra.runtime import SecurityMetadataValidator
+
+           def wire_handlers_from_contract(contract_config):
+               validator = SecurityMetadataValidator()
+
+               for handler_config in handlers_config:
+                   # Validate security metadata if present in config
+                   if "security" in handler_config:
+                       security_policy = ModelHandlerSecurityPolicy(**handler_config["security"])
+                       handler_type = EnumHandlerTypeCategory(handler_config.get("kind", "EFFECT"))
+
+                       result = validator.validate(
+                           handler_name=handler_type_str,
+                           handler_type=handler_type,
+                           security_policy=security_policy,
+                       )
+
+                       if not result.valid:
+                           raise ProtocolConfigurationError(
+                               f"Handler {handler_type_str} failed security validation"
+                           )
+
+                   handler_registry.register(handler_type, handler_cls)
+
+    3. **wire_registration_handlers()**: During container-based handler
+       instance registration.
+
+       Location: ``omnibase_infra/runtime/container_wiring.py``
+
+       Note: At this level, handlers are being instantiated rather than
+       registered by type. Security validation should ideally happen earlier
+       (in bootstrap or wiring), but can be added here as a safety check.
+
+Integration Status:
+    **NOT YET INTEGRATED** - The SecurityMetadataValidator is currently
+    standalone and must be called manually. Future work (tracked separately)
+    will integrate this validator into the handler loading flow at the
+    HandlerBootstrapSource level.
+
+    TODO(OMN-1137): Integrate SecurityMetadataValidator into HandlerBootstrapSource
+    when ModelHandlerDescriptor includes security_policy field.
+
 See Also:
     - ModelHandlerSecurityPolicy: Handler-declared security requirements
     - EnumHandlerTypeCategory: Handler behavioral classification
     - EnumSecurityRuleId: Security validation rule identifiers
     - RegistrationSecurityValidator: Environment-level security validation
+    - HandlerBootstrapSource: Bootstrap handler descriptor registration
+    - wire_default_handlers: Default handler wiring function
+    - wire_handlers_from_contract: Contract-based handler wiring
 
 .. versionadded:: 0.6.4
     Created as part of OMN-1137 handler security metadata validation.
@@ -60,9 +150,34 @@ _DEFAULT_CLASSIFICATION = EnumDataClassification.INTERNAL
 # Maximum length for a DNS label (RFC 1035)
 _MAX_DNS_LABEL_LENGTH = 63
 
+# Maximum total domain length (RFC 1035: 253 characters)
+_MAX_DOMAIN_LENGTH = 253
+
 # Valid port range (1-65535)
 _MIN_PORT = 1
 _MAX_PORT = 65535
+
+# Known URL schemes for more robust URL detection
+# urlparse() may interpret "hostname:port" as having a "scheme" of the hostname,
+# so we only flag domains as URLs if they have a known URL scheme
+_KNOWN_URL_SCHEMES = frozenset({
+    "http",
+    "https",
+    "ftp",
+    "ftps",
+    "sftp",
+    "ssh",
+    "file",
+    "mailto",
+    "tel",
+    "data",
+    "ws",
+    "wss",
+    "git",
+    "svn",
+    "s3",
+    "gcs",
+})
 
 # Pattern for validating domain patterns
 # Supports: hostname, hostname:port, wildcards like *.example.com
@@ -89,6 +204,23 @@ class SecurityMetadataValidator:
     - Domain patterns must be valid URL patterns
     - Port numbers must be in valid range (1-65535)
     - DNS labels must be max 63 characters each
+    - Total domain length must be max 253 characters (RFC 1035)
+
+    Usage in Handler Loading Flow:
+        This validator is designed to be called during handler registration,
+        before handlers are loaded into the runtime. The recommended integration
+        points are:
+
+        1. **HandlerBootstrapSource._register_handler()** (recommended):
+           Validate when handler descriptors are registered at bootstrap.
+
+        2. **wire_handlers_from_contract()**: Validate when handlers are
+           wired from contract configuration.
+
+        See the module docstring for detailed integration examples and code.
+
+        **Current Status**: NOT YET INTEGRATED. The validator must be called
+        manually. See TODO(OMN-1137) for integration tracking.
 
     Example:
         >>> from omnibase_infra.enums import EnumHandlerTypeCategory
@@ -120,6 +252,11 @@ class SecurityMetadataValidator:
     Attributes:
         None - this validator is stateless.
 
+    See Also:
+        - Module docstring: Full integration examples and code snippets
+        - HandlerBootstrapSource: Bootstrap handler descriptor registration
+        - wire_handlers_from_contract: Contract-based handler wiring
+
     .. versionadded:: 0.6.4
     """
 
@@ -142,6 +279,7 @@ class SecurityMetadataValidator:
             - Domain patterns must be valid URL patterns
             - Port numbers must be in range 1-65535
             - DNS labels must be max 63 characters each
+            - Total domain length must be max 253 characters (RFC 1035)
 
         Args:
             handler_name: Name of the handler being validated.
@@ -318,6 +456,7 @@ class SecurityMetadataValidator:
             - Invalid hostname characters
             - Port numbers outside 1-65535 range
             - DNS labels longer than 63 characters
+            - Total domain length exceeding 253 characters (RFC 1035)
 
         Args:
             allowed_domains: List of domain patterns to validate.
@@ -373,15 +512,22 @@ class SecurityMetadataValidator:
                 )
                 continue
 
-            # Check if it looks like a full URL (has scheme)
-            if "://" in domain:
+            # Check if it looks like a full URL (has known scheme)
+            # Using urlparse().scheme with a known schemes set is more robust
+            # than checking for "://" as it handles schemes like "mailto:"
+            # that don't use "://". We check against known schemes to avoid
+            # false positives with "hostname:port" patterns where urlparse
+            # would interpret "hostname" as the scheme.
+            parsed = urlparse(domain)
+            if parsed.scheme and parsed.scheme.lower() in _KNOWN_URL_SCHEMES:
                 errors.append(
                     ModelSecurityError(
                         code=EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value,
                         field=f"allowed_domains[{i}]",
                         message=(
                             f"Invalid domain pattern at index {i}{context}: "
-                            f"'{domain}' appears to be a full URL. "
+                            f"'{domain}' appears to be a full URL "
+                            f"(detected scheme: '{parsed.scheme}'). "
                             "Use hostname only (e.g., 'api.example.com')."
                         ),
                         severity=EnumValidationSeverity.ERROR,
@@ -437,6 +583,29 @@ class SecurityMetadataValidator:
                     # Port is not a valid integer - already caught by regex
                     pass
 
+            # Validate total domain length (max 253 characters, RFC 1035)
+            # Note: We validate the hostname part only, without port
+            hostname_for_length = hostname
+            if hostname_for_length.startswith("*."):
+                # Wildcard prefix doesn't count toward length limit
+                # but the rest of the domain does
+                hostname_for_length = hostname_for_length[2:]
+
+            if len(hostname_for_length) > _MAX_DOMAIN_LENGTH:
+                errors.append(
+                    ModelSecurityError(
+                        code=EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value,
+                        field=f"allowed_domains[{i}]",
+                        message=(
+                            f"Invalid domain pattern at index {i}{context}: "
+                            f"total domain length ({len(hostname_for_length)} characters) "
+                            f"exceeds maximum of {_MAX_DOMAIN_LENGTH} characters (RFC 1035)."
+                        ),
+                        severity=EnumValidationSeverity.ERROR,
+                    )
+                )
+                continue
+
             # Validate DNS label lengths (max 63 characters each)
             # Remove wildcard prefix if present for label validation
             hostname_for_labels = hostname
@@ -444,17 +613,26 @@ class SecurityMetadataValidator:
                 hostname_for_labels = hostname_for_labels[2:]
 
             labels = hostname_for_labels.split(".")
-            for label in labels:
+            for label_index, label in enumerate(labels):
                 if len(label) > _MAX_DNS_LABEL_LENGTH:
+                    # Format label position as ordinal (1st, 2nd, 3rd, etc.)
+                    position = label_index + 1  # 1-indexed for human readability
+                    ordinal = self._ordinal(position)
+
+                    # Show truncated label if very long, full label if reasonable
+                    label_display = (
+                        f"'{label[:30]}...'" if len(label) > 35 else f"'{label}'"
+                    )
+
                     errors.append(
                         ModelSecurityError(
                             code=EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value,
                             field=f"allowed_domains[{i}]",
                             message=(
                                 f"Invalid domain pattern at index {i}{context}: "
-                                f"DNS label '{label[:20]}...' exceeds maximum length "
-                                f"of {_MAX_DNS_LABEL_LENGTH} characters "
-                                f"(has {len(label)} characters)."
+                                f"DNS label {label_display} ({len(label)} chars) "
+                                f"exceeds maximum {_MAX_DNS_LABEL_LENGTH} chars "
+                                f"at {ordinal} label in domain pattern."
                             ),
                             severity=EnumValidationSeverity.ERROR,
                         )
@@ -522,6 +700,35 @@ class SecurityMetadataValidator:
             )
 
         return ", ".join(parts) if parts else "(none)"
+
+    def _ordinal(self, n: int) -> str:
+        """Convert an integer to its ordinal string representation.
+
+        Args:
+            n: The integer to convert (1-indexed).
+
+        Returns:
+            Ordinal string like "1st", "2nd", "3rd", "4th", etc.
+
+        Example:
+            >>> validator = SecurityMetadataValidator()
+            >>> validator._ordinal(1)
+            '1st'
+            >>> validator._ordinal(2)
+            '2nd'
+            >>> validator._ordinal(3)
+            '3rd'
+            >>> validator._ordinal(11)
+            '11th'
+            >>> validator._ordinal(21)
+            '21st'
+        """
+        # Special cases for 11th, 12th, 13th
+        if 11 <= (n % 100) <= 13:
+            suffix = "th"
+        else:
+            suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+        return f"{n}{suffix}"
 
 
 def validate_handler_security(

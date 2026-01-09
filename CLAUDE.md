@@ -137,9 +137,16 @@ output_type.is_routable()  # False for PROJECTION
 
 Result models may override `__bool__` to enable idiomatic conditional checks. This differs from standard Pydantic behavior where `bool(model)` always returns `True`.
 
-**Current implementations**:
-- `ModelReducerExecutionResult`: Returns `True` only if `has_intents` (intents tuple is non-empty)
-- `ModelCategoryMatchResult`: Returns `True` only if `matched` is True
+**Related**: `docs/decisions/adr-custom-bool-result-models.md`
+
+**Categories of implementations**:
+
+| Category | Models | Condition |
+|----------|--------|-----------|
+| Validity/Success | `ModelSecurityValidationResult`, `ModelValidationOutcome`, `ModelLifecycleResult` | Returns `True` when `valid`/`success`/`is_valid` is True |
+| Collection-Based | `ModelReducerExecutionResult`, `ModelDispatchOutputs` | Returns `True` when intents/topics non-empty |
+| Optional Wrappers | `ModelOptionalString`, `ModelOptionalUUID`, `ModelOptionalCorrelationId` | Returns `True` when value present |
+| Matching Results | `ModelCategoryMatchResult`, `ModelExecutionShapeValidationResult` | Returns `True` when `matched`/`passed` is True |
 
 **Usage pattern**:
 ```python
