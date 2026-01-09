@@ -160,24 +160,26 @@ _MAX_PORT = 65535
 # Known URL schemes for more robust URL detection
 # urlparse() may interpret "hostname:port" as having a "scheme" of the hostname,
 # so we only flag domains as URLs if they have a known URL scheme
-_KNOWN_URL_SCHEMES = frozenset({
-    "http",
-    "https",
-    "ftp",
-    "ftps",
-    "sftp",
-    "ssh",
-    "file",
-    "mailto",
-    "tel",
-    "data",
-    "ws",
-    "wss",
-    "git",
-    "svn",
-    "s3",
-    "gcs",
-})
+_KNOWN_URL_SCHEMES = frozenset(
+    {
+        "http",
+        "https",
+        "ftp",
+        "ftps",
+        "sftp",
+        "ssh",
+        "file",
+        "mailto",
+        "tel",
+        "data",
+        "ws",
+        "wss",
+        "git",
+        "svn",
+        "s3",
+        "gcs",
+    }
+)
 
 # Pattern for validating domain patterns
 # Supports: hostname, hostname:port, wildcards like *.example.com
@@ -553,7 +555,7 @@ class SecurityMetadataValidator:
                 continue
 
             # Extract hostname and port for further validation
-            hostname = domain
+            hostname: str = domain
             port_str: str | None = None
             if ":" in domain:
                 # Split on last colon to get port
