@@ -160,6 +160,11 @@ class TestBasicReduce:
 
         assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
+        # Verify both intent types exist via payload.intent_type
+        intent_types = {i.payload.intent_type for i in output.intents}
+        assert "consul.register" in intent_types
+        assert "postgres.upsert_registration" in intent_types
+
     def test_reduce_valid_event_transitions_to_pending(
         self,
         reducer: RegistrationReducer,
@@ -218,6 +223,14 @@ class TestBasicReduce:
 
             assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS, (
                 f"Failed for node_type: {node_type}"
+            )
+            # Verify both intent types exist via payload.intent_type
+            intent_types = {i.payload.intent_type for i in output.intents}
+            assert "consul.register" in intent_types, (
+                f"Missing consul.register for node_type: {node_type}"
+            )
+            assert "postgres.upsert_registration" in intent_types, (
+                f"Missing postgres.upsert_registration for node_type: {node_type}"
             )
             assert output.result.status == "pending"
 

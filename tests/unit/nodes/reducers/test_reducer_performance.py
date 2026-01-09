@@ -30,6 +30,8 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
@@ -100,11 +102,13 @@ def sample_event() -> ModelNodeIntrospectionEvent:
     """
     return ModelNodeIntrospectionEvent(
         node_id=uuid4(),
-        node_type="effect",
-        node_version="1.0.0",
+        node_type=EnumNodeKind.EFFECT,
+        node_version=ModelSemVer(major=1, minor=0, patch=0),
         correlation_id=uuid4(),
         endpoints={"health": "http://localhost:8080/health"},
-        capabilities=ModelNodeCapabilities(postgres=True, read=True, write=True),
+        declared_capabilities=ModelNodeCapabilities(
+            postgres=True, read=True, write=True
+        ),
         metadata=ModelNodeMetadata(environment="performance-test"),
         timestamp=TEST_TIMESTAMP,
     )
@@ -217,11 +221,11 @@ class TestReducerPerformance:
             # Create fresh event for each iteration
             event = ModelNodeIntrospectionEvent(
                 node_id=uuid4(),
-                node_type="effect",
-                node_version="1.0.0",
+                node_type=EnumNodeKind.EFFECT,
+                node_version=ModelSemVer(major=1, minor=0, patch=0),
                 correlation_id=uuid4(),
                 endpoints={},
-                capabilities=ModelNodeCapabilities(),
+                declared_capabilities=ModelNodeCapabilities(),
                 metadata=ModelNodeMetadata(),
                 timestamp=datetime.now(UTC),
             )
@@ -390,11 +394,11 @@ class TestReducerPerformanceEdgeCases:
         """Reduce with empty endpoints should not have performance penalty."""
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer(major=1, minor=0, patch=0),
             correlation_id=uuid4(),
             endpoints={},  # Empty endpoints
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
             timestamp=datetime.now(UTC),
         )
@@ -424,11 +428,11 @@ class TestReducerPerformanceEdgeCases:
 
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer(major=1, minor=0, patch=0),
             correlation_id=uuid4(),
             endpoints=endpoints,
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             metadata=ModelNodeMetadata(),
             timestamp=datetime.now(UTC),
         )

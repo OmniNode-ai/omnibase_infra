@@ -54,6 +54,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.models.reducer import ModelIntent
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
@@ -108,9 +109,8 @@ def introspection_event(
     """Create a test introspection event."""
     return ModelNodeIntrospectionEvent(
         node_id=node_id,
-        node_type="effect",
-        node_version="1.0.0",
-        capabilities={},
+        node_type=EnumNodeKind.EFFECT,
+        node_version=ModelSemVer(major=1, minor=0, patch=0),
         endpoints={"health": "http://localhost:8080/health"},
         correlation_id=correlation_id,
         timestamp=TEST_TIMESTAMP,
@@ -460,7 +460,7 @@ class TestEffectLayerRequestFormatting:
         # Verify request was built correctly
         assert request.node_id == node_id
         assert request.node_type == EnumNodeKind.EFFECT
-        assert request.node_version == "1.0.0"
+        assert str(request.node_version) == "1.0.0"
         assert request.correlation_id == correlation_id
 
     @pytest.mark.asyncio
@@ -479,7 +479,7 @@ class TestEffectLayerRequestFormatting:
         request = ModelRegistryRequest(
             node_id=node_id,
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer(major=1, minor=0, patch=0),
             correlation_id=correlation_id,
             service_name="onex-effect",
             endpoints={"health": "http://localhost:8080/health"},

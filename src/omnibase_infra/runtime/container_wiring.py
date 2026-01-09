@@ -56,6 +56,7 @@ from typing import TYPE_CHECKING
 
 from omnibase_core.models.primitives import ModelSemVer
 
+from omnibase_infra.errors import ServiceRegistryUnavailableError
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.registry_compute import RegistryCompute
@@ -78,8 +79,6 @@ if TYPE_CHECKING:
         ProjectorRegistration,
     )
     from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
-
-from omnibase_infra.errors import ServiceRegistryUnavailableError
 
 logger = logging.getLogger(__name__)
 

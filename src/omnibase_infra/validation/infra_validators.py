@@ -701,9 +701,27 @@ def validate_infra_contract_deep(
 
     Returns:
         ModelContractValidationResult with validation status, score, and any errors.
+
+    Raises:
+        OnexError: If YAML validation fails with an unexpected error.
     """
+    from uuid import uuid4
+
+    from omnibase_core.enums import EnumCoreErrorCode
+    from omnibase_core.errors import OnexError
+
+    correlation_id = uuid4()
+
     # Use the validation API from omnibase_core 0.6.x directly
-    result = validate_yaml_file(Path(contract_path))
+    try:
+        result = validate_yaml_file(Path(contract_path))
+    except Exception as e:
+        raise OnexError(
+            message=f"YAML validation failed for {contract_path}: {e}",
+            error_code=EnumCoreErrorCode.VALIDATION_ERROR,
+            correlation_id=correlation_id,
+            contract_path=str(contract_path),
+        ) from e
 
     # Return a ModelContractValidationResult
     # The API may return a different type, so we adapt it
