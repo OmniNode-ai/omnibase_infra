@@ -91,7 +91,11 @@ handler_routing:
 
 ### Any Type CI Enforcement
 
-The `Any` type policy is enforced via pre-commit hook and CI check (`scripts/check_any_types.py`).
+The `Any` type policy is enforced via pre-commit hook and CI check (`scripts/validate.py any_types`).
+
+**Enforcement Levels:**
+1. **Pre-commit Hook**: Runs `poetry run python scripts/validate.py any_types` before commit
+2. **CI Pipeline**: Runs as part of `ONEX Validators` job - blocks merge on violations (non-zero exit)
 
 | Context | Allowed | Enforcement |
 |---------|---------|-------------|
