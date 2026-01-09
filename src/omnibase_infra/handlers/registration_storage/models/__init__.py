@@ -2,12 +2,12 @@
 # Copyright (c) 2025 OmniNode Team
 """Registration Storage Handler Models.
 
-Models for registration storage handler operations.
+Handler-specific request models for registration storage operations.
 
 Note:
-    ModelRegistrationRecord, ModelStorageResult, and ModelUpsertResult are
-    defined in ``omnibase_infra.nodes.node_registration_storage_effect.models``
-    and re-exported here for convenience.
+    Core storage models (ModelRegistrationRecord, ModelStorageResult,
+    ModelUpsertResult) are defined in the canonical location:
+    ``omnibase_infra.nodes.node_registration_storage_effect.models``
 """
 
 from omnibase_infra.handlers.registration_storage.models.model_delete_registration_request import (
@@ -17,17 +17,7 @@ from omnibase_infra.handlers.registration_storage.models.model_update_registrati
     ModelUpdateRegistrationRequest,
 )
 
-# Import from canonical location
-from omnibase_infra.nodes.node_registration_storage_effect.models import (
-    ModelRegistrationRecord,
-    ModelStorageResult,
-    ModelUpsertResult,
-)
-
 __all__: list[str] = [
     "ModelDeleteRegistrationRequest",
-    "ModelRegistrationRecord",
-    "ModelStorageResult",
     "ModelUpdateRegistrationRequest",
-    "ModelUpsertResult",
 ]
