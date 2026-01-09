@@ -103,6 +103,15 @@ from omnibase_core.validation import (
     ModelModuleImportResult as ModelImportValidationResult,
 )
 
+# AST-based Any type validation for strong typing policy (OMN-1276)
+from omnibase_infra.validation.any_type_validator import (
+    AnyTypeDetector,
+    ModelAnyTypeValidationResult,
+    validate_any_types,
+    validate_any_types_ci,
+    validate_any_types_in_file,
+)
+
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
     ChainPropagationError,
@@ -214,6 +223,9 @@ __all__: list[str] = [
     # Topic category validation
     "TOPIC_CATEGORY_PATTERNS",
     "TOPIC_SUFFIXES",
+    # Any type validation (OMN-1276)
+    "AnyTypeDetector",
+    "ModelAnyTypeValidationResult",
     # Chain propagation validation (OMN-951)
     "ChainPropagationError",
     "ChainPropagationValidator",
@@ -255,6 +267,10 @@ __all__: list[str] = [
     "lint_contracts_ci",
     "lint_contracts_in_directory",
     "validate_all",
+    # Any type validation functions (OMN-1276)
+    "validate_any_types",
+    "validate_any_types_ci",
+    "validate_any_types_in_file",
     # Direct re-exports from omnibase_core
     "validate_architecture",
     "validate_contracts",

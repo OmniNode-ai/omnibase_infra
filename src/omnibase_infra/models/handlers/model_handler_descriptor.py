@@ -29,6 +29,7 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
+# ONEX_EXCLUDE: any_type - Pydantic BeforeValidator receives raw input before coercion
 def _parse_version(v: ModelSemVer | str | dict[str, Any]) -> ModelSemVer:
     """Parse version input to ModelSemVer.
 

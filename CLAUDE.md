@@ -89,6 +89,34 @@ handler_routing:
 - **One model per file** - Each file contains exactly one `Model*` class
 - **PEP 604 unions** - Use `X | None` not `Optional[X]`
 
+### Any Type CI Enforcement
+
+The `Any` type policy is enforced via pre-commit hook and CI check (`scripts/check_any_types.py`).
+
+| Context | Allowed | Enforcement |
+|---------|---------|-------------|
+| Function parameters | NO - use `object` | CI BLOCKED |
+| Return types | NO - use `object` | CI BLOCKED |
+| Pydantic `Field()` with `NOTE:` comment | YES | CI ALLOWED |
+| Pydantic `Field()` without `NOTE:` comment | NO | CI BLOCKED |
+| Variables, type aliases | NO | CI BLOCKED |
+
+**Pydantic Workaround** (only when technically required):
+```python
+from typing import Any
+from pydantic import Field
+
+class MyModel(BaseModel):
+    # NOTE: Any required for Pydantic discriminated union - see ADR
+    payload: Any = Field(...)
+```
+
+**Exemption Mechanisms**:
+- `@allow_any` decorator with documented reason
+- `ONEX_EXCLUDE: any_type` inline comment (use sparingly)
+
+**Related**: `docs/decisions/adr-any-type-pydantic-workaround.md`
+
 ### File & Class Naming
 
 | Type | File Pattern | Class Pattern |

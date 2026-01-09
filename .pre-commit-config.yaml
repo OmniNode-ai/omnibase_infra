@@ -122,6 +122,15 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
+      # Any type validation (OMN-1276)
+      # Ensures no `Any` types are used in the codebase
+      - id: onex-validate-any-types
+        name: ONEX Any Type Validation
+        entry: poetry run python scripts/validate.py any_types
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]
       # Reducer purity enforcement (OMN-914)
       # Ensures reducers remain pure functions with no I/O dependencies
       # Timeout: 60s prevents hanging if tests get stuck (normal runtime: <5s)
@@ -147,4 +156,4 @@ ci:
   autoupdate_schedule: weekly
   submodules: false
   # Skip ONEX validation hooks in CI (they require omnibase_core)
-  skip: [onex-validate-architecture, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports]
+  skip: [onex-validate-architecture, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types]

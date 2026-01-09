@@ -5,9 +5,11 @@
 Provides models for ONEX execution shape validation and chain validation,
 including rules defining handler constraints, violation results for CI gate
 integration, message category to node kind routing validation, coverage metrics
-for routing validation, and correlation/causation chain violation tracking.
+for routing validation, correlation/causation chain violation tracking,
+and Any type violation detection.
 
 Exports:
+    ModelAnyTypeViolation: Result of Any type violation detection
     ModelCategoryMatchResult: Result of category matching operation
     ModelChainViolation: Result of chain violation detection
     ModelCoverageMetrics: Coverage metrics for routing validation
@@ -18,6 +20,9 @@ Exports:
     ModelValidationOutcome: Generic validation result model
 """
 
+from omnibase_infra.models.validation.model_any_type_violation import (
+    ModelAnyTypeViolation,
+)
 from omnibase_infra.models.validation.model_category_match_result import (
     ModelCategoryMatchResult,
 )
@@ -42,6 +47,7 @@ from omnibase_infra.models.validation.model_validation_outcome import (
 )
 
 __all__ = [
+    "ModelAnyTypeViolation",
     "ModelCategoryMatchResult",
     "ModelChainViolation",
     "ModelCoverageMetrics",

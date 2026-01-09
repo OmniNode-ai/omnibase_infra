@@ -256,6 +256,29 @@ pattern_exemptions:
       - docs/validation/validator_reference.md
     ticket: OMN-958
   # ==========================================================================
+  # Any Type Validator Exemptions (OMN-1276)
+  # ==========================================================================
+  # AST-based validator for Any type usage enforcement. The class requires
+  # multiple visitor methods and helper methods for comprehensive detection.
+  - file_pattern: 'any_type_validator\.py'
+    class_pattern: "Class 'AnyTypeDetector'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      AST visitor class requires multiple methods for comprehensive Any type detection: visit methods (ClassDef, FunctionDef, AsyncFunctionDef, AnnAssign, Assign, Subscript), helper methods (_check_annotation_for_any, _check_subscript_for_any, _is_field_call, _is_field_with_note, _contains_any, _add_violation), and exemption handling (_has_allow_decorator, _allow_all_lines_in_node). Standard AST visitor pattern.
+
+    documentation:
+      - docs/decisions/adr-any-type-pydantic-workaround.md
+      - CLAUDE.md (Any Type CI Enforcement)
+    ticket: OMN-1276
+  - file_pattern: 'model_any_type_violation\.py'
+    violation_pattern: "Field 'context_name' might reference an entity"
+    reason: >
+      context_name is descriptive metadata (e.g., "process_event(payload)") showing where the violation occurred, not an entity reference requiring ID + display_name. It provides human-readable context for error messages.
+
+    documentation:
+      - docs/decisions/adr-any-type-pydantic-workaround.md
+    ticket: OMN-1276
+  # ==========================================================================
   # AST Visitor Method Naming Exemptions
   # ==========================================================================
   # Python ast.NodeVisitor convention uses visit_ClassDef, visit_Call, etc.
@@ -267,13 +290,14 @@ pattern_exemptions:
   # - validator_no_handler_publishing.py
   # - validator_no_direct_dispatch.py
   # - validator_no_orchestrator_fsm.py
+  # - any_type_validator.py (OMN-1276)
   #
   # Common AST visitor methods:
   # - visit_ClassDef, visit_FunctionDef, visit_AsyncFunctionDef
-  # - visit_Assign, visit_AnnAssign, visit_Call
+  # - visit_Assign, visit_AnnAssign, visit_Call, visit_Subscript
   #
   # Generic pattern for all AST visitor methods across all validator files
-  - file_pattern: '(topic_category_validator|validator_no_handler_publishing|validator_no_direct_dispatch|validator_no_orchestrator_fsm)\.py'
+  - file_pattern: '(topic_category_validator|validator_no_handler_publishing|validator_no_direct_dispatch|validator_no_orchestrator_fsm|any_type_validator)\.py'
     violation_pattern: "Function name 'visit_[A-Z][a-zA-Z]+' should use snake_case"
     reason: >
       Python ast.NodeVisitor convention. Methods named visit_<NodeType> (e.g., visit_ClassDef, visit_FunctionDef, visit_Call) are standard AST visitor methods that the ast module dispatches to based on the node type being visited. These CANNOT be renamed as they are part of the visitor dispatch protocol.
@@ -1263,3 +1287,62 @@ union_exemptions:
       - CLAUDE.md (Type Annotation Conventions - Union patterns)
       - Standard JSON config pattern (RFC 8259)
     ticket: null
+# ==============================================================================
+# Any Type Exemptions (OMN-1276)
+# ==============================================================================
+# These patterns exempt specific files from the Any type CI check.
+#
+# Why exemptions exist:
+# ONEX prohibits Any types for strong typing guarantees. However, certain
+# infrastructure patterns legitimately require Any for dynamic payloads
+# (e.g., Vault secrets, database query parameters). These exemptions document
+# approved exceptions with explicit architectural rationale.
+#
+# Exemption criteria:
+# 1. Must have explicit NOTE comment in code documenting why Any is used
+# 2. Must be infrastructure payload handling (secrets, DB params, etc.)
+# 3. Must be reviewed and approved per OMN-1276
+# ==============================================================================
+any_type_exemptions:
+  # ==========================================================================
+  # Vault Secret Payload Exemption (OMN-1276)
+  # ==========================================================================
+  # Vault secrets can contain arbitrary JSON values (strings, dicts, lists,
+  # numbers). The exact type depends on what the user stored in Vault.
+  # Code contains explicit NOTE comments documenting this requirement.
+  - file_pattern: 'handlers/models/vault/model_vault_secret_payload\.py'
+    reason: >
+      Vault secrets contain arbitrary JSON values (strings, dicts, lists, numbers). The exact type depends on user-stored content. Fields 'data' and 'metadata' use Any for this dynamic payload pattern. Code contains explicit NOTE comments documenting why Any is required here.
+
+    documentation:
+      - CLAUDE.md (Strong Typing & Models - Any type policy)
+      - HashiCorp Vault KV Secrets Engine (https://developer.hashicorp.com/vault/docs/secrets/kv)
+    ticket: OMN-1276
+  # ==========================================================================
+  # Database Query Payload Exemption (OMN-1276)
+  # ==========================================================================
+  # Database query parameters can be any SQL-compatible value type (strings,
+  # numbers, dates, booleans, None). The exact types depend on the query.
+  # Code contains explicit NOTE comment documenting this requirement.
+  - file_pattern: 'handlers/models/model_db_query_payload\.py'
+    reason: >
+      Database query parameters accept any SQL-compatible value type (strings, numbers, dates, booleans, None). The 'parameters' field uses dict[str, Any] to support arbitrary query parameter types. Code contains explicit NOTE comment documenting why Any is required here.
+
+    documentation:
+      - CLAUDE.md (Strong Typing & Models - Any type policy)
+      - Python DB-API 2.0 (PEP 249) parameter passing conventions
+    ticket: OMN-1276
+  # ==========================================================================
+  # Handler Descriptor Exemption (OMN-1276)
+  # ==========================================================================
+  # Pydantic validator receives raw input values before type coercion.
+  # The @field_validator decorator's 'v' parameter is typed as Any by Pydantic
+  # because validators run before type conversion/validation occurs.
+  - file_pattern: 'models/handlers/model_handler_descriptor\.py'
+    reason: >
+      Pydantic @field_validator decorator receives raw input values before type coercion. The validator parameter 'v' is typed as Any because it receives the pre-validation value which could be any JSON-compatible type. This is a Pydantic framework constraint, not a design choice.
+
+    documentation:
+      - CLAUDE.md (Strong Typing & Models - Any type policy)
+      - Pydantic V2 Validators (https://docs.pydantic.dev/latest/concepts/validators/)
+    ticket: OMN-1276
