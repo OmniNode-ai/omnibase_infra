@@ -39,6 +39,14 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 ContractType = Literal["effect", "compute", "reducer", "orchestrator"]
 VALID_CONTRACT_TYPES: tuple[str, ...] = EnumContractType.valid_type_values()
 
+# Contract type including 'unknown' for backfill/migration scenarios.
+# The 'unknown' value is allowed at the model layer but rejected at the persistence
+# layer unless allow_unknown_backfill=True is explicitly passed.
+# See: EnumContractType.UNKNOWN documentation and persist_state_transition()
+ContractTypeWithUnknown = Literal[
+    "effect", "compute", "reducer", "orchestrator", "unknown"
+]
+
 
 class ModelRegistrationProjection(BaseModel):
     """Registration projection for orchestrator state queries.
@@ -143,11 +151,16 @@ class ModelRegistrationProjection(BaseModel):
 
     # Capability fields for fast discovery queries (OMN-1134)
     # These are denormalized from capabilities for GIN-indexed queries
-    contract_type: ContractType | None = Field(
+    # Uses ContractTypeWithUnknown to allow 'unknown' for backfill scenarios.
+    # The 'unknown' value is accepted here but rejected at persistence layer
+    # unless allow_unknown_backfill=True is explicitly passed.
+    contract_type: ContractTypeWithUnknown | None = Field(
         default=None,
         description=(
             "Contract type for the node. Valid values: 'effect', 'compute', "
-            "'reducer', 'orchestrator'. None indicates unspecified."
+            "'reducer', 'orchestrator'. 'unknown' is allowed for backfill but "
+            "rejected at persistence unless explicitly permitted. None indicates "
+            "unspecified (never processed)."
         ),
     )
 
@@ -163,9 +176,19 @@ class ModelRegistrationProjection(BaseModel):
             The validated value (unchanged if valid)
 
         Raises:
-            ValueError: If v is not None and not a valid contract type
+            ValueError: If v is not None and not a valid contract type or 'unknown'
+
+        Note:
+            The 'unknown' value is accepted here to allow model construction for
+            backfill scenarios. However, `persist_state_transition()` will reject
+            'unknown' unless `allow_unknown_backfill=True` is explicitly passed.
         """
-        if v is not None and v not in EnumContractType.valid_type_values():
+        if v is None:
+            return v
+        # Allow 'unknown' for backfill scenarios (validated at persistence layer)
+        if v == EnumContractType.UNKNOWN.value:
+            return v
+        if v not in EnumContractType.valid_type_values():
             raise ValueError(
                 f"contract_type must be one of {EnumContractType.valid_type_values()}, "
                 f"got: {v!r}"
@@ -398,6 +421,7 @@ class ModelRegistrationProjection(BaseModel):
 
 __all__: list[str] = [
     "ContractType",
+    "ContractTypeWithUnknown",
     "ModelRegistrationProjection",
     "VALID_CONTRACT_TYPES",
 ]

@@ -39,28 +39,64 @@ class ProtocolCapabilityProjection(Protocol):
     fields. Implementations use GIN-indexed PostgreSQL array queries for
     efficient lookups.
 
-    Methods:
-        get_by_capability_tag: Find nodes by capability tag
-        get_by_intent_type: Find nodes by intent type they handle
-        get_by_protocol: Find nodes implementing a specific protocol
-        get_by_contract_type: Find nodes by contract type (effect, compute, etc.)
+    Canonical Implementation:
+        The reference implementation of this protocol is
+        ``ProjectionReaderRegistration`` in:
 
-    Example Implementation:
-        class ProjectionReaderRegistration(ProtocolCapabilityProjection):
-            async def get_by_capability_tag(
-                self, tag: str
-            ) -> list[ModelRegistrationProjection]:
-                return await self._query(
-                    "SELECT * FROM registration_projections "
-                    "WHERE capability_tags @> ARRAY[$1]",
-                    tag,
-                )
+            ``omnibase_infra/projectors/projection_reader_registration.py``
+
+        This implementation provides:
+        - asyncpg-based PostgreSQL queries with connection pooling
+        - Circuit breaker resilience (MixinAsyncCircuitBreaker)
+        - Parameterized queries for SQL injection protection
+        - Consistent error handling with InfraConnectionError/InfraTimeoutError
+        - Optional state filtering on all capability query methods
+
+    Methods:
+        get_by_capability_tag: Find nodes by capability tag (e.g., "postgres.storage").
+            Uses GIN index on capability_tags column.
+        get_by_intent_type: Find nodes by intent type they handle (e.g., "postgres.query").
+            Uses GIN index on intent_types column.
+        get_by_protocol: Find nodes implementing a specific protocol
+            (e.g., "ProtocolEventPublisher"). Uses GIN index on protocols column.
+        get_by_contract_type: Find nodes by contract type (effect, compute, reducer,
+            orchestrator). Uses B-tree index on contract_type column.
+        get_by_capability_tags_all: Find nodes with ALL specified tags.
+            Uses GIN index with @> (contains all) operator.
+        get_by_capability_tags_any: Find nodes with ANY of the specified tags.
+            Uses GIN index with && (overlaps) operator.
 
     Query Performance:
         All methods use GIN-indexed array queries which provide:
         - O(log n) lookup time for single-element containment
         - Efficient multi-tag queries using array operators
         - Automatic index selection by PostgreSQL query planner
+
+    Example:
+        >>> import asyncpg
+        >>> from omnibase_infra.projectors import ProjectionReaderRegistration
+        >>> from omnibase_infra.enums import EnumRegistrationState
+        >>>
+        >>> # Create reader with connection pool
+        >>> pool = await asyncpg.create_pool(dsn)
+        >>> reader = ProjectionReaderRegistration(pool)
+        >>>
+        >>> # Find all active Kafka consumers
+        >>> kafka_nodes = await reader.get_by_capability_tag(
+        ...     "kafka.consumer",
+        ...     state=EnumRegistrationState.ACTIVE,
+        ... )
+        >>>
+        >>> # Find nodes implementing a protocol
+        >>> publishers = await reader.get_by_protocol("ProtocolEventPublisher")
+        >>>
+        >>> # Find effect nodes
+        >>> effects = await reader.get_by_contract_type("effect")
+
+    See Also:
+        - ``ProtocolProjectionReader``: Base protocol for all projection readers
+        - ``ModelRegistrationProjection``: The projection model returned by queries
+        - ``EnumRegistrationState``: FSM states for optional state filtering
     """
 
     async def get_by_capability_tag(

@@ -506,4 +506,199 @@ class TestNodeTypeStringCoercion:
         assert isinstance(projection.node_type, EnumNodeKind)
 
 
+@pytest.mark.unit
+class TestUnknownContractTypeValidation:
+    """Test validation of 'unknown' contract type at model and persistence layers."""
+
+    def test_model_capability_fields_accepts_unknown(self) -> None:
+        """Test that ModelCapabilityFields accepts 'unknown' for backfill scenarios.
+
+        The model layer allows 'unknown' to be constructed, but persistence
+        will reject it unless allow_unknown_backfill=True.
+        """
+        fields = ModelCapabilityFields(contract_type="unknown")
+        assert fields.contract_type == "unknown"
+
+    def test_model_registration_projection_accepts_unknown(self) -> None:
+        """Test that ModelRegistrationProjection accepts 'unknown' for backfill."""
+        now = datetime.now(UTC)
+        projection = ModelRegistrationProjection(
+            entity_id=uuid4(),
+            domain="registration",
+            current_state=EnumRegistrationState.ACTIVE,
+            node_type=EnumNodeKind.EFFECT,
+            contract_type="unknown",
+            last_applied_event_id=uuid4(),
+            registered_at=now,
+            updated_at=now,
+        )
+        assert projection.contract_type == "unknown"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestUnknownContractTypePersistence:
+    """Test persistence layer validation of 'unknown' contract type."""
+
+    async def test_persist_state_transition_rejects_unknown_by_default(
+        self,
+        projector: ProjectorRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test that persist_state_transition rejects 'unknown' by default."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+
+        capabilities = ModelNodeCapabilities(postgres=True)
+        now = datetime.now(UTC)
+
+        # Try to persist with 'unknown' contract type
+        capability_fields = ModelCapabilityFields(contract_type="unknown")
+
+        with pytest.raises(ValueError) as exc_info:
+            await projector.persist_state_transition(
+                entity_id=uuid4(),
+                domain="registration",
+                new_state=EnumRegistrationState.PENDING_REGISTRATION,
+                node_type=EnumNodeKind.EFFECT,
+                node_version="1.0.0",
+                capabilities=capabilities,
+                event_id=uuid4(),
+                now=now,
+                capability_fields=capability_fields,
+            )
+
+        # Verify error message content
+        error_msg = str(exc_info.value)
+        assert "unknown" in error_msg
+        assert "backfill" in error_msg.lower()
+        assert "allow_unknown_backfill=True" in error_msg
+
+    async def test_persist_state_transition_allows_unknown_with_flag(
+        self,
+        projector: ProjectorRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test that persist_state_transition allows 'unknown' with flag."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetchrow.return_value = {"entity_id": uuid4()}
+
+        capabilities = ModelNodeCapabilities(postgres=True)
+        now = datetime.now(UTC)
+
+        # Persist with 'unknown' contract type and allow_unknown_backfill=True
+        capability_fields = ModelCapabilityFields(contract_type="unknown")
+
+        result = await projector.persist_state_transition(
+            entity_id=uuid4(),
+            domain="registration",
+            new_state=EnumRegistrationState.PENDING_REGISTRATION,
+            node_type=EnumNodeKind.EFFECT,
+            node_version="1.0.0",
+            capabilities=capabilities,
+            event_id=uuid4(),
+            now=now,
+            capability_fields=capability_fields,
+            allow_unknown_backfill=True,
+        )
+
+        assert result is True
+        # Verify database was called
+        mock_connection.fetchrow.assert_called_once()
+
+    async def test_persist_state_transition_allows_valid_types(
+        self,
+        projector: ProjectorRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test that valid contract types are allowed without flag."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetchrow.return_value = {"entity_id": uuid4()}
+
+        capabilities = ModelNodeCapabilities(postgres=True)
+        now = datetime.now(UTC)
+
+        valid_types = ["effect", "compute", "reducer", "orchestrator"]
+        for contract_type in valid_types:
+            capability_fields = ModelCapabilityFields(contract_type=contract_type)
+
+            result = await projector.persist_state_transition(
+                entity_id=uuid4(),
+                domain="registration",
+                new_state=EnumRegistrationState.PENDING_REGISTRATION,
+                node_type=EnumNodeKind.EFFECT,
+                node_version="1.0.0",
+                capabilities=capabilities,
+                event_id=uuid4(),
+                now=now,
+                capability_fields=capability_fields,
+            )
+
+            assert result is True, f"Should allow contract_type={contract_type}"
+
+    async def test_persist_state_transition_allows_none_contract_type(
+        self,
+        projector: ProjectorRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test that None contract type is allowed (NULL in database)."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetchrow.return_value = {"entity_id": uuid4()}
+
+        capabilities = ModelNodeCapabilities(postgres=True)
+        now = datetime.now(UTC)
+
+        # Explicit None contract type
+        capability_fields = ModelCapabilityFields(contract_type=None)
+
+        result = await projector.persist_state_transition(
+            entity_id=uuid4(),
+            domain="registration",
+            new_state=EnumRegistrationState.PENDING_REGISTRATION,
+            node_type=EnumNodeKind.EFFECT,
+            node_version="1.0.0",
+            capabilities=capabilities,
+            event_id=uuid4(),
+            now=now,
+            capability_fields=capability_fields,
+        )
+
+        assert result is True
+
+    async def test_persist_state_transition_allows_no_capability_fields(
+        self,
+        projector: ProjectorRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test that omitting capability_fields entirely is allowed."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetchrow.return_value = {"entity_id": uuid4()}
+
+        capabilities = ModelNodeCapabilities(postgres=True)
+        now = datetime.now(UTC)
+
+        # No capability_fields parameter at all
+        result = await projector.persist_state_transition(
+            entity_id=uuid4(),
+            domain="registration",
+            new_state=EnumRegistrationState.PENDING_REGISTRATION,
+            node_type=EnumNodeKind.EFFECT,
+            node_version="1.0.0",
+            capabilities=capabilities,
+            event_id=uuid4(),
+            now=now,
+        )
+
+        assert result is True
+
+
 __all__: list[str] = []

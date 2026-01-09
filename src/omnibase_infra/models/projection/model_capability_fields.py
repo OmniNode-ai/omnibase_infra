@@ -16,7 +16,9 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumContractType
-from omnibase_infra.models.projection.model_registration_projection import ContractType
+from omnibase_infra.models.projection.model_registration_projection import (
+    ContractTypeWithUnknown,
+)
 
 
 class ModelCapabilityFields(BaseModel):
@@ -64,11 +66,13 @@ class ModelCapabilityFields(BaseModel):
         extra="forbid",
     )
 
-    contract_type: ContractType | None = Field(
+    contract_type: ContractTypeWithUnknown | None = Field(
         default=None,
         description=(
             "Contract type for the node. Valid values: 'effect', 'compute', "
-            "'reducer', 'orchestrator'. None indicates unspecified."
+            "'reducer', 'orchestrator'. 'unknown' is allowed for backfill but "
+            "rejected at persistence unless explicitly permitted. None indicates "
+            "unspecified (never processed)."
         ),
     )
 
@@ -77,8 +81,10 @@ class ModelCapabilityFields(BaseModel):
     def validate_contract_type(cls, v: str | None) -> str | None:
         """Validate contract_type is a valid node contract type.
 
-        Provides fail-fast validation for contract_type to catch invalid values
-        at model instantiation time rather than at persistence time.
+        Provides validation for contract_type to catch invalid values at model
+        instantiation time. The special value 'unknown' is allowed for backfill
+        scenarios but will be rejected at persistence time unless explicitly
+        permitted via the `allow_unknown_backfill` flag.
 
         Args:
             v: The contract_type value to validate
@@ -87,9 +93,19 @@ class ModelCapabilityFields(BaseModel):
             The validated value (unchanged if valid)
 
         Raises:
-            ValueError: If v is not None and not a valid contract type
+            ValueError: If v is not None and not a valid contract type or 'unknown'
+
+        Note:
+            The 'unknown' value is accepted here to allow model construction for
+            backfill scenarios. However, `persist_state_transition()` will reject
+            'unknown' unless `allow_unknown_backfill=True` is explicitly passed.
         """
-        if v is not None and v not in EnumContractType.valid_type_values():
+        if v is None:
+            return v
+        # Allow 'unknown' for backfill scenarios (validated at persistence layer)
+        if v == EnumContractType.UNKNOWN.value:
+            return v
+        if v not in EnumContractType.valid_type_values():
             raise ValueError(
                 f"contract_type must be one of {EnumContractType.valid_type_values()}, "
                 f"got: {v!r}"
