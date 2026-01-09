@@ -15,6 +15,24 @@ Circuit Breaker:
     - Uses MixinAsyncCircuitBreaker for consistent resilience
     - Three states: CLOSED (normal), OPEN (blocking), HALF_OPEN (testing)
     - Configurable failure threshold and reset timeout
+
+SQL Security:
+    All SQL queries in this module use parameterized queries with positional
+    placeholders ($1, $2, etc.) to prevent SQL injection attacks. The asyncpg
+    library handles proper escaping and type conversion for all parameters.
+
+    Query parameters are ALWAYS passed as separate arguments to execute/fetch
+    methods, never interpolated into SQL strings:
+
+    SAFE:
+        await conn.execute("SELECT * FROM users WHERE id = $1", user_id)
+
+    UNSAFE (never do this):
+        await conn.execute(f"SELECT * FROM users WHERE id = {user_id}")  # WRONG!
+
+    Dynamic WHERE clauses (e.g., in query_registrations) are built by appending
+    conditions with parameterized placeholders, not by string interpolation of
+    user values.
 """
 
 from __future__ import annotations
@@ -41,6 +59,7 @@ from omnibase_infra.handlers.registration_storage.models import (
     ModelUpsertResult,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelDeleteResult,
     ModelRegistrationUpdate,
@@ -148,7 +167,9 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
         user: str = "postgres",
         password: str | None = None,
         pool_size: int = DEFAULT_POOL_SIZE,
-        circuit_breaker_config: dict[str, object] | None = None,
+        circuit_breaker_config: ModelCircuitBreakerConfig
+        | dict[str, object]
+        | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         """Initialize PostgresRegistrationStorageHandler.
@@ -163,39 +184,39 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             user: Database user (default: "postgres").
             password: Optional database password.
             pool_size: Connection pool size (default: 10).
-            circuit_breaker_config: Optional circuit breaker configuration with:
+            circuit_breaker_config: Optional circuit breaker configuration.
+                Accepts ModelCircuitBreakerConfig or dict with keys:
                 - threshold: Max failures before opening (default: 5)
-                - reset_timeout: Seconds before reset (default: 30.0)
+                - reset_timeout_seconds: Seconds before reset (default: 60.0)
                 - service_name: Service identifier (default: "postgres.storage")
             timeout_seconds: Operation timeout in seconds (default: 30.0).
         """
-        config = circuit_breaker_config or {}
-        _threshold_raw = config.get("threshold", DEFAULT_CIRCUIT_BREAKER_THRESHOLD)
-        threshold = (
-            int(_threshold_raw)
-            if isinstance(_threshold_raw, (int, float, str))
-            else DEFAULT_CIRCUIT_BREAKER_THRESHOLD
-        )
-        _reset_timeout_raw = config.get(
-            "reset_timeout", DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT
-        )
-        reset_timeout = (
-            float(_reset_timeout_raw)
-            if isinstance(_reset_timeout_raw, (int, float, str))
-            else DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT
-        )
-        _service_name_raw = config.get("service_name", "postgres.storage")
-        service_name = (
-            str(_service_name_raw)
-            if _service_name_raw is not None
-            else "postgres.storage"
-        )
+        # Normalize circuit breaker config to ModelCircuitBreakerConfig
+        if isinstance(circuit_breaker_config, ModelCircuitBreakerConfig):
+            cb_config = circuit_breaker_config
+        elif circuit_breaker_config is not None:
+            # Handle dict with legacy key names (reset_timeout -> reset_timeout_seconds)
+            config_dict = dict(circuit_breaker_config)
+            if (
+                "reset_timeout" in config_dict
+                and "reset_timeout_seconds" not in config_dict
+            ):
+                config_dict["reset_timeout_seconds"] = config_dict.pop("reset_timeout")
+            # Set defaults for service_name and transport_type if not provided
+            config_dict.setdefault("service_name", "postgres.storage")
+            config_dict.setdefault("transport_type", EnumInfraTransportType.DATABASE)
+            cb_config = ModelCircuitBreakerConfig(**config_dict)
+        else:
+            cb_config = ModelCircuitBreakerConfig(
+                service_name="postgres.storage",
+                transport_type=EnumInfraTransportType.DATABASE,
+            )
 
         self._init_circuit_breaker(
-            threshold=threshold,
-            reset_timeout=reset_timeout,
-            service_name=service_name,
-            transport_type=EnumInfraTransportType.DATABASE,
+            threshold=cb_config.threshold,
+            reset_timeout=cb_config.reset_timeout_seconds,
+            service_name=cb_config.service_name,
+            transport_type=cb_config.transport_type,
         )
 
         # Store configuration
@@ -449,7 +470,10 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
         try:
             pool = await self._ensure_pool()
 
-            # Build query with filters from ModelStorageQuery
+            # Build query with parameterized filters
+            # NOTE: All filter values use positional parameters ($1, $2, etc.)
+            # to prevent SQL injection. The param_idx tracks parameter positions.
+            # User values are NEVER interpolated into SQL strings.
             conditions: list[str] = []
             params: list[object] = []
             param_idx = 1

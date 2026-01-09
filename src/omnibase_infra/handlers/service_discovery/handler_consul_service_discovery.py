@@ -9,12 +9,13 @@ resilience.
 Thread Pool Management:
     - All synchronous consul operations run in a dedicated thread pool
     - Configurable max workers (default: 10)
+    - Thread pool is lazily initialized on first use
     - Thread pool gracefully shutdown on handler shutdown
 
 Circuit Breaker:
     - Uses MixinAsyncCircuitBreaker for consistent resilience
     - Three states: CLOSED (normal), OPEN (blocking), HALF_OPEN (testing)
-    - Configurable failure threshold and reset timeout
+    - Configurable via ModelCircuitBreakerConfig model
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ from omnibase_infra.handlers.service_discovery.models import (
     ModelServiceInfo,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 from omnibase_infra.nodes.node_service_discovery_effect.models import (
     ModelDiscoveryQuery,
     ModelServiceDiscoveryHealthCheckDetails,
@@ -59,10 +61,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Default configuration values
-DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 5
-DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT = 30.0
 DEFAULT_MAX_WORKERS = 10
 DEFAULT_TIMEOUT_SECONDS = 30.0
+
+# Custom namespace for ONEX service IDs (deterministic but distinct from DNS namespace)
+# This ensures UUID5 generation for non-UUID service IDs is specific to ONEX
+# and won't collide with DNS-based UUID5 values from other systems.
+NAMESPACE_ONEX_SERVICE = uuid5(NAMESPACE_DNS, "omninode.service.discovery")
 
 
 class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
@@ -76,13 +81,18 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         in a dedicated thread pool, and circuit breaker state is protected
         by asyncio.Lock.
 
+    Thread Pool Initialization:
+        The thread pool executor is lazily initialized on first use via
+        ``_ensure_executor()``. This avoids resource allocation until the
+        handler is actually used.
+
     Attributes:
         handler_type: Returns "consul" identifier.
 
     Example:
         >>> handler = ConsulServiceDiscoveryHandler(
         ...     consul_client=consul_client,
-        ...     circuit_breaker_config={"threshold": 5, "reset_timeout": 30.0},
+        ...     circuit_breaker_config=ModelCircuitBreakerConfig(threshold=5),
         ... )
         >>> result = await handler.register_service(service_info)
     """
@@ -94,7 +104,9 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         consul_port: int = 8500,
         consul_scheme: str = "http",
         consul_token: str | None = None,
-        circuit_breaker_config: dict[str, object] | None = None,
+        circuit_breaker_config: ModelCircuitBreakerConfig
+        | dict[str, object]
+        | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
@@ -107,40 +119,42 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             consul_port: Consul server port (default: 8500).
             consul_scheme: HTTP scheme "http" or "https" (default: "http").
             consul_token: Optional Consul ACL token.
-            circuit_breaker_config: Optional circuit breaker configuration with:
+            circuit_breaker_config: Optional circuit breaker configuration.
+                Can be a ModelCircuitBreakerConfig instance or a dict with keys:
                 - threshold: Max failures before opening (default: 5)
-                - reset_timeout: Seconds before reset (default: 30.0)
+                - reset_timeout_seconds: Seconds before reset (default: 60.0)
                 - service_name: Service identifier (default: "consul.discovery")
+                If not provided, uses ModelCircuitBreakerConfig defaults.
             max_workers: Thread pool max workers (default: 10).
             timeout_seconds: Operation timeout in seconds (default: 30.0).
         """
-        config = circuit_breaker_config or {}
-        _threshold_raw = config.get("threshold", DEFAULT_CIRCUIT_BREAKER_THRESHOLD)
-        threshold = (
-            int(_threshold_raw)
-            if isinstance(_threshold_raw, (int, float, str))
-            else DEFAULT_CIRCUIT_BREAKER_THRESHOLD
-        )
-        _reset_timeout_raw = config.get(
-            "reset_timeout", DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT
-        )
-        reset_timeout = (
-            float(_reset_timeout_raw)
-            if isinstance(_reset_timeout_raw, (int, float, str))
-            else DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT
-        )
-        _service_name_raw = config.get("service_name", "consul.discovery")
-        service_name = (
-            str(_service_name_raw)
-            if _service_name_raw is not None
-            else "consul.discovery"
-        )
+        # Parse circuit breaker configuration using ModelCircuitBreakerConfig
+        if isinstance(circuit_breaker_config, ModelCircuitBreakerConfig):
+            cb_config = circuit_breaker_config
+        elif circuit_breaker_config is not None:
+            # Handle legacy dict format with key mapping
+            config_dict = dict(circuit_breaker_config)
+            # Map legacy 'reset_timeout' key to 'reset_timeout_seconds'
+            if (
+                "reset_timeout" in config_dict
+                and "reset_timeout_seconds" not in config_dict
+            ):
+                config_dict["reset_timeout_seconds"] = config_dict.pop("reset_timeout")
+            # Set defaults for service_name and transport_type if not provided
+            config_dict.setdefault("service_name", "consul.discovery")
+            config_dict.setdefault("transport_type", EnumInfraTransportType.CONSUL)
+            cb_config = ModelCircuitBreakerConfig(**config_dict)
+        else:
+            cb_config = ModelCircuitBreakerConfig(
+                service_name="consul.discovery",
+                transport_type=EnumInfraTransportType.CONSUL,
+            )
 
         self._init_circuit_breaker(
-            threshold=threshold,
-            reset_timeout=reset_timeout,
-            service_name=service_name,
-            transport_type=EnumInfraTransportType.CONSUL,
+            threshold=cb_config.threshold,
+            reset_timeout=cb_config.reset_timeout_seconds,
+            service_name=cb_config.service_name,
+            transport_type=cb_config.transport_type,
         )
 
         # Store configuration
@@ -168,10 +182,9 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             )
             self._owns_client = True
 
-        # Initialize thread pool
-        self._executor: ThreadPoolExecutor | None = ThreadPoolExecutor(
-            max_workers=max_workers
-        )
+        # Lazy thread pool initialization
+        self._executor: ThreadPoolExecutor | None = None
+        self._executor_lock = asyncio.Lock()
         self._max_workers = max_workers
 
         logger.info(
@@ -191,6 +204,29 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             "consul" identifier string.
         """
         return "consul"
+
+    async def _ensure_executor(self) -> ThreadPoolExecutor:
+        """Ensure thread pool executor is initialized.
+
+        Uses double-checked locking for thread-safe lazy initialization.
+        The executor is created on first use rather than at handler
+        construction time to avoid allocating resources for handlers
+        that may never be used.
+
+        Returns:
+            The ThreadPoolExecutor instance.
+        """
+        if self._executor is not None:
+            return self._executor
+
+        async with self._executor_lock:
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(max_workers=self._max_workers)
+                logger.debug(
+                    "Thread pool executor initialized",
+                    extra={"max_workers": self._max_workers},
+                )
+            return self._executor
 
     async def register_service(
         self,
@@ -234,12 +270,13 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             # Execute registration in thread pool
             # Client is typed as consul.Consul (duck-typed for injected clients)
             client = self._consul_client
+            executor = await self._ensure_executor()
             loop = asyncio.get_running_loop()
             # Convert UUID to string for Consul API compatibility
             service_id_str = str(service_info.service_id)
             await asyncio.wait_for(
                 loop.run_in_executor(
-                    self._executor,
+                    executor,
                     lambda: client.agent.service.register(  # type: ignore[union-attr]
                         name=service_info.service_name,
                         service_id=service_id_str,
@@ -363,10 +400,11 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         try:
             # Client is typed as consul.Consul (duck-typed for injected clients)
             client = self._consul_client
+            executor = await self._ensure_executor()
             loop = asyncio.get_running_loop()
             await asyncio.wait_for(
                 loop.run_in_executor(
-                    self._executor,
+                    executor,
                     lambda: client.agent.service.deregister(service_id_str),  # type: ignore[union-attr]
                 ),
                 timeout=self._timeout_seconds,
@@ -430,7 +468,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             query: Query parameters including service_name, tags,
                 and health_filter for filtering services.
             correlation_id: Optional correlation ID for tracing.
-                If not provided, uses query.correlation_id.
+                If not provided, uses query.correlation_id, then generates new.
 
         Returns:
             ModelDiscoveryResult with list of matching services.
@@ -439,8 +477,15 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             InfraConnectionError: If connection to Consul fails.
             InfraTimeoutError: If operation times out.
             InfraUnavailableError: If circuit breaker is open.
+
+        Note:
+            Service IDs from Consul are converted to UUIDs. If the Consul service
+            ID is not a valid UUID string, a deterministic UUID5 is generated
+            using the ONEX service namespace. This ensures consistent IDs across
+            discovery calls while maintaining UUID format compatibility.
         """
-        correlation_id = correlation_id or query.correlation_id
+        # Standardized correlation ID handling: explicit > query > generate
+        correlation_id = correlation_id or query.correlation_id or uuid4()
         service_name = query.service_name or ""
         tags = query.tags
         start_time = time.monotonic()
@@ -456,6 +501,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             # Query Consul catalog
             # Client is typed as consul.Consul (duck-typed for injected clients)
             client = self._consul_client
+            executor = await self._ensure_executor()
             loop = asyncio.get_running_loop()
 
             def _query_services() -> tuple[int, list[dict[str, object]]]:
@@ -469,7 +515,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
                 return result
 
             _, services = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, _query_services),
+                loop.run_in_executor(executor, _query_services),
                 timeout=self._timeout_seconds,
             )
 
@@ -497,8 +543,16 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
                     try:
                         svc_id = UUID(svc_id_str)
                     except ValueError:
-                        # Generate deterministic UUID from service ID string using uuid5
-                        svc_id = uuid5(NAMESPACE_DNS, svc_id_str)
+                        # Non-UUID service ID from Consul - generate deterministic UUID5
+                        # using ONEX-specific namespace to avoid collisions
+                        logger.warning(
+                            "Non-UUID service ID from Consul, using deterministic UUID5 conversion",
+                            extra={
+                                "original_id": svc_id_str,
+                                "correlation_id": str(correlation_id),
+                            },
+                        )
+                        svc_id = uuid5(NAMESPACE_ONEX_SERVICE, svc_id_str)
 
                     service_infos.append(
                         ModelServiceInfo(
@@ -589,10 +643,11 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         try:
             # Client is typed as consul.Consul (duck-typed for injected clients)
             client = self._consul_client
+            executor = await self._ensure_executor()
             loop = asyncio.get_running_loop()
             leader = await asyncio.wait_for(
                 loop.run_in_executor(
-                    self._executor,
+                    executor,
                     lambda: client.status.leader(),  # type: ignore[union-attr]
                 ),
                 timeout=5.0,  # Short timeout for health check

@@ -129,6 +129,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
 
         # Parse node_version from string if needed.
         # Database stores version as string, model expects ModelSemVer.
+        # See util_semver.py "Database Persistence" section for pattern docs.
         node_version_data = row["node_version"]
         if isinstance(node_version_data, str):
             node_version_data = ModelSemVer.parse(node_version_data)

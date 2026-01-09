@@ -321,7 +321,9 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             domain,
             projection.current_state.value,  # Convert enum to string
             projection.node_type,
-            str(projection.node_version),  # Convert ModelSemVer to string
+            str(
+                projection.node_version
+            ),  # ModelSemVer -> string for asyncpg (see util_semver.py)
             projection.capabilities.model_dump_json(),  # JSONB as JSON string
             projection.ack_deadline,
             projection.liveness_deadline,
@@ -954,7 +956,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             domain,
             new_state.value,  # Convert enum to string
             node_type,
-            node_version,
+            str(node_version),  # ModelSemVer -> string for asyncpg (see util_semver.py)
             capabilities_json,
             ack_deadline,
             liveness_deadline,
