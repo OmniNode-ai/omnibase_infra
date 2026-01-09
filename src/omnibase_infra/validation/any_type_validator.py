@@ -13,7 +13,7 @@ The validator uses Python AST to detect forbidden patterns without runtime execu
 
 Exemption Mechanisms:
     1. ``@allow_any`` decorator on function/class
-    2. ``ONEX_EXCLUDE: any_type`` comment on the line or within 5 lines before
+    2. ``ONEX_EXCLUDE: any_type`` comment (applies to that line and the next 5 lines)
     3. ``NOTE:`` comment within 5 lines before Any usage (for Field() only)
 
 Limitations:
@@ -256,9 +256,11 @@ class AnyTypeDetector(ast.NodeVisitor):
         )
 
         if is_field_without_note:
+            # Find accurate column for Any token, fall back to node start
+            any_col = self._find_any_col(node.annotation)
             self._add_violation(
                 node.lineno,
-                node.col_offset,
+                any_col if any_col is not None else node.col_offset,
                 EnumAnyTypeViolation.FIELD_MISSING_NOTE,
                 context_name=context_name,
             )
@@ -271,9 +273,11 @@ class AnyTypeDetector(ast.NodeVisitor):
         # For type aliases, check the VALUE for Any (e.g., ConfigType: TypeAlias = dict[str, Any])
         if is_type_alias and node.value is not None:
             if self._contains_any(node.value):
+                # Find accurate column for Any token, fall back to node start
+                any_col = self._find_any_col(node.value)
                 self._add_violation(
                     node.lineno,
-                    node.col_offset,
+                    any_col if any_col is not None else node.col_offset,
                     EnumAnyTypeViolation.TYPE_ALIAS,
                     context_name=context_name,
                 )
@@ -313,9 +317,11 @@ class AnyTypeDetector(ast.NodeVisitor):
                 if self._is_likely_type_alias_name(name):
                     # Check if the value contains Any
                     if self._contains_any(node.value):
+                        # Find accurate column for Any token, fall back to node start
+                        any_col = self._find_any_col(node.value)
                         self._add_violation(
                             node.lineno,
-                            node.col_offset,
+                            any_col if any_col is not None else node.col_offset,
                             EnumAnyTypeViolation.TYPE_ALIAS,
                             context_name=name,
                         )
@@ -692,12 +698,45 @@ class AnyTypeDetector(ast.NodeVisitor):
             return self._contains_any(node.left) or self._contains_any(node.right)
         return False
 
+    def _find_any_col(self, node: ast.expr) -> int | None:
+        """Find the column offset of the first Any token in an expression.
+
+        Walks the annotation/value AST recursively to find an ast.Name node
+        with id == "Any" and returns its col_offset. This provides accurate
+        column reporting for CI annotations.
+
+        Args:
+            node: The AST expression to search.
+
+        Returns:
+            The column offset of the Any token, or None if not found.
+        """
+        if isinstance(node, ast.Name) and node.id == "Any":
+            return node.col_offset
+        if isinstance(node, ast.Attribute) and node.attr == "Any":
+            return node.col_offset
+        if isinstance(node, ast.Subscript):
+            slice_node = node.slice
+            if isinstance(slice_node, ast.Tuple):
+                for elt in slice_node.elts:
+                    result = self._find_any_col(elt)
+                    if result is not None:
+                        return result
+            else:
+                return self._find_any_col(slice_node)
+        if isinstance(node, ast.BinOp):
+            left_result = self._find_any_col(node.left)
+            if left_result is not None:
+                return left_result
+            return self._find_any_col(node.right)
+        return None
+
 
 def _find_onex_exclude_lines(content: str) -> set[int]:
     """Find lines exempted via ONEX_EXCLUDE: any_type comments.
 
-    The comment can be on the line itself or up to 5 lines after (to handle
-    function signatures that span multiple lines).
+    The exemption applies to the comment line and the next 5 lines (to cover
+    multi-line signatures such as function definitions that span multiple lines).
 
     Args:
         content: Source file content.
@@ -776,7 +815,8 @@ def _should_skip_file(filepath: Path) -> bool:
     Returns:
         True if the file should be skipped.
     """
-    filepath_str = str(filepath)
+    # Use as_posix() for cross-platform path comparison (Windows uses backslashes)
+    filepath_str = filepath.as_posix()
     return (
         "/tests/" in filepath_str
         or "/scripts/validation/" in filepath_str
