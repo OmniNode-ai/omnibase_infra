@@ -839,7 +839,7 @@ def assert_introspection_event_complete(event: ModelNodeIntrospectionEvent) -> N
     assert event.correlation_id is not None, "correlation_id is required"
     assert event.timestamp is not None, "timestamp is required"
     assert event.timestamp.tzinfo is not None, "timestamp must be timezone-aware"
-    assert event.capabilities is not None, "capabilities is required"
+    assert event.declared_capabilities is not None, "declared_capabilities is required"
 
 
 def assert_registration_initiated(event: ModelNodeRegistrationInitiated) -> None:
@@ -887,7 +887,7 @@ def assert_node_became_active(event: ModelNodeBecameActive) -> None:
     assert event.correlation_id is not None, "correlation_id is required"
     assert event.causation_id is not None, "causation_id is required"
     assert event.emitted_at is not None, "emitted_at is required"
-    assert event.capabilities is not None, "capabilities is required"
+    assert event.declared_capabilities is not None, "declared_capabilities is required"
 
 
 def assert_registration_accepted(event: ModelNodeRegistrationAccepted) -> None:

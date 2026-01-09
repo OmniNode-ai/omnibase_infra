@@ -222,11 +222,10 @@ class TestMockRegistrationStorageHandlerProtocolCompliance:
         sig = inspect.signature(mock_handler.delete_registration)
         params = list(sig.parameters.keys())
 
-        assert "node_id" in params, (
-            "delete_registration must accept 'node_id' parameter"
-        )
-        assert "correlation_id" in params, (
-            "delete_registration must accept 'correlation_id' parameter"
+        # Protocol now uses request model pattern per ONEX standards
+        assert "request" in params, (
+            "delete_registration must accept 'request' parameter "
+            "(ModelDeleteRegistrationRequest with node_id and correlation_id)"
         )
 
     def test_mock_handler_health_check_signature(
@@ -339,11 +338,10 @@ class TestPostgresRegistrationStorageHandlerProtocolCompliance:
         sig = inspect.signature(postgres_handler.delete_registration)
         params = list(sig.parameters.keys())
 
-        assert "node_id" in params, (
-            "delete_registration must accept 'node_id' parameter"
-        )
-        assert "correlation_id" in params, (
-            "delete_registration must accept 'correlation_id' parameter"
+        # Protocol now uses request model pattern per ONEX standards
+        assert "request" in params, (
+            "delete_registration must accept 'request' parameter "
+            "(ModelDeleteRegistrationRequest with node_id and correlation_id)"
         )
 
     def test_postgres_handler_health_check_signature(

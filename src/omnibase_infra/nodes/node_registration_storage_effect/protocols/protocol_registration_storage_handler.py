@@ -42,6 +42,10 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
 if TYPE_CHECKING:
+    from omnibase_infra.handlers.registration_storage.models import (
+        ModelDeleteRegistrationRequest,
+        ModelUpdateRegistrationRequest,
+    )
     from omnibase_infra.nodes.node_registration_storage_effect.models import (
         ModelDeleteResult,
         ModelRegistrationRecord,
@@ -180,9 +184,7 @@ class ProtocolRegistrationStorageHandler(Protocol):
 
     async def update_registration(
         self,
-        node_id: UUID,
-        updates: ModelRegistrationUpdate,
-        correlation_id: UUID | None = None,
+        request: ModelUpdateRegistrationRequest,
     ) -> ModelUpsertResult:
         """Update specific fields of a registration record.
 
@@ -190,13 +192,14 @@ class ProtocolRegistrationStorageHandler(Protocol):
         The node_id identifies the record to update.
 
         Args:
-            node_id: UUID of the registration record to update.
-            updates: ModelRegistrationUpdate containing fields to update.
-                Only non-None fields will be applied. The model provides
-                type-safe partial updates for endpoints, metadata,
-                capabilities, and node_version fields.
-            correlation_id: Optional correlation ID for distributed tracing.
-                If not provided, implementations should generate one.
+            request: ModelUpdateRegistrationRequest containing:
+                - node_id: UUID of the registration record to update
+                - updates: ModelRegistrationUpdate containing fields to update.
+                  Only non-None fields will be applied. The model provides
+                  type-safe partial updates for endpoints, metadata,
+                  capabilities, and node_version fields.
+                - correlation_id: Optional correlation ID for distributed tracing.
+                  If not provided, implementations should generate one.
 
         Returns:
             ModelUpsertResult: Result indicating success/failure.
@@ -207,21 +210,26 @@ class ProtocolRegistrationStorageHandler(Protocol):
             InfraUnavailableError: If circuit breaker is open.
 
         Example:
+            >>> from omnibase_infra.handlers.registration_storage.models import (
+            ...     ModelUpdateRegistrationRequest,
+            ... )
             >>> from omnibase_infra.nodes.node_registration_storage_effect.models import (
             ...     ModelRegistrationUpdate,
             ... )
-            >>> updates = ModelRegistrationUpdate(
-            ...     endpoints={"health": "http://new-host:8080/health"},
-            ...     metadata={"env": "production"},
+            >>> request = ModelUpdateRegistrationRequest(
+            ...     node_id=node_id,
+            ...     updates=ModelRegistrationUpdate(
+            ...         endpoints={"health": "http://new-host:8080/health"},
+            ...         metadata={"env": "production"},
+            ...     ),
             ... )
-            >>> result = await handler.update_registration(node_id, updates)
+            >>> result = await handler.update_registration(request)
         """
         ...
 
     async def delete_registration(
         self,
-        node_id: UUID,
-        correlation_id: UUID | None = None,
+        request: ModelDeleteRegistrationRequest,
     ) -> ModelDeleteResult:
         """Delete a registration record by node ID.
 
@@ -229,9 +237,10 @@ class ProtocolRegistrationStorageHandler(Protocol):
         whether the operation succeeded and whether a record was deleted.
 
         Args:
-            node_id: UUID of the registration record to delete.
-            correlation_id: Optional correlation ID for distributed tracing.
-                If not provided, implementations should generate one.
+            request: ModelDeleteRegistrationRequest containing:
+                - node_id: UUID of the registration record to delete
+                - correlation_id: Optional correlation ID for distributed tracing.
+                  If not provided, implementations should generate one.
 
         Returns:
             ModelDeleteResult: Result indicating success/failure and whether
@@ -243,7 +252,11 @@ class ProtocolRegistrationStorageHandler(Protocol):
             InfraUnavailableError: If circuit breaker is open.
 
         Example:
-            >>> result = await handler.delete_registration(node_id)
+            >>> from omnibase_infra.handlers.registration_storage.models import (
+            ...     ModelDeleteRegistrationRequest,
+            ... )
+            >>> request = ModelDeleteRegistrationRequest(node_id=node_id)
+            >>> result = await handler.delete_registration(request)
             >>> if result.was_deleted():
             ...     print("Record deleted successfully")
             >>> elif result.success and not result.deleted:

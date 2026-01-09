@@ -23,8 +23,10 @@ from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from omnibase_infra.handlers.registration_storage.models import (
+    ModelDeleteRegistrationRequest,
     ModelRegistrationRecord,
     ModelStorageResult,
+    ModelUpdateRegistrationRequest,
     ModelUpsertResult,
 )
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
@@ -116,17 +118,16 @@ class ProtocolRegistrationStorageHandler(Protocol):
 
     async def update_registration(
         self,
-        node_id: UUID,
-        updates: ModelRegistrationUpdate,
-        correlation_id: UUID | None = None,
+        request: ModelUpdateRegistrationRequest,
     ) -> ModelUpsertResult:
         """Update an existing registration record.
 
         Args:
-            node_id: ID of the node to update.
-            updates: ModelRegistrationUpdate containing fields to update.
-                Only non-None fields will be applied.
-            correlation_id: Optional correlation ID for tracing.
+            request: ModelUpdateRegistrationRequest containing:
+                - node_id: ID of the node to update
+                - updates: ModelRegistrationUpdate with fields to update
+                  (only non-None fields will be applied)
+                - correlation_id: Optional correlation ID for tracing
 
         Returns:
             ModelUpsertResult with success status and operation metadata.
@@ -140,14 +141,14 @@ class ProtocolRegistrationStorageHandler(Protocol):
 
     async def delete_registration(
         self,
-        node_id: UUID,
-        correlation_id: UUID | None = None,
+        request: ModelDeleteRegistrationRequest,
     ) -> ModelDeleteResult:
         """Delete a registration record from storage.
 
         Args:
-            node_id: ID of the node to delete.
-            correlation_id: Optional correlation ID for tracing.
+            request: ModelDeleteRegistrationRequest containing:
+                - node_id: ID of the node to delete
+                - correlation_id: Optional correlation ID for tracing
 
         Returns:
             ModelDeleteResult with deletion outcome.

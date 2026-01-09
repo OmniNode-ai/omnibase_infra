@@ -54,8 +54,10 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
 )
 from omnibase_infra.handlers.registration_storage.models import (
+    ModelDeleteRegistrationRequest,
     ModelRegistrationRecord,
     ModelStorageResult,
+    ModelUpdateRegistrationRequest,
     ModelUpsertResult,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
@@ -171,6 +173,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
         | dict[str, object]
         | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        auto_create_schema: bool = False,
     ) -> None:
         """Initialize PostgresRegistrationStorageHandler.
 
@@ -190,6 +193,9 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
                 - reset_timeout_seconds: Seconds before reset (default: 60.0)
                 - service_name: Service identifier (default: "postgres.storage")
             timeout_seconds: Operation timeout in seconds (default: 30.0).
+            auto_create_schema: If True, automatically create the node_registrations
+                table on first connection. Default is False. Production deployments
+                should use database migrations instead of auto-creation.
         """
         # Normalize circuit breaker config to ModelCircuitBreakerConfig
         if isinstance(circuit_breaker_config, ModelCircuitBreakerConfig):
@@ -228,6 +234,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
         self._password = password
         self._pool_size = pool_size
         self._timeout_seconds = timeout_seconds
+        self._auto_create_schema = auto_create_schema
 
         # Connection pool (initialized on first use)
         self._pool: asyncpg.Pool | None = None
@@ -256,8 +263,14 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
         """
         return "postgresql"
 
-    async def _ensure_pool(self) -> asyncpg.Pool:
+    async def _ensure_pool(
+        self,
+        correlation_id: UUID | None = None,
+    ) -> asyncpg.Pool:
         """Ensure connection pool is initialized.
+
+        Args:
+            correlation_id: Optional correlation ID for tracing.
 
         Returns:
             The asyncpg connection pool.
@@ -293,9 +306,11 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
                         max_size=self._pool_size,
                     )
 
-                # Create table if not exists
-                async with self._pool.acquire() as conn:
-                    await conn.execute(SQL_CREATE_TABLE)
+                # Create table only if auto_create_schema is enabled
+                # Production deployments should use database migrations
+                if self._auto_create_schema:
+                    async with self._pool.acquire() as conn:
+                        await conn.execute(SQL_CREATE_TABLE)
 
                 self._initialized = True
 
@@ -305,6 +320,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
                         "host": self._host,
                         "port": self._port,
                         "database": self._database,
+                        "auto_create_schema": self._auto_create_schema,
                     },
                 )
 
@@ -315,6 +331,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
                     transport_type=EnumInfraTransportType.DATABASE,
                     operation="initialize_pool",
                     target_name="postgres.storage",
+                    correlation_id=correlation_id,
                 )
                 raise InfraConnectionError(
                     f"Failed to initialize PostgreSQL pool: {type(e).__name__}",
@@ -351,7 +368,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             )
 
         try:
-            pool = await self._ensure_pool()
+            pool = await self._ensure_pool(correlation_id=correlation_id)
 
             now = datetime.now(UTC)
             capabilities_json = json.dumps(record.capabilities)
@@ -468,7 +485,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             )
 
         try:
-            pool = await self._ensure_pool()
+            pool = await self._ensure_pool(correlation_id=correlation_id)
 
             # Build query with parameterized filters
             # NOTE: All filter values use positional parameters ($1, $2, etc.)
@@ -609,17 +626,16 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
 
     async def update_registration(
         self,
-        node_id: UUID,
-        updates: ModelRegistrationUpdate,
-        correlation_id: UUID | None = None,
+        request: ModelUpdateRegistrationRequest,
     ) -> ModelUpsertResult:
         """Update an existing registration record.
 
         Args:
-            node_id: ID of the node to update.
-            updates: ModelRegistrationUpdate containing fields to update.
-                Only non-None fields will be applied.
-            correlation_id: Optional correlation ID for tracing.
+            request: ModelUpdateRegistrationRequest containing:
+                - node_id: ID of the node to update
+                - updates: ModelRegistrationUpdate with fields to update
+                  (only non-None fields will be applied)
+                - correlation_id: Optional correlation ID for tracing
 
         Returns:
             ModelUpsertResult with update outcome.
@@ -629,7 +645,10 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             InfraTimeoutError: If operation times out.
             InfraUnavailableError: If circuit breaker is open.
         """
-        correlation_id = correlation_id or uuid4()
+        # Extract fields from request model
+        node_id = request.node_id
+        updates = request.updates
+        correlation_id = request.correlation_id or uuid4()
         start_time = time.monotonic()
 
         # Check circuit breaker
@@ -640,16 +659,22 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             )
 
         try:
-            pool = await self._ensure_pool()
+            pool = await self._ensure_pool(correlation_id=correlation_id)
 
             # Extract fields from the update model
+            # Use `is not None` checks to allow explicitly clearing fields with empty
+            # lists/dicts. Truthiness checks would treat [] and {} as "no update".
             capabilities_json = (
-                json.dumps(updates.capabilities) if updates.capabilities else None
+                json.dumps(updates.capabilities)
+                if updates.capabilities is not None
+                else None
             )
             endpoints_json = (
-                json.dumps(updates.endpoints) if updates.endpoints else None
+                json.dumps(updates.endpoints) if updates.endpoints is not None else None
             )
-            metadata_json = json.dumps(updates.metadata) if updates.metadata else None
+            metadata_json = (
+                json.dumps(updates.metadata) if updates.metadata is not None else None
+            )
             node_version = updates.node_version
 
             async with pool.acquire() as conn:
@@ -731,14 +756,14 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
 
     async def delete_registration(
         self,
-        node_id: UUID,
-        correlation_id: UUID | None = None,
+        request: ModelDeleteRegistrationRequest,
     ) -> ModelDeleteResult:
         """Delete a registration record from PostgreSQL.
 
         Args:
-            node_id: ID of the node to delete.
-            correlation_id: Optional correlation ID for tracing.
+            request: ModelDeleteRegistrationRequest containing:
+                - node_id: ID of the node to delete
+                - correlation_id: Optional correlation ID for tracing
 
         Returns:
             ModelDeleteResult with deletion outcome.
@@ -748,7 +773,9 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             InfraTimeoutError: If operation times out.
             InfraUnavailableError: If circuit breaker is open.
         """
-        correlation_id = correlation_id or uuid4()
+        # Extract fields from request model
+        node_id = request.node_id
+        correlation_id = request.correlation_id or uuid4()
         start_time = time.monotonic()
 
         # Check circuit breaker
@@ -759,7 +786,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             )
 
         try:
-            pool = await self._ensure_pool()
+            pool = await self._ensure_pool(correlation_id=correlation_id)
 
             async with pool.acquire() as conn:
                 result = await asyncio.wait_for(
@@ -844,7 +871,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
         start_time = time.monotonic()
 
         try:
-            pool = await self._ensure_pool()
+            pool = await self._ensure_pool(correlation_id=correlation_id)
 
             async with pool.acquire() as conn:
                 await asyncio.wait_for(

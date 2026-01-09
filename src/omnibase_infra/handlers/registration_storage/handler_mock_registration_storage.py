@@ -19,8 +19,10 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from omnibase_infra.handlers.registration_storage.models import (
+    ModelDeleteRegistrationRequest,
     ModelRegistrationRecord,
     ModelStorageResult,
+    ModelUpdateRegistrationRequest,
     ModelUpsertResult,
 )
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
@@ -194,21 +196,23 @@ class MockRegistrationStorageHandler:
 
     async def update_registration(
         self,
-        node_id: UUID,
-        updates: ModelRegistrationUpdate,
-        correlation_id: UUID | None = None,
+        request: ModelUpdateRegistrationRequest,
     ) -> ModelUpsertResult:
         """Update an existing registration record in the mock store.
 
         Args:
-            node_id: ID of the node to update.
-            updates: ModelRegistrationUpdate containing fields to update.
-            correlation_id: Optional correlation ID for tracing.
+            request: ModelUpdateRegistrationRequest containing:
+                - node_id: ID of the node to update
+                - updates: ModelRegistrationUpdate with fields to update
+                - correlation_id: Optional correlation ID for tracing
 
         Returns:
             ModelUpsertResult with update outcome.
         """
-        correlation_id = correlation_id or uuid4()
+        # Extract fields from request model
+        node_id = request.node_id
+        updates = request.updates
+        correlation_id = request.correlation_id or uuid4()
         start_time = time.monotonic()
 
         async with self._lock:
@@ -279,19 +283,21 @@ class MockRegistrationStorageHandler:
 
     async def delete_registration(
         self,
-        node_id: UUID,
-        correlation_id: UUID | None = None,
+        request: ModelDeleteRegistrationRequest,
     ) -> ModelDeleteResult:
         """Delete a registration record from the mock store.
 
         Args:
-            node_id: ID of the node to delete.
-            correlation_id: Optional correlation ID for tracing.
+            request: ModelDeleteRegistrationRequest containing:
+                - node_id: ID of the node to delete
+                - correlation_id: Optional correlation ID for tracing
 
         Returns:
             ModelDeleteResult with deletion outcome.
         """
-        correlation_id = correlation_id or uuid4()
+        # Extract fields from request model
+        node_id = request.node_id
+        correlation_id = request.correlation_id or uuid4()
         start_time = time.monotonic()
 
         async with self._lock:

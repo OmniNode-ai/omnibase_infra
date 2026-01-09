@@ -341,7 +341,7 @@ class TestHandlerNodeHeartbeatHappyPath:
         # Verify other fields unchanged
         updated = await reader.get_entity_state(node_id)
         assert updated is not None
-        assert updated.node_version == original_version
+        assert str(updated.node_version) == original_version
         assert updated.current_state == EnumRegistrationState.ACTIVE
         assert updated.node_type == "effect"
 

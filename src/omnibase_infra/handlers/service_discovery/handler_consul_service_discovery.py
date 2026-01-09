@@ -228,6 +228,32 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
                 )
             return self._executor
 
+    def _check_not_shutdown(
+        self,
+        operation: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Check that handler has not been shut down.
+
+        Args:
+            operation: Name of the operation being attempted.
+            correlation_id: Correlation ID for tracing.
+
+        Raises:
+            InfraConnectionError: If handler has been shut down.
+        """
+        if self._consul_client is None:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation=operation,
+                target_name="consul.discovery",
+                correlation_id=correlation_id,
+            )
+            raise InfraConnectionError(
+                "Handler has been shut down, cannot perform operation",
+                context=context,
+            )
+
     async def register_service(
         self,
         service_info: ModelServiceInfo,
@@ -249,6 +275,9 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         """
         correlation_id = correlation_id or uuid4()
         start_time = time.monotonic()
+
+        # Guard against use-after-shutdown
+        self._check_not_shutdown("register_service", correlation_id)
 
         # Check circuit breaker
         async with self._circuit_breaker_lock:
@@ -390,6 +419,9 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         # Convert UUID to string for Consul API
         service_id_str = str(service_id)
 
+        # Guard against use-after-shutdown
+        self._check_not_shutdown("deregister_service", correlation_id)
+
         # Check circuit breaker
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
@@ -489,6 +521,9 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         service_name = query.service_name or ""
         tags = query.tags
         start_time = time.monotonic()
+
+        # Guard against use-after-shutdown
+        self._check_not_shutdown("discover_services", correlation_id)
 
         # Check circuit breaker
         async with self._circuit_breaker_lock:
@@ -639,6 +674,9 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         """
         correlation_id = correlation_id or uuid4()
         start_time = time.monotonic()
+
+        # Guard against use-after-shutdown
+        self._check_not_shutdown("health_check", correlation_id)
 
         try:
             # Client is typed as consul.Consul (duck-typed for injected clients)
