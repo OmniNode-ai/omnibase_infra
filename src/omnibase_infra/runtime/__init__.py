@@ -149,6 +149,12 @@ from omnibase_infra.runtime.invocation_security_enforcer import (
     SecurityViolationError,
 )
 
+# Handler security validator (OMN-1137)
+from omnibase_infra.runtime.handler_security_validator import (
+    HandlerSecurityValidator,
+    validate_handler_security,
+)
+
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
 from omnibase_infra.runtime.chain_aware_dispatch import (
     ChainAwareDispatcher,
@@ -245,4 +251,7 @@ __all__: list[str] = [
     # Invocation security enforcer (OMN-1098)
     "InvocationSecurityEnforcer",
     "SecurityViolationError",
+    # Handler security validator (OMN-1137)
+    "HandlerSecurityValidator",
+    "validate_handler_security",
 ]
