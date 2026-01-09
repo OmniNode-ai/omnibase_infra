@@ -28,6 +28,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import asyncpg
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import (
     EnumContractType,
@@ -333,7 +334,9 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             domain,
             projection.current_state.value,  # Convert enum to string
             projection.node_type,
-            projection.node_version,
+            str(
+                projection.node_version
+            ),  # ModelSemVer -> string for asyncpg (see util_semver.py)
             projection.capabilities.model_dump_json(),  # JSONB as JSON string
             projection.contract_type,  # Capability fields (OMN-1134)
             projection.intent_types,  # TEXT[]
@@ -868,7 +871,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         domain: str,
         new_state: EnumRegistrationState,
         node_type: str,
-        node_version: str,
+        node_version: ModelSemVer,
         capabilities: ModelNodeCapabilities,
         event_id: UUID,
         now: datetime,
@@ -1002,7 +1005,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             ...     domain="registration",
             ...     new_state=EnumRegistrationState.PENDING_REGISTRATION,
             ...     node_type="effect",
-            ...     node_version="1.0.0",
+            ...     node_version=ModelSemVer(major=1, minor=0, patch=0),
             ...     capabilities=ModelNodeCapabilities(),
             ...     event_id=correlation_id,
             ...     now=datetime.now(UTC),
@@ -1121,7 +1124,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             domain,
             new_state.value,  # Convert enum to string
             node_type,
-            node_version,
+            str(node_version),  # ModelSemVer -> string for asyncpg (see util_semver.py)
             capabilities_json,
             # Capability fields (OMN-1134) - order must match SQL column order:
             # contract_type: None becomes NULL (never processed state)

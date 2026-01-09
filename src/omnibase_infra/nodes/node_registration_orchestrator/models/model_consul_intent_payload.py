@@ -103,7 +103,7 @@ class ModelConsulIntentPayload(BaseModel):
                         f"tags[{i}] must be a string, got {type(item).__name__}"
                     )
             return v  # type: ignore[return-value]  # Runtime validated by Pydantic
-        if isinstance(v, list | set | frozenset):
+        if isinstance(v, (list, set, frozenset)):
             # Validate and convert to tuple - strict mode requires string elements
             result: list[str] = []
             for i, item in enumerate(v):

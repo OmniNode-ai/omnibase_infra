@@ -31,6 +31,7 @@ from uuid import UUID
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.reducers import RegistrationReducer
@@ -46,7 +47,7 @@ def create_deterministic_event(
     correlation_id: UUID,
     timestamp: datetime | None = None,
     node_type: EnumNodeKind = EnumNodeKind.EFFECT,
-    node_version: str = "1.0.0",
+    node_version: str | ModelSemVer = "1.0.0",
 ) -> ModelNodeIntrospectionEvent:
     """Create a deterministic introspection event with fixed values.
 
@@ -58,7 +59,7 @@ def create_deterministic_event(
         correlation_id: Fixed correlation ID for tracing.
         timestamp: Fixed timestamp (defaults to epoch for max determinism).
         node_type: ONEX node type (e.g., EnumNodeKind.EFFECT).
-        node_version: Semantic version string.
+        node_version: Semantic version string or ModelSemVer.
 
     Returns:
         ModelNodeIntrospectionEvent with deterministic values.
@@ -66,10 +67,17 @@ def create_deterministic_event(
     if timestamp is None:
         timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
 
+    # Convert string to ModelSemVer if needed
+    version = (
+        node_version
+        if isinstance(node_version, ModelSemVer)
+        else ModelSemVer.parse(node_version)
+    )
+
     return ModelNodeIntrospectionEvent(
         node_id=node_id,
         node_type=node_type.value,
-        node_version=node_version,
+        node_version=version,
         correlation_id=correlation_id,
         timestamp=timestamp,
         endpoints={"health": "http://localhost:8080/health"},
@@ -745,7 +753,7 @@ class TestA6Observability:
         event = ModelNodeIntrospectionEvent(
             node_id=fixed_node_id,
             node_type=EnumNodeKind.EFFECT.value,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=fixed_correlation_id,
             timestamp=fixed_timestamp,
             endpoints={

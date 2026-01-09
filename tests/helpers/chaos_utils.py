@@ -28,7 +28,7 @@ Related Tickets:
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata

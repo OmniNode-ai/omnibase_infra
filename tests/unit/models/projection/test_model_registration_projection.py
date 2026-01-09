@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -74,7 +75,7 @@ class TestModelRegistrationProjectionInstantiation:
             domain="custom_domain",
             current_state=EnumRegistrationState.ACTIVE,
             node_type="compute",
-            node_version="2.1.0",
+            node_version=ModelSemVer.parse("2.1.0"),
             capabilities=ModelNodeCapabilities(postgres=True, read=True),
             ack_deadline=ack_deadline,
             liveness_deadline=liveness_deadline,
@@ -90,7 +91,7 @@ class TestModelRegistrationProjectionInstantiation:
         )
 
         assert proj.domain == "custom_domain"
-        assert proj.node_version == "2.1.0"
+        assert str(proj.node_version) == "2.1.0"
         assert proj.capabilities.postgres is True
         assert proj.ack_deadline == ack_deadline
         assert proj.liveness_deadline == liveness_deadline
@@ -110,7 +111,7 @@ class TestModelRegistrationProjectionInstantiation:
         )
 
         assert proj.domain == "registration"
-        assert proj.node_version == "1.0.0"
+        assert str(proj.node_version) == "1.0.0"
         assert proj.capabilities is not None
         assert proj.ack_deadline is None
         assert proj.liveness_deadline is None
@@ -804,7 +805,7 @@ class TestModelRegistrationProjectionFromAttributes:
                 self.domain = "registration"
                 self.current_state = EnumRegistrationState.ACTIVE
                 self.node_type = EnumNodeKind.EFFECT
-                self.node_version = "1.0.0"
+                self.node_version = ModelSemVer.parse("1.0.0")
                 self.capabilities = ModelNodeCapabilities()
                 self.ack_deadline = None
                 self.liveness_deadline = None

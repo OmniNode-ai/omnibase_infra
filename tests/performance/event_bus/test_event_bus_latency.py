@@ -34,7 +34,6 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from statistics import mean, median, quantiles, stdev
-from uuid import uuid4
 
 import pytest
 
