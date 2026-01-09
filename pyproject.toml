@@ -73,8 +73,9 @@ click = "^8.1.0"
 rich = "^13.7.0"
 
 # System utilities
-# cryptography v46.0.3: Security-reviewed upgrade (see docs/decisions/adr-cryptography-upgrade-46.md)
-# Security fixes included: CVE-2024-26130 (42.0.4), CVE-2024-12797 (44.0.1)
+# cryptography v46.0.3: Required by omnibase_core 0.6.2 transitive dependency chain.
+# Note: CVE-2024-26130 was fixed in 42.0.4, CVE-2024-12797 in 44.0.1 (already addressed).
+# Breaking changes in 45.x/46.x: cipher module restructure, SSH key handling updates.
 cryptography = "^46.0.3"
 jinja2 = "^3.1.6"
 aiofiles = "^23.2.1"

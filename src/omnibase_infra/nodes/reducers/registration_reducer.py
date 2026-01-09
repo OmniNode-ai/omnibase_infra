@@ -440,7 +440,7 @@ class ModelValidationResult(BaseModel):
         - None for error_code (unavoidable for Literal type safety)
         - Use ``has_field_name``, ``has_error_message`` to check
 
-    Backwards Compatibility:
+    Constructor API:
         Constructors accept ``None`` for string fields and convert to sentinel.
 
     Attributes:
@@ -464,7 +464,7 @@ class ModelValidationResult(BaseModel):
     @field_validator("field_name", "error_message", mode="before")
     @classmethod
     def _convert_none_to_str_sentinel(cls, v: object) -> str:
-        """Convert None to empty string sentinel for backwards compatibility."""
+        """Convert None to empty string sentinel for API convenience."""
         if v is None:
             return _SENTINEL_STR
         if isinstance(v, str):
@@ -711,8 +711,8 @@ class RegistrationReducer:
     def _is_valid(self, event: ModelNodeIntrospectionEvent) -> bool:
         """Validate introspection event for processing.
 
-        Delegates to _validate_event() for detailed validation. This method
-        is retained for backwards compatibility.
+        Convenience wrapper around _validate_event() that returns a simple bool.
+        Use _validate_event() when detailed error information is needed.
 
         Args:
             event: Introspection event to validate.

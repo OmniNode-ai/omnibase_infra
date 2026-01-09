@@ -93,14 +93,12 @@ Security Design (Intentional Fail-Open Architecture):
 
 from omnibase_core.validation import (
     CircularImportValidator,
+    ModelModuleImportResult,
     validate_all,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage,
-)
-from omnibase_core.validation import (
-    ModelModuleImportResult as ModelImportValidationResult,
 )
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
@@ -187,12 +185,6 @@ from omnibase_infra.validation.security_validator import (
     validate_method_exposure,
 )
 
-# NOTE: ServiceContractValidator was removed in omnibase_core 0.6.2
-# Using a stub that implements ProtocolContractValidator
-from omnibase_infra.validation.stub_contract_validator import (
-    ServiceContractValidator,
-)
-
 # Topic category validation for execution shape enforcement
 from omnibase_infra.validation.topic_category_validator import (
     NODE_ARCHETYPE_EXPECTED_CATEGORIES,
@@ -235,8 +227,7 @@ __all__: list[str] = [
     "ModelContractLintResult",
     "ModelContractViolation",
     "ModelExecutionShapeValidationResult",
-    "ModelImportValidationResult",
-    "ServiceContractValidator",
+    "ModelModuleImportResult",
     # Routing coverage validation (OMN-958)
     "RoutingCoverageError",
     "RoutingCoverageValidator",

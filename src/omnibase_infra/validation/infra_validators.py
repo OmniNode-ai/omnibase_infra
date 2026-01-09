@@ -51,15 +51,6 @@ from omnibase_core.validation import (
     validate_yaml_file,
 )
 
-# Backwards compatibility alias for renamed type
-type ModelImportValidationResult = ModelModuleImportResult
-
-# NOTE: ServiceContractValidator was removed in omnibase_core 0.6.2
-# Using a stub that implements ProtocolContractValidator
-from omnibase_infra.validation.stub_contract_validator import (
-    ServiceContractValidator,
-)
-
 # Module-level initialization (AFTER all imports)
 logger = logging.getLogger(__name__)
 
@@ -730,8 +721,9 @@ def validate_infra_contract_deep(
 
     # If result is a different type, wrap it in ModelContractValidationResult
     # Default to passed=False for unknown result types to avoid silently masking failures
+    # Check 'passed' first, then 'is_valid' as fallback (some validators use is_valid)
     return ModelContractValidationResult(
-        passed=getattr(result, "passed", False),
+        passed=getattr(result, "passed", getattr(result, "is_valid", False)),
         score=getattr(result, "score", 0.0),
         errors=getattr(result, "errors", []),
         warnings=getattr(result, "warnings", []),
@@ -1136,7 +1128,7 @@ def validate_infra_union_usage(
 
 def validate_infra_circular_imports(
     directory: str | Path = INFRA_SRC_PATH,
-) -> ModelImportValidationResult:
+) -> ModelModuleImportResult:
     """
     Check for circular imports in infrastructure code.
 
@@ -1147,7 +1139,7 @@ def validate_infra_circular_imports(
         directory: Directory to check. Defaults to infrastructure source.
 
     Returns:
-        ModelImportValidationResult with detailed import validation results.
+        ModelModuleImportResult with detailed import validation results.
         Use result.has_circular_imports to check for issues.
     """
     validator = CircularImportValidator(source_path=Path(directory))
@@ -1157,7 +1149,7 @@ def validate_infra_circular_imports(
 def validate_infra_all(
     directory: str | Path = INFRA_SRC_PATH,
     nodes_directory: str | Path = INFRA_NODES_PATH,
-) -> dict[str, ValidationResult | ModelImportValidationResult]:
+) -> dict[str, ValidationResult | ModelModuleImportResult]:
     """
     Run all validations on infrastructure code.
 
@@ -1175,7 +1167,7 @@ def validate_infra_all(
     Returns:
         Dictionary mapping validator name to result.
     """
-    results: dict[str, ValidationResult | ModelImportValidationResult] = {}
+    results: dict[str, ValidationResult | ModelModuleImportResult] = {}
 
     # HIGH priority validators
     results["architecture"] = validate_infra_architecture(directory)
@@ -1190,7 +1182,7 @@ def validate_infra_all(
 
 
 def get_validation_summary(
-    results: dict[str, ValidationResult | ModelImportValidationResult],
+    results: dict[str, ValidationResult | ModelModuleImportResult],
 ) -> dict[str, int | list[str]]:
     """
     Generate a summary of validation results.
@@ -1220,7 +1212,7 @@ def get_validation_summary(
         if not isinstance(name, str):
             continue
         # Use duck typing to determine result API:
-        # - ModelImportValidationResult has 'has_circular_imports' attribute
+        # - ModelModuleImportResult has 'has_circular_imports' attribute
         # - ModelValidationResult has 'is_valid' attribute
         # This follows ONEX convention of duck typing over isinstance for protocols.
         if hasattr(result, "has_circular_imports"):
@@ -1257,7 +1249,7 @@ __all__ = [
     "INFRA_UNIONS_STRICT",
     "SKIP_DIRECTORY_NAMES",
     # Re-exported types from omnibase_core.validation
-    "ModelImportValidationResult",
+    "ModelModuleImportResult",
     "ExemptionPattern",
     # Type aliases
     "ValidationResult",

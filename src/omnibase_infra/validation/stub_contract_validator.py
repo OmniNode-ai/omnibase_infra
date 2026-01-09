@@ -433,7 +433,4 @@ class StubContractValidator:
             ) from e
 
 
-# Alias for backwards compatibility
-ServiceContractValidator = StubContractValidator
-
-__all__ = ["ServiceContractValidator", "StubContractValidator"]
+__all__ = ["StubContractValidator"]
