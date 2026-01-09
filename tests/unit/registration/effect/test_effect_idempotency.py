@@ -44,6 +44,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.idempotency import (
     InMemoryIdempotencyStore,
@@ -101,7 +102,7 @@ def sample_registration_record() -> ModelNodeRegistrationRecord:
     return ModelNodeRegistrationRecord(
         node_id=uuid4(),
         node_type="effect",
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         capabilities=ModelNodeCapabilities(postgres=True),
         endpoints={"health": "http://localhost:8080/health"},
         metadata=ModelNodeMetadata(environment="test"),

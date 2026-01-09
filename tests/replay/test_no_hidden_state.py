@@ -145,7 +145,7 @@ class TestReducerPurityInspection:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, property | classmethod | staticmethod)
+            and not isinstance(value, (property, classmethod, staticmethod))
         }
 
         mutable_types = (list, dict, set)
@@ -345,7 +345,7 @@ class TestNoSideEffects:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, property | classmethod | staticmethod)
+            and not isinstance(value, (property, classmethod, staticmethod))
         }
 
         # Run multiple reductions on multiple instances
@@ -366,7 +366,7 @@ class TestNoSideEffects:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, property | classmethod | staticmethod)
+            and not isinstance(value, (property, classmethod, staticmethod))
         }
 
         assert class_vars_before == class_vars_after, (

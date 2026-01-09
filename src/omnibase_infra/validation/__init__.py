@@ -149,6 +149,12 @@ from omnibase_infra.validation.infra_validators import (
     validate_infra_union_usage,
 )
 
+# Registration-time security validation for handlers (OMN-1098)
+from omnibase_infra.validation.registration_security_validator import (
+    RegistrationSecurityValidator,
+    validate_handler_registration,
+)
+
 # Routing coverage validation for startup fail-fast (OMN-958)
 from omnibase_infra.validation.routing_coverage_validator import (
     RoutingCoverageError,
@@ -240,6 +246,9 @@ __all__: list[str] = [
     "TopicCategoryValidator",
     # Validation error aggregation (OMN-1091)
     "ValidationAggregator",
+    # Registration-time security validation (OMN-1098)
+    "RegistrationSecurityValidator",
+    "validate_handler_registration",
     "check_routing_coverage_ci",
     "convert_to_validation_error",
     "detect_message_category",

@@ -17,7 +17,7 @@ Design Principles:
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, Protocol
@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 
@@ -584,7 +585,7 @@ def sample_introspection_event() -> ModelNodeIntrospectionEvent:
     return ModelNodeIntrospectionEvent(
         node_id=uuid4(),
         node_type=EnumNodeKind.EFFECT.value,
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         correlation_id=uuid4(),
         endpoints={"health": "http://localhost:8080/health"},
         timestamp=datetime.now(UTC),
@@ -601,14 +602,20 @@ def introspection_event_factory() -> ProtocolIntrospectionEventFactory:
 
     def _create_event(
         node_type: EnumNodeKind = EnumNodeKind.EFFECT,
-        node_version: str = "1.0.0",
+        node_version: str | ModelSemVer = "1.0.0",
         correlation_id: UUID | None = None,
         node_id: UUID | None = None,
     ) -> ModelNodeIntrospectionEvent:
+        # Convert string to ModelSemVer if needed
+        version = (
+            node_version
+            if isinstance(node_version, ModelSemVer)
+            else ModelSemVer.parse(node_version)
+        )
         return ModelNodeIntrospectionEvent(
             node_id=node_id or uuid4(),
             node_type=node_type.value,
-            node_version=node_version,
+            node_version=version,
             correlation_id=correlation_id or uuid4(),
             endpoints={"health": "http://localhost:8080/health"},
             timestamp=datetime.now(UTC),
@@ -1309,7 +1316,7 @@ def deterministic_introspection_event_factory(
 
     def _create_event(
         node_type: EnumNodeKind = EnumNodeKind.EFFECT,
-        node_version: str = "1.0.0",
+        node_version: str | ModelSemVer = "1.0.0",
         endpoints: dict[str, str] | None = None,
         capabilities: ModelNodeCapabilities | None = None,
         metadata: ModelNodeMetadata | None = None,
@@ -1320,7 +1327,7 @@ def deterministic_introspection_event_factory(
 
         Args:
             node_type: ONEX node type (EnumNodeKind).
-            node_version: Semantic version.
+            node_version: Semantic version (string or ModelSemVer).
             endpoints: Endpoint URLs.
             capabilities: Node capabilities.
             metadata: Additional metadata.
@@ -1330,11 +1337,17 @@ def deterministic_introspection_event_factory(
         Returns:
             ModelNodeIntrospectionEvent with deterministic values.
         """
+        # Convert string to ModelSemVer if needed
+        version = (
+            node_version
+            if isinstance(node_version, ModelSemVer)
+            else ModelSemVer.parse(node_version)
+        )
         return ModelNodeIntrospectionEvent(
             node_id=node_id or uuid_generator.next(),
             node_type=node_type.value,
-            node_version=node_version,
-            capabilities=capabilities or ModelNodeCapabilities(),
+            node_version=version,
+            declared_capabilities=capabilities or ModelNodeCapabilities(),
             endpoints=endpoints or {"health": "http://localhost:8080/health"},
             metadata=metadata or ModelNodeMetadata(),
             correlation_id=correlation_id or uuid_generator.next(),
@@ -1364,7 +1377,7 @@ def registry_request_factory(
 
     def _create_request(
         node_type: EnumNodeKind = EnumNodeKind.EFFECT,
-        node_version: str = "1.0.0",
+        node_version: str | ModelSemVer = "1.0.0",
         endpoints: dict[str, str] | None = None,
         tags: list[str] | None = None,
         metadata: dict[str, str] | None = None,
@@ -1375,7 +1388,7 @@ def registry_request_factory(
 
         Args:
             node_type: ONEX node type (EnumNodeKind).
-            node_version: Semantic version.
+            node_version: Semantic version (string or ModelSemVer).
             endpoints: Endpoint URLs.
             tags: Service tags.
             metadata: Additional metadata.
@@ -1385,10 +1398,16 @@ def registry_request_factory(
         Returns:
             ModelRegistryRequest with deterministic values.
         """
+        # Convert string to ModelSemVer if needed
+        version = (
+            node_version
+            if isinstance(node_version, ModelSemVer)
+            else ModelSemVer.parse(node_version)
+        )
         return ModelRegistryRequest(
             node_id=node_id or uuid_generator.next(),
             node_type=node_type,
-            node_version=node_version,
+            node_version=version,
             correlation_id=correlation_id or uuid_generator.next(),
             service_name=f"onex-{node_type.value}",
             endpoints=endpoints or {"health": "http://localhost:8080/health"},

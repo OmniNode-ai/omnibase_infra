@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.idempotency import InMemoryIdempotencyStore
 from omnibase_infra.models.registration import (
@@ -155,10 +156,12 @@ def create_sample_introspection_event(
     return ModelNodeIntrospectionEvent(
         node_id=node_id or uuid4(),
         node_type="effect",
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         correlation_id=correlation_id or uuid4(),
         endpoints={"health": "http://localhost:8080/health"},
-        capabilities=ModelNodeCapabilities(postgres=True, read=True, write=True),
+        declared_capabilities=ModelNodeCapabilities(
+            postgres=True, read=True, write=True
+        ),
         metadata=ModelNodeMetadata(environment="test"),
         timestamp=datetime.now(UTC),  # Required: time injection pattern
     )
@@ -179,7 +182,7 @@ def create_sample_registration(
     return ModelNodeRegistration(
         node_id=node_id or uuid4(),
         node_type="effect",
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         capabilities=ModelNodeCapabilities(postgres=True, read=True),
         endpoints={"health": "http://localhost:8080/health"},
         metadata=ModelNodeMetadata(environment="test"),

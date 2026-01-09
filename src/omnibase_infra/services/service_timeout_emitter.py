@@ -138,7 +138,7 @@ class ModelTimeoutEmissionResult(BaseModel):
         """
         if isinstance(v, tuple):
             return v  # type: ignore[return-value]
-        if isinstance(v, Sequence) and not isinstance(v, str | bytes):
+        if isinstance(v, Sequence) and not isinstance(v, (str, bytes)):
             return tuple(v)  # type: ignore[return-value]
         raise ValueError(
             f"errors must be a tuple or Sequence (excluding str/bytes), "
@@ -539,18 +539,19 @@ class ServiceTimeoutEmitter:
             )
 
         # Runtime import to avoid circular import (see TYPE_CHECKING block)
-        from omnibase_infra.nodes.node_registration_orchestrator.models.model_node_registration_ack_timed_out import (
+        from omnibase_infra.models.registration.events.model_node_registration_ack_timed_out import (
             ModelNodeRegistrationAckTimedOut,
         )
 
         # 1. Create event
         event = ModelNodeRegistrationAckTimedOut(
+            entity_id=projection.entity_id,
             node_id=projection.entity_id,
-            ack_deadline=projection.ack_deadline,
-            detected_at=detected_at,
-            previous_state=projection.current_state,
             correlation_id=correlation_id,
             causation_id=tick_id,
+            emitted_at=detected_at,
+            deadline_at=projection.ack_deadline,
+            previous_state=projection.current_state,
         )
 
         # 2. Build topic and publish event

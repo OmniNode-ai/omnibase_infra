@@ -35,6 +35,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.reducers import RegistrationReducer
@@ -111,7 +112,7 @@ def stub_postgres_adapter() -> StubPostgresAdapter:
 def create_introspection_event(
     node_id: UUID | None = None,
     node_type: str = "effect",
-    node_version: str = "1.0.0",
+    node_version: str | ModelSemVer = "1.0.0",
     correlation_id: UUID | None = None,
     endpoints: dict[str, str] | None = None,
 ) -> ModelNodeIntrospectionEvent:
@@ -120,13 +121,17 @@ def create_introspection_event(
     Args:
         node_id: Unique node identifier (generated if not provided).
         node_type: ONEX node type string.
-        node_version: Semantic version string.
+        node_version: Semantic version string or ModelSemVer instance.
         correlation_id: Optional correlation ID for tracing.
         endpoints: Optional endpoint URLs.
 
     Returns:
         ModelNodeIntrospectionEvent with specified values.
     """
+    # Convert string version to ModelSemVer if needed
+    if isinstance(node_version, str):
+        node_version = ModelSemVer.parse(node_version)
+
     return ModelNodeIntrospectionEvent(
         node_id=node_id or uuid4(),
         node_type=node_type,
@@ -267,7 +272,7 @@ class TestIntentEmissionOnIntrospectionEvent:
         # Access record attributes
         assert payload.record.node_id == node_id
         assert payload.record.node_type == "compute"
-        assert payload.record.node_version == "2.0.0"
+        assert str(payload.record.node_version) == "2.0.0"
 
     def test_intent_target_patterns(
         self,

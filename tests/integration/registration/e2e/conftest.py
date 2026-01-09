@@ -60,6 +60,7 @@ import pytest
 logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.utils import sanitize_error_message
 
@@ -87,9 +88,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from tests.infrastructure_config import (
     DEFAULT_CONSUL_PORT,
-    DEFAULT_KAFKA_PORT,
     DEFAULT_POSTGRES_PORT,
-    REMOTE_INFRA_HOST,
 )
 
 if TYPE_CHECKING:
@@ -809,17 +808,21 @@ def introspection_event_factory(
 
     def _create_event(
         node_type: EnumNodeKind = EnumNodeKind.EFFECT,
-        node_version: str = "1.0.0",
+        node_version: str | ModelSemVer = "1.0.0",
         endpoints: dict[str, str] | None = None,
         node_id: UUID | None = None,
         correlation_id: UUID | None = None,
     ) -> ModelNodeIntrospectionEvent:
         """Create an introspection event with test-specific IDs."""
+        # Convert string version to ModelSemVer if needed
+        if isinstance(node_version, str):
+            node_version = ModelSemVer.parse(node_version)
+
         return ModelNodeIntrospectionEvent(
             node_id=node_id or unique_node_id,
             node_type=node_type.value,
             node_version=node_version,
-            capabilities=ModelNodeCapabilities(),
+            declared_capabilities=ModelNodeCapabilities(),
             endpoints=endpoints or {"health": "http://localhost:8080/health"},
             metadata=ModelNodeMetadata(),
             correlation_id=correlation_id or unique_correlation_id,

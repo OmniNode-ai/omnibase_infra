@@ -12,9 +12,8 @@ from datetime import datetime
 from uuid import UUID
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-from omnibase_infra.utils.util_semver import validate_semver as _validate_semver
 
 
 class ModelNodeHeartbeatEvent(BaseModel):
@@ -39,10 +38,11 @@ class ModelNodeHeartbeatEvent(BaseModel):
         >>> from datetime import UTC, datetime
         >>> from uuid import uuid4
         >>> from omnibase_core.enums import EnumNodeKind
+        >>> from omnibase_core.models.primitives.model_semver import ModelSemVer
         >>> event = ModelNodeHeartbeatEvent(
         ...     node_id=uuid4(),
         ...     node_type=EnumNodeKind.EFFECT,
-        ...     node_version="1.2.3",
+        ...     node_version=ModelSemVer(major=1, minor=2, patch=3),
         ...     uptime_seconds=3600.5,
         ...     active_operations_count=5,
         ...     memory_usage_mb=256.0,
@@ -64,16 +64,31 @@ class ModelNodeHeartbeatEvent(BaseModel):
     # consistent type handling for all node-related events. The previous relaxed `str`
     # validation was speculative support for experimental/plugin nodes that never existed.
     node_type: EnumNodeKind = Field(..., description="ONEX node type")
-    node_version: str = Field(
-        default="1.0.0",
+    node_version: ModelSemVer = Field(
+        default_factory=lambda: ModelSemVer(major=1, minor=0, patch=0),
         description="Semantic version of the node emitting this event",
     )
 
-    @field_validator("node_version")
+    @field_validator("node_version", mode="before")
     @classmethod
-    def validate_semver(cls, v: str) -> str:
-        """Validate that node_version follows semantic versioning."""
-        return _validate_semver(v, "node_version")
+    def parse_node_version(cls, v: ModelSemVer | str) -> ModelSemVer:
+        """Parse node_version from string or ModelSemVer.
+
+        Args:
+            v: Either a ModelSemVer instance or a semver string.
+
+        Returns:
+            Validated ModelSemVer instance.
+
+        Raises:
+            ValueError: If the string is not a valid semantic version.
+        """
+        if isinstance(v, str):
+            try:
+                return ModelSemVer.parse(v)
+            except Exception as e:
+                raise ValueError(f"node_version: {e!s}") from e
+        return v
 
     # Health metrics
     uptime_seconds: float = Field(..., ge=0, description="Node uptime in seconds")

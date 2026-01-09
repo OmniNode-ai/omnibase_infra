@@ -48,6 +48,10 @@ from omnibase_infra.models.registration import (
 )
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 from omnibase_infra.models.runtime import ModelLoadedHandler
+from omnibase_infra.models.security import (
+    ModelEnvironmentPolicy,
+    ModelHandlerSecurityPolicy,
+)
 from omnibase_infra.models.validation import (
     ModelCoverageMetrics,
     ModelExecutionShapeRule,
@@ -97,6 +101,9 @@ __all__: list[str] = [
     "ModelRegistrationSnapshot",
     # Retry models
     "ModelRetryErrorClassification",
+    # Security models
+    "ModelEnvironmentPolicy",
+    "ModelHandlerSecurityPolicy",
     "ModelSequenceInfo",
     "ModelSnapshotTopicConfig",
     "ModelTopicParser",

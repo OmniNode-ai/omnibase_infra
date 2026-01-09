@@ -8,37 +8,58 @@ tracking, circuit breaking, and other cross-cutting concerns.
 
 Related:
     - Ticket: OMN-1099 (Architecture Validator)
+    - PR: #124 (Protocol-Compliant Rule Classes)
     - Rule: ARCH-001 (No Direct Handler Dispatch)
 
-Example Violations:
+Detection Patterns:
+    1. **Handler variable tracking**: Variables assigned from Handler() instantiation
+    2. **Attribute access**: Attributes containing 'handler' (e.g., self._handler)
+    3. **Inline instantiation**: Handler().handle() calls
+
+Example Violations::
+
     # VIOLATION: Direct handler instantiation and call
     handler = MyHandler(container)
-    result = handler.handle(event)
+    result = handler.handle(event)  # Direct dispatch detected
+
+    # VIOLATION: Attribute-based handler call
+    self._handler.handle(event)  # Handler via attribute
 
     # VIOLATION: Inline handler dispatch
-    handler.handle(event)
+    MyHandler(container).handle(event)  # Instantiate and call
 
-Allowed Patterns:
-    # OK: Dispatch through runtime
+Allowed Patterns::
+
+    # OK: Dispatch through runtime (proper pattern)
     self.runtime.dispatch(event)
 
-    # OK: Test files are exempt
+    # OK: Test files are exempt (needed for unit testing)
     def test_handler():
-        handler.handle(test_event)  # Allowed in tests
+        handler.handle(test_event)  # Allowed in test files
+
+    # OK: Handler calling its own handle() method
+    class MyHandler:
+        def process(self, event):
+            return self.handle(event)  # self.handle() is allowed
 """
 
 from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+from omnibase_infra.nodes.architecture_validator.mixins import MixinFilePathRule
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
 )
 from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
     ModelFileValidationResult,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.nodes.architecture_validator.models import ModelRuleCheckResult
 
 RULE_ID = "ARCH-001"
 RULE_NAME = "No Direct Handler Dispatch"
@@ -158,7 +179,7 @@ class DirectDispatchVisitor(ast.NodeVisitor):
             ModelArchitectureViolation(
                 rule_id=RULE_ID,
                 rule_name=RULE_NAME,
-                severity=EnumValidationSeverity.ERROR,
+                severity=EnumValidationSeverity.WARNING,
                 target_type="handler",
                 target_name=self._current_class or "unknown",
                 message="Direct handler dispatch detected. Handlers must be invoked through runtime.",
@@ -250,6 +271,44 @@ def validate_no_direct_dispatch(file_path: str) -> ModelFileValidationResult:
             files_checked=1,
             rules_checked=[RULE_ID],
         )
+    except (PermissionError, OSError) as e:
+        # Return WARNING violation for file I/O errors
+        return ModelFileValidationResult(
+            valid=True,  # Still valid (not a rule violation), but with warning
+            violations=[
+                ModelArchitectureViolation(
+                    rule_id=RULE_ID,
+                    rule_name=RULE_NAME,
+                    severity=EnumValidationSeverity.WARNING,
+                    target_type="file",
+                    target_name=Path(file_path).name,
+                    message=f"File could not be read: {e}",
+                    location=file_path,
+                    suggestion="Ensure file is readable and has correct permissions",
+                )
+            ],
+            files_checked=1,
+            rules_checked=[RULE_ID],
+        )
+    except UnicodeDecodeError as e:
+        # Return WARNING violation for encoding errors
+        return ModelFileValidationResult(
+            valid=True,  # Still valid (not a rule violation), but with warning
+            violations=[
+                ModelArchitectureViolation(
+                    rule_id=RULE_ID,
+                    rule_name=RULE_NAME,
+                    severity=EnumValidationSeverity.WARNING,
+                    target_type="file",
+                    target_name=Path(file_path).name,
+                    message=f"File has encoding error and could not be validated: {e.reason}",
+                    location=file_path,
+                    suggestion="Ensure file is valid UTF-8 encoded",
+                )
+            ],
+            files_checked=1,
+            rules_checked=[RULE_ID],
+        )
 
     visitor = DirectDispatchVisitor(file_path)
     visitor.visit(tree)
@@ -262,4 +321,102 @@ def validate_no_direct_dispatch(file_path: str) -> ModelFileValidationResult:
     )
 
 
-__all__ = ["validate_no_direct_dispatch"]
+class RuleNoDirectDispatch(MixinFilePathRule):
+    """Protocol-compliant rule: No direct handler dispatch.
+
+    This class wraps the file-based validator to implement ProtocolArchitectureRule,
+    enabling use with NodeArchitectureValidatorCompute.
+
+    Thread Safety:
+        This rule is stateless and safe for concurrent use.
+    """
+
+    @property
+    def rule_id(self) -> str:
+        """Return the canonical rule ID matching contract.yaml."""
+        return RULE_ID
+
+    @property
+    def name(self) -> str:
+        """Return human-readable rule name."""
+        return RULE_NAME
+
+    @property
+    def description(self) -> str:
+        """Return detailed rule description."""
+        return (
+            "Handlers must be dispatched through the runtime, not called directly. "
+            "Direct handler calls bypass runtime event tracking and circuit breaking."
+        )
+
+    @property
+    def severity(self) -> EnumValidationSeverity:
+        """Return severity level for violations of this rule.
+
+        Note: Contract specifies WARNING severity for ARCH-001. This is appropriate
+        because AST-based pattern detection may produce false positives for
+        legitimate patterns like test mocks or debugging code. Using WARNING
+        allows non-blocking validation while still flagging potential issues
+        for review.
+        """
+        return EnumValidationSeverity.WARNING
+
+    def check(self, target: object) -> ModelRuleCheckResult:
+        """Check target against this rule.
+
+        Args:
+            target: Target to validate. If a string, treated as file path.
+                   Other types return skipped=True with reason.
+
+        Returns:
+            ModelRuleCheckResult indicating pass/fail with details.
+
+        Note:
+            When multiple violations are found, only the first violation's
+            message and location are returned. The total count is available
+            in ``details["total_violations"]``. This fail-fast behavior is
+            intentional - fix the first violation and re-run to find others.
+        """
+        from omnibase_infra.nodes.architecture_validator.models import (
+            ModelRuleCheckResult,
+        )
+
+        file_path = self._extract_file_path(target)
+        if file_path is None:
+            return ModelRuleCheckResult(
+                passed=True,
+                rule_id=self.rule_id,
+                skipped=True,
+                reason="Target is not a valid file path",
+            )
+
+        # Delegate to existing file-based validator
+        result = validate_no_direct_dispatch(file_path)
+
+        if result.valid:
+            return ModelRuleCheckResult(passed=True, rule_id=self.rule_id)
+
+        # Convert first violation to ModelRuleCheckResult
+        if result.violations:
+            violation = result.violations[0]
+            return ModelRuleCheckResult(
+                passed=False,
+                rule_id=self.rule_id,
+                message=violation.message,
+                details={
+                    "target_name": violation.target_name,
+                    "target_type": violation.target_type,
+                    "location": violation.location,
+                    "suggestion": violation.suggestion,
+                    "total_violations": len(result.violations),
+                },
+            )
+
+        return ModelRuleCheckResult(
+            passed=False,
+            rule_id=self.rule_id,
+            message="Direct handler dispatch violation detected",
+        )
+
+
+__all__ = ["validate_no_direct_dispatch", "RuleNoDirectDispatch"]

@@ -154,6 +154,12 @@ from omnibase_infra.runtime.protocol_handler_plugin_loader import (
     ProtocolHandlerPluginLoader,
 )
 
+# Invocation security enforcer (OMN-1098)
+from omnibase_infra.runtime.invocation_security_enforcer import (
+    InvocationSecurityEnforcer,
+    SecurityViolationError,
+)
+
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
 from omnibase_infra.runtime.chain_aware_dispatch import (
     ChainAwareDispatcher,
@@ -253,4 +259,7 @@ __all__: list[str] = [
     "HandlerPluginLoader",
     "MAX_CONTRACT_SIZE",
     "ProtocolHandlerPluginLoader",
+    # Invocation security enforcer (OMN-1098)
+    "InvocationSecurityEnforcer",
+    "SecurityViolationError",
 ]

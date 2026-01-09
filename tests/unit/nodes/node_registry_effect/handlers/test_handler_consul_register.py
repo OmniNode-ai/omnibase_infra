@@ -21,6 +21,7 @@ from uuid import uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 from omnibase_infra.nodes.node_registry_effect.handlers.handler_consul_register import (
@@ -52,7 +53,7 @@ def create_registry_request(
     return ModelRegistryRequest(
         node_id=node_id or uuid4(),
         node_type=node_type,
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         correlation_id=uuid4(),
         timestamp=TEST_NOW,
         service_name=service_name,

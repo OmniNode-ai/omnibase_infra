@@ -116,8 +116,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
-from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.handlers.handler_consul import HandlerConsul
 from omnibase_infra.handlers.handler_db import HandlerDb
@@ -323,24 +324,38 @@ def wire_handlers_from_contract(
     registered_handlers: list[str] = []
     registered_buses: list[str] = []
 
+    # Create error context for configuration errors
+    def _make_error_context(
+        operation: str, target_name: str = "wiring"
+    ) -> ModelInfraErrorContext:
+        """Create standardized error context for configuration errors."""
+        return ModelInfraErrorContext(
+            operation=operation,
+            target_name=target_name,
+            correlation_id=uuid4(),
+        )
+
     # Process handler configurations
     handlers_config = contract_config.get("handlers")
     if handlers_config is not None:
         if not isinstance(handlers_config, list):
             raise ProtocolConfigurationError(
-                "Contract 'handlers' must be a list of handler configurations"
+                "Contract 'handlers' must be a list of handler configurations",
+                context=_make_error_context("validate_handlers_config"),
             )
 
         for handler_config in handlers_config:
             if not isinstance(handler_config, dict):
                 raise ProtocolConfigurationError(
-                    "Each handler configuration must be a dict"
+                    "Each handler configuration must be a dict",
+                    context=_make_error_context("validate_handler_entry"),
                 )
 
             handler_type = handler_config.get("type")
             if not isinstance(handler_type, str):
                 raise ProtocolConfigurationError(
-                    "Handler configuration missing required 'type' field"
+                    "Handler configuration missing required 'type' field",
+                    context=_make_error_context("validate_handler_type"),
                 )
 
             # Check if handler is enabled (default True)
@@ -357,7 +372,8 @@ def wire_handlers_from_contract(
                 known_types = sorted(_KNOWN_HANDLERS.keys())
                 raise ProtocolConfigurationError(
                     f"Unknown handler type: {handler_type!r}. "
-                    f"Known types: {known_types}"
+                    f"Known types: {known_types}",
+                    context=_make_error_context("validate_handler_type", handler_type),
                 )
 
             # Register the handler
@@ -380,13 +396,15 @@ def wire_handlers_from_contract(
     if event_bus_config is not None:
         if not isinstance(event_bus_config, dict):
             raise ProtocolConfigurationError(
-                "Contract 'event_bus' must be a configuration dict"
+                "Contract 'event_bus' must be a configuration dict",
+                context=_make_error_context("validate_event_bus_config"),
             )
 
         bus_kind = event_bus_config.get("kind")
         if not isinstance(bus_kind, str):
             raise ProtocolConfigurationError(
-                "Event bus configuration missing required 'kind' field"
+                "Event bus configuration missing required 'kind' field",
+                context=_make_error_context("validate_event_bus_kind"),
             )
 
         # Check if event bus is enabled (default True)
@@ -401,7 +419,8 @@ def wire_handlers_from_contract(
             if bus_kind not in _KNOWN_EVENT_BUSES:
                 known_kinds = sorted(_KNOWN_EVENT_BUSES.keys())
                 raise ProtocolConfigurationError(
-                    f"Unknown event bus kind: {bus_kind!r}. Known kinds: {known_kinds}"
+                    f"Unknown event bus kind: {bus_kind!r}. Known kinds: {known_kinds}",
+                    context=_make_error_context("validate_event_bus_kind", bus_kind),
                 )
 
             # Register the event bus (check if already registered first)
