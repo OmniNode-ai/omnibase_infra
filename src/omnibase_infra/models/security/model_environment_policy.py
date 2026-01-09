@@ -56,10 +56,13 @@ class ModelEnvironmentPolicy(BaseModel):
             Handlers requesting scopes not in this set will be rejected.
         max_data_classification: Maximum data classification allowed.
             Handlers declaring higher classification will be rejected.
-        allowed_outbound_domains: Permitted outbound domains.
-            None means unrestricted, empty list means no outbound access.
-            Handlers requesting domains not in this list will be rejected
-            (unless None/unrestricted).
+        allowed_outbound_domains: Reserved for future registration-time domain
+            enforcement. Currently NOT validated at registration time. This field
+            is intended for future validation where handlers requesting domains
+            not in this list would be rejected (unless None/unrestricted).
+            None means unrestricted, empty list would mean no outbound access.
+            Note: Handler-level domain allowlists (allowed_domains) ARE validated
+            via require_explicit_domain_allowlist constraint.
         require_explicit_domain_allowlist: Whether handlers must declare
             explicit domain allowlists. When True, handlers with empty
             domain lists or ["*"] will be rejected.
@@ -115,7 +118,11 @@ class ModelEnvironmentPolicy(BaseModel):
 
     allowed_outbound_domains: list[str] | None = Field(
         default=None,
-        description="Permitted outbound domains (None = unrestricted)",
+        description=(
+            "Reserved for future registration-time domain enforcement. "
+            "Currently NOT validated - see require_explicit_domain_allowlist "
+            "for handler-level domain validation. None = unrestricted."
+        ),
     )
 
     require_explicit_domain_allowlist: bool = Field(

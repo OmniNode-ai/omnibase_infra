@@ -35,6 +35,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.nodes.effects import NodeRegistryEffect
 from omnibase_infra.nodes.effects.models import ModelRegistryRequest
@@ -186,12 +187,12 @@ class TestConsulFailureFlow:
 
         # Assert - Error captured (sanitized to prevent secret exposure)
         # Raw error "Service unavailable" is sanitized to "service unavailable" safe prefix
-        # Note: sanitize_backend_error uses lowercase backend names
+        # Backend name is lowercase as passed to sanitize_backend_error()
         assert response.consul_result.error is not None
         assert "consul operation failed" in response.consul_result.error.lower()
         assert "service unavailable" in response.consul_result.error.lower()
         assert response.error_summary is not None
-        assert "Consul" in response.error_summary or "consul" in response.error_summary
+        assert "consul" in response.error_summary.lower()
 
         # Assert - Only PostgreSQL registration recorded
         assert len(consul_client.registrations) == 0
@@ -227,9 +228,8 @@ class TestConsulFailureFlow:
         response = await effect.register_node(sample_request)
 
         # Assert - Partial failure with sanitized error
-        # Note: Python's native ConnectionError falls through to the generic
-        # exception handler (CONSUL_UNKNOWN_ERROR). Only InfraConnectionError
-        # would be caught by the specific connection error handler.
+        # Note: Standard Python ConnectionError falls into the generic Exception
+        # handler because only InfraConnectionError maps to CONSUL_CONNECTION_ERROR
         assert response.status == "partial"
         assert response.consul_result.success is False
         assert response.consul_result.error is not None
@@ -284,15 +284,12 @@ class TestPostgresFailureFlow:
 
         # Assert - Error captured (sanitized to prevent secret exposure)
         # Raw error "Connection timeout" is sanitized to "timeout" safe prefix
-        # Note: sanitize_backend_error uses lowercase backend names
+        # Backend name is lowercase as passed to sanitize_backend_error()
         assert response.postgres_result.error is not None
         assert "postgres operation failed" in response.postgres_result.error.lower()
         assert "timeout" in response.postgres_result.error.lower()
         assert response.error_summary is not None
-        assert (
-            "PostgreSQL" in response.error_summary
-            or "postgres" in response.error_summary
-        )
+        assert "postgres" in response.error_summary.lower()
 
         # Assert - Only Consul registration recorded
         assert len(consul_client.registrations) == 1
@@ -324,8 +321,7 @@ class TestPostgresFailureFlow:
         response = await effect.register_node(sample_request)
 
         # Assert - Partial failure with sanitized error
-        # Note: Python's native TimeoutError is explicitly caught by the timeout
-        # handler, so the error code is POSTGRES_TIMEOUT_ERROR.
+        # Note: TimeoutError is correctly caught and mapped to POSTGRES_TIMEOUT_ERROR
         assert response.status == "partial"
         assert response.postgres_result.success is False
         assert response.postgres_result.error is not None
@@ -384,20 +380,16 @@ class TestBothFailFlow:
 
         # Assert - Errors captured (sanitized to prevent secret exposure)
         # Raw errors without safe prefix patterns are sanitized to generic message
-        # Note: sanitize_backend_error uses lowercase backend names
+        # Backend names are lowercase as passed to sanitize_backend_error()
         assert response.consul_result.error is not None
         assert response.postgres_result.error is not None
         assert "consul operation failed" in response.consul_result.error.lower()
         assert "postgres operation failed" in response.postgres_result.error.lower()
 
         # Assert - Error summary contains both
-        # Note: error_summary may use either capitalized or lowercase form
         assert response.error_summary is not None
-        assert "Consul" in response.error_summary or "consul" in response.error_summary
-        assert (
-            "PostgreSQL" in response.error_summary
-            or "postgres" in response.error_summary
-        )
+        assert "consul" in response.error_summary.lower()
+        assert "postgres" in response.error_summary.lower()
 
         # Assert - No registrations recorded
         assert len(consul_client.registrations) == 0
@@ -628,7 +620,7 @@ class TestIdempotencyVerification:
         request1 = ModelRegistryRequest(
             node_id=base_node_id,
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=uuid4(),  # Different correlation_id
             service_name="onex-effect",
             endpoints={"health": "http://localhost:8080/health"},
@@ -639,7 +631,7 @@ class TestIdempotencyVerification:
         request2 = ModelRegistryRequest(
             node_id=base_node_id,  # Same node_id
             node_type="effect",
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=uuid4(),  # Different correlation_id
             service_name="onex-effect",
             endpoints={"health": "http://localhost:8080/health"},

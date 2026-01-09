@@ -34,6 +34,8 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.nodes.effects import (
     ModelBackendResult,
@@ -98,8 +100,8 @@ def sample_registry_request() -> ModelRegistryRequest:
     """
     return ModelRegistryRequest(
         node_id=uuid4(),
-        node_type="effect",
-        node_version="1.0.0",
+        node_type=EnumNodeKind.EFFECT,  # ModelRegistryRequest uses EnumNodeKind
+        node_version=ModelSemVer.parse("1.0.0"),
         correlation_id=uuid4(),
         service_name="test-service",
         endpoints={"health": "http://localhost:8080/health"},
@@ -308,8 +310,8 @@ class TestEffectPartialFailure:
         correlation_id = uuid4()
         request = ModelRegistryRequest(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=correlation_id,
             service_name="test-service",
             timestamp=datetime(2025, 1, 1, tzinfo=UTC),
@@ -528,8 +530,8 @@ class TestPartialFailureEdgeCases:
         correlation_id = uuid4()
         request = ModelRegistryRequest(
             node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
+            node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer.parse("1.0.0"),
             correlation_id=correlation_id,
             timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )

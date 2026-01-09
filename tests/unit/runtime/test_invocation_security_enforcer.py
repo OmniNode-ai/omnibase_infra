@@ -13,6 +13,7 @@ Test Categories:
     - TestClassificationConstraintEnforcement: Data classification level enforcement
     - TestEnforcerIntegration: Integration and statelessness tests
     - TestSecurityViolationErrorAttributes: Error class validation
+    - TestDomainPatternValidation: Domain pattern configuration validation
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ import pytest
 from omnibase_core.enums import EnumDataClassification
 
 from omnibase_infra.enums.enum_security_rule_id import EnumSecurityRuleId
-from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
 from omnibase_infra.models.security.model_handler_security_policy import (
     ModelHandlerSecurityPolicy,
 )
@@ -510,40 +511,34 @@ class TestEnforcerIntegration:
         """Verify that ModelHandlerSecurityPolicy is frozen and immutable.
 
         The security policy model uses Pydantic's frozen=True configuration,
-        which ensures that:
-        1. Lists passed to allowed_domains are converted to immutable tuples
-        2. The model attributes cannot be modified after construction
-        3. External mutation of source data does not affect the policy
+        which ensures that model attributes cannot be modified after construction.
 
         This test verifies the frozen model behavior by:
         - Confirming the model_config has frozen=True
-        - Attempting to mutate source list (which has no effect due to tuple conversion)
-        - Verifying enforcer behavior remains consistent
+        - Verifying allowed_domains is stored as a tuple
+        - Verifying enforcer behavior remains consistent across calls
         """
-        # ARRANGE - Pass a mutable list (Pydantic converts to tuple)
-        allowed_domains_list = ["api.example.com"]
+        # ARRANGE - Pass tuple for type consistency with model definition
+        allowed_domains = ("api.example.com",)
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=allowed_domains_list,
+            allowed_domains=allowed_domains,
             data_classification=EnumDataClassification.INTERNAL,
         )
 
         # ASSERT - Model is frozen (immutable)
         assert handler_policy.model_config.get("frozen") is True
 
-        # ASSERT - allowed_domains was converted to tuple
+        # ASSERT - allowed_domains is stored as tuple
         assert isinstance(handler_policy.allowed_domains, tuple)
+        assert handler_policy.allowed_domains == ("api.example.com",)
 
         enforcer = InvocationSecurityEnforcer(handler_policy)
 
         # Verify initial behavior
         enforcer.check_domain_access("api.example.com")
 
-        # Mutating the original list has no effect because Pydantic
-        # already converted it to an immutable tuple during validation
-        allowed_domains_list.append("api.hacked.com")
-
-        # ASSERT - Enforcer behavior unchanged (tuple was created from list snapshot)
+        # ASSERT - Enforcer behavior is consistent (unauthorized domain blocked)
         with pytest.raises(SecurityViolationError):
             enforcer.check_domain_access("api.hacked.com")
 
@@ -628,9 +623,152 @@ class TestSecurityViolationErrorAttributes:
         assert isinstance(error, Exception)
 
 
+class TestDomainPatternValidation:
+    """Tests for domain pattern validation during enforcer initialization.
+
+    Validates that invalid domain patterns raise ProtocolConfigurationError
+    per ONEX error guidelines.
+    """
+
+    def test_empty_domain_pattern_raises_protocol_configuration_error(self) -> None:
+        """Empty domain pattern should raise ProtocolConfigurationError.
+
+        Per ONEX error guidelines, configuration validation errors must use
+        ProtocolConfigurationError, not ValueError.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=("",),  # Empty string pattern
+            data_classification=EnumDataClassification.INTERNAL,
+        )
+
+        # ACT & ASSERT
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            InvocationSecurityEnforcer(handler_policy)
+
+        assert "empty" in str(exc_info.value).lower()
+        # ProtocolConfigurationError extends RuntimeHostError
+        assert isinstance(exc_info.value, RuntimeHostError)
+
+    def test_double_wildcard_raises_protocol_configuration_error(self) -> None:
+        """Double wildcard pattern should raise ProtocolConfigurationError.
+
+        Pattern '**.example.com' is misleading and not supported.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=("**.example.com",),  # Double wildcard
+            data_classification=EnumDataClassification.INTERNAL,
+        )
+
+        # ACT & ASSERT
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            InvocationSecurityEnforcer(handler_policy)
+
+        assert "double wildcard" in str(exc_info.value).lower()
+        assert isinstance(exc_info.value, RuntimeHostError)
+
+    def test_multiple_wildcards_raises_protocol_configuration_error(self) -> None:
+        """Multiple wildcard pattern should raise ProtocolConfigurationError.
+
+        Pattern '*.*.example.com' is not supported.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=("*.*.example.com",),  # Multiple wildcards
+            data_classification=EnumDataClassification.INTERNAL,
+        )
+
+        # ACT & ASSERT
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            InvocationSecurityEnforcer(handler_policy)
+
+        assert "multiple wildcard" in str(exc_info.value).lower()
+        assert isinstance(exc_info.value, RuntimeHostError)
+
+    def test_wildcard_not_at_start_raises_protocol_configuration_error(self) -> None:
+        """Wildcard not at start should raise ProtocolConfigurationError.
+
+        Pattern '*example.com' is invalid - must be '*.example.com'.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=("*example.com",),  # Wildcard without dot
+            data_classification=EnumDataClassification.INTERNAL,
+        )
+
+        # ACT & ASSERT
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            InvocationSecurityEnforcer(handler_policy)
+
+        assert "wildcard must be at the start" in str(exc_info.value).lower()
+        assert isinstance(exc_info.value, RuntimeHostError)
+
+    def test_wildcard_only_tld_raises_protocol_configuration_error(self) -> None:
+        """Wildcard with only TLD should raise ProtocolConfigurationError.
+
+        Pattern '*.com' is too broad and potentially dangerous.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=("*.com",),  # Only TLD
+            data_classification=EnumDataClassification.INTERNAL,
+        )
+
+        # ACT & ASSERT
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            InvocationSecurityEnforcer(handler_policy)
+
+        assert "valid domain" in str(exc_info.value).lower()
+        assert isinstance(exc_info.value, RuntimeHostError)
+
+    def test_wildcard_only_dot_raises_protocol_configuration_error(self) -> None:
+        """Wildcard pattern '*.' should raise ProtocolConfigurationError."""
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=("*.",),  # Just wildcard and dot
+            data_classification=EnumDataClassification.INTERNAL,
+        )
+
+        # ACT & ASSERT
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            InvocationSecurityEnforcer(handler_policy)
+
+        assert "valid domain" in str(exc_info.value).lower()
+        assert isinstance(exc_info.value, RuntimeHostError)
+
+    def test_protocol_configuration_error_has_correlation_id(self) -> None:
+        """ProtocolConfigurationError should include correlation ID for tracing.
+
+        When enforcer is created with a correlation_id and validation fails,
+        that ID should be propagated to the error.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=("",),  # Invalid empty pattern
+            data_classification=EnumDataClassification.INTERNAL,
+        )
+
+        correlation_id = uuid4()
+
+        # ACT & ASSERT
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            InvocationSecurityEnforcer(handler_policy, correlation_id=correlation_id)
+
+        assert exc_info.value.correlation_id == correlation_id
+
+
 __all__: list[str] = [
     "TestClassificationConstraintEnforcement",
     "TestDomainAccessEnforcement",
+    "TestDomainPatternValidation",
     "TestEnforcerIntegration",
     "TestSecretScopeAccessEnforcement",
     "TestSecurityViolationErrorAttributes",

@@ -1,59 +1,74 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 OmniNode Team
-"""Node Introspection Event Model.
+"""Unified Node Introspection Event Model.
 
 This module provides ModelNodeIntrospectionEvent for node introspection broadcasts
-in the ONEX 2-way registration pattern.
+in the ONEX registration and discovery patterns.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 from urllib.parse import urlparse
 from uuid import UUID
 
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_infra.enums import EnumIntrospectionReason
+from omnibase_infra.models.discovery.model_discovered_capabilities import (
+    ModelDiscoveredCapabilities,
+)
+from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
+    ModelIntrospectionPerformanceMetrics,
+)
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
-from omnibase_infra.utils.util_semver import validate_semver as _validate_semver
 
 
 class ModelNodeIntrospectionEvent(BaseModel):
-    """Event model for node introspection broadcasts.
+    """Unified event model for node introspection broadcasts.
 
     Nodes publish this event to announce their presence, capabilities,
     and endpoints to the cluster. Used by the Registry node to maintain
-    a live catalog of available nodes.
+    a live catalog of available nodes and by introspection for service discovery.
+
+    This model co-locates both declared capabilities (from contract) and
+    discovered capabilities (from reflection) - they are NOT unified as they
+    represent fundamentally different data.
 
     Attributes:
         node_id: Unique node identifier.
-        node_type: ONEX node type (effect, compute, reducer, orchestrator).
-        node_version: Semantic version of the node emitting this event.
-        capabilities: Dictionary of node capabilities.
+        node_type: ONEX node type (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
+        node_version: Semantic version of the node.
+        declared_capabilities: Contract-declared capabilities (feature flags).
+        discovered_capabilities: Runtime-discovered capabilities (reflection).
         endpoints: Dictionary of exposed endpoints (name -> URL).
+        current_state: Current FSM state if the node has state management.
+        reason: Why this introspection event was emitted.
+        correlation_id: Required correlation ID for tracing and idempotency.
+        timestamp: Event timestamp (must be timezone-aware).
         node_role: Optional role descriptor (registry, adapter, etc).
         metadata: Additional node metadata.
-        correlation_id: Required correlation ID for tracing and idempotency.
         network_id: Network/cluster identifier.
         deployment_id: Deployment/release identifier.
         epoch: Registration epoch for ordering.
-        timestamp: Event timestamp.
+        performance_metrics: Optional metrics from introspection operation.
 
     Example:
         >>> from uuid import uuid4
         >>> from datetime import datetime, timezone
+        >>> from omnibase_core.enums import EnumNodeKind
+        >>> from omnibase_core.models.primitives.model_semver import ModelSemVer
         >>> event = ModelNodeIntrospectionEvent(
         ...     node_id=uuid4(),
-        ...     node_type="effect",
-        ...     node_version="1.2.3",
-        ...     capabilities={"postgres": True, "read": True, "write": True},
-        ...     endpoints={"health": "http://localhost:8080/health"},
+        ...     node_type=EnumNodeKind.EFFECT,
+        ...     node_version=ModelSemVer(major=1, minor=2, patch=3),
         ...     correlation_id=uuid4(),
-        ...     timestamp=datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
+        ...     timestamp=datetime.now(timezone.utc),
         ... )
     """
 
@@ -63,32 +78,28 @@ class ModelNodeIntrospectionEvent(BaseModel):
         from_attributes=True,
     )
 
-    # Required fields
+    # Core identity (required, strongly typed)
     node_id: UUID = Field(..., description="Unique node identifier")
-    # Design Note: node_type uses strict Literal validation because introspection
-    # events are the authoritative source for node registrations persisted to
-    # PostgreSQL. ModelNodeRegistration inherits this constraint to maintain
-    # registry integrity. For relaxed validation supporting experimental node
-    # types, see ModelNodeHeartbeatEvent which uses str.
-    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = Field(
-        ..., description="ONEX node type"
-    )
-    node_version: str = Field(
-        default="1.0.0",
-        description="Semantic version of the node emitting this event",
+    node_type: EnumNodeKind = Field(..., description="ONEX node type")
+    node_version: ModelSemVer = Field(
+        default_factory=lambda: ModelSemVer(major=1, minor=0, patch=0),
+        description="Semantic version of the node",
     )
 
-    @field_validator("node_version")
-    @classmethod
-    def validate_semver(cls, v: str) -> str:
-        """Validate that node_version follows semantic versioning."""
-        return _validate_semver(v, "node_version")
-
-    capabilities: ModelNodeCapabilities = Field(
-        default_factory=ModelNodeCapabilities, description="Node capabilities"
+    # Co-located capabilities (different purposes, different structures)
+    declared_capabilities: ModelNodeCapabilities = Field(
+        default_factory=ModelNodeCapabilities,
+        description="Node-declared capabilities from contract (feature flags)",
     )
+    discovered_capabilities: ModelDiscoveredCapabilities = Field(
+        default_factory=ModelDiscoveredCapabilities,
+        description="Capabilities discovered via runtime reflection",
+    )
+
+    # Endpoints and state
     endpoints: dict[str, str] = Field(
-        default_factory=dict, description="Exposed endpoints (name -> URL)"
+        default_factory=dict,
+        description="Exposed endpoints (name -> URL)",
     )
 
     @field_validator("endpoints")
@@ -111,34 +122,23 @@ class ModelNodeIntrospectionEvent(BaseModel):
                 raise ValueError(f"Invalid URL for endpoint '{name}': {url}")
         return v
 
-    # Optional metadata
-    node_role: str | None = Field(
-        default=None, description="Node role (registry, adapter, etc)"
+    current_state: str | None = Field(
+        default=None,
+        description="Current FSM state if node has state management",
     )
-    metadata: ModelNodeMetadata = Field(
-        default_factory=ModelNodeMetadata, description="Additional node metadata"
+
+    # Event metadata (strongly typed)
+    reason: EnumIntrospectionReason = Field(
+        default=EnumIntrospectionReason.STARTUP,
+        description="Why this introspection event was emitted",
     )
     correlation_id: UUID = Field(
-        ..., description="Request correlation ID for tracing (required for idempotency)"
+        ...,
+        description="Request correlation ID for tracing (required for idempotency)",
     )
-
-    # Deployment topology
-    network_id: str | None = Field(
-        default=None, description="Network/cluster identifier"
-    )
-    deployment_id: str | None = Field(
-        default=None, description="Deployment/release identifier"
-    )
-    epoch: int | None = Field(
-        default=None,
-        ge=0,
-        description="Registration epoch for ordering (monotonically increasing counter)",
-    )
-
-    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     timestamp: datetime = Field(
         ...,
-        description="Event timestamp",
+        description="Event timestamp (must be timezone-aware)",
     )
 
     @field_validator("timestamp")
@@ -161,6 +161,35 @@ class ModelNodeIntrospectionEvent(BaseModel):
                 "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
             )
         return v
+
+    # Optional registration fields
+    node_role: str | None = Field(
+        default=None,
+        description="Node role (registry, adapter, etc)",
+    )
+    metadata: ModelNodeMetadata = Field(
+        default_factory=ModelNodeMetadata,
+        description="Additional node metadata",
+    )
+    network_id: str | None = Field(
+        default=None,
+        description="Network/cluster identifier",
+    )
+    deployment_id: str | None = Field(
+        default=None,
+        description="Deployment/release identifier",
+    )
+    epoch: int | None = Field(
+        default=None,
+        ge=0,
+        description="Registration epoch for ordering (monotonically increasing)",
+    )
+
+    # Optional discovery fields
+    performance_metrics: ModelIntrospectionPerformanceMetrics | None = Field(
+        default=None,
+        description="Performance metrics from introspection operation",
+    )
 
 
 __all__ = ["ModelNodeIntrospectionEvent"]

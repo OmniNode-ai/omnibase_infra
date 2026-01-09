@@ -42,6 +42,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.nodes.effects import NodeRegistryEffect
 from omnibase_infra.nodes.effects.models import (
@@ -158,7 +159,7 @@ def registry_request() -> ModelRegistryRequest:
     return ModelRegistryRequest(
         node_id=uuid4(),
         node_type=EnumNodeKind.EFFECT,
-        node_version="1.0.0",
+        node_version=ModelSemVer.parse("1.0.0"),
         correlation_id=uuid4(),
         service_name="test-service",
         endpoints={"health": "http://localhost:8080/health"},

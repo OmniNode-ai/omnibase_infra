@@ -1,7 +1,15 @@
 # Copyright 2025 OmniNode Team. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Discovery models for node introspection and capability reporting."""
+"""Discovery models for node introspection and capability reporting.
 
+Note:
+    ModelNodeIntrospectionEvent has been moved to omnibase_infra.models.registration.
+    Import it from there for new code.
+"""
+
+from omnibase_infra.models.discovery.model_discovered_capabilities import (
+    ModelDiscoveredCapabilities,
+)
 from omnibase_infra.models.discovery.model_introspection_config import (
     DEFAULT_HEARTBEAT_TOPIC,
     DEFAULT_INTROSPECTION_TOPIC,
@@ -17,10 +25,6 @@ from omnibase_infra.models.discovery.model_introspection_performance_metrics imp
 from omnibase_infra.models.discovery.model_introspection_task_config import (
     ModelIntrospectionTaskConfig,
 )
-from omnibase_infra.models.discovery.model_node_introspection_event import (
-    ModelNodeIntrospectionEvent,
-    TypedDictCapabilities,
-)
 
 __all__ = [
     "DEFAULT_HEARTBEAT_TOPIC",
@@ -29,9 +33,8 @@ __all__ = [
     "INVALID_TOPIC_CHARS",
     "TOPIC_PATTERN",
     "VERSION_SUFFIX_PATTERN",
+    "ModelDiscoveredCapabilities",
     "ModelIntrospectionConfig",
     "ModelIntrospectionPerformanceMetrics",
     "ModelIntrospectionTaskConfig",
-    "ModelNodeIntrospectionEvent",
-    "TypedDictCapabilities",
 ]

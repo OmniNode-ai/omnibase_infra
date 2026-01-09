@@ -201,24 +201,27 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.models.discovery import (
+    ModelDiscoveredCapabilities,
     ModelIntrospectionConfig,
     ModelIntrospectionTaskConfig,
-    ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
     ModelIntrospectionPerformanceMetrics,
 )
-from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
-from omnibase_infra.types import TypedDictCapabilities
-from omnibase_infra.types.typed_dict import (
-    TypedDictIntrospectionCache,
-    TypedDictPerformanceMetricsCache,
+from omnibase_infra.models.registration import (
+    ModelNodeCapabilities,
+    ModelNodeHeartbeatEvent,
+)
+from omnibase_infra.models.registration.model_node_introspection_event import (
+    ModelNodeIntrospectionEvent,
 )
 
 if TYPE_CHECKING:
@@ -233,53 +236,90 @@ INTROSPECTION_TOPIC = "node.introspection"
 HEARTBEAT_TOPIC = "node.heartbeat"
 REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
 
-# =============================================================================
-# Performance Threshold Constants (in milliseconds)
-# =============================================================================
-#
-# These thresholds define acceptable performance limits for introspection
-# operations. When operations exceed these thresholds:
-#   - The `threshold_exceeded` field is set to True in metrics
-#   - The operation name is added to the `slow_operations` list
-#   - A warning is logged with timing details
-#
-# Threshold Values:
-#   - PERF_THRESHOLD_GET_CAPABILITIES_MS (50.0): Maximum time for get_capabilities()
-#   - PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS (30.0): Maximum time for method discovery
-#   - PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS (50.0): Maximum time for full introspection
-#   - PERF_THRESHOLD_CACHE_HIT_MS (1.0): Maximum time for cache hit retrieval
-#
-# IMPORTANT - Synchronization Requirements:
-# =========================================
-# When modifying these threshold values, ensure consistency across:
-#
-# 1. Test File:
-#    tests/unit/mixins/test_mixin_node_introspection.py
-#    - TestMixinNodeIntrospectionPerformance class
-#    - TestMixinNodeModelIntrospectionPerformanceMetrics class
-#    - TestCacheHitPerformanceRobust class
-#    - TestThresholdExceeded class
-#    - TestPerformanceBenchmarks class
-#    - TestMethodCountScaling class
-#    Note: Tests import these constants directly, so values auto-sync.
-#    However, test assertions may use derived thresholds (e.g., 10ms for
-#    relaxed cache tests) that should be reviewed when changing base values.
-#
-# 2. TypedDict Documentation:
-#    src/omnibase_infra/types/typed_dict/typed_dict_performance_metrics_cache.py
-#    - "Performance Thresholds" docstring section (lines 111-116)
-#    - Attribute docstrings reference specific threshold values
-#    These are documentation-only and must be manually updated.
-#
-# 3. Module __all__ Export:
-#    These constants are exported in __all__ at the bottom of this file
-#    for external consumers who may validate against them.
-#
-# =============================================================================
-PERF_THRESHOLD_GET_CAPABILITIES_MS: float = 50.0
-PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS: float = 30.0
-PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS: float = 50.0
-PERF_THRESHOLD_CACHE_HIT_MS: float = 1.0
+# Performance threshold constants (in milliseconds)
+PERF_THRESHOLD_GET_CAPABILITIES_MS = 50.0
+PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS = 30.0
+PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS = 50.0
+PERF_THRESHOLD_CACHE_HIT_MS = 1.0
+
+
+class PerformanceMetricsCacheDict(TypedDict, total=False):
+    """TypedDict for JSON-serialized ModelIntrospectionPerformanceMetrics.
+
+    This type matches the output of ModelIntrospectionPerformanceMetrics.model_dump(mode="json"),
+    enabling proper type checking for cached performance metrics.
+
+    Attributes:
+        get_capabilities_ms: Time taken by get_capabilities() in milliseconds.
+        discover_capabilities_ms: Time taken by _discover_capabilities() in ms.
+        get_endpoints_ms: Time taken by get_endpoints() in milliseconds.
+        get_current_state_ms: Time taken by get_current_state() in milliseconds.
+        total_introspection_ms: Total time for get_introspection_data() in ms.
+        cache_hit: Whether the result was served from cache.
+        method_count: Number of methods discovered during reflection.
+        threshold_exceeded: Whether any operation exceeded performance thresholds.
+        slow_operations: List of operation names that exceeded their thresholds.
+        captured_at: UTC timestamp when metrics were captured (ISO string).
+    """
+
+    get_capabilities_ms: float
+    discover_capabilities_ms: float
+    get_endpoints_ms: float
+    get_current_state_ms: float
+    total_introspection_ms: float
+    cache_hit: bool
+    method_count: int
+    threshold_exceeded: bool
+    slow_operations: list[str]
+    captured_at: str  # datetime serializes to ISO string in JSON mode
+
+
+class DiscoveredCapabilitiesCacheDict(TypedDict, total=False):
+    """TypedDict for JSON-serialized ModelDiscoveredCapabilities.
+
+    Attributes:
+        operations: List of method names matching operation keywords.
+        has_fsm: Whether the node has FSM state management.
+        method_signatures: Mapping of method names to signature strings.
+        attributes: Additional discovered attributes.
+    """
+
+    operations: list[str]
+    has_fsm: bool
+    method_signatures: dict[str, str]
+    attributes: dict[str, object]
+
+
+class IntrospectionCacheDict(TypedDict):
+    """TypedDict representing the JSON-serialized ModelNodeIntrospectionEvent.
+
+    This type matches the output of ModelNodeIntrospectionEvent.model_dump(mode="json"),
+    enabling proper type checking for cache operations without requiring type: ignore comments.
+
+    Note:
+        The capabilities are split into declared_capabilities (from contract) and
+        discovered_capabilities (from reflection). This reflects the fundamental
+        difference between what a node declares and what introspection discovers.
+    """
+
+    node_id: str
+    node_type: str
+    node_version: dict[str, int]  # ModelSemVer serializes to {major, minor, patch}
+    declared_capabilities: dict[str, object]  # ModelNodeCapabilities (flexible schema)
+    discovered_capabilities: DiscoveredCapabilitiesCacheDict
+    endpoints: dict[str, str]
+    current_state: str | None
+    reason: str  # EnumIntrospectionReason serializes to string
+    correlation_id: str  # UUID serializes to string in JSON mode (required field)
+    timestamp: str  # datetime serializes to ISO string in JSON mode
+    # Optional fields
+    node_role: str | None
+    metadata: dict[str, object]  # ModelNodeMetadata serializes to dict
+    network_id: str | None
+    deployment_id: str | None
+    epoch: int | None
+    # Performance metrics from introspection operation (may be None)
+    performance_metrics: PerformanceMetricsCacheDict | None
 
 
 class MixinNodeIntrospection:
@@ -398,7 +438,7 @@ class MixinNodeIntrospection:
     # All of these are initialized in initialize_introspection()
     #
     # Caching attributes
-    _introspection_cache: TypedDictIntrospectionCache | None
+    _introspection_cache: IntrospectionCacheDict | None
     _introspection_cache_ttl: float
     _introspection_cached_at: float | None
 
@@ -835,27 +875,6 @@ class MixinNodeIntrospection:
             keyword in name_lower for keyword in self._introspection_operation_keywords
         )
 
-    def _discover_protocols(self) -> list[str]:
-        """Discover protocol and mixin implementations from class hierarchy.
-
-        Security Note:
-            This method exposes the inheritance hierarchy by returning class
-            names that start with ``Protocol`` or ``Mixin``. This reveals what
-            capabilities the node implements (e.g., ``ProtocolDatabaseAdapter``,
-            ``MixinAsyncCircuitBreaker``). This information is generally safe
-            to expose as it describes the node's public interface contracts,
-            but be aware that it may reveal architectural decisions.
-
-        Returns:
-            List of protocol and mixin class names implemented by this class
-        """
-        protocols: list[str] = []
-        for base in type(self).__mro__:
-            base_name = base.__name__
-            if base_name.startswith(("Protocol", "Mixin")):
-                protocols.append(base_name)
-        return protocols
-
     def _has_fsm_state(self) -> bool:
         """Check if this class has FSM state management.
 
@@ -927,12 +946,11 @@ class MixinNodeIntrospection:
             )
             return None
 
-    async def get_capabilities(self) -> TypedDictCapabilities:
+    async def get_capabilities(self) -> ModelDiscoveredCapabilities:
         """Extract node capabilities via reflection.
 
         Uses the inspect module to discover:
         - Public methods (potential operations)
-        - Protocol implementations
         - FSM state attributes
 
         Method signatures are cached at the class level for performance
@@ -947,7 +965,6 @@ class MixinNodeIntrospection:
 
             - Method names matching operation keywords (execute, handle, etc.)
             - Full method signatures including parameter names and types
-            - Protocol/mixin class names from the inheritance hierarchy
             - Whether FSM state management is present
 
             **Filtering Applied**:
@@ -967,9 +984,8 @@ class MixinNodeIntrospection:
             - Configure additional ``exclude_prefixes`` if needed
 
         Returns:
-            Dictionary containing:
-            - operations: List of public method names that may be operations
-            - protocols: List of protocol/interface names implemented
+            ModelDiscoveredCapabilities containing:
+            - operations: Tuple of public method names that may be operations
             - has_fsm: Boolean indicating if node has FSM state management
             - method_signatures: Dict of method names to signature strings
 
@@ -979,18 +995,17 @@ class MixinNodeIntrospection:
         Example:
             ```python
             capabilities = await node.get_capabilities()
-            # {
-            #     "operations": ["execute", "query", "batch_execute"],
-            #     "protocols": ["ProtocolDatabaseAdapter"],
-            #     "has_fsm": True,
-            #     "method_signatures": {
+            # ModelDiscoveredCapabilities(
+            #     operations=("execute", "query", "batch_execute"),
+            #     has_fsm=True,
+            #     method_signatures={
             #         "execute": "(query: str) -> list[dict]",
             #         ...
             #     }
-            # }
+            # )
 
             # Review exposed capabilities before production
-            for op in capabilities["operations"]:
+            for op in capabilities.operations:
                 print(f"Exposed operation: {op}")
             ```
         """
@@ -1019,13 +1034,12 @@ class MixinNodeIntrospection:
             if self._is_operation_method(name):
                 operations.append(name)
 
-        # Build capabilities dict
-        capabilities: TypedDictCapabilities = {
-            "operations": operations,
-            "protocols": self._discover_protocols(),
-            "has_fsm": self._has_fsm_state(),
-            "method_signatures": method_signatures,
-        }
+        # Build capabilities model
+        capabilities = ModelDiscoveredCapabilities(
+            operations=tuple(operations),
+            has_fsm=self._has_fsm_state(),
+            method_signatures=method_signatures,
+        )
 
         # Performance instrumentation
         elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -1164,7 +1178,7 @@ class MixinNodeIntrospection:
         Example:
             ```python
             data = await node.get_introspection_data()
-            print(f"Node {data.node_id} has capabilities: {data.capabilities}")
+            print(f"Node {data.node_id} has capabilities: {data.discovered_capabilities}")
             ```
         """
         self._ensure_initialized()
@@ -1212,12 +1226,11 @@ class MixinNodeIntrospection:
         discover_capabilities_ms = (time.perf_counter() - discover_start) * 1000
 
         cap_start = time.perf_counter()
-        capabilities = await self.get_capabilities()
+        discovered_capabilities = await self.get_capabilities()
         get_capabilities_ms = (time.perf_counter() - cap_start) * 1000
 
-        # Extract method count from capabilities
-        method_sigs = capabilities.get("method_signatures", {})
-        method_count = len(method_sigs) if isinstance(method_sigs, dict) else 0
+        # Extract method count from capabilities (now a Pydantic model)
+        method_count = len(discovered_capabilities.method_signatures)
 
         endpoints_start = time.perf_counter()
         endpoints = await self.get_endpoints()
@@ -1256,11 +1269,8 @@ class MixinNodeIntrospection:
             )
             node_type = EnumNodeKind.EFFECT
 
-        # Extract operations list with proper type narrowing
-        operations_value = capabilities.get("operations", [])
-        operations_count = (
-            len(operations_value) if isinstance(operations_value, list) else 0
-        )
+        # Extract operations count from discovered capabilities
+        operations_count = len(discovered_capabilities.operations)
 
         # Finalize metrics calculations
         total_introspection_ms = (time.perf_counter() - total_start) * 1000
@@ -1292,15 +1302,30 @@ class MixinNodeIntrospection:
         # Store metrics for later retrieval
         self._introspection_last_metrics = metrics
 
+        # Parse version string into ModelSemVer
+        try:
+            version_parts = self._introspection_version.split(".")
+            node_version = ModelSemVer(
+                major=int(version_parts[0]) if len(version_parts) > 0 else 1,
+                minor=int(version_parts[1]) if len(version_parts) > 1 else 0,
+                patch=int(version_parts[2].split("-")[0])
+                if len(version_parts) > 2
+                else 0,
+            )
+        except (ValueError, IndexError):
+            # Fallback to 1.0.0 if version parsing fails
+            node_version = ModelSemVer(major=1, minor=0, patch=0)
+
         # Create event with performance metrics (metrics is already Pydantic model)
         event = ModelNodeIntrospectionEvent(
             node_id=node_id_uuid,
             node_type=node_type,
-            capabilities=capabilities,
+            node_version=node_version,
+            declared_capabilities=ModelNodeCapabilities(),
+            discovered_capabilities=discovered_capabilities,
             endpoints=endpoints,
             current_state=current_state,
-            version=self._introspection_version,
-            reason="cache_refresh",
+            reason=EnumIntrospectionReason.HEARTBEAT,  # cache_refresh maps to heartbeat
             correlation_id=uuid4(),
             timestamp=datetime.now(UTC),
             performance_metrics=metrics,
@@ -1309,7 +1334,7 @@ class MixinNodeIntrospection:
         # Update cache - cast the model_dump output to our typed dict since we know
         # the structure matches (model_dump returns dict[str, Any] by default)
         self._introspection_cache = cast(
-            TypedDictIntrospectionCache, event.model_dump(mode="json")
+            IntrospectionCacheDict, event.model_dump(mode="json")
         )
         self._introspection_cached_at = current_time
 
@@ -2371,14 +2396,14 @@ class MixinNodeIntrospection:
 __all__ = [
     "HEARTBEAT_TOPIC",
     "INTROSPECTION_TOPIC",
-    "MixinNodeIntrospection",
-    "ModelIntrospectionPerformanceMetrics",
     "PERF_THRESHOLD_CACHE_HIT_MS",
     "PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS",
     "PERF_THRESHOLD_GET_CAPABILITIES_MS",
     "PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS",
     "REQUEST_INTROSPECTION_TOPIC",
-    "TypedDictCapabilities",  # Re-export from types for convenience
-    "TypedDictIntrospectionCache",  # Re-export from types for convenience
-    "TypedDictPerformanceMetricsCache",  # Re-export from types for convenience
+    "DiscoveredCapabilitiesCacheDict",  # TypedDict for cached discovered capabilities
+    "IntrospectionCacheDict",
+    "MixinNodeIntrospection",
+    "ModelIntrospectionPerformanceMetrics",
+    "PerformanceMetricsCacheDict",  # TypedDict for cached performance metrics
 ]

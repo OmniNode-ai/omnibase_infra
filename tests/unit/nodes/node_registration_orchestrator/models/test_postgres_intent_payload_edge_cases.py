@@ -26,6 +26,7 @@ import warnings
 from uuid import uuid4
 
 import pytest
+from omnibase_core.enums import EnumNodeKind
 from pydantic import ValidationError
 
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_intent_payload import (
@@ -45,7 +46,7 @@ def base_payload_kwargs() -> dict[str, object]:
     """
     return {
         "node_id": uuid4(),
-        "node_type": "effect",
+        "node_type": EnumNodeKind.EFFECT,
         "correlation_id": uuid4(),
         "timestamp": "2025-01-01T00:00:00Z",
     }

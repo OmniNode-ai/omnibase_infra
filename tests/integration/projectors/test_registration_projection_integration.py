@@ -434,7 +434,7 @@ class TestIdempotency:
         # Verify original version is preserved
         stored = await reader.get_entity_state(projection.entity_id)
         assert stored is not None
-        assert stored.node_version == "1.0.0"
+        assert str(stored.node_version) == "1.0.0"
 
     async def test_is_stale_check(
         self,
@@ -1020,4 +1020,4 @@ class TestConcurrency:
         stored = await reader.get_entity_state(entity_id)
         assert stored is not None
         assert stored.last_applied_offset == 1000
-        assert stored.node_version == "1.0.1000"
+        assert str(stored.node_version) == "1.0.1000"

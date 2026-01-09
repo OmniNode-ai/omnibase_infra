@@ -34,6 +34,7 @@ from uuid import uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 from omnibase_infra.nodes.effects.protocol_consul_client import ProtocolConsulClient
@@ -238,7 +239,7 @@ class TestStubPostgresAdapterProtocolCompliance:
         result = await stub.upsert(
             node_id=uuid4(),
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={"health": "http://localhost:8080/health"},
             metadata={"environment": "test"},
         )
@@ -264,7 +265,7 @@ class TestStubPostgresAdapterProtocolCompliance:
             result = await stub.upsert(
                 node_id=uuid4(),
                 node_type=node_kind,
-                node_version="1.0.0",
+                node_version=ModelSemVer.parse("1.0.0"),
                 endpoints={},
                 metadata={},
             )
@@ -279,7 +280,7 @@ class TestStubPostgresAdapterProtocolCompliance:
         result = await stub.upsert(
             node_id=uuid4(),
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             metadata={},
         )
@@ -293,7 +294,7 @@ class TestStubPostgresAdapterProtocolCompliance:
         result = await stub.upsert(
             node_id=uuid4(),
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             metadata={},
         )
@@ -333,7 +334,7 @@ class TestProtocolConsistency:
         postgres_result = await postgres_stub.upsert(
             node_id=uuid4(),
             node_type=EnumNodeKind.EFFECT,
-            node_version="1.0.0",
+            node_version=ModelSemVer.parse("1.0.0"),
             endpoints={},
             metadata={},
         )

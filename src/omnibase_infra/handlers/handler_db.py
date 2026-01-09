@@ -259,7 +259,7 @@ class HandlerDb(MixinEnvelopeExtraction):
             )
 
         timeout_raw = config.get("timeout", _DEFAULT_TIMEOUT_SECONDS)
-        if isinstance(timeout_raw, int | float):
+        if isinstance(timeout_raw, (int, float)):
             self._timeout = float(timeout_raw)
 
         try:

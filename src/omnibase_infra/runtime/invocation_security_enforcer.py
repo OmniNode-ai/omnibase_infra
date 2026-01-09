@@ -42,7 +42,7 @@ from omnibase_core.enums import EnumDataClassification
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 
 from omnibase_infra.enums import EnumSecurityRuleId
-from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -183,7 +183,7 @@ class InvocationSecurityEnforcer:
             pattern: Domain pattern to validate.
 
         Raises:
-            ValueError: If the pattern is invalid.
+            ProtocolConfigurationError: If the pattern is invalid.
 
         Valid patterns:
             - "example.com" (exact match)
@@ -196,42 +196,64 @@ class InvocationSecurityEnforcer:
             - "" (empty string)
         """
         if not pattern:
-            msg = "Domain pattern cannot be empty"
-            raise ValueError(msg)
+            context = ModelInfraErrorContext(
+                operation="validate_domain_pattern",
+                correlation_id=self._correlation_id,
+            )
+            raise ProtocolConfigurationError(
+                "Domain pattern cannot be empty",
+                context=context,
+            )
 
         # Check for double wildcards or nested wildcards
         if "**" in pattern:
-            msg = (
-                f"Invalid domain pattern '{pattern}': double wildcards (** ) are not "
-                "supported. Use '*.example.com' for single-level subdomain matching."
+            context = ModelInfraErrorContext(
+                operation="validate_domain_pattern",
+                correlation_id=self._correlation_id,
             )
-            raise ValueError(msg)
+            raise ProtocolConfigurationError(
+                f"Invalid domain pattern '{pattern}': double wildcards (** ) are not "
+                "supported. Use '*.example.com' for single-level subdomain matching.",
+                context=context,
+            )
 
         # Check for multiple wildcards
         if pattern.count("*") > 1:
-            msg = (
-                f"Invalid domain pattern '{pattern}': multiple wildcards are not "
-                "supported. Use a single '*.domain.com' pattern."
+            context = ModelInfraErrorContext(
+                operation="validate_domain_pattern",
+                correlation_id=self._correlation_id,
             )
-            raise ValueError(msg)
+            raise ProtocolConfigurationError(
+                f"Invalid domain pattern '{pattern}': multiple wildcards are not "
+                "supported. Use a single '*.domain.com' pattern.",
+                context=context,
+            )
 
         # Wildcard must be at the start followed by a dot
         if "*" in pattern and not pattern.startswith("*."):
-            msg = (
-                f"Invalid domain pattern '{pattern}': wildcard must be at the start "
-                "followed by a dot (e.g., '*.example.com')."
+            context = ModelInfraErrorContext(
+                operation="validate_domain_pattern",
+                correlation_id=self._correlation_id,
             )
-            raise ValueError(msg)
+            raise ProtocolConfigurationError(
+                f"Invalid domain pattern '{pattern}': wildcard must be at the start "
+                "followed by a dot (e.g., '*.example.com').",
+                context=context,
+            )
 
         # Validate the domain part after wildcard
         if pattern.startswith("*."):
             suffix = pattern[2:]
             if not suffix or "." not in suffix:
-                msg = (
-                    f"Invalid domain pattern '{pattern}': wildcard patterns must "
-                    "include a valid domain (e.g., '*.example.com', not '*.' or '*.com')."
+                context = ModelInfraErrorContext(
+                    operation="validate_domain_pattern",
+                    correlation_id=self._correlation_id,
                 )
-                raise ValueError(msg)
+                raise ProtocolConfigurationError(
+                    f"Invalid domain pattern '{pattern}': wildcard patterns must "
+                    "include a valid domain (e.g., '*.example.com', not '*.' or '*.com').",
+                    context=context,
+                )
             # NOTE: Patterns like '*.co.uk' are technically valid but potentially too
             # broad (matching any .co.uk subdomain). Proper validation would require
             # checking against the Public Suffix List (PSL), which is beyond current
@@ -255,7 +277,7 @@ class InvocationSecurityEnforcer:
             Tuple of compiled regex patterns (immutable).
 
         Raises:
-            ValueError: If any pattern is invalid (see _validate_domain_pattern).
+            ProtocolConfigurationError: If any pattern is invalid (see _validate_domain_pattern).
 
         Note:
             Wildcard patterns only match a single subdomain level.

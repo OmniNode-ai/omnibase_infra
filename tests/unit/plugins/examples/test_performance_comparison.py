@@ -151,7 +151,7 @@ class TestPerformanceAnalysis:
     ) -> None:
         """Demonstrate reduced isinstance calls with early exit pattern.
 
-        Optimization: Single isinstance(obj, dict | list) check followed by
+        Optimization: Single isinstance(obj, (dict, list)) check followed by
         early return for primitives eliminates redundant type checks.
 
         Expected Improvement: ~15-25% for mixed structures.

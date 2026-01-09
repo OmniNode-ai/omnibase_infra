@@ -13,13 +13,13 @@ from typing import Literal
 from urllib.parse import urlparse
 from uuid import UUID
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
-from omnibase_infra.utils.util_semver import validate_semver as _validate_semver
 
 
 class ModelNodeRegistration(BaseModel):
@@ -97,15 +97,31 @@ class ModelNodeRegistration(BaseModel):
     node_type: Literal["effect", "compute", "reducer", "orchestrator"] = Field(
         ..., description="ONEX node type"
     )
-    node_version: str = Field(
-        default="1.0.0", description="Semantic version of the node"
+    node_version: ModelSemVer = Field(
+        default_factory=lambda: ModelSemVer(major=1, minor=0, patch=0),
+        description="Semantic version of the node",
     )
 
-    @field_validator("node_version")
+    @field_validator("node_version", mode="before")
     @classmethod
-    def validate_semver(cls, v: str) -> str:
-        """Validate that node_version follows semantic versioning."""
-        return _validate_semver(v, "node_version")
+    def parse_node_version(cls, v: ModelSemVer | str) -> ModelSemVer:
+        """Parse node_version from string or ModelSemVer.
+
+        Args:
+            v: Either a ModelSemVer instance or a semver string.
+
+        Returns:
+            Validated ModelSemVer instance.
+
+        Raises:
+            ValueError: If the string is not a valid semantic version.
+        """
+        if isinstance(v, str):
+            try:
+                return ModelSemVer.parse(v)
+            except Exception as e:
+                raise ValueError(f"node_version: {e!s}") from e
+        return v
 
     # Capabilities and endpoints
     capabilities: ModelNodeCapabilities = Field(
