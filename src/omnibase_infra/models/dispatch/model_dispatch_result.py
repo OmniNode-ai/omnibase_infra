@@ -23,6 +23,37 @@ Thread Safety:
     ModelDispatchResult is immutable (frozen=True) after creation,
     making it thread-safe for concurrent read access.
 
+JsonType Recursion Fix (OMN-1274):
+    The ``error_details`` field uses ``dict[str, object]`` instead of the
+    recursive ``JsonType`` type alias. Here is why:
+
+    **The Original Problem:**
+    ``JsonType`` was a recursive type alias::
+
+        JsonType = dict[str, "JsonType"] | list["JsonType"] | str | int | float | bool | None
+
+    Pydantic 2.x performs eager schema generation at class definition time,
+    causing ``RecursionError`` when expanding recursive type aliases::
+
+        JsonType -> dict[str, JsonType] | list[JsonType] | ...
+                 -> dict[str, dict[str, JsonType] | ...] | ...
+                 -> ... (infinite recursion)
+
+    **Why dict[str, object] is Correct for error_details:**
+    Error details are structured diagnostic information, always represented as
+    key-value dictionaries (e.g., ``{"retry_count": 3, "service": "db"}``).
+    They do NOT need to support arrays or primitives at the root level.
+
+    Using ``dict[str, object]`` provides:
+    - Correct semantics: Error details are always dictionaries
+    - Type safety: Pydantic validates the outer structure
+    - No recursion: ``object`` avoids recursive type expansion
+
+    **Caveats:**
+    - Values are typed as ``object`` (no static type checking)
+    - For fields needing full JSON support, use ``JsonType`` from
+      ``omnibase_core.types`` (now fixed via TypeAlias pattern)
+
 Example:
     >>> from omnibase_infra.models.dispatch import (
     ...     ModelDispatchResult,
@@ -50,6 +81,8 @@ Example:
 See Also:
     omnibase_infra.models.dispatch.ModelDispatchRoute: Routing rule model
     omnibase_infra.models.dispatch.EnumDispatchStatus: Dispatch status enum
+    ADR: ``docs/decisions/adr-any-type-pydantic-workaround.md`` (historical)
+    Pydantic issue: https://github.com/pydantic/pydantic/issues/3278
 """
 
 from datetime import UTC, datetime
@@ -58,9 +91,6 @@ from uuid import UUID, uuid4
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from pydantic import BaseModel, ConfigDict, Field
 
-# NOTE: Using `object` instead of `JsonType` from omnibase_core to avoid Pydantic 2.x
-# recursion issues with recursive type aliases. Per ONEX ADR, `Any` is not permitted
-# in function signatures - use `object` for generic payload types.
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
