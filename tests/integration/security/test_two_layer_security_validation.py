@@ -229,14 +229,26 @@ class TestDefenseInDepthIntegration:
         # Registration catches all issues
         errors = validate_handler_registration(handler_policy, env_policy)
 
-        # Should have multiple errors
-        assert len(errors) >= 3
+        # Should have 6 errors total:
+        # - 2x SECRET_SCOPE_NOT_PERMITTED (one per forbidden scope)
+        # - 1x CLASSIFICATION_EXCEEDS_MAX
+        # - 1x ADAPTER_REQUESTING_SECRETS
+        # - 1x ADAPTER_NON_EFFECT_CATEGORY (missing handler_type_category)
+        # - 1x ADAPTER_MISSING_DOMAIN_ALLOWLIST (empty allowed_domains)
+        assert len(errors) == 6
 
-        # Verify error types
+        # Verify all expected error types are present (prevents rule regressions)
         error_rules = {e.rule_id for e in errors}
-        assert EnumSecurityRuleId.SECRET_SCOPE_NOT_PERMITTED in error_rules
-        assert EnumSecurityRuleId.CLASSIFICATION_EXCEEDS_MAX in error_rules
-        assert EnumSecurityRuleId.ADAPTER_REQUESTING_SECRETS in error_rules
+        expected_rules = {
+            EnumSecurityRuleId.SECRET_SCOPE_NOT_PERMITTED,
+            EnumSecurityRuleId.CLASSIFICATION_EXCEEDS_MAX,
+            EnumSecurityRuleId.ADAPTER_REQUESTING_SECRETS,
+            EnumSecurityRuleId.ADAPTER_NON_EFFECT_CATEGORY,
+            EnumSecurityRuleId.ADAPTER_MISSING_DOMAIN_ALLOWLIST,
+        }
+        assert error_rules == expected_rules, (
+            f"Expected rules {expected_rules}, got {error_rules}"
+        )
 
 
 class TestSharedClassificationLevels:

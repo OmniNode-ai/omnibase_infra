@@ -1,26 +1,18 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""RED tests for invocation-time security enforcement.
+"""Unit tests for invocation-time security enforcement.
 
-These tests define expected behavior for InvocationSecurityEnforcer.
-They are expected to FAIL until the enforcer is implemented (TDD RED phase).
+These tests validate the behavior of InvocationSecurityEnforcer, which
+enforces security policies at handler invocation time.
 
 Ticket: OMN-1098
-
-TDD Requirements Covered:
-    - RED: Test domain violation at invocation
 
 Test Categories:
     - TestDomainAccessEnforcement: Outbound domain access control
     - TestSecretScopeAccessEnforcement: Secret scope access control
     - TestClassificationConstraintEnforcement: Data classification level enforcement
     - TestEnforcerIntegration: Integration and statelessness tests
-
-Expected Import Failures (TDD RED):
-    - InvocationSecurityEnforcer: Not implemented yet
-    - SecurityViolationError: Not implemented yet
-    - ModelHandlerSecurityPolicy: Not implemented yet
-    - EnumSecurityRuleId: Not implemented yet
+    - TestSecurityViolationErrorAttributes: Error class validation
 """
 
 from __future__ import annotations
@@ -28,19 +20,13 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-
-# Import from omnibase_core - this should work
 from omnibase_core.enums import EnumDataClassification
 
 from omnibase_infra.enums.enum_security_rule_id import EnumSecurityRuleId
-
-# These imports SHOULD FAIL - models not yet implemented (TDD RED)
-# Once models are created, these imports will work
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.security.model_handler_security_policy import (
     ModelHandlerSecurityPolicy,
 )
-
-# These imports SHOULD FAIL - enforcer not implemented yet (TDD RED)
 from omnibase_infra.runtime.invocation_security_enforcer import (
     InvocationSecurityEnforcer,
     SecurityViolationError,
@@ -521,12 +507,20 @@ class TestEnforcerIntegration:
             enforcer.check_classification_constraint(EnumDataClassification.RESTRICTED)
 
     def test_enforcer_policy_is_immutable(self) -> None:
-        """Enforcer's policy reference should not allow external mutation.
+        """Verify that ModelHandlerSecurityPolicy is frozen and immutable.
 
-        Once created, the enforcer's behavior should be consistent.
-        External changes to the policy object should not affect enforcer.
+        The security policy model uses Pydantic's frozen=True configuration,
+        which ensures that:
+        1. Lists passed to allowed_domains are converted to immutable tuples
+        2. The model attributes cannot be modified after construction
+        3. External mutation of source data does not affect the policy
+
+        This test verifies the frozen model behavior by:
+        - Confirming the model_config has frozen=True
+        - Attempting to mutate source list (which has no effect due to tuple conversion)
+        - Verifying enforcer behavior remains consistent
         """
-        # ARRANGE
+        # ARRANGE - Pass a mutable list (Pydantic converts to tuple)
         allowed_domains_list = ["api.example.com"]
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
@@ -534,17 +528,22 @@ class TestEnforcerIntegration:
             data_classification=EnumDataClassification.INTERNAL,
         )
 
+        # ASSERT - Model is frozen (immutable)
+        assert handler_policy.model_config.get("frozen") is True
+
+        # ASSERT - allowed_domains was converted to tuple
+        assert isinstance(handler_policy.allowed_domains, tuple)
+
         enforcer = InvocationSecurityEnforcer(handler_policy)
 
         # Verify initial behavior
         enforcer.check_domain_access("api.example.com")
 
-        # Even if we try to mutate the original list, enforcer should be unaffected
-        # (This tests that enforcer makes a defensive copy or uses immutable structures)
+        # Mutating the original list has no effect because Pydantic
+        # already converted it to an immutable tuple during validation
         allowed_domains_list.append("api.hacked.com")
 
-        # ASSERT - Original behavior should be preserved
-        # (If enforcer shares reference, this would NOT raise)
+        # ASSERT - Enforcer behavior unchanged (tuple was created from list snapshot)
         with pytest.raises(SecurityViolationError):
             enforcer.check_domain_access("api.hacked.com")
 
@@ -585,7 +584,7 @@ class TestSecurityViolationErrorAttributes:
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
             secret_scopes=frozenset(),
-            allowed_domains=["api.allowed.com"],
+            allowed_domains=("api.allowed.com",),
             data_classification=EnumDataClassification.INTERNAL,
         )
 
@@ -604,6 +603,8 @@ class TestSecurityViolationErrorAttributes:
         """SecurityViolationError should extend ONEX error hierarchy.
 
         This ensures proper integration with ONEX error handling patterns.
+        SecurityViolationError inherits from RuntimeHostError, which inherits
+        from ModelOnexError (the base ONEX error class).
         """
         # ARRANGE
         handler_policy = ModelHandlerSecurityPolicy(
@@ -618,10 +619,11 @@ class TestSecurityViolationErrorAttributes:
         with pytest.raises(SecurityViolationError) as exc_info:
             enforcer.check_domain_access("forbidden.com")
 
-        # SecurityViolationError should be catchable as a broader exception type
-        # (This will be validated once we know the exact hierarchy)
+        # SecurityViolationError should be catchable as RuntimeHostError
         error = exc_info.value
         assert isinstance(error, SecurityViolationError)
+        # Should inherit from RuntimeHostError (ONEX error hierarchy)
+        assert isinstance(error, RuntimeHostError)
         # Should also be an Exception
         assert isinstance(error, Exception)
 

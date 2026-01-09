@@ -39,19 +39,26 @@ import re
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumDataClassification
+from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 
 from omnibase_infra.enums import EnumSecurityRuleId
+from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.models.security import (
     ModelHandlerSecurityPolicy,
     get_security_level,
 )
 
 
-class SecurityViolationError(Exception):
+class SecurityViolationError(RuntimeHostError):
     """Raised when a security constraint is violated at invocation time.
 
     This exception is raised when a handler attempts to access resources
     or process data that violates its declared security policy.
+
+    Inherits from RuntimeHostError to integrate with the ONEX error hierarchy.
 
     Attributes:
         rule_id: Security rule that was violated (EnumSecurityRuleId).
@@ -86,11 +93,23 @@ class SecurityViolationError(Exception):
             rule_id: The security rule that was violated.
             message: Human-readable description of the violation.
             correlation_id: Optional tracing ID for observability.
+                If not provided, a correlation ID is auto-generated.
         """
         self.rule_id = rule_id
-        self.message = message
-        self.correlation_id = correlation_id
-        super().__init__(message)
+        # Build context for RuntimeHostError
+        context = ModelInfraErrorContext(
+            operation="security_check",
+            correlation_id=correlation_id,
+        )
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.SECURITY_VIOLATION,
+            context=context,
+            rule_id=rule_id.value,
+        )
+        # Note: message and correlation_id are accessed via parent's properties
+        # - self.message -> self.model.message
+        # - self.correlation_id -> self.model.correlation_id (auto-generated if None)
 
     def __str__(self) -> str:
         """Return formatted error string including rule ID."""

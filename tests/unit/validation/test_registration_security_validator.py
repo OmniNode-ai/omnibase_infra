@@ -1,26 +1,18 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""RED tests for registration-time security validation.
+"""Unit tests for registration-time security validation.
 
-These tests define expected behavior for RegistrationSecurityValidator.
-They are expected to FAIL until the validator is implemented (TDD RED phase).
+These tests verify the behavior of RegistrationSecurityValidator, which enforces
+security policies at handler registration time (before handlers can execute).
 
 Ticket: OMN-1098
 
-TDD Requirements covered:
-    - RED: Test secret scope violation at registration
-    - RED: Test classification constraint enforcement
-    - RED: Test `is_adapter=True` handler rejected when requesting secrets
-    - RED: Test `is_adapter=True` with non-EFFECT category raises validation error
-
-Note:
-    These tests will fail with ImportError until the following are implemented:
-    - RegistrationSecurityValidator
-    - validate_handler_registration function
-    - ModelHandlerSecurityPolicy
-    - ModelEnvironmentPolicy
-    - EnumSecurityRuleId (extended with registration rules)
-    - EnumEnvironment
+Test coverage:
+    - Secret scope validation (permitted vs unpermitted scopes)
+    - Data classification constraint enforcement
+    - Adapter-specific constraints (is_adapter=True handlers)
+    - Domain allowlist requirements for adapters
+    - Wildcard semantics for secret scopes and domain allowlists
 
 See Also:
     - docs/patterns/security_patterns.md
@@ -31,27 +23,21 @@ from __future__ import annotations
 
 import pytest
 
-# Core enum imports - these exist
+# Core enum imports
 from omnibase_core.enums import EnumDataClassification
 
-# Infra enum imports - EnumHandlerTypeCategory exists
+# Infra enum imports
 from omnibase_infra.enums import EnumHandlerTypeCategory
-
-# This enum needs to be created or extended (TDD RED phase)
 from omnibase_infra.enums.enum_environment import EnumEnvironment
-
-# This enum needs to be created (TDD RED phase)
-# Contains registration-time security rule IDs (SECURITY-300 to SECURITY-399)
 from omnibase_infra.enums.enum_security_rule_id import EnumSecurityRuleId
 
-# These imports will FAIL until models are created (TDD RED phase)
-# The GREEN phase will create these models
+# Security policy models
 from omnibase_infra.models.security import (
     ModelEnvironmentPolicy,
     ModelHandlerSecurityPolicy,
 )
 
-# This import should fail (validator not implemented yet - TDD RED)
+# Registration security validator
 from omnibase_infra.validation.registration_security_validator import (
     RegistrationSecurityValidator,
     validate_handler_registration,
@@ -68,7 +54,6 @@ class TestSecretScopeValidation:
     def test_secret_scope_violation_at_registration(self) -> None:
         """Handler declaring unpermitted secret scope should fail registration.
 
-        TDD Requirement: RED: Test secret scope violation at registration
         Expected Error: SECURITY-300
 
         This test verifies that when a handler requests a secret scope
@@ -189,6 +174,38 @@ class TestSecretScopeValidation:
         ]
         assert len(secret_errors) == 0
 
+    def test_wildcard_secret_scope_permits_any_scope(self) -> None:
+        """Wildcard '*' in permitted_secret_scopes should allow any requested scope.
+
+        When the environment policy permits '*', handlers can request any secret
+        scope without validation errors. This is useful for development environments.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(
+                {"database-creds", "vault-keys", "api-keys", "custom-secret"}
+            ),
+            allowed_domains=[],
+            data_classification=EnumDataClassification.INTERNAL,
+        )
+
+        env_policy = ModelEnvironmentPolicy(
+            environment=EnumEnvironment.DEVELOPMENT,
+            permitted_secret_scopes=frozenset({"*"}),  # Wildcard permits everything
+            max_data_classification=EnumDataClassification.CONFIDENTIAL,
+        )
+
+        # ACT
+        errors = validate_handler_registration(handler_policy, env_policy)
+
+        # ASSERT - No secret scope errors should occur
+        secret_errors = [
+            e
+            for e in errors
+            if e.rule_id == EnumSecurityRuleId.SECRET_SCOPE_NOT_PERMITTED
+        ]
+        assert len(secret_errors) == 0
+
 
 class TestClassificationConstraintEnforcement:
     """Tests for data classification validation at registration.
@@ -200,7 +217,6 @@ class TestClassificationConstraintEnforcement:
     def test_classification_exceeds_environment_max(self) -> None:
         """Handler with classification exceeding environment max should fail.
 
-        TDD Requirement: RED: Test classification constraint enforcement
         Expected Error: SECURITY-301
 
         This test verifies that when a handler declares a data classification
@@ -324,7 +340,6 @@ class TestAdapterSecurityConstraints:
     def test_adapter_rejected_when_requesting_secrets(self) -> None:
         """Adapter handler requesting secrets should fail registration.
 
-        TDD Requirement: RED: Test is_adapter=True handler rejected when requesting secrets
         Expected Error: SECURITY-302
 
         Adapters should not have direct secret access - they should use
@@ -431,7 +446,6 @@ class TestAdapterSecurityConstraints:
     def test_adapter_with_non_effect_category_raises_error(self) -> None:
         """Adapter with non-EFFECT handler category should fail registration.
 
-        TDD Requirement: RED: Test is_adapter=True with non-EFFECT category raises validation error
         Expected Error: SECURITY-303
 
         Adapters by definition perform external I/O and must be classified
@@ -556,6 +570,43 @@ class TestAdapterSecurityConstraints:
             if e.rule_id == EnumSecurityRuleId.ADAPTER_MISSING_DOMAIN_ALLOWLIST
         ]
         assert len(domain_errors) == 0
+
+    def test_wildcard_domain_rejected_when_explicit_allowlist_required(self) -> None:
+        """Wildcard '*' in allowed_domains should be rejected when explicit allowlist required.
+
+        Expected Error: SECURITY-304
+
+        When require_explicit_domain_allowlist=True, adapters must specify actual
+        domain names. Using '*' as a wildcard defeats the purpose of the allowlist
+        and should be rejected as equivalent to having no allowlist.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=["*"],  # Wildcard - not an explicit allowlist
+            data_classification=EnumDataClassification.INTERNAL,
+            is_adapter=True,
+            handler_type_category=EnumHandlerTypeCategory.EFFECT,
+        )
+
+        env_policy = ModelEnvironmentPolicy(
+            environment=EnumEnvironment.PRODUCTION,
+            permitted_secret_scopes=frozenset(),
+            max_data_classification=EnumDataClassification.CONFIDENTIAL,
+            require_explicit_domain_allowlist=True,  # Requires explicit domains
+        )
+
+        # ACT
+        errors = validate_handler_registration(handler_policy, env_policy)
+
+        # ASSERT - Wildcard should be treated as missing explicit allowlist
+        assert len(errors) >= 1
+        domain_errors = [
+            e
+            for e in errors
+            if e.rule_id == EnumSecurityRuleId.ADAPTER_MISSING_DOMAIN_ALLOWLIST
+        ]
+        assert len(domain_errors) == 1
 
     def test_valid_adapter_passes_validation(self) -> None:
         """Properly configured adapter should pass all validation."""
@@ -826,3 +877,211 @@ class TestSecurityRuleIdValues:
         ]
 
         assert len(rule_ids) == len(set(rule_ids)), "Duplicate rule IDs found"
+
+
+class TestWildcardSemantics:
+    """Tests for wildcard handling in security policies.
+
+    Wildcards provide a way to express "allow all" semantics for development
+    environments where strict security constraints are less critical.
+    """
+
+    def test_secret_scope_wildcard_allows_all_scopes(self) -> None:
+        """Environment with "*" in permitted_secret_scopes should allow all scopes.
+
+        This is the standard pattern for development environments where
+        secret isolation is less critical.
+
+        See Also:
+            ModelEnvironmentPolicy docstring example showing:
+            permitted_secret_scopes=frozenset({"*"})  # All scopes
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset({"database-creds", "vault-keys", "api-keys"}),
+            allowed_domains=[],
+            data_classification=EnumDataClassification.INTERNAL,
+        )
+
+        env_policy = ModelEnvironmentPolicy(
+            environment=EnumEnvironment.DEVELOPMENT,
+            permitted_secret_scopes=frozenset({"*"}),  # Wildcard allows all
+            max_data_classification=EnumDataClassification.CONFIDENTIAL,
+        )
+
+        # ACT
+        errors = validate_handler_registration(handler_policy, env_policy)
+
+        # ASSERT
+        secret_errors = [
+            e
+            for e in errors
+            if e.rule_id == EnumSecurityRuleId.SECRET_SCOPE_NOT_PERMITTED
+        ]
+        assert len(secret_errors) == 0, "Wildcard should allow all secret scopes"
+
+    def test_secret_scope_wildcard_with_other_scopes(self) -> None:
+        """Wildcard with other scopes should still allow all scopes.
+
+        If "*" is present in the set, all other values are effectively ignored.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset({"unpermitted-scope"}),
+            allowed_domains=[],
+            data_classification=EnumDataClassification.INTERNAL,
+        )
+
+        env_policy = ModelEnvironmentPolicy(
+            environment=EnumEnvironment.DEVELOPMENT,
+            permitted_secret_scopes=frozenset({"*", "api-keys"}),  # Wildcard + specific
+            max_data_classification=EnumDataClassification.CONFIDENTIAL,
+        )
+
+        # ACT
+        errors = validate_handler_registration(handler_policy, env_policy)
+
+        # ASSERT
+        secret_errors = [
+            e
+            for e in errors
+            if e.rule_id == EnumSecurityRuleId.SECRET_SCOPE_NOT_PERMITTED
+        ]
+        assert len(secret_errors) == 0, (
+            "Wildcard should allow all even with other scopes"
+        )
+
+    def test_domain_allowlist_wildcard_rejected_when_explicit_required(self) -> None:
+        """Adapter with "*" in allowed_domains should fail when explicit required.
+
+        When require_explicit_domain_allowlist=True, using ["*"] is treated
+        as equivalent to missing the domain allowlist.
+
+        Expected Error: SECURITY-304
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=["*"],  # Wildcard should be rejected
+            data_classification=EnumDataClassification.INTERNAL,
+            is_adapter=True,
+            handler_type_category=EnumHandlerTypeCategory.EFFECT,
+        )
+
+        env_policy = ModelEnvironmentPolicy(
+            environment=EnumEnvironment.PRODUCTION,
+            permitted_secret_scopes=frozenset(),
+            max_data_classification=EnumDataClassification.CONFIDENTIAL,
+            require_explicit_domain_allowlist=True,
+        )
+
+        # ACT
+        errors = validate_handler_registration(handler_policy, env_policy)
+
+        # ASSERT
+        domain_errors = [
+            e
+            for e in errors
+            if e.rule_id == EnumSecurityRuleId.ADAPTER_MISSING_DOMAIN_ALLOWLIST
+        ]
+        assert len(domain_errors) == 1, "Wildcard domain should be rejected"
+        assert "wildcard" in domain_errors[0].message.lower()
+
+    def test_domain_allowlist_wildcard_allowed_when_not_required(self) -> None:
+        """Adapter with "*" in allowed_domains should pass when not required.
+
+        In development environments, wildcard domain access may be acceptable.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=["*"],  # Wildcard
+            data_classification=EnumDataClassification.INTERNAL,
+            is_adapter=True,
+            handler_type_category=EnumHandlerTypeCategory.EFFECT,
+        )
+
+        env_policy = ModelEnvironmentPolicy(
+            environment=EnumEnvironment.DEVELOPMENT,
+            permitted_secret_scopes=frozenset(),
+            max_data_classification=EnumDataClassification.CONFIDENTIAL,
+            require_explicit_domain_allowlist=False,  # Not required
+        )
+
+        # ACT
+        errors = validate_handler_registration(handler_policy, env_policy)
+
+        # ASSERT
+        domain_errors = [
+            e
+            for e in errors
+            if e.rule_id == EnumSecurityRuleId.ADAPTER_MISSING_DOMAIN_ALLOWLIST
+        ]
+        assert len(domain_errors) == 0, "Wildcard should be allowed when not required"
+
+    def test_domain_allowlist_with_wildcard_and_specific_rejected(self) -> None:
+        """Adapter with ["*", "api.example.com"] should fail when explicit required.
+
+        If "*" appears anywhere in the list, the whole list is treated as
+        non-explicit, regardless of other entries.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=["api.example.com", "*"],  # Wildcard mixed with specific
+            data_classification=EnumDataClassification.INTERNAL,
+            is_adapter=True,
+            handler_type_category=EnumHandlerTypeCategory.EFFECT,
+        )
+
+        env_policy = ModelEnvironmentPolicy(
+            environment=EnumEnvironment.PRODUCTION,
+            permitted_secret_scopes=frozenset(),
+            max_data_classification=EnumDataClassification.CONFIDENTIAL,
+            require_explicit_domain_allowlist=True,
+        )
+
+        # ACT
+        errors = validate_handler_registration(handler_policy, env_policy)
+
+        # ASSERT
+        domain_errors = [
+            e
+            for e in errors
+            if e.rule_id == EnumSecurityRuleId.ADAPTER_MISSING_DOMAIN_ALLOWLIST
+        ]
+        assert len(domain_errors) == 1, (
+            "Wildcard should be rejected even with other domains"
+        )
+
+    def test_explicit_domains_passes_when_required(self) -> None:
+        """Adapter with explicit domains should pass when required.
+
+        This verifies the positive case - explicit domains without wildcards.
+        """
+        # ARRANGE
+        handler_policy = ModelHandlerSecurityPolicy(
+            secret_scopes=frozenset(),
+            allowed_domains=["api.example.com", "cdn.example.com"],
+            data_classification=EnumDataClassification.INTERNAL,
+            is_adapter=True,
+            handler_type_category=EnumHandlerTypeCategory.EFFECT,
+        )
+
+        env_policy = ModelEnvironmentPolicy(
+            environment=EnumEnvironment.PRODUCTION,
+            permitted_secret_scopes=frozenset(),
+            max_data_classification=EnumDataClassification.CONFIDENTIAL,
+            require_explicit_domain_allowlist=True,
+        )
+
+        # ACT
+        errors = validate_handler_registration(handler_policy, env_policy)
+
+        # ASSERT
+        domain_errors = [
+            e
+            for e in errors
+            if e.rule_id == EnumSecurityRuleId.ADAPTER_MISSING_DOMAIN_ALLOWLIST
+        ]
+        assert len(domain_errors) == 0, "Explicit domains should pass"

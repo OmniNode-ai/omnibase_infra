@@ -171,6 +171,11 @@ def _validate_secret_scopes(
 
     SECURITY-300: Secret scope not permitted by environment.
 
+    Wildcard Support:
+        If permitted_secret_scopes contains "*", all secret scopes are allowed.
+        This is intended for development environments where secret isolation
+        is less critical.
+
     Args:
         handler_policy: Handler-declared security policy.
         env_policy: Environment-level security constraints.
@@ -180,6 +185,10 @@ def _validate_secret_scopes(
         List of errors for unpermitted secret scopes.
     """
     errors: list[ModelHandlerValidationError] = []
+
+    # If "*" is in permitted_secret_scopes, all scopes are allowed
+    if "*" in env_policy.permitted_secret_scopes:
+        return errors
 
     # Find unpermitted scopes
     unpermitted = handler_policy.secret_scopes - env_policy.permitted_secret_scopes
@@ -320,19 +329,31 @@ def _validate_adapter_constraints(
         errors.append(error)
 
     # SECURITY-304: Adapter missing domain allowlist
-    if (
-        env_policy.require_explicit_domain_allowlist
-        and not handler_policy.allowed_domains
-    ):
+    # Empty allowed_domains or containing "*" wildcard is treated as missing
+    # when explicit domain allowlist is required
+    has_explicit_domains = (
+        bool(handler_policy.allowed_domains)
+        and "*" not in handler_policy.allowed_domains
+    )
+    if env_policy.require_explicit_domain_allowlist and not has_explicit_domains:
+        # Determine appropriate message based on violation type
+        if not handler_policy.allowed_domains:
+            violation_detail = "missing explicit domain allowlist"
+        else:
+            violation_detail = (
+                "using wildcard '*' in domain allowlist (explicit domains required)"
+            )
+
         error = ModelHandlerValidationError.from_security_violation(
             rule_id=EnumSecurityRuleId.ADAPTER_MISSING_DOMAIN_ALLOWLIST,
             message=(
-                "Adapter handler missing explicit domain allowlist "
+                f"Adapter handler {violation_detail} "
                 f"which is required in {env_policy.environment.value} environment"
             ),
             remediation_hint=(
                 "Add allowed_domains to handler policy specifying which "
-                "external domains the adapter may communicate with"
+                "external domains the adapter may communicate with. "
+                "Wildcard '*' is not permitted when explicit domain allowlist is required."
             ),
             handler_identity=handler_identity,
         )
