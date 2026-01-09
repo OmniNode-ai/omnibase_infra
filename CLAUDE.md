@@ -89,6 +89,77 @@ handler_routing:
 - **One model per file** - Each file contains exactly one `Model*` class
 - **PEP 604 unions** - Use `X | None` not `Optional[X]`
 
+### Any Type CI Enforcement
+
+The `Any` type policy is enforced via pre-commit hook and CI check (`scripts/validate.py any_types`).
+
+**Enforcement Levels:**
+1. **Pre-commit Hook**: Runs `poetry run python scripts/validate.py any_types` before commit
+2. **CI Pipeline**: Runs as part of `ONEX Validators` job - blocks merge on violations (non-zero exit)
+
+| Context | Allowed | Enforcement |
+|---------|---------|-------------|
+| Function parameters | NO - use `object` | CI BLOCKED |
+| Return types | NO - use `object` | CI BLOCKED |
+| Pydantic `Field()` with `NOTE:` comment | YES | CI ALLOWED |
+| Pydantic `Field()` without `NOTE:` comment | NO | CI BLOCKED |
+| Variables, type aliases | NO | CI BLOCKED |
+
+**Pydantic Workaround** (only when technically required):
+```python
+from typing import Any
+from pydantic import Field
+
+class MyModel(BaseModel):
+    # NOTE: Any required for Pydantic discriminated union - see ADR
+    payload: Any = Field(...)
+```
+
+**Exemption Mechanisms**:
+- `@allow_any` decorator with documented reason
+- `ONEX_EXCLUDE: any_type` inline comment (use sparingly)
+
+**Related**: `docs/decisions/adr-any-type-pydantic-workaround.md`
+
+### Any Type Validator Detection and Limitations
+
+The AST-based Any type validator scans Python source files to detect `Any` usage.
+
+**What IS Detected** (will trigger violations):
+- Direct `Any` annotations: `def foo(x: Any) -> Any`
+- `Any` in Pydantic fields: `field: Any = Field(...)`
+- `Any` as generic argument: `list[Any]`, `dict[str, Any]`, `Callable[..., Any]`
+- Type aliases with `Any`: `MyType = dict[str, Any]`
+- String annotations: `from __future__ import annotations` - these ARE correctly resolved by the AST parser
+
+**What is NOT Detected** (validator limitations):
+1. **External type aliases**: When `Any` is hidden behind an imported alias:
+   ```python
+   from external_lib import DynamicType  # If DynamicType = Any, NOT detected
+   def process(data: DynamicType): ...   # Violation NOT caught
+   ```
+
+2. **Runtime type construction**: Factory patterns creating types dynamically:
+   ```python
+   def make_type() -> type:
+       return Any  # NOT detected - evaluated at runtime
+   DynamicType = make_type()
+   ```
+
+3. **Indirect imports**: `Any` re-exported through intermediate modules may not be traced.
+
+**Example @allow_any Usage**:
+```python
+from omnibase_infra.decorators import allow_any
+
+@allow_any("Required for legacy API compatibility - see OMN-1234")
+def legacy_handler(data: Any) -> Any:
+    """Handle legacy API payloads."""
+    return process_legacy(data)
+```
+
+The `@allow_any` decorator is recognized by the validator when applied to functions or classes. The decorator is a no-op at runtime - it only serves as an AST marker for the validator to skip the decorated definition.
+
 ### File & Class Naming
 
 | Type | File Pattern | Class Pattern |

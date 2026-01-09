@@ -7,9 +7,10 @@ protocol identification, policy classification, dispatch status,
 message categories, topic types, topic standards, chain validation,
 registration states, handler types, handler error types, handler source types,
 node archetypes, introspection reasons, contract types, circuit breaker states, retry error categories,
-security validation, and other infrastructure concerns.
+any type violations, security validation, and other infrastructure concerns.
 
 Exports:
+    EnumAnyTypeViolation: Any type violation categories for strong typing validation
     EnumChainViolationType: Chain violation types for correlation/causation validation
     EnumCircuitState: Circuit breaker states (CLOSED, OPEN, HALF_OPEN)
     EnumContractType: Contract types for ONEX nodes (effect, compute, reducer, orchestrator)
@@ -35,6 +36,7 @@ Exports:
 
 from omnibase_core.enums import EnumTopicType
 
+from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.enums.enum_circuit_state import EnumCircuitState
 from omnibase_infra.enums.enum_contract_type import EnumContractType
@@ -59,6 +61,7 @@ from omnibase_infra.enums.enum_security_rule_id import EnumSecurityRuleId
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 
 __all__: list[str] = [
+    "EnumAnyTypeViolation",
     "EnumChainViolationType",
     "EnumCircuitState",
     "EnumContractType",
