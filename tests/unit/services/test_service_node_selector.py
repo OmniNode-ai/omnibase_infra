@@ -3,26 +3,24 @@
 """Unit tests for ServiceNodeSelector.
 
 This test suite validates the node selection service that implements various
-strategies for selecting nodes from a candidate list (FIRST, RANDOM, ROUND_ROBIN,
-LEAST_LOADED).
+strategies for selecting nodes from a candidate list (FIRST, RANDOM, ROUND_ROBIN).
+Note: LEAST_LOADED is not yet implemented and raises NotImplementedError.
 
 Test Organization:
     - TestEnumSelectionStrategy: Enum definition tests
     - TestSelectionStrategyFirst: FIRST strategy tests
     - TestSelectionStrategyRandom: RANDOM strategy tests
     - TestSelectionStrategyRoundRobin: ROUND_ROBIN strategy tests
-    - TestSelectionStrategyLeastLoaded: LEAST_LOADED strategy tests
+    - TestSelectionStrategyLeastLoaded: LEAST_LOADED strategy tests (NotImplementedError)
     - TestServiceNodeSelectorEdgeCases: Edge cases and error handling
-
-TDD Note:
-    These tests are written TDD-style BEFORE the implementation exists.
-    They define the expected API contract for ServiceNodeSelector.
+    - TestServiceNodeSelectorThreadSafety: Async lock thread safety tests
 
 Coverage Goals:
     - >90% code coverage for service
     - All selection strategies tested
     - Round robin state tracking verified
     - Edge cases (empty list, single item) covered
+    - Thread safety with asyncio.Lock verified
 
 Related Tickets:
     - OMN-1135: ServiceCapabilityQuery Implementation
@@ -31,6 +29,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -145,7 +144,8 @@ class TestEnumSelectionStrategy:
 class TestSelectionStrategyFirst:
     """Tests for FIRST selection strategy."""
 
-    def test_first_strategy_returns_first_candidate(self) -> None:
+    @pytest.mark.asyncio
+    async def test_first_strategy_returns_first_candidate(self) -> None:
         """Should always return the first candidate in the list.
 
         Given: A list of candidates
@@ -155,7 +155,7 @@ class TestSelectionStrategyFirst:
         candidates = create_candidate_list(5)
 
         selector = ServiceNodeSelector()
-        result = selector.select(
+        result = await selector.select(
             candidates=candidates,
             strategy=EnumSelectionStrategy.FIRST,
         )
@@ -163,12 +163,13 @@ class TestSelectionStrategyFirst:
         assert result is not None
         assert result.entity_id == candidates[0].entity_id
 
-    def test_first_strategy_with_single_candidate(self) -> None:
+    @pytest.mark.asyncio
+    async def test_first_strategy_with_single_candidate(self) -> None:
         """Should return the only candidate when list has one element."""
         candidates = create_candidate_list(1)
 
         selector = ServiceNodeSelector()
-        result = selector.select(
+        result = await selector.select(
             candidates=candidates,
             strategy=EnumSelectionStrategy.FIRST,
         )
@@ -176,13 +177,16 @@ class TestSelectionStrategyFirst:
         assert result is not None
         assert result.entity_id == candidates[0].entity_id
 
-    def test_first_strategy_is_deterministic(self) -> None:
+    @pytest.mark.asyncio
+    async def test_first_strategy_is_deterministic(self) -> None:
         """Should return the same result on repeated calls."""
         candidates = create_candidate_list(3)
 
         selector = ServiceNodeSelector()
         results = [
-            selector.select(candidates=candidates, strategy=EnumSelectionStrategy.FIRST)
+            await selector.select(
+                candidates=candidates, strategy=EnumSelectionStrategy.FIRST
+            )
             for _ in range(10)
         ]
 
@@ -194,7 +198,8 @@ class TestSelectionStrategyFirst:
 class TestSelectionStrategyRandom:
     """Tests for RANDOM selection strategy."""
 
-    def test_random_strategy_returns_valid_candidate(self) -> None:
+    @pytest.mark.asyncio
+    async def test_random_strategy_returns_valid_candidate(self) -> None:
         """Should return a candidate that exists in the input list.
 
         Given: A list of candidates
@@ -204,7 +209,7 @@ class TestSelectionStrategyRandom:
         candidates = create_candidate_list(5)
 
         selector = ServiceNodeSelector()
-        result = selector.select(
+        result = await selector.select(
             candidates=candidates,
             strategy=EnumSelectionStrategy.RANDOM,
         )
@@ -212,12 +217,13 @@ class TestSelectionStrategyRandom:
         assert result is not None
         assert result.entity_id in [c.entity_id for c in candidates]
 
-    def test_random_strategy_with_single_candidate(self) -> None:
+    @pytest.mark.asyncio
+    async def test_random_strategy_with_single_candidate(self) -> None:
         """Should return the only candidate when list has one element."""
         candidates = create_candidate_list(1)
 
         selector = ServiceNodeSelector()
-        result = selector.select(
+        result = await selector.select(
             candidates=candidates,
             strategy=EnumSelectionStrategy.RANDOM,
         )
@@ -225,7 +231,8 @@ class TestSelectionStrategyRandom:
         assert result is not None
         assert result.entity_id == candidates[0].entity_id
 
-    def test_random_strategy_distributes_selections(self) -> None:
+    @pytest.mark.asyncio
+    async def test_random_strategy_distributes_selections(self) -> None:
         """Should distribute selections across candidates over many calls.
 
         Note: This is a statistical test - with 1000 selections across 5 candidates,
@@ -239,7 +246,7 @@ class TestSelectionStrategyRandom:
         selected_ids = set()
 
         for _ in range(1000):
-            result = selector.select(
+            result = await selector.select(
                 candidates=candidates,
                 strategy=EnumSelectionStrategy.RANDOM,
             )
@@ -254,7 +261,8 @@ class TestSelectionStrategyRandom:
 class TestSelectionStrategyRoundRobin:
     """Tests for ROUND_ROBIN selection strategy."""
 
-    def test_round_robin_cycles_through_candidates(self) -> None:
+    @pytest.mark.asyncio
+    async def test_round_robin_cycles_through_candidates(self) -> None:
         """Should cycle through candidates in order.
 
         Given: A list of 3 candidates
@@ -268,7 +276,7 @@ class TestSelectionStrategyRoundRobin:
 
         results = []
         for _ in range(6):
-            result = selector.select(
+            result = await selector.select(
                 candidates=candidates,
                 strategy=EnumSelectionStrategy.ROUND_ROBIN,
                 selection_key=selection_key,
@@ -280,7 +288,8 @@ class TestSelectionStrategyRoundRobin:
         for i, result in enumerate(results):
             assert result.entity_id == expected_pattern[i].entity_id
 
-    def test_round_robin_tracks_state_per_key(self) -> None:
+    @pytest.mark.asyncio
+    async def test_round_robin_tracks_state_per_key(self) -> None:
         """Should maintain separate rotation state for different keys.
 
         Given: Two different selection keys
@@ -292,19 +301,19 @@ class TestSelectionStrategyRoundRobin:
         selector = ServiceNodeSelector()
 
         # Key A: select twice
-        a_result_1 = selector.select(
+        a_result_1 = await selector.select(
             candidates=candidates,
             strategy=EnumSelectionStrategy.ROUND_ROBIN,
             selection_key="key_a",
         )
-        a_result_2 = selector.select(
+        a_result_2 = await selector.select(
             candidates=candidates,
             strategy=EnumSelectionStrategy.ROUND_ROBIN,
             selection_key="key_a",
         )
 
         # Key B: select once (should start fresh)
-        b_result_1 = selector.select(
+        b_result_1 = await selector.select(
             candidates=candidates,
             strategy=EnumSelectionStrategy.ROUND_ROBIN,
             selection_key="key_b",
@@ -316,7 +325,8 @@ class TestSelectionStrategyRoundRobin:
         assert a_result_2.entity_id == candidates[1].entity_id
         assert b_result_1.entity_id == candidates[0].entity_id
 
-    def test_round_robin_resets_when_candidate_list_changes(self) -> None:
+    @pytest.mark.asyncio
+    async def test_round_robin_resets_when_candidate_list_changes(self) -> None:
         """Should handle changing candidate list sizes gracefully.
 
         Given: Round robin state for a key
@@ -330,19 +340,19 @@ class TestSelectionStrategyRoundRobin:
         selection_key = "resizing_test"
 
         # Use 3-item list
-        selector.select(
+        await selector.select(
             candidates=candidates_3,
             strategy=EnumSelectionStrategy.ROUND_ROBIN,
             selection_key=selection_key,
         )
-        selector.select(
+        await selector.select(
             candidates=candidates_3,
             strategy=EnumSelectionStrategy.ROUND_ROBIN,
             selection_key=selection_key,
         )
 
         # Switch to 5-item list - should handle gracefully
-        result = selector.select(
+        result = await selector.select(
             candidates=candidates_5,
             strategy=EnumSelectionStrategy.ROUND_ROBIN,
             selection_key=selection_key,
@@ -352,7 +362,8 @@ class TestSelectionStrategyRoundRobin:
         assert result is not None
         assert result.entity_id in [c.entity_id for c in candidates_5]
 
-    def test_round_robin_with_single_candidate(self) -> None:
+    @pytest.mark.asyncio
+    async def test_round_robin_with_single_candidate(self) -> None:
         """Should always return the same candidate when list has one element."""
         candidates = create_candidate_list(1)
 
@@ -360,7 +371,7 @@ class TestSelectionStrategyRoundRobin:
         selection_key = "single_test"
 
         results = [
-            selector.select(
+            await selector.select(
                 candidates=candidates,
                 strategy=EnumSelectionStrategy.ROUND_ROBIN,
                 selection_key=selection_key,
@@ -374,50 +385,69 @@ class TestSelectionStrategyRoundRobin:
 
 @pytest.mark.unit
 class TestSelectionStrategyLeastLoaded:
-    """Tests for LEAST_LOADED selection strategy."""
+    """Tests for LEAST_LOADED selection strategy (NotImplementedError)."""
 
-    def test_least_loaded_returns_first_with_warning(self) -> None:
-        """Should return first candidate with warning (not implemented).
+    @pytest.mark.asyncio
+    async def test_least_loaded_raises_not_implemented_error(self) -> None:
+        """Should raise NotImplementedError when LEAST_LOADED is requested.
 
         Given: LEAST_LOADED strategy (requires load metrics)
-        When: select is called
-        Then: Falls back to FIRST strategy with a warning log
+        When: select is called with multiple candidates
+        Then: Raises NotImplementedError with clear message
 
         Note: Full implementation requires load metrics from monitoring system.
-        Initial implementation falls back to FIRST strategy.
         """
         candidates = create_candidate_list(3)
 
         selector = ServiceNodeSelector()
 
-        # Should work but log a warning about fallback
-        result = selector.select(
-            candidates=candidates,
-            strategy=EnumSelectionStrategy.LEAST_LOADED,
+        with pytest.raises(NotImplementedError) as exc_info:
+            await selector.select(
+                candidates=candidates,
+                strategy=EnumSelectionStrategy.LEAST_LOADED,
+            )
+
+        assert "LEAST_LOADED selection strategy is not yet implemented" in str(
+            exc_info.value
         )
+        assert "FIRST, RANDOM, or ROUND_ROBIN" in str(exc_info.value)
 
-        assert result is not None
-        # Falls back to first
-        assert result.entity_id == candidates[0].entity_id
-
-    def test_least_loaded_with_empty_list(self) -> None:
-        """Should return None when candidate list is empty."""
+    @pytest.mark.asyncio
+    async def test_least_loaded_with_empty_list(self) -> None:
+        """Should return None when candidate list is empty (before NotImplementedError)."""
         candidates: list[ModelRegistrationProjection] = []
 
         selector = ServiceNodeSelector()
-        result = selector.select(
+        result = await selector.select(
             candidates=candidates,
             strategy=EnumSelectionStrategy.LEAST_LOADED,
         )
 
+        # Empty list returns None before checking strategy
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_least_loaded_with_single_candidate(self) -> None:
+        """Should return single candidate without error (optimization path)."""
+        candidates = create_candidate_list(1)
+
+        selector = ServiceNodeSelector()
+        result = await selector.select(
+            candidates=candidates,
+            strategy=EnumSelectionStrategy.LEAST_LOADED,
+        )
+
+        # Single candidate returns early before checking strategy
+        assert result is not None
+        assert result.entity_id == candidates[0].entity_id
 
 
 @pytest.mark.unit
 class TestServiceNodeSelectorEdgeCases:
     """Tests for edge cases in ServiceNodeSelector."""
 
-    def test_empty_candidates_returns_none(self) -> None:
+    @pytest.mark.asyncio
+    async def test_empty_candidates_returns_none(self) -> None:
         """Should return None when candidate list is empty.
 
         Given: An empty candidate list
@@ -428,34 +458,37 @@ class TestServiceNodeSelectorEdgeCases:
 
         selector = ServiceNodeSelector()
 
-        # Test with each strategy
+        # Test with each strategy (empty list returns early before strategy check)
         for strategy in EnumSelectionStrategy:
-            result = selector.select(
+            result = await selector.select(
                 candidates=candidates,
                 strategy=strategy,
             )
             assert result is None
 
-    def test_single_candidate_all_strategies(self) -> None:
+    @pytest.mark.asyncio
+    async def test_single_candidate_all_strategies(self) -> None:
         """Should return the single candidate for all strategies.
 
         Given: A list with exactly one candidate
         When: select is called with any strategy
-        Then: Returns that candidate
+        Then: Returns that candidate (single candidate optimization)
         """
         candidates = create_candidate_list(1)
 
         selector = ServiceNodeSelector()
 
+        # Single candidate returns early before strategy check
         for strategy in EnumSelectionStrategy:
-            result = selector.select(
+            result = await selector.select(
                 candidates=candidates,
                 strategy=strategy,
             )
             assert result is not None
             assert result.entity_id == candidates[0].entity_id
 
-    def test_round_robin_uses_default_key_when_not_specified(self) -> None:
+    @pytest.mark.asyncio
+    async def test_round_robin_uses_default_key_when_not_specified(self) -> None:
         """Should use default key for ROUND_ROBIN when not specified.
 
         Given: ROUND_ROBIN strategy
@@ -467,7 +500,7 @@ class TestServiceNodeSelectorEdgeCases:
         selector = ServiceNodeSelector()
 
         # Implementation uses default key when not provided
-        result = selector.select(
+        result = await selector.select(
             candidates=candidates,
             strategy=EnumSelectionStrategy.ROUND_ROBIN,
             # No selection_key provided
@@ -478,7 +511,7 @@ class TestServiceNodeSelectorEdgeCases:
         assert result.entity_id == candidates[0].entity_id
 
         # Verify state was tracked under "_default" key
-        state = selector.get_round_robin_state()
+        state = await selector.get_round_robin_state()
         assert "_default" in state
 
 
@@ -490,8 +523,12 @@ class TestServiceNodeSelectorInstantiation:
         """Should instantiate with default configuration."""
         selector = ServiceNodeSelector()
         assert selector is not None
+        # Verify lock is initialized
+        assert hasattr(selector, "_round_robin_lock")
+        assert isinstance(selector._round_robin_lock, asyncio.Lock)
 
-    def test_round_robin_state_isolation(self) -> None:
+    @pytest.mark.asyncio
+    async def test_round_robin_state_isolation(self) -> None:
         """Each ServiceNodeSelector instance should have isolated state.
 
         Given: Two separate ServiceNodeSelector instances
@@ -505,26 +542,27 @@ class TestServiceNodeSelectorInstantiation:
         selection_key = "shared_key"
 
         # Advance selector1 twice
-        selector1.select(
+        await selector1.select(
             candidates,
             EnumSelectionStrategy.ROUND_ROBIN,
             selection_key=selection_key,
         )
-        selector1.select(
+        await selector1.select(
             candidates,
             EnumSelectionStrategy.ROUND_ROBIN,
             selection_key=selection_key,
         )
 
         # selector2 should start fresh
-        result = selector2.select(
+        result = await selector2.select(
             candidates,
             EnumSelectionStrategy.ROUND_ROBIN,
             selection_key=selection_key,
         )
         assert result.entity_id == candidates[0].entity_id  # First candidate
 
-    def test_reset_round_robin_state(self) -> None:
+    @pytest.mark.asyncio
+    async def test_reset_round_robin_state(self) -> None:
         """Should be able to reset round robin state for a key.
 
         Given: Round robin state accumulated for a key
@@ -537,27 +575,94 @@ class TestServiceNodeSelectorInstantiation:
         selection_key = "clearable_key"
 
         # Advance state
-        selector.select(
+        await selector.select(
             candidates,
             EnumSelectionStrategy.ROUND_ROBIN,
             selection_key=selection_key,
         )
-        selector.select(
+        await selector.select(
             candidates,
             EnumSelectionStrategy.ROUND_ROBIN,
             selection_key=selection_key,
         )
 
         # Reset state for specific key
-        selector.reset_round_robin_state(selection_key)
+        await selector.reset_round_robin_state(selection_key)
 
         # Should start from beginning
-        result = selector.select(
+        result = await selector.select(
             candidates,
             EnumSelectionStrategy.ROUND_ROBIN,
             selection_key=selection_key,
         )
         assert result.entity_id == candidates[0].entity_id
+
+
+@pytest.mark.unit
+class TestServiceNodeSelectorThreadSafety:
+    """Tests for thread safety with asyncio.Lock."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_round_robin_selections(self) -> None:
+        """Should handle concurrent round-robin selections safely.
+
+        Given: A shared ServiceNodeSelector instance
+        When: Multiple coroutines make concurrent round-robin selections
+        Then: All selections are valid and no race conditions occur
+        """
+        candidates = create_candidate_list(5)
+        selector = ServiceNodeSelector()
+        selection_key = "concurrent_test"
+
+        async def make_selection() -> ModelRegistrationProjection | None:
+            return await selector.select(
+                candidates=candidates,
+                strategy=EnumSelectionStrategy.ROUND_ROBIN,
+                selection_key=selection_key,
+            )
+
+        # Run 100 concurrent selections
+        tasks = [make_selection() for _ in range(100)]
+        results = await asyncio.gather(*tasks)
+
+        # All results should be valid candidates
+        for result in results:
+            assert result is not None
+            assert result.entity_id in [c.entity_id for c in candidates]
+
+    @pytest.mark.asyncio
+    async def test_concurrent_state_access(self) -> None:
+        """Should handle concurrent get/reset operations safely.
+
+        Given: A shared ServiceNodeSelector instance
+        When: Multiple coroutines concurrently get and reset state
+        Then: No race conditions occur
+        """
+        candidates = create_candidate_list(3)
+        selector = ServiceNodeSelector()
+        selection_key = "state_test"
+
+        async def select_and_get_state() -> dict[str, int]:
+            await selector.select(
+                candidates=candidates,
+                strategy=EnumSelectionStrategy.ROUND_ROBIN,
+                selection_key=selection_key,
+            )
+            return await selector.get_round_robin_state()
+
+        async def reset_state() -> None:
+            await selector.reset_round_robin_state(selection_key)
+
+        # Run concurrent operations
+        tasks = []
+        for i in range(50):
+            if i % 5 == 0:
+                tasks.append(reset_state())
+            else:
+                tasks.append(select_and_get_state())
+
+        # Should complete without errors
+        await asyncio.gather(*tasks)
 
 
 __all__: list[str] = []

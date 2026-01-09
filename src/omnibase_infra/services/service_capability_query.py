@@ -337,6 +337,17 @@ class ServiceCapabilityQuery:
         Returns:
             Resolved node registration, or None if not found.
 
+        Note:
+            Performance consideration: When resolving by intent types, this method
+            executes sequential queries (one database call per intent type). For N
+            intent types in the dependency spec, N separate queries are made to the
+            registry adapter. This is acceptable for typical use cases with 1-3 intent
+            types, but may become a bottleneck at scale.
+
+            Future optimization: A bulk query method could be added to the registry
+            adapter that accepts multiple intent types and uses an IN clause, reducing
+            N queries to a single query for better performance.
+
         Example:
             >>> spec = ModelDependencySpec(
             ...     name="storage",
@@ -418,7 +429,7 @@ class ServiceCapabilityQuery:
 
         # Apply selection strategy
         strategy = self._parse_selection_strategy(dependency_spec.selection_strategy)
-        selected = self._node_selector.select(
+        selected = await self._node_selector.select(
             candidates=candidates,
             strategy=strategy,
             selection_key=dependency_spec.name,

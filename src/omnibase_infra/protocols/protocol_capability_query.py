@@ -108,8 +108,10 @@ class ProtocolCapabilityQuery(Protocol):
                 "kafka.consumer", "consul.registration").
             contract_type: Optional filter by contract type ("effect", "compute",
                 "reducer", "orchestrator").
-            state: Optional state filter (e.g., EnumRegistrationState.ACTIVE).
-                Default behavior is implementation-defined.
+            state: Registration state filter. When None (default), filters to
+                EnumRegistrationState.ACTIVE to return only actively registered
+                nodes. Pass an explicit EnumRegistrationState value to query
+                nodes in other states (e.g., PENDING, INACTIVE).
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -141,8 +143,10 @@ class ProtocolCapabilityQuery(Protocol):
                 "consul.register", "kafka.publish").
             contract_type: Filter by contract type (default: "effect").
                 Intents are typically handled by effect nodes.
-            state: Optional state filter (e.g., EnumRegistrationState.ACTIVE).
-                Default behavior is implementation-defined.
+            state: Registration state filter. When None (default), filters to
+                EnumRegistrationState.ACTIVE to return only actively registered
+                nodes. Pass an explicit EnumRegistrationState value to query
+                nodes in other states (e.g., PENDING, INACTIVE).
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -174,8 +178,10 @@ class ProtocolCapabilityQuery(Protocol):
                 "ProtocolReducer", "ProtocolDatabaseAdapter").
             contract_type: Optional filter by contract type ("effect", "compute",
                 "reducer", "orchestrator").
-            state: Optional state filter (e.g., EnumRegistrationState.ACTIVE).
-                Default behavior is implementation-defined.
+            state: Registration state filter. When None (default), filters to
+                EnumRegistrationState.ACTIVE to return only actively registered
+                nodes. Pass an explicit EnumRegistrationState value to query
+                nodes in other states (e.g., PENDING, INACTIVE).
 
         Returns:
             List of matching registration projections. Empty list if no matches.
