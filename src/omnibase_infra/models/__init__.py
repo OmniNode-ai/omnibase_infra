@@ -47,6 +47,7 @@ from omnibase_infra.models.registration import (
     ModelNodeRegistration,
 )
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+from omnibase_infra.models.runtime import ModelLoadedHandler
 from omnibase_infra.models.validation import (
     ModelCoverageMetrics,
     ModelExecutionShapeRule,
@@ -81,6 +82,8 @@ __all__: list[str] = [
     "ModelHealthCheckResult",
     # Registration models
     "ModelIntrospectionMetrics",
+    # Runtime models
+    "ModelLoadedHandler",
     # Logging models
     "ModelLogContext",
     "ModelNodeCapabilities",

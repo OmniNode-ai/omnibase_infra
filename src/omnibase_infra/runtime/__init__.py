@@ -143,6 +143,17 @@ from omnibase_infra.runtime.introspection_event_router import (
     IntrospectionEventRouter,
 )
 
+# Handler plugin loader (OMN-1132)
+from omnibase_infra.runtime.handler_plugin_loader import (
+    CONTRACT_YAML_FILENAME,
+    HANDLER_CONTRACT_FILENAME,
+    HandlerPluginLoader,
+    MAX_CONTRACT_SIZE,
+)
+from omnibase_infra.runtime.protocol_handler_plugin_loader import (
+    ProtocolHandlerPluginLoader,
+)
+
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
 from omnibase_infra.runtime.chain_aware_dispatch import (
     ChainAwareDispatcher,
@@ -236,4 +247,10 @@ __all__: list[str] = [
     "DispatcherNodeRegistrationAcked",
     # Introspection event router (PR #101)
     "IntrospectionEventRouter",
+    # Handler plugin loader (OMN-1132)
+    "CONTRACT_YAML_FILENAME",
+    "HANDLER_CONTRACT_FILENAME",
+    "HandlerPluginLoader",
+    "MAX_CONTRACT_SIZE",
+    "ProtocolHandlerPluginLoader",
 ]

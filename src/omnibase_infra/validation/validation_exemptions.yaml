@@ -1044,6 +1044,48 @@ pattern_exemptions:
       - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-1097
+  # ==========================================================================
+  # Handler Plugin Loader Exemptions (OMN-1132)
+  # ==========================================================================
+  # HandlerPluginLoader discovers and loads ONEX handlers from contract YAML files.
+  # The "Handler" in the name refers to ONEX handler contracts being loaded,
+  # not an anti-pattern manager/helper class.
+  - file_pattern: 'handler_plugin_loader\.py'
+    class_pattern: "Class name 'HandlerPluginLoader'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      HandlerPluginLoader loads ONEX handler contracts from YAML files. The "Handler" refers to ONEX handler contracts being discovered and loaded, not an anti-pattern manager class. This is legitimate handler infrastructure code.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - CLAUDE.md (ONEX Architecture - Handler Types)
+    ticket: OMN-1132
+  - file_pattern: 'protocol_handler_plugin_loader\.py'
+    class_pattern: "Class name 'ProtocolHandlerPluginLoader'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ProtocolHandlerPluginLoader defines the interface for handler plugin loading. The "Handler" refers to ONEX handler contracts, consistent with HandlerPluginLoader.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1132
+  - file_pattern: 'model_loaded_handler\.py'
+    class_pattern: "Class name 'ModelLoadedHandler'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ModelLoadedHandler represents metadata about a loaded ONEX handler contract. The "Handler" refers to ONEX handler concepts, not an anti-pattern.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1132
+  - file_pattern: 'model_loaded_handler\.py'
+    violation_pattern: "Field 'handler_name' might reference an entity"
+    reason: >
+      handler_name is a human-readable identifier for the handler from the contract (e.g., "auth-handler"). It's a semantic identifier, not an entity reference.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers)
+    ticket: OMN-1132
   - file_pattern: 'model_handler_descriptor\.py'
     violation_pattern: "Field 'handler_id' should use UUID"
     reason: >
