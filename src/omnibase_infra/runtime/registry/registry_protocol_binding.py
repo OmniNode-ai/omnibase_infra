@@ -179,11 +179,35 @@ class ProtocolBindingRegistry:
                           Should be one of the HANDLER_TYPE_* constants.
             handler_cls: Handler class implementing the ProtocolHandler protocol.
 
+        Raises:
+            RegistryError: If handler_cls does not implement the ProtocolHandler protocol
+                          (missing or non-callable handle() method).
+
         Example:
             >>> registry = ProtocolBindingRegistry()
             >>> registry.register(HANDLER_TYPE_HTTP, HttpHandler)
             >>> registry.register(HANDLER_TYPE_DATABASE, PostgresHandler)
         """
+        # Runtime type validation: Ensure handler_cls implements ProtocolHandler protocol
+        # Check if handle() method exists and is callable
+        handle_attr = getattr(handler_cls, "handle", None)
+
+        if handle_attr is None:
+            raise RegistryError(
+                f"Handler class {handler_cls.__name__!r} does not implement "
+                f"ProtocolHandler protocol: missing 'handle()' method",
+                protocol_type=protocol_type,
+                handler_class=handler_cls.__name__,
+            )
+
+        if not callable(handle_attr):
+            raise RegistryError(
+                f"Handler class {handler_cls.__name__!r} does not implement "
+                f"ProtocolHandler protocol: handle() method (not callable)",
+                protocol_type=protocol_type,
+                handler_class=handler_cls.__name__,
+            )
+
         with self._lock:
             self._registry[protocol_type] = handler_cls
 
@@ -212,15 +236,14 @@ class ProtocolBindingRegistry:
         """
         with self._lock:
             handler_cls = self._registry.get(protocol_type)
-
-        if handler_cls is None:
-            registered = self.list_protocols()
-            raise RegistryError(
-                f"No handler registered for protocol type: {protocol_type!r}. "
-                f"Registered protocols: {registered}",
-                protocol_type=protocol_type,
-                registered_protocols=registered,
-            )
+            if handler_cls is None:
+                registered = sorted(self._registry.keys())
+                raise RegistryError(
+                    f"No handler registered for protocol type: {protocol_type!r}. "
+                    f"Registered protocols: {registered}",
+                    protocol_type=protocol_type,
+                    registered_protocols=registered,
+                )
 
         return handler_cls
 

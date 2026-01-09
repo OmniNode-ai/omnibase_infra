@@ -64,7 +64,7 @@ from omnibase_infra.runtime.registry.registry_protocol_binding import (
 )
 
 __all__: list[str] = [
-    # Protocol binding registry
+    # Event bus binding registry
     "EventBusBindingRegistry",
     # Registry implementation
     "MessageTypeRegistry",
@@ -72,7 +72,7 @@ __all__: list[str] = [
     "ModelDomainConstraint",
     # Models
     "ModelMessageTypeEntry",
-    # Event bus binding registry
+    # Protocol binding registry
     "ProtocolBindingRegistry",
     # Protocol
     "ProtocolMessageTypeRegistry",

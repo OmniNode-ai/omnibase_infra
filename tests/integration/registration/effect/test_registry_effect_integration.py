@@ -233,6 +233,7 @@ class TestConsulFailureFlow:
         assert response.consul_result.success is False
         assert response.consul_result.error is not None
         assert "ConnectionError" in response.consul_result.error
+        # Note: Python's built-in ConnectionError (not InfraConnectionError) maps to UNKNOWN_ERROR
         assert response.consul_result.error_code == "CONSUL_UNKNOWN_ERROR"
 
         # Assert - PostgreSQL still succeeded
@@ -325,6 +326,7 @@ class TestPostgresFailureFlow:
         assert response.postgres_result.success is False
         assert response.postgres_result.error is not None
         assert "TimeoutError" in response.postgres_result.error
+        # Note: TimeoutError maps to TIMEOUT_ERROR, not CONNECTION_ERROR
         assert response.postgres_result.error_code == "POSTGRES_TIMEOUT_ERROR"
 
         # Assert - Consul still succeeded

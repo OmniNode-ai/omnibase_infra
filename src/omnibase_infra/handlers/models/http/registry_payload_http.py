@@ -57,7 +57,9 @@ class RegistryPayloadHttp:
     _types: ClassVar[dict[str, type[ModelPayloadHttp]]] = {}
 
     @classmethod
-    def register(cls, operation_type: str) -> Callable[[type], type]:
+    def register(
+        cls, operation_type: str
+    ) -> Callable[[type[ModelPayloadHttp]], type[ModelPayloadHttp]]:
         """Decorator to register an HTTP payload model type.
 
         Args:
@@ -78,7 +80,9 @@ class RegistryPayloadHttp:
                 ...
         """
 
-        def decorator(payload_cls: type) -> type:
+        def decorator(
+            payload_cls: type[ModelPayloadHttp],
+        ) -> type[ModelPayloadHttp]:
             if operation_type in cls._types:
                 raise ValueError(
                     f"HTTP payload operation_type '{operation_type}' already registered "

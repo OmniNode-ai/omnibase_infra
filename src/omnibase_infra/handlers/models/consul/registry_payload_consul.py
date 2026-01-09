@@ -57,7 +57,9 @@ class RegistryPayloadConsul:
     _types: ClassVar[dict[str, type[ModelPayloadConsul]]] = {}
 
     @classmethod
-    def register(cls, operation_type: str) -> Callable[[type], type]:
+    def register(
+        cls, operation_type: str
+    ) -> Callable[[type[ModelPayloadConsul]], type[ModelPayloadConsul]]:
         """Decorator to register a Consul payload model type.
 
         Args:
@@ -80,7 +82,9 @@ class RegistryPayloadConsul:
                 ...
         """
 
-        def decorator(payload_cls: type) -> type:
+        def decorator(
+            payload_cls: type[ModelPayloadConsul],
+        ) -> type[ModelPayloadConsul]:
             if operation_type in cls._types:
                 raise ValueError(
                     f"Consul payload operation_type '{operation_type}' already registered "

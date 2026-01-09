@@ -28,6 +28,10 @@ if TYPE_CHECKING:
 class MockHandler:
     """Mock handler for testing."""
 
+    def handle(self, request: object) -> object:
+        """Valid handle() method for ProtocolHandler protocol."""
+        return {"status": "ok"}
+
 
 class TestProtocolBindingRegistryGetRaceConditionFix:
     """Tests for PR #129 race condition fix in ProtocolBindingRegistry.get()."""

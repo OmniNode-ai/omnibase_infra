@@ -51,6 +51,11 @@ class EventBusBindingRegistry:
     This registry is thread-safe and supports concurrent registration and
     retrieval operations.
 
+    Note:
+        Event bus registrations are permanent for the runtime lifecycle. The
+        registry intentionally omits unregister() and clear() methods to
+        prevent accidental removal of event bus bindings during runtime.
+
     Attributes:
         _registry: Internal storage mapping bus_kind to bus class.
         _lock: Threading lock for thread-safe operations.
@@ -86,7 +91,8 @@ class EventBusBindingRegistry:
             bus_cls: Event bus class implementing ProtocolEventBus protocol.
 
         Raises:
-            RuntimeHostError: If bus_kind is already registered.
+            RuntimeHostError: If bus_kind is already registered or if bus_cls
+                does not implement required ProtocolEventBus methods.
 
         Example:
             ```python
@@ -94,6 +100,35 @@ class EventBusBindingRegistry:
             registry.register(EVENT_BUS_KAFKA, KafkaEventBus)
             ```
         """
+        # Validate bus_cls implements ProtocolEventBus
+        has_publish_envelope = hasattr(bus_cls, "publish_envelope")
+        has_publish = hasattr(bus_cls, "publish")
+
+        if not has_publish_envelope and not has_publish:
+            raise RuntimeHostError(
+                f"Event bus class {bus_cls.__name__} is missing "
+                f"'publish_envelope()' or 'publish()' method from "
+                f"ProtocolEventBus protocol",
+                bus_class=bus_cls.__name__,
+            )
+
+        # Check that at least one publish method is callable
+        if has_publish_envelope:
+            if not callable(getattr(bus_cls, "publish_envelope", None)):
+                raise RuntimeHostError(
+                    f"Event bus class {bus_cls.__name__} has "
+                    f"'publish_envelope' attribute but it is not callable",
+                    bus_class=bus_cls.__name__,
+                )
+
+        if has_publish:
+            if not callable(getattr(bus_cls, "publish", None)):
+                raise RuntimeHostError(
+                    f"Event bus class {bus_cls.__name__} has "
+                    f"'publish' attribute but it is not callable",
+                    bus_class=bus_cls.__name__,
+                )
+
         with self._lock:
             if bus_kind in self._registry:
                 raise RuntimeHostError(

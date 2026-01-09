@@ -35,7 +35,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from omnibase_infra.errors import InfraConnectionError
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.nodes.effects import (
     ModelBackendResult,
     ModelRegistryRequest,
@@ -204,8 +205,13 @@ class TestEffectPartialFailure:
         # Arrange
         # Use InfraConnectionError to properly simulate a connection error scenario
         # (generic Exception would result in CONSUL_UNKNOWN_ERROR instead)
+        error_context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.CONSUL,
+            operation="register_service",
+            correlation_id=sample_registry_request.correlation_id,
+        )
         mock_consul_client.register_service.side_effect = InfraConnectionError(
-            "Consul service unavailable"
+            "Consul service unavailable", context=error_context
         )
         mock_postgres_handler.upsert.return_value = ModelBackendResult(success=True)
 

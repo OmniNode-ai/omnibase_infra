@@ -57,7 +57,9 @@ class RegistryPayloadVault:
     _types: ClassVar[dict[str, type[ModelPayloadVault]]] = {}
 
     @classmethod
-    def register(cls, operation_type: str) -> Callable[[type], type]:
+    def register(
+        cls, operation_type: str
+    ) -> Callable[[type[ModelPayloadVault]], type[ModelPayloadVault]]:
         """Decorator to register a Vault payload model type.
 
         Args:
@@ -69,6 +71,7 @@ class RegistryPayloadVault:
 
         Raises:
             ValueError: If operation_type is already registered (prevents duplicates).
+            TypeError: If payload_cls is not a subclass of ModelPayloadVault.
 
         Example:
             @RegistryPayloadVault.register("read_secret")
@@ -78,7 +81,20 @@ class RegistryPayloadVault:
                 ...
         """
 
-        def decorator(payload_cls: type) -> type:
+        def decorator(
+            payload_cls: type[ModelPayloadVault],
+        ) -> type[ModelPayloadVault]:
+            # Runtime type validation
+            from omnibase_infra.handlers.models.vault.model_payload_vault import (
+                ModelPayloadVault,
+            )
+
+            if not issubclass(payload_cls, ModelPayloadVault):
+                raise TypeError(
+                    f"Cannot register {payload_cls.__name__}: "
+                    f"must be a subclass of ModelPayloadVault"
+                )
+
             if operation_type in cls._types:
                 raise ValueError(
                     f"Vault payload operation_type '{operation_type}' already registered "

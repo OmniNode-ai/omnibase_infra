@@ -1999,7 +1999,7 @@ output_model: "test.models.Output"
         """Verify permission errors raise in strict mode.
 
         In strict mode (default), unreadable files should cause discovery to
-        fail with an appropriate error.
+        fail with ModelOnexError wrapping the underlying permission error.
         """
         import stat
 
@@ -2037,15 +2037,14 @@ output_model: "test.models.Output"
             with pytest.raises(ModelOnexError) as exc_info:
                 await source.discover_handlers()
 
+            # Verify error details
             error = exc_info.value
             assert error.error_code == "HANDLER_SOURCE_006", (
                 f"Expected error code HANDLER_SOURCE_006, got {error.error_code}"
             )
-            # Verify error message mentions the file path
-            assert "permission denied" in str(
-                error
-            ).lower() or "Permission denied" in str(error), (
-                f"Error message should mention permission denied: {error}"
+            # Verify error message mentions permission issue
+            assert "permission denied" in str(error).lower(), (
+                f"Error message should mention permission issue: {error}"
             )
         finally:
             # Restore permissions for cleanup

@@ -276,7 +276,7 @@ def register_handlers_from_config(
             # TODO(OMN-41): Resolve handler class from name using importlib
             # For now, just validate config structure is correct
             # The actual handler instantiation will be done by RuntimeHostProcess
-            pass
+            pass  # Validation passed; handler resolution deferred to OMN-41
 
 
 # =============================================================================

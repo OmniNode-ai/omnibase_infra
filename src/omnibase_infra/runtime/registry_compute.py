@@ -603,7 +603,7 @@ class RegistryCompute:
                             f"Registered plugins: {registered}",
                             plugin_id=plugin_id,
                             registered_plugins=registered,
-                            version=version if version is not None else None,
+                            version=version,
                         )
 
                     # If version specified, do exact match
