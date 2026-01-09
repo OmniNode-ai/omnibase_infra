@@ -23,7 +23,6 @@ from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
 )
 from omnibase_infra.handlers.models.vault.model_payload_vault import (
     ModelPayloadVault,
-    RegistryPayloadVault,
 )
 from omnibase_infra.handlers.models.vault.model_vault_delete_payload import (
     ModelVaultDeletePayload,
@@ -49,6 +48,9 @@ from omnibase_infra.handlers.models.vault.model_vault_secret_payload import (
 )
 from omnibase_infra.handlers.models.vault.model_vault_write_payload import (
     ModelVaultWritePayload,
+)
+from omnibase_infra.handlers.models.vault.registry_payload_vault import (
+    RegistryPayloadVault,
 )
 
 __all__: list[str] = [

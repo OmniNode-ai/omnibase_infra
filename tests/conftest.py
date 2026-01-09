@@ -349,7 +349,6 @@ def mock_container() -> MagicMock:
     """
     container = MagicMock()
 
-    # Mock legacy methods for backwards compatibility
     container.get_config.return_value = {}
 
     # Mock service_registry for container-based DI

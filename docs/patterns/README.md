@@ -20,6 +20,7 @@ This directory contains detailed implementation guides and best practices for ON
 ### Architecture
 - **[Container Dependency Injection](./container_dependency_injection.md)** - Service registration, resolution, and testing patterns
 - **[Utility Directory Structure](./utility_directory_structure.md)** - Distinction between `utils/` and `shared/utils/` directories
+- **[Registry clear() Policy](./registry_clear_policy.md)** - When and how to implement clear() methods for test isolation vs production safety
 
 ### Infrastructure Integration
 - **[Consul Integration](./consul_integration.md)** - HashiCorp Consul connection, health checks, service registration, security patterns
@@ -78,6 +79,8 @@ This directory contains detailed implementation guides and best practices for ON
 | Review production security | [Security Patterns](./security_patterns.md) | Production Security Checklist |
 | Write actionable assertions | [Testing Patterns](./testing_patterns.md) | The "HOW TO FIX" Pattern |
 | Improve test error messages | [Testing Patterns](./testing_patterns.md) | Writing Effective Messages |
+| Add registry clear() method | [Registry clear() Policy](./registry_clear_policy.md) | Implementation Patterns |
+| Decide if registry needs clear() | [Registry clear() Policy](./registry_clear_policy.md) | When to/NOT to Implement |
 
 ### Transport Types
 
@@ -166,6 +169,12 @@ Testing Patterns
     ├── Used by: All test modules
     ├── References: pytest, architectural tests
     └── Enhances: Developer experience during test failures
+
+Registry clear() Policy
+    ├── Guidelines for implementing clear() methods
+    ├── Depends on: Testing Patterns (test isolation)
+    ├── References: Async Thread Safety (lock patterns)
+    └── Used by: PolicyRegistry, RegistryCompute, payload registries
 ```
 
 ## Usage Examples

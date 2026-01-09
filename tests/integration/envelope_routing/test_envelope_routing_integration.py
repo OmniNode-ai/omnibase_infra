@@ -79,6 +79,29 @@ def handler_registry() -> ProtocolBindingRegistry:
     class MockHandler:
         """Mock handler for testing envelope routing."""
 
+        async def handle(
+            self,
+            envelope: dict[str, object],
+            correlation_id: str | None = None,
+        ) -> dict[str, object]:
+            """Handle the envelope and return response.
+
+            This method implements the ProtocolHandler protocol requirement.
+
+            Args:
+                envelope: The envelope dictionary containing operation and payload.
+                correlation_id: Optional correlation ID for tracing.
+
+            Returns:
+                Response dictionary with status and processed data.
+            """
+            return {
+                "status": "handled",
+                "operation": envelope.get("operation"),
+                "payload": envelope.get("payload"),
+                "correlation_id": correlation_id or envelope.get("correlation_id"),
+            }
+
         async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
             """Execute the envelope and return success response."""
             return {

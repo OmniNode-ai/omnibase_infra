@@ -37,6 +37,8 @@ import pytest
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.nodes.effects import (
     ModelBackendResult,
     ModelRegistryRequest,
@@ -203,8 +205,15 @@ class TestEffectPartialFailure:
             - Error context preserved for Consul failure
         """
         # Arrange
-        mock_consul_client.register_service.side_effect = Exception(
-            "Consul service unavailable"
+        # Use InfraConnectionError to properly simulate a connection error scenario
+        # (generic Exception would result in CONSUL_UNKNOWN_ERROR instead)
+        error_context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.CONSUL,
+            operation="register_service",
+            correlation_id=sample_registry_request.correlation_id,
+        )
+        mock_consul_client.register_service.side_effect = InfraConnectionError(
+            "Consul service unavailable", context=error_context
         )
         mock_postgres_handler.upsert.return_value = ModelBackendResult(success=True)
 
@@ -217,12 +226,11 @@ class TestEffectPartialFailure:
         assert response.postgres_result.success is True
         # Error message is sanitized to avoid exposing secrets (connection strings, etc.)
         # Format: "{ExceptionType}: {original_message}" (sanitize_error_message preserves the message)
-        assert "Exception: Consul service unavailable" in (
-            response.consul_result.error or ""
-        )
-        # Note: Generic Exception falls through to CONSUL_UNKNOWN_ERROR.
-        # Only InfraConnectionError would trigger CONSUL_CONNECTION_ERROR.
-        assert response.consul_result.error_code == "CONSUL_UNKNOWN_ERROR"
+        # Using InfraConnectionError in mock setup triggers CONSUL_CONNECTION_ERROR
+        consul_error = response.consul_result.error or ""
+        assert "InfraConnectionError" in consul_error
+        assert "Consul service unavailable" in consul_error
+        assert response.consul_result.error_code == "CONSUL_CONNECTION_ERROR"
         assert response.correlation_id == sample_registry_request.correlation_id
 
         # Verify appropriate error context

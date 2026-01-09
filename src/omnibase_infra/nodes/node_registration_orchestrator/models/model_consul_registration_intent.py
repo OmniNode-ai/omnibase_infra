@@ -3,11 +3,11 @@
 """Consul registration intent model for registration orchestrator.
 
 This module provides the typed intent model for Consul registration operations.
-Registered with IntentRegistry for dynamic type resolution.
+Registered with RegistryIntent for dynamic type resolution.
 
 Related:
     - ModelRegistryIntent: Base class for all registration intents
-    - IntentRegistry: Decorator-based registry for intent type discovery
+    - RegistryIntent: Decorator-based registry for intent type discovery
     - OMN-1007: Union reduction refactoring
 """
 
@@ -21,16 +21,16 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_consul_int
     ModelConsulIntentPayload,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_registry_intent import (
-    IntentRegistry,
     ModelRegistryIntent,
+    RegistryIntent,
 )
 
 
-@IntentRegistry.register("consul")
+@RegistryIntent.register("consul")
 class ModelConsulRegistrationIntent(ModelRegistryIntent):
     """Intent to register a node in Consul service discovery.
 
-    This model is registered with IntentRegistry for dynamic type resolution,
+    This model is registered with RegistryIntent for dynamic type resolution,
     enabling Pydantic discriminated union validation without explicit union types.
 
     Attributes:

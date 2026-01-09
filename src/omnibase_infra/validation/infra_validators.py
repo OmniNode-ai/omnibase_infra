@@ -30,8 +30,6 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-
-# Forward migration type aliases for renamed types in omnibase_core 0.6.2
 from typing import Literal, TypedDict
 
 # Third-party imports
@@ -49,15 +47,6 @@ from omnibase_core.validation import (
     validate_contracts,
     validate_patterns,
     validate_union_usage_file,
-)
-
-# Backwards compatibility alias for renamed type
-type ModelImportValidationResult = ModelModuleImportResult
-
-# NOTE: ServiceContractValidator was removed in omnibase_core 0.6.2
-# Using a stub that implements ProtocolContractValidator
-from omnibase_infra.validation.stub_contract_validator import (
-    ServiceContractValidator,
 )
 
 # Module-level initialization (AFTER all imports)
@@ -687,49 +676,6 @@ def _create_filtered_result(
     )
 
 
-def validate_infra_contract_deep(
-    contract_path: str | Path,
-    contract_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
-) -> ModelContractValidationResult:
-    """
-    Perform deep contract validation for ONEX compliance.
-
-    Uses ServiceContractValidator for comprehensive contract checking
-    suitable for autonomous code generation.
-
-    Performance Note:
-        This function uses a cached singleton ServiceContractValidator instance
-        for optimal performance in hot paths. The validator is stateless after
-        initialization, making it safe to reuse across calls.
-
-    Args:
-        contract_path: Path to the contract YAML file.
-        contract_type: Type of contract to validate. Defaults to "effect".
-
-    Returns:
-        ModelContractValidationResult with validation status, score, and any errors.
-    """
-    return _contract_validator.validate_contract_file(
-        Path(contract_path), contract_type
-    )
-
-
-# ==============================================================================
-# Module-Level Singleton Validators
-# ==============================================================================
-#
-# Performance Optimization: The ServiceContractValidator is stateless after
-# initialization. Creating new instances on every validation call is wasteful
-# in hot paths. Instead, we use a module-level singleton.
-#
-# Why a singleton is safe here:
-# - The validator has no mutable state after initialization
-# - All validation state is created fresh for each file
-# - No per-validation state is stored in the validator instance
-
-_contract_validator = ServiceContractValidator()
-
-
 # ==============================================================================
 # Skip Directory Configuration
 # ==============================================================================
@@ -1128,7 +1074,7 @@ def validate_infra_union_usage(
 
 def validate_infra_circular_imports(
     directory: str | Path = INFRA_SRC_PATH,
-) -> ModelImportValidationResult:
+) -> ModelModuleImportResult:
     """
     Check for circular imports in infrastructure code.
 
@@ -1139,7 +1085,7 @@ def validate_infra_circular_imports(
         directory: Directory to check. Defaults to infrastructure source.
 
     Returns:
-        ModelImportValidationResult with detailed import validation results.
+        ModelModuleImportResult with detailed import validation results.
         Use result.has_circular_imports to check for issues.
     """
     validator = CircularImportValidator(source_path=Path(directory))
@@ -1149,7 +1095,7 @@ def validate_infra_circular_imports(
 def validate_infra_all(
     directory: str | Path = INFRA_SRC_PATH,
     nodes_directory: str | Path = INFRA_NODES_PATH,
-) -> dict[str, ValidationResult | ModelImportValidationResult]:
+) -> dict[str, ValidationResult | ModelModuleImportResult]:
     """
     Run all validations on infrastructure code.
 
@@ -1167,7 +1113,7 @@ def validate_infra_all(
     Returns:
         Dictionary mapping validator name to result.
     """
-    results: dict[str, ValidationResult | ModelImportValidationResult] = {}
+    results: dict[str, ValidationResult | ModelModuleImportResult] = {}
 
     # HIGH priority validators
     results["architecture"] = validate_infra_architecture(directory)
@@ -1182,7 +1128,7 @@ def validate_infra_all(
 
 
 def get_validation_summary(
-    results: dict[str, ValidationResult | ModelImportValidationResult],
+    results: dict[str, ValidationResult | ModelModuleImportResult],
 ) -> dict[str, int | list[str]]:
     """
     Generate a summary of validation results.
@@ -1212,7 +1158,7 @@ def get_validation_summary(
         if not isinstance(name, str):
             continue
         # Use duck typing to determine result API:
-        # - ModelImportValidationResult has 'has_circular_imports' attribute
+        # - ModelModuleImportResult has 'has_circular_imports' attribute
         # - ModelValidationResult has 'is_valid' attribute
         # This follows ONEX convention of duck typing over isinstance for protocols.
         if hasattr(result, "has_circular_imports"):
@@ -1239,39 +1185,35 @@ def get_validation_summary(
 
 
 __all__ = [
-    "EXEMPTIONS_YAML_PATH",
-    "INFRA_MAX_UNIONS",
-    "INFRA_MAX_VIOLATIONS",
-    "INFRA_NODES_PATH",
-    "INFRA_PATTERNS_STRICT",
     # Constants
-    "INFRA_SRC_PATH",
-    "INFRA_UNIONS_STRICT",
-    "SKIP_DIRECTORY_NAMES",
-    # Re-exported types from omnibase_core.validation
-    "ModelImportValidationResult",
-    "ExemptionPattern",
-    # Type aliases
-    "ValidationResult",
-    "get_architecture_exemptions",
+    "EXEMPTIONS_YAML_PATH",  # Path to exemptions YAML file
+    "INFRA_MAX_UNIONS",  # Maximum union count threshold
+    "INFRA_MAX_VIOLATIONS",  # Maximum violations threshold
+    "INFRA_NODES_PATH",  # Nodes directory path
+    "INFRA_PATTERNS_STRICT",  # Strict pattern validation flag
+    "INFRA_SRC_PATH",  # Source directory path
+    "INFRA_UNIONS_STRICT",  # Strict union validation flag
+    "SKIP_DIRECTORY_NAMES",  # Directories to skip
+    # Types
+    "ExemptionPattern",  # Exemption pattern TypedDict
+    "ModelModuleImportResult",  # Re-export from omnibase_core
+    "ValidationResult",  # Type alias for validation result
     # Exemption loaders
-    "get_pattern_exemptions",
-    # Path skip configuration
-    "get_skip_directories",
-    "get_union_exemptions",
-    "get_validation_summary",
-    # Union pattern utilities
-    "is_simple_optional",
+    "get_architecture_exemptions",  # Architecture exemption loader
+    "get_pattern_exemptions",  # Pattern exemption loader
+    "get_skip_directories",  # Skip directory loader
+    "get_union_exemptions",  # Union exemption loader
+    "get_validation_summary",  # Validation summary generator
     # Path utilities
-    "is_skip_directory",
-    "load_skip_directories_from_yaml",
-    "should_skip_path",
-    "validate_infra_all",
+    "is_simple_optional",  # Check if union is X | None
+    "is_skip_directory",  # Check if directory should be skipped
+    "load_skip_directories_from_yaml",  # Load skip dirs from YAML
+    "should_skip_path",  # Check if path should be skipped
     # Validators
-    "validate_infra_architecture",
-    "validate_infra_circular_imports",
-    "validate_infra_contract_deep",
-    "validate_infra_contracts",
-    "validate_infra_patterns",
-    "validate_infra_union_usage",
+    "validate_infra_all",  # Run all validators
+    "validate_infra_architecture",  # Architecture validation
+    "validate_infra_circular_imports",  # Circular import check
+    "validate_infra_contracts",  # Contract validation
+    "validate_infra_patterns",  # Pattern validation
+    "validate_infra_union_usage",  # Union usage validation
 ]
