@@ -121,31 +121,32 @@ class MyModel(BaseModel):
 
 **Related**: `docs/decisions/adr-any-type-pydantic-workaround.md`
 
-### Any Type Validator Known Limitations
+### Any Type Validator Detection and Limitations
 
-The AST-based Any type validator has inherent limitations:
+The AST-based Any type validator scans Python source files to detect `Any` usage.
 
-**Detection Capabilities**:
-- Direct `Any` annotations in function signatures
-- `Any` in Pydantic `Field()` definitions
-- `Any` as generic type argument (`list[Any]`, `dict[str, Any]`)
-- Type aliases with `Any`
+**What IS Detected** (will trigger violations):
+- Direct `Any` annotations: `def foo(x: Any) -> Any`
+- `Any` in Pydantic fields: `field: Any = Field(...)`
+- `Any` as generic argument: `list[Any]`, `dict[str, Any]`, `Callable[..., Any]`
+- Type aliases with `Any`: `MyType = dict[str, Any]`
+- String annotations: `from __future__ import annotations` - these ARE correctly resolved by the AST parser
 
-**Known Limitations**:
-1. **String annotations not detected**: When using `from __future__ import annotations`, type hints become strings at parse time. The AST parser resolves these correctly in most cases.
-
-2. **External type aliases**: Cannot detect Any usage via type aliases imported from external modules:
+**What is NOT Detected** (validator limitations):
+1. **External type aliases**: When `Any` is hidden behind an imported alias:
    ```python
-   from external_lib import DynamicType  # If DynamicType = Any, not detected
-   def process(data: DynamicType): ...  # NOT detected
+   from external_lib import DynamicType  # If DynamicType = Any, NOT detected
+   def process(data: DynamicType): ...   # Violation NOT caught
    ```
 
-3. **Dynamic type construction**: Factory patterns creating types at runtime are not detected:
+2. **Runtime type construction**: Factory patterns creating types dynamically:
    ```python
    def make_type() -> type:
-       return Any  # NOT detected
+       return Any  # NOT detected - evaluated at runtime
    DynamicType = make_type()
    ```
+
+3. **Indirect imports**: `Any` re-exported through intermediate modules may not be traced.
 
 **Example @allow_any Usage**:
 ```python
@@ -157,7 +158,7 @@ def legacy_handler(data: Any) -> Any:
     return process_legacy(data)
 ```
 
-The `@allow_any` decorator is recognized by the validator when applied to functions or classes. Note: The decorator implementation should be provided in the `omnibase_infra.decorators` module.
+The `@allow_any` decorator is recognized by the validator when applied to functions or classes. The decorator is a no-op at runtime - it only serves as an AST marker for the validator to skip the decorated definition.
 
 ### File & Class Naming
 

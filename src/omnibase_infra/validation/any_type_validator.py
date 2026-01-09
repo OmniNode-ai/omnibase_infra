@@ -77,6 +77,11 @@ _NOTE_PATTERN = "NOTE:"
 # Larger values would risk matching unrelated NOTE comments.
 _NOTE_LOOKBACK_LINES = 5
 
+# Maximum file size to process (in bytes).
+# Files larger than this are skipped to prevent hangs on auto-generated
+# or minified code. 1MB is sufficient for any reasonable hand-written Python.
+_MAX_FILE_SIZE_BYTES: int = 1_000_000  # 1MB
+
 
 class AnyTypeDetector(ast.NodeVisitor):
     """AST visitor to detect Any type usage violations.
@@ -806,25 +811,73 @@ def validate_any_types_in_file(filepath: Path) -> list[ModelAnyTypeViolation]:
     return detector.violations
 
 
+# Directories to skip for Any type validation (exact name matching).
+# Uses frozenset for O(1) lookup performance.
+# NOTE: "tests" is included because test files are allowed to use Any types.
+# This differs from the general skip directories in infra_validators.py.
+_ANY_TYPE_SKIP_DIRECTORIES: frozenset[str] = frozenset(
+    {
+        "tests",  # Test files are allowed to use Any types
+        "archive",  # Historical code not subject to validation
+        "archived",  # Alternative naming for archived code
+        "__pycache__",  # Python bytecode cache
+    }
+)
+
+
 def _should_skip_file(filepath: Path) -> bool:
-    """Check if a file should be skipped based on path patterns.
+    """Check if a file should be skipped based on exact directory name matching.
+
+    Uses exact parent directory matching (not substring) to prevent false positives.
+    For example, '/my_tests/foo.py' is NOT skipped because 'my_tests' != 'tests'.
+
+    Matching behavior:
+    - Only parent directories are checked (filenames are NOT checked against skip list)
+    - Matching is case-sensitive (Linux standard)
+    - A path is skipped if ANY parent directory matches exactly
 
     Args:
         filepath: Path to check.
 
     Returns:
         True if the file should be skipped.
+
+    Examples:
+        Paths that ARE skipped (exact directory match):
+        >>> _should_skip_file(Path("src/tests/foo.py"))
+        True
+        >>> _should_skip_file(Path("src/archive/foo.py"))
+        True
+
+        Paths that are NOT skipped (no false positives):
+        >>> _should_skip_file(Path("src/my_tests/foo.py"))
+        False
+        >>> _should_skip_file(Path("src/testing_utils/foo.py"))
+        False
     """
-    # Use as_posix() for cross-platform path comparison (Windows uses backslashes)
-    filepath_str = filepath.as_posix()
-    return (
-        "/tests/" in filepath_str
-        or "/scripts/validation/" in filepath_str
-        or "/archive/" in filepath_str
-        or "/archived/" in filepath_str
-        or "/__pycache__/" in filepath_str
-        or filepath.name.startswith("_")
-    )
+    parts = filepath.parts
+
+    # Check parent directories for exact matches (exclude filename at parts[-1])
+    for part in parts[:-1]:
+        if part in _ANY_TYPE_SKIP_DIRECTORIES:
+            return True
+
+    # Special case: skip files in scripts/validation/ nested path.
+    # This specifically targets validation test scripts, not the validation module itself.
+    # Checks for exact sequence: "scripts" followed immediately by "validation".
+    for i, part in enumerate(parts[:-1]):
+        if (
+            part == "scripts"
+            and i + 1 < len(parts) - 1
+            and parts[i + 1] == "validation"
+        ):
+            return True
+
+    # Skip files starting with underscore (test fixtures, private modules)
+    if filepath.name.startswith("_"):
+        return True
+
+    return False
 
 
 def validate_any_types(
@@ -851,6 +904,22 @@ def validate_any_types(
 
     for filepath in directory.glob(pattern):
         if filepath.is_file() and not _should_skip_file(filepath):
+            # Skip very large files to prevent hangs on auto-generated code
+            try:
+                file_size = filepath.stat().st_size
+                if file_size > _MAX_FILE_SIZE_BYTES:
+                    logger.debug(
+                        "Skipping large file",
+                        extra={"file": str(filepath), "size_bytes": file_size},
+                    )
+                    continue
+            except OSError as e:
+                logger.warning(
+                    "Failed to stat file",
+                    extra={"file": str(filepath), "error": str(e)},
+                )
+                continue
+
             try:
                 file_violations = validate_any_types_in_file(filepath)
                 violations.extend(file_violations)
@@ -892,10 +961,14 @@ def validate_any_types_ci(
         ...         print(line)
         ...     sys.exit(1)
     """
-    # Count files
+    # Count files (excluding skipped patterns and large files)
     pattern = "**/*.py" if recursive else "*.py"
     files_checked = sum(
-        1 for f in directory.glob(pattern) if f.is_file() and not _should_skip_file(f)
+        1
+        for f in directory.glob(pattern)
+        if f.is_file()
+        and not _should_skip_file(f)
+        and f.stat().st_size <= _MAX_FILE_SIZE_BYTES
     )
 
     violations = validate_any_types(directory, recursive=recursive)
