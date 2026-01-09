@@ -9,6 +9,7 @@ for routing validation, correlation/causation chain violation tracking,
 and Any type violation detection.
 
 Exports:
+    ModelAnyTypeValidationResult: Aggregate result of Any type validation for CI
     ModelAnyTypeViolation: Result of Any type violation detection
     ModelCategoryMatchResult: Result of category matching operation
     ModelChainViolation: Result of chain violation detection
@@ -20,6 +21,9 @@ Exports:
     ModelValidationOutcome: Generic validation result model
 """
 
+from omnibase_infra.models.validation.model_any_type_validation_result import (
+    ModelAnyTypeValidationResult,
+)
 from omnibase_infra.models.validation.model_any_type_violation import (
     ModelAnyTypeViolation,
 )
@@ -47,6 +51,7 @@ from omnibase_infra.models.validation.model_validation_outcome import (
 )
 
 __all__ = [
+    "ModelAnyTypeValidationResult",
     "ModelAnyTypeViolation",
     "ModelCategoryMatchResult",
     "ModelChainViolation",
