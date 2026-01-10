@@ -48,6 +48,20 @@ HTTP Models:
     ModelHttpGetPayload: Payload for http.get result
     ModelHttpPostPayload: Payload for http.post result
     HttpPayload: Discriminated union of all HTTP payload types
+
+Filesystem Models:
+    ModelFileSystemConfig: Configuration for HandlerFileSystem initialization
+    ModelReadFilePayload: Payload for filesystem.read_file operation
+    ModelReadFileResult: Result from filesystem.read_file operation
+    ModelWriteFilePayload: Payload for filesystem.write_file operation
+    ModelWriteFileResult: Result from filesystem.write_file operation
+    ModelListDirectoryPayload: Payload for filesystem.list_directory operation
+    ModelDirectoryEntry: Single entry from directory listing
+    ModelListDirectoryResult: Result from filesystem.list_directory operation
+    ModelEnsureDirectoryPayload: Payload for filesystem.ensure_directory operation
+    ModelEnsureDirectoryResult: Result from filesystem.ensure_directory operation
+    ModelDeleteFilePayload: Payload for filesystem.delete_file operation
+    ModelDeleteFileResult: Result from filesystem.delete_file operation
 """
 
 from omnibase_infra.handlers.models.consul import (
@@ -78,6 +92,42 @@ from omnibase_infra.handlers.models.model_db_describe_response import (
 )
 from omnibase_infra.handlers.models.model_db_query_payload import ModelDbQueryPayload
 from omnibase_infra.handlers.models.model_db_query_response import ModelDbQueryResponse
+
+# Filesystem models (one model per file per ONEX convention)
+from omnibase_infra.handlers.models.model_filesystem_config import ModelFileSystemConfig
+from omnibase_infra.handlers.models.model_filesystem_delete_payload import (
+    ModelDeleteFilePayload,
+)
+from omnibase_infra.handlers.models.model_filesystem_delete_result import (
+    ModelDeleteFileResult,
+)
+from omnibase_infra.handlers.models.model_filesystem_directory_entry import (
+    ModelDirectoryEntry,
+)
+from omnibase_infra.handlers.models.model_filesystem_ensure_directory_payload import (
+    ModelEnsureDirectoryPayload,
+)
+from omnibase_infra.handlers.models.model_filesystem_ensure_directory_result import (
+    ModelEnsureDirectoryResult,
+)
+from omnibase_infra.handlers.models.model_filesystem_list_directory_payload import (
+    ModelListDirectoryPayload,
+)
+from omnibase_infra.handlers.models.model_filesystem_list_directory_result import (
+    ModelListDirectoryResult,
+)
+from omnibase_infra.handlers.models.model_filesystem_read_payload import (
+    ModelReadFilePayload,
+)
+from omnibase_infra.handlers.models.model_filesystem_read_result import (
+    ModelReadFileResult,
+)
+from omnibase_infra.handlers.models.model_filesystem_write_payload import (
+    ModelWriteFilePayload,
+)
+from omnibase_infra.handlers.models.model_filesystem_write_result import (
+    ModelWriteFileResult,
+)
 from omnibase_infra.handlers.models.model_handler_response import (
     ModelHandlerResponse,
 )
@@ -147,4 +197,17 @@ __all__: list[str] = [
     "ModelVaultSecretPayload",
     "ModelVaultWritePayload",
     "VaultPayload",
+    # Filesystem models
+    "ModelFileSystemConfig",
+    "ModelReadFilePayload",
+    "ModelReadFileResult",
+    "ModelWriteFilePayload",
+    "ModelWriteFileResult",
+    "ModelListDirectoryPayload",
+    "ModelDirectoryEntry",
+    "ModelListDirectoryResult",
+    "ModelEnsureDirectoryPayload",
+    "ModelEnsureDirectoryResult",
+    "ModelDeleteFilePayload",
+    "ModelDeleteFileResult",
 ]
