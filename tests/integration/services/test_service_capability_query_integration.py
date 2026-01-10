@@ -36,6 +36,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import pytest
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import (
@@ -428,7 +429,9 @@ class TestSelectionStrategies:
         results = [await service.resolve_dependency(spec) for _ in range(3)]
 
         assert all(r is not None for r in results)
-        assert all(r.entity_id == projections[0].entity_id for r in results)
+        # Type narrowing: filter to non-None after assertion
+        valid_results = [r for r in results if r is not None]
+        assert all(r.entity_id == projections[0].entity_id for r in valid_results)
 
     async def test_random_strategy_returns_valid_candidate(
         self,
@@ -604,7 +607,7 @@ class TestEmptyResultsHandling:
 
         assert result is None
 
-    def test_model_validation_rejects_spec_without_filters(
+    async def test_model_validation_rejects_spec_without_filters(
         self,
     ) -> None:
         """Test ModelDependencySpec validates at least one filter is specified.
@@ -612,8 +615,13 @@ class TestEmptyResultsHandling:
         Note: This test validates the Pydantic model behavior, not the service.
         The service never receives specs without filters because validation
         happens at model construction time.
+
+        Important: Pydantic wraps validator-raised ValueError in ValidationError,
+        so we expect ValidationError here, not ValueError.
         """
-        with pytest.raises(ValueError, match="must have at least one discovery filter"):
+        with pytest.raises(
+            ValidationError, match="must have at least one discovery filter"
+        ):
             ModelDependencySpec(
                 name="empty",
                 type="node",
@@ -743,8 +751,7 @@ class TestErrorPropagation:
                 await service.resolve_dependency(spec, correlation_id=correlation_id)
 
         # Verify correlation_id was attached to log records as an extra attribute.
-        # Must check both UUID and string representations since logging may store
-        # correlation_id in either format depending on the service implementation.
+        # Check both UUID and string representations since logging stores as string.
         correlation_str = str(correlation_id)
         matching_records = [
             record
@@ -756,13 +763,30 @@ class TestErrorPropagation:
             f"Expected log records with correlation_id={correlation_id}, "
             f"but found none. Records: {[(r.message, getattr(r, 'correlation_id', None)) for r in caplog.records]}"
         )
-        # Verify at least one record is from the capability query operation
-        assert any(
-            "capability" in record.message.lower()
-            or "dependency" in record.message.lower()
+
+        # Verify at least one record is from the resolve_dependency or
+        # find_nodes_by_capability operation (the specific operation being tested)
+        operation_records = [
+            record
             for record in matching_records
-        ), (
-            f"Expected capability/dependency operation log, got: {[r.message for r in matching_records]}"
+            if "resolving dependency" in record.message.lower()
+            or "finding nodes by capability" in record.message.lower()
+        ]
+        assert len(operation_records) > 0, (
+            f"Expected 'Resolving dependency' or 'Finding nodes by capability' log, "
+            f"got: {[r.message for r in matching_records]}"
+        )
+
+        # Verify the logger is from the capability query service module
+        service_logger_records = [
+            record
+            for record in matching_records
+            if "service_capability_query" in record.name
+        ]
+        logger_names = {r.name for r in matching_records}
+        assert len(service_logger_records) > 0, (
+            f"Expected log from service_capability_query logger, "
+            f"got loggers: {logger_names}"
         )
 
 

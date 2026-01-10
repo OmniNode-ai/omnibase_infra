@@ -48,7 +48,11 @@ from uuid import UUID, uuid4
 
 from omnibase_core.container import ModelONEXContainer
 
-from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
+from omnibase_infra.enums import (
+    EnumInfraTransportType,
+    EnumRegistrationState,
+    EnumSelectionStrategy,
+)
 from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.discovery.model_dependency_spec import ModelDependencySpec
@@ -56,7 +60,6 @@ from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
 from omnibase_infra.models.projection import ModelRegistrationProjection
-from omnibase_infra.services.enum_selection_strategy import EnumSelectionStrategy
 from omnibase_infra.services.service_node_selector import ServiceNodeSelector
 
 if TYPE_CHECKING:

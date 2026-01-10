@@ -167,19 +167,27 @@ class ModelDependencySpec(BaseModel):
 
     @field_validator("intent_types", mode="before")
     @classmethod
-    def normalize_empty_intent_types(cls, v: list[str] | None) -> list[str] | None:
+    def normalize_empty_intent_types(
+        cls, v: list[str] | list[object] | None
+    ) -> list[str] | list[object] | None:
         """Normalize empty intent_types list to None.
 
         This ensures consistent behavior: both None and [] mean "no intent filter".
         The has_intent_filter() method can then simply check for None.
 
+        Note:
+            With mode="before", input may be any JSON-compatible value. The type
+            hint accepts list[object] to handle unvalidated input. Pydantic will
+            validate the list contents in the "after" phase.
+
         Args:
-            v: The intent_types value (list or None).
+            v: The intent_types value - may be list, None, or other raw input.
 
         Returns:
-            None if v is None or empty list, otherwise the original list.
+            None if v is None or empty list, otherwise the original value for
+            further validation by Pydantic.
         """
-        if v is not None and len(v) == 0:
+        if isinstance(v, list) and len(v) == 0:
             return None
         return v
 

@@ -24,6 +24,7 @@ Example:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from uuid import UUID
 
 if TYPE_CHECKING:
     from omnibase_infra.enums import EnumRegistrationState
@@ -97,6 +98,7 @@ class ProtocolCapabilityQuery(Protocol):
         capability: str,
         contract_type: str | None = None,
         state: EnumRegistrationState | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find nodes that provide a specific capability.
 
@@ -112,6 +114,8 @@ class ProtocolCapabilityQuery(Protocol):
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
                 nodes in other states (e.g., PENDING_REGISTRATION, LIVENESS_EXPIRED).
+            correlation_id: Optional correlation ID for distributed tracing.
+                When provided, included in all log messages for request tracking.
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -121,6 +125,7 @@ class ProtocolCapabilityQuery(Protocol):
             ...     "postgres.storage",
             ...     contract_type="effect",
             ...     state=EnumRegistrationState.ACTIVE,
+            ...     correlation_id=uuid4(),
             ... )
             >>> for node in nodes:
             ...     print(f"Found: {node.entity_id}")
@@ -132,6 +137,7 @@ class ProtocolCapabilityQuery(Protocol):
         intent_type: str,
         contract_type: str = "effect",
         state: EnumRegistrationState | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find effect nodes that handle a specific intent type.
 
@@ -147,6 +153,8 @@ class ProtocolCapabilityQuery(Protocol):
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
                 nodes in other states (e.g., PENDING_REGISTRATION, LIVENESS_EXPIRED).
+            correlation_id: Optional correlation ID for distributed tracing.
+                When provided, included in all log messages for request tracking.
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -156,6 +164,7 @@ class ProtocolCapabilityQuery(Protocol):
             ...     "postgres.query",
             ...     contract_type="effect",
             ...     state=EnumRegistrationState.ACTIVE,
+            ...     correlation_id=uuid4(),
             ... )
             >>> for handler in handlers:
             ...     print(f"Can handle postgres.query: {handler.entity_id}")
@@ -167,6 +176,7 @@ class ProtocolCapabilityQuery(Protocol):
         protocol: str,
         contract_type: str | None = None,
         state: EnumRegistrationState | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find nodes implementing a specific protocol.
 
@@ -182,6 +192,8 @@ class ProtocolCapabilityQuery(Protocol):
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
                 nodes in other states (e.g., PENDING_REGISTRATION, LIVENESS_EXPIRED).
+            correlation_id: Optional correlation ID for distributed tracing.
+                When provided, included in all log messages for request tracking.
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -190,6 +202,7 @@ class ProtocolCapabilityQuery(Protocol):
             >>> adapters = await query.find_nodes_by_protocol(
             ...     "ProtocolEventPublisher",
             ...     state=EnumRegistrationState.ACTIVE,
+            ...     correlation_id=uuid4(),
             ... )
             >>> print(f"Found {len(adapters)} event publishers")
         """
@@ -198,6 +211,7 @@ class ProtocolCapabilityQuery(Protocol):
     async def resolve_dependency(
         self,
         dependency_spec: ModelDependencySpec,
+        correlation_id: UUID | None = None,
     ) -> ModelRegistrationProjection | None:
         """Resolve a dependency specification to a concrete node.
 
@@ -213,6 +227,8 @@ class ProtocolCapabilityQuery(Protocol):
         Args:
             dependency_spec: Dependency specification from contract.
                 Contains capability filters and selection strategy.
+            correlation_id: Optional correlation ID for distributed tracing.
+                When provided, included in all log messages for request tracking.
 
         Returns:
             Resolved node registration, or None if not found.
@@ -225,7 +241,7 @@ class ProtocolCapabilityQuery(Protocol):
             ...     contract_type="effect",
             ...     selection_strategy="round_robin",
             ... )
-            >>> node = await query.resolve_dependency(spec)
+            >>> node = await query.resolve_dependency(spec, correlation_id=uuid4())
             >>> if node:
             ...     print(f"Resolved to: {node.entity_id}")
         """

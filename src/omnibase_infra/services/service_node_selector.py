@@ -45,8 +45,8 @@ from uuid import UUID, uuid4
 
 from omnibase_core.container import ModelONEXContainer
 
+from omnibase_infra.enums import EnumSelectionStrategy
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
-from omnibase_infra.services.enum_selection_strategy import EnumSelectionStrategy
 
 if TYPE_CHECKING:
     from omnibase_infra.models.projection import ModelRegistrationProjection
@@ -223,9 +223,15 @@ class ServiceNodeSelector:
             coroutines within the same event loop. The asyncio.Lock protects
             round-robin state access.
 
+        Immutability:
+            A defensive copy of the candidates list is made at the start of
+            selection. This protects against caller modifications during async
+            operations and ensures consistent behavior.
+
         Args:
-            candidates: List of nodes matching capability criteria. Treated as
-                immutable during selection - the list is not modified.
+            candidates: List of nodes matching capability criteria. A defensive
+                copy is made internally - the original list is never modified
+                or accessed after the copy.
             strategy: Selection strategy to use. Must be one of:
                 - FIRST: Return first candidate (deterministic)
                 - RANDOM: Random selection (stateless load distribution)
@@ -236,6 +242,7 @@ class ServiceNodeSelector:
                 For FIRST and RANDOM strategies, this parameter is ignored.
             correlation_id: Optional correlation ID for distributed tracing.
                 When provided, included in all log messages for request tracking.
+                Auto-generated as UUID4 if not provided.
 
         Returns:
             Selected node, or None if candidates is empty.
@@ -264,6 +271,10 @@ class ServiceNodeSelector:
         """
         # Ensure correlation_id is present for distributed tracing
         cid = self._ensure_correlation_id(correlation_id)
+
+        # Defensive copy to protect against caller modifications during async operations
+        # This ensures consistent behavior even if the caller modifies the original list
+        candidates = list(candidates)
 
         if not candidates:
             logger.debug(
@@ -383,9 +394,12 @@ class ServiceNodeSelector:
         Implements LRU eviction: when state entries exceed max_round_robin_entries,
         the oldest 10% (by last access time) are automatically evicted.
 
+        Note:
+            This is an internal method. Callers should use select() which
+            makes a defensive copy of the candidates list before calling this.
+
         Args:
-            candidates: Non-empty list of candidates. Treated as immutable -
-                the list is accessed by index but never modified.
+            candidates: Non-empty list of candidates (already copied by select()).
             selection_key: Key for state tracking. Defaults to "_default".
             correlation_id: Correlation ID for distributed tracing.
 

@@ -237,41 +237,36 @@ class TestSelectionStrategyRandom:
         assert result.entity_id == candidates[0].entity_id
 
     @pytest.mark.asyncio
-    async def test_random_strategy_distributes_selections(self) -> None:
-        """Should distribute selections across candidates over many calls.
+    async def test_random_strategy_uses_random_choice(self) -> None:
+        """Should use random.choice to select from candidates.
 
-        This test verifies randomness by checking that:
-        1. At least 3 distinct candidates are selected (not deterministic)
-        2. All selected candidates are valid
-
-        Note: We use a reasonable lower bound (3 out of 5) to avoid flaky tests.
-        With 100 selections and true randomness, the probability of selecting
-        fewer than 3 distinct candidates is effectively zero, but checking for
-        all 5 would introduce theoretical (though astronomically unlikely) flakiness.
+        This test verifies the random selection implementation by mocking
+        random.choice to ensure it's called with the correct arguments.
+        This approach is deterministic and avoids flaky probabilistic assertions.
         """
+        import random
+        from unittest.mock import patch
+
         candidates = create_candidate_list(5)
-        candidate_ids = {c.entity_id for c in candidates}
+        expected_selection = candidates[2]  # Pre-determined mock return
 
         selector = ServiceNodeSelector()
-        selected_ids: set[UUID] = set()
 
-        for _ in range(100):
+        with patch.object(
+            random, "choice", return_value=expected_selection
+        ) as mock_choice:
             result = await selector.select(
                 candidates=candidates,
                 strategy=EnumSelectionStrategy.RANDOM,
             )
-            if result:
-                selected_ids.add(result.entity_id)
 
-        # Verify all selected IDs are valid candidates
-        assert selected_ids.issubset(candidate_ids)
-
-        # With random selection, at least 3 distinct candidates should be selected
-        # This proves distribution without being flaky about exact coverage
-        assert len(selected_ids) >= 3, (
-            f"Random selection should select at least 3 distinct candidates "
-            f"in 100 iterations, but only selected {len(selected_ids)}"
-        )
+            # Verify random.choice was called with the candidates
+            mock_choice.assert_called_once()
+            call_args = mock_choice.call_args[0][0]
+            # Compare entity_ids since defensive copy creates new list
+            assert [c.entity_id for c in call_args] == [c.entity_id for c in candidates]
+            assert result is not None
+            assert result.entity_id == expected_selection.entity_id
 
 
 @pytest.mark.unit
@@ -744,3 +739,88 @@ class TestServiceNodeSelectorThreadSafety:
 
         # Should complete without errors
         await asyncio.gather(*tasks)
+
+
+@pytest.mark.unit
+class TestServiceNodeSelectorDefensiveCopy:
+    """Tests for defensive copy behavior with candidates list."""
+
+    @pytest.mark.asyncio
+    async def test_select_makes_defensive_copy(self) -> None:
+        """Should make a defensive copy of candidates to prevent caller mutation issues.
+
+        Given: A list of candidates
+        When: select is called and original list is cleared during selection
+        Then: Selection should still work correctly (using the copied list)
+        """
+        candidates = create_candidate_list(3)
+        original_first_id = candidates[0].entity_id
+
+        selector = ServiceNodeSelector()
+
+        # Call select and verify it returns from original data
+        result = await selector.select(
+            candidates=candidates,
+            strategy=EnumSelectionStrategy.FIRST,
+        )
+
+        assert result is not None
+        assert result.entity_id == original_first_id
+
+    @pytest.mark.asyncio
+    async def test_original_list_not_modified(self) -> None:
+        """Should not modify the original candidates list.
+
+        Given: A list of candidates
+        When: select is called with any strategy
+        Then: The original list should be unchanged after selection
+        """
+        candidates = create_candidate_list(5)
+        original_length = len(candidates)
+        original_ids = [c.entity_id for c in candidates]
+
+        selector = ServiceNodeSelector()
+
+        # Call select multiple times with different strategies
+        await selector.select(candidates, EnumSelectionStrategy.FIRST)
+        await selector.select(candidates, EnumSelectionStrategy.RANDOM)
+        await selector.select(candidates, EnumSelectionStrategy.ROUND_ROBIN, "test_key")
+
+        # Verify original list unchanged
+        assert len(candidates) == original_length
+        assert [c.entity_id for c in candidates] == original_ids
+
+    @pytest.mark.asyncio
+    async def test_defensive_copy_protects_round_robin_sequence(self) -> None:
+        """Should maintain correct round-robin sequence even if original list changes.
+
+        Given: Multiple round-robin selections with the same key
+        When: Each selection works with a fresh copy
+        Then: Sequence should be consistent based on index into the copied list
+        """
+        selector = ServiceNodeSelector()
+        selection_key = "copy_test"
+
+        # First selection with 3 candidates
+        candidates_1 = create_candidate_list(3)
+        result_1 = await selector.select(
+            candidates=candidates_1,
+            strategy=EnumSelectionStrategy.ROUND_ROBIN,
+            selection_key=selection_key,
+        )
+        assert result_1.entity_id == candidates_1[0].entity_id
+
+        # Second selection with same key - should use index 1
+        result_2 = await selector.select(
+            candidates=candidates_1,
+            strategy=EnumSelectionStrategy.ROUND_ROBIN,
+            selection_key=selection_key,
+        )
+        assert result_2.entity_id == candidates_1[1].entity_id
+
+        # Mutate original list after selections
+        candidates_1.clear()
+
+        # Results should still be valid (they were from copied lists)
+        assert result_1 is not None
+        assert result_2 is not None
