@@ -39,7 +39,14 @@ if TYPE_CHECKING:
 
 
 class TestHandlerMCPInitialization:
-    """Test suite for HandlerMCP initialization."""
+    """Test suite for HandlerMCP initialization.
+
+    Note:
+        Some tests in this class access internal state (attributes prefixed with _)
+        to verify initialization behavior. This is appropriate for unit tests that
+        need to verify internal invariants. Integration tests should prefer testing
+        via public APIs (health_check, describe, execute).
+    """
 
     @pytest.fixture
     def handler(self, mock_container: MagicMock) -> HandlerMCP:
@@ -47,7 +54,13 @@ class TestHandlerMCPInitialization:
         return HandlerMCP(container=mock_container)
 
     def test_handler_init_default_state(self, handler: HandlerMCP) -> None:
-        """Test handler initializes in uninitialized state."""
+        """Test handler initializes in uninitialized state.
+
+        Note:
+            This unit test accesses internal state (_initialized, _config,
+            _tool_registry) to verify initialization invariants. Integration
+            tests should prefer testing via public APIs (health_check, describe).
+        """
         assert handler._initialized is False
         assert handler._config is None
         assert handler._tool_registry == {}
@@ -55,7 +68,13 @@ class TestHandlerMCPInitialization:
     def test_handler_stores_container(
         self, handler: HandlerMCP, mock_container: MagicMock
     ) -> None:
-        """Test handler stores container reference for dependency injection."""
+        """Test handler stores container reference for dependency injection.
+
+        Note:
+            This unit test accesses internal _container attribute to verify
+            dependency injection worked correctly. This is necessary because
+            the container is not exposed via public API.
+        """
         assert handler._container is mock_container
 
     def test_handler_type_returns_infra_handler(self, handler: HandlerMCP) -> None:
@@ -72,7 +91,14 @@ class TestHandlerMCPInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_with_empty_config(self, handler: HandlerMCP) -> None:
-        """Test handler initializes with empty config (uses defaults)."""
+        """Test handler initializes with empty config (uses defaults).
+
+        Note:
+            This unit test accesses internal state (_initialized, _config) to
+            verify that default configuration values are correctly applied.
+            This validates the initialization contract that cannot be fully
+            tested via public APIs alone.
+        """
         await handler.initialize({})
 
         assert handler._initialized is True
@@ -87,7 +113,14 @@ class TestHandlerMCPInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_with_custom_config(self, handler: HandlerMCP) -> None:
-        """Test handler initializes with custom configuration."""
+        """Test handler initializes with custom configuration.
+
+        Note:
+            This unit test accesses internal state (_initialized, _config) to
+            verify that custom configuration values are correctly applied.
+            This validates the initialization contract that cannot be fully
+            tested via public APIs alone.
+        """
         config: dict[str, object] = {
             "host": "127.0.0.1",
             "port": 9000,
@@ -109,7 +142,14 @@ class TestHandlerMCPInitialization:
 
     @pytest.mark.asyncio
     async def test_shutdown_clears_state(self, handler: HandlerMCP) -> None:
-        """Test shutdown clears handler state."""
+        """Test shutdown clears handler state.
+
+        Note:
+            This unit test accesses internal state (_initialized, _config,
+            _tool_registry) to verify that shutdown properly clears all state.
+            This is a critical invariant that must be verified at the unit level
+            to ensure no state leaks between handler lifecycles.
+        """
         await handler.initialize({})
         assert handler._initialized is True
 

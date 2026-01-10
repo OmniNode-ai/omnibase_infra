@@ -8,6 +8,22 @@ as MCP tools. This transport is recommended for production deployments.
 The transport uses the official MCP Python SDK's streamable HTTP implementation,
 configured for stateless operation and JSON responses for scalability.
 
+Security:
+    Authentication is handled at the handler level (HandlerMCP), not at the
+    transport level. The transport exposes the raw HTTP endpoint without any
+    authentication middleware.
+
+    For production deployments before HandlerMCP authentication is implemented:
+    - Deploy behind an API gateway with authentication (recommended)
+    - Use network-level access controls (VPC, firewall rules)
+    - Restrict access to trusted clients only
+
+    The transport layer is intentionally kept simple to allow flexibility in
+    authentication strategies (API gateway, service mesh, direct auth).
+
+    See: HandlerMCP class docstring for authentication implementation status
+    See: TODO(OMN-1288) for authentication implementation tracking
+
 Usage:
     from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
 
@@ -27,6 +43,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     import uvicorn
+    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
     from omnibase_spi.protocols.types.protocol_mcp_tool_types import (
         ProtocolMCPToolDefinition,
     )
@@ -47,15 +64,24 @@ class TransportMCPStreamableHttp:
 
     Attributes:
         config: MCP handler configuration containing host, port, path, etc.
+        _container: Optional ONEX container for dependency injection.
     """
 
-    def __init__(self, config: ModelMcpHandlerConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: ModelMcpHandlerConfig | None = None,
+        container: ModelONEXContainer | None = None,
+    ) -> None:
         """Initialize the streamable HTTP transport.
 
         Args:
             config: MCP handler configuration. If None, uses defaults.
+            container: Optional ONEX container for dependency injection.
+                      Provides access to shared services and configuration
+                      when integrating with the ONEX runtime.
         """
         self._config = config or ModelMcpHandlerConfig()
+        self._container = container
         self._app: Starlette | None = None
         self._server: uvicorn.Server | None = None
         self._running = False
@@ -141,8 +167,14 @@ class TransportMCPStreamableHttp:
     ) -> None:
         """Register a tool with the MCP server.
 
-        Creates a wrapper function that calls the tool_executor with
-        the tool name and arguments.
+        Creates a wrapper function with a unique name that calls the tool_executor
+        with the tool name and arguments.
+
+        Note:
+            Each tool handler gets a unique function name (onex_tool_{name}) to avoid
+            potential conflicts with FastMCP's internal function registry. While FastMCP
+            uses the explicit `name` parameter for tool identification, having unique
+            function names ensures robustness across different MCP SDK versions.
 
         Args:
             mcp: FastMCP server instance.
@@ -154,16 +186,25 @@ class TransportMCPStreamableHttp:
         if not isinstance(mcp, FastMCP):
             raise TypeError(f"Expected FastMCP instance, got {type(mcp).__name__}")
 
-        # Create a closure that captures the tool name
         tool_name = tool_def.name
 
-        @mcp.tool(name=tool_name, description=tool_def.description)
-        def tool_wrapper(**kwargs: object) -> object:
-            """Wrapper that routes to the ONEX tool executor."""
-            return tool_executor(tool_name, kwargs)
+        # Create a handler factory that produces uniquely-named functions per tool.
+        # This avoids potential issues where FastMCP might use __name__ internally.
+        def _make_tool_handler(name: str) -> Callable[..., object]:
+            def handler(**kwargs: object) -> object:
+                """Wrapper that routes to the ONEX tool executor."""
+                return tool_executor(name, kwargs)
+
+            # Set unique function name for this tool - ensures no naming collisions
+            handler.__name__ = f"onex_tool_{name}"
+            handler.__qualname__ = f"TransportMCPStreamableHttp.onex_tool_{name}"
+            return handler
+
+        handler = _make_tool_handler(tool_name)
+        mcp.tool(name=tool_name, description=tool_def.description)(handler)
 
         # Store the handler for reference
-        self._tool_handlers[tool_name] = tool_wrapper
+        self._tool_handlers[tool_name] = handler
 
         logger.debug(
             "Tool registered with MCP server",
@@ -185,6 +226,20 @@ class TransportMCPStreamableHttp:
         Args:
             tools: Sequence of tool definitions to expose.
             tool_executor: Callback function to execute tool calls.
+
+        Raises:
+            Exception: If the server fails to start (e.g., port already in use).
+                      State is reset to not-running on failure.
+
+        Note:
+            Port binding occurs during uvicorn server startup, not during
+            configuration. If the configured port is unavailable at bind time,
+            the server will fail to start and raise an exception.
+
+            For testing scenarios where port availability needs to be checked,
+            note that there is an inherent TOCTOU (time-of-check-time-of-use)
+            race between checking port availability and actually binding.
+            Production deployments should handle startup failures gracefully.
         """
         import uvicorn
 
@@ -222,26 +277,62 @@ class TransportMCPStreamableHttp:
     async def stop(self) -> None:
         """Stop the MCP server.
 
-        Signals uvicorn to exit gracefully and waits for shutdown to complete.
-        The server will finish processing current requests before stopping.
+        Signals uvicorn to exit gracefully. This method sets the shutdown flag
+        and clears local state, but does NOT block waiting for shutdown completion.
+
+        Shutdown Behavior:
+            1. Sets ``should_exit = True`` on the uvicorn server, which signals
+               the server's main loop to stop accepting new connections.
+            2. Clears local state (``_running``, ``_app``, ``_server``).
+            3. Returns immediately - actual shutdown completes asynchronously.
+
+        Important:
+            The actual server shutdown happens when the ``serve()`` coroutine
+            (started by ``start()``) detects ``should_exit`` and returns.
+            Callers that need to wait for full shutdown should await the
+            ``start()`` coroutine completion, not just call ``stop()``.
+
+        Usage Pattern:
+            .. code-block:: python
+
+                # Start in background task
+                server_task = asyncio.create_task(transport.start(tools, executor))
+
+                # ... do work ...
+
+                # Signal shutdown
+                await transport.stop()
+
+                # Wait for full shutdown
+                await server_task
+
+        Note:
+            This design follows uvicorn's cooperative shutdown model where
+            setting ``should_exit`` signals intent, and the server gracefully
+            finishes in-flight requests before the ``serve()`` coroutine returns.
         """
         if not self._running:
             return
 
-        # Signal the uvicorn server to exit gracefully
+        # Signal the uvicorn server to exit gracefully.
+        # Per uvicorn's design, setting should_exit = True causes serve() to:
+        # 1. Stop accepting new connections
+        # 2. Wait for in-flight requests to complete (with configurable timeout)
+        # 3. Return from the serve() coroutine
         if self._server is not None:
             self._server.should_exit = True
-            # Wait for the server to complete shutdown
-            # The serve() coroutine will return when should_exit is True
-            # and all pending requests are processed
-            logger.info("Signaled MCP transport shutdown, waiting for server to stop")
+            logger.info(
+                "Signaled MCP transport shutdown",
+                extra={
+                    "host": self._config.host,
+                    "port": self._config.port,
+                },
+            )
 
-        # Mark as not running - the actual server cleanup happens when serve() returns
+        # Clear local state immediately. The caller of start() should await
+        # that coroutine to ensure the server has fully stopped.
         self._running = False
         self._app = None
-        # Note: We clear _server reference after signaling shutdown.
-        # The caller of start() should await that coroutine to ensure
-        # the server has fully stopped before proceeding.
         self._server = None
         self._tool_handlers.clear()
 

@@ -42,6 +42,8 @@ from omnibase_infra.errors import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+
 logger = logging.getLogger(__name__)
 
 
@@ -108,15 +110,18 @@ class ONEXToMCPAdapter:
     - Contract-to-schema conversion
     - Parameter mapping between ONEX and MCP formats
     - Tool invocation routing to ONEX nodes
+    - Container-based dependency injection for ONEX integration
 
     Attributes:
         _tool_cache: Cache of discovered tool definitions.
         _node_executor: Callback for executing ONEX nodes.
+        _container: Optional ONEX container for dependency injection.
     """
 
     def __init__(
         self,
         node_executor: object | None = None,
+        container: ModelONEXContainer | None = None,
     ) -> None:
         """Initialize the adapter.
 
@@ -124,9 +129,13 @@ class ONEXToMCPAdapter:
             node_executor: Optional callback for node execution.
                           If not provided, tools will be discovered but
                           not executable.
+            container: Optional ONEX container for dependency injection.
+                      Provides access to shared services and configuration
+                      when integrating with the ONEX runtime.
         """
         self._tool_cache: dict[str, MCPToolDefinition] = {}
         self._node_executor = node_executor
+        self._container = container
 
     async def discover_tools(
         self,
@@ -302,7 +311,11 @@ class ONEXToMCPAdapter:
         return False
 
     @staticmethod
-    def pydantic_to_json_schema(model_class: type) -> dict[str, object]:
+    def pydantic_to_json_schema(
+        model_class: type,
+        *,
+        raise_on_error: bool = False,
+    ) -> dict[str, object]:
         """Convert a Pydantic model to JSON Schema.
 
         This is useful for generating MCP input schemas from ONEX
@@ -310,26 +323,58 @@ class ONEXToMCPAdapter:
 
         Args:
             model_class: Pydantic model class.
+            raise_on_error: If True, raise ProtocolConfigurationError on failure
+                instead of returning a fallback schema. Default is False for
+                backwards compatibility.
 
         Returns:
             JSON Schema dict.
+
+        Raises:
+            ProtocolConfigurationError: If raise_on_error=True and schema
+                generation fails.
         """
         try:
             from pydantic import BaseModel
 
             if issubclass(model_class, BaseModel):
                 return model_class.model_json_schema()
+
+            # model_class is a valid type but not a Pydantic BaseModel subclass
+            model_name = getattr(model_class, "__name__", str(model_class))
+            logger.warning(
+                "Cannot generate Pydantic schema: model_class is not a BaseModel subclass",
+                extra={
+                    "model_class": model_name,
+                    "model_type": type(model_class).__name__,
+                    "reason": "not_basemodel_subclass",
+                },
+            )
+            if raise_on_error:
+                raise ProtocolConfigurationError(
+                    f"Cannot generate schema: {model_name} is not a Pydantic BaseModel subclass",
+                )
+
         except TypeError as e:
             # TypeError occurs when model_class is not a valid class type
-            # (e.g., None, primitive, or other non-class object)
+            # (e.g., None, primitive, or other non-class object that cannot be
+            # checked with issubclass)
+            model_repr = getattr(model_class, "__name__", str(model_class))
             logger.warning(
                 "Cannot generate Pydantic schema: model_class is not a valid type, "
                 "using fallback",
                 extra={
-                    "model_class": getattr(model_class, "__name__", str(model_class)),
+                    "model_class": model_repr,
+                    "model_type": type(model_class).__name__,
                     "error": str(e),
+                    "reason": "not_valid_type",
                 },
             )
+            if raise_on_error:
+                raise ProtocolConfigurationError(
+                    f"Cannot generate schema: {model_repr} is not a valid Pydantic model class",
+                ) from e
+
         except ImportError as e:
             # ImportError occurs when pydantic is not installed
             logger.warning(
@@ -337,8 +382,13 @@ class ONEXToMCPAdapter:
                 extra={
                     "model_class": getattr(model_class, "__name__", str(model_class)),
                     "error": str(e),
+                    "reason": "pydantic_not_installed",
                 },
             )
+            if raise_on_error:
+                raise ProtocolConfigurationError(
+                    "Cannot generate schema: pydantic library is not installed",
+                ) from e
 
         # Fallback for non-Pydantic types or when pydantic unavailable
         return {"type": "object"}

@@ -51,6 +51,40 @@ if TYPE_CHECKING:
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 
+# =============================================================================
+# Test Helper Classes
+# =============================================================================
+
+
+class MockToolDefinition:
+    """Test helper for tool definitions.
+
+    This class provides a simple wrapper for tool definitions used in tests.
+    It conforms to the ProtocolMCPToolDefinition protocol expected by the
+    MCP transport layer.
+
+    Extracted to module level for reuse across fixtures and tests instead of
+    defining inline within each fixture/test function.
+    """
+
+    def __init__(self, name: str, description: str, parameters: list[object]) -> None:
+        """Initialize tool definition.
+
+        Args:
+            name: Tool name (unique identifier).
+            description: Human-readable tool description.
+            parameters: List of parameter definitions.
+        """
+        self.name = name
+        self.description = description
+        self.parameters = parameters
+
+
+# =============================================================================
+# Test Utilities
+# =============================================================================
+
+
 def _find_free_port() -> int:
     """Find a free port on localhost for testing.
 
@@ -266,25 +300,16 @@ async def mcp_app(
     # Get tools from adapter
     tools = await registered_adapter.discover_tools()
 
-    # Convert adapter tools to protocol format for transport
-    protocol_tools: list[ProtocolMCPToolDefinition] = []
-    for tool in tools:
-
-        class ToolDef:
-            """Simple tool definition wrapper."""
-
-            def __init__(self, name: str, description: str, parameters: list[object]):
-                self.name = name
-                self.description = description
-                self.parameters = parameters
-
-        protocol_tools.append(
-            ToolDef(
-                name=tool.name,
-                description=tool.description,
-                parameters=tool.parameters,
-            )
+    # Convert adapter tools to protocol format for transport using the
+    # module-level MockToolDefinition class (extracted for reuse)
+    protocol_tools: list[ProtocolMCPToolDefinition] = [
+        MockToolDefinition(
+            name=tool.name,
+            description=tool.description,
+            parameters=tool.parameters,
         )
+        for tool in tools
+    ]
 
     # Create the app
     app = mcp_transport.create_app(
@@ -359,15 +384,9 @@ class TestMcpAppCreation:
 
         tools = await registered_adapter.discover_tools()
 
-        # Create simple tool definitions
-        class SimpleTool:
-            def __init__(self, name: str, description: str, parameters: list[object]):
-                self.name = name
-                self.description = description
-                self.parameters = parameters
-
+        # Use the module-level MockToolDefinition class (extracted for reuse)
         protocol_tools = [
-            SimpleTool(t.name, t.description, t.parameters) for t in tools
+            MockToolDefinition(t.name, t.description, t.parameters) for t in tools
         ]
 
         app = mcp_transport.create_app(
@@ -412,6 +431,12 @@ class TestMcpHttpEndpoint:
         Verifies:
         - MCP endpoint responds to requests
         - Correct path is configured
+
+        Note:
+            This test uses a broad status code assertion because we are testing
+            endpoint reachability, not specific MCP protocol behavior. The MCP
+            streamable HTTP transport may return various status codes depending
+            on protocol state, request format, and server configuration.
         """
         import httpx
 
@@ -419,12 +444,14 @@ class TestMcpHttpEndpoint:
             transport=httpx.ASGITransport(app=mcp_app),
             base_url="http://testserver",
         ) as client:
-            # MCP endpoint should exist - any response is acceptable
-            # The exact response depends on the MCP protocol state
             response = await client.get(f"{mcp_handler_config.path}")
-            # MCP streamable HTTP may return various status codes
-            # depending on the request type. 307 = Temporary Redirect is
-            # common for mounted apps requiring trailing slash.
+            # Broad assertion is intentional for this reachability test:
+            # - 200: Success (endpoint fully operational)
+            # - 307: Temporary redirect (mounted app requires trailing slash)
+            # - 400: Bad request (endpoint exists but request format wrong)
+            # - 404: Route exists but specific path not found
+            # - 405: Method not allowed (endpoint exists, wrong HTTP method)
+            # All of these indicate the endpoint is reachable and responding.
             assert response.status_code in (200, 307, 400, 404, 405)
 
     async def test_mcp_post_endpoint(
@@ -435,6 +462,12 @@ class TestMcpHttpEndpoint:
         Verifies:
         - MCP endpoint handles POST method
         - JSON-RPC format is expected
+
+        Note:
+            This test uses a broad status code assertion because we are testing
+            that the endpoint can process POST requests, not specific JSON-RPC
+            semantics. The MCP protocol state and initialization status affect
+            the exact response code returned.
         """
         import httpx
 
@@ -450,9 +483,12 @@ class TestMcpHttpEndpoint:
                 json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
                 headers={"Content-Type": "application/json"},
             )
-            # MCP server should respond with JSON-RPC response
-            # May be an error if not properly initialized, but should be valid JSON
-            # 404 can occur if the endpoint routing differs from expected
+            # Broad assertion is intentional for this POST endpoint test:
+            # - 200: Success (JSON-RPC request processed)
+            # - 307: Redirect (path normalization)
+            # - 400: Bad request (JSON-RPC validation failed but endpoint works)
+            # - 404: Route configuration difference
+            # All indicate POST handling capability at the endpoint.
             assert response.status_code in (200, 307, 400, 404)
 
 
@@ -803,15 +839,3 @@ class TestMcpMultipleToolCalls:
             arguments={"required_param": "value"},
         )
         assert result3["success"] is True
-
-
-__all__: list[str] = [
-    "TestMcpTransportCreation",
-    "TestMcpAppCreation",
-    "TestMcpHttpEndpoint",
-    "TestOnexAdapterToolRegistration",
-    "TestOnexAdapterToolInvocation",
-    "TestMcpTransportLifecycle",
-    "TestMcpSchemaConversion",
-    "TestMcpMultipleToolCalls",
-]

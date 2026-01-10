@@ -84,9 +84,31 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         - JSON response mode for compatibility
 
     Security Features:
-        - Tool execution timeout enforcement
+        - Tool execution timeout enforcement (via config.timeout_seconds)
         - Request size limits inherited from ONEX nodes
         - Correlation ID propagation for tracing
+        - Circuit breaker protection against cascading failures
+
+    Authentication:
+        Authentication is NOT yet implemented in this MVP version. The MCP
+        endpoint is currently open/unauthenticated. Authentication will be
+        added in a future release via:
+        - Bearer token validation in the transport layer
+        - Integration with ONEX identity service for token verification
+        - Optional API key support for service-to-service communication
+        See: TODO(OMN-1288) for authentication implementation tracking
+
+        For production deployments before authentication is implemented,
+        deploy behind an API gateway with authentication or restrict
+        network access to trusted clients.
+
+    Dispatcher Integration:
+        This MVP version uses placeholder tool execution. Full ONEX dispatcher
+        integration is planned to enable:
+        - Routing tool calls to the appropriate ONEX node
+        - Timeout enforcement via asyncio.wait_for()
+        - Full observability through the ONEX runtime
+        See: TODO(OMN-1288) for dispatcher integration tracking
     """
 
     def __init__(self, container: ModelONEXContainer) -> None:
@@ -158,7 +180,9 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         )
 
         try:
-            # Use Pydantic validation for type-safe configuration parsing
+            # Use Pydantic validation for type-safe configuration parsing.
+            # Pydantic handles type coercion (e.g., str "8090" -> int 8090) automatically.
+            # ValidationError will be raised for truly invalid types that cannot be coerced.
             self._config = ModelMcpHandlerConfig(**config)
 
             # Initialize tool registry (empty until tools are registered)
@@ -542,6 +566,18 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         Circuit breaker protection is applied to prevent cascading failures
         when tool execution repeatedly fails.
 
+        Timeout Enforcement:
+            The tool execution timeout (config.timeout_seconds, default: 30.0s)
+            will be enforced when dispatcher integration is complete. The timeout
+            will be applied using asyncio.wait_for() around the dispatcher call.
+
+            Currently, timeout enforcement is handled at the protocol level by:
+            - uvicorn request timeout settings
+            - MCP SDK's internal timeout handling
+            - HTTP client timeouts on the caller side
+
+            See: TODO(OMN-1288) for dispatcher timeout integration
+
         Args:
             tool_name: Name of the tool to execute.
             arguments: Tool arguments.
@@ -559,6 +595,15 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         try:
             # TODO(OMN-1288): Implement actual tool execution via ONEX dispatcher
+            # Integration plan:
+            # 1. Look up the ONEX node that provides this tool from container registry
+            # 2. Build a ModelEventEnvelope for the node with proper correlation ID
+            # 3. Dispatch to the node via the ONEX runtime dispatcher
+            # 4. Apply timeout enforcement via asyncio.wait_for(dispatch(), timeout)
+            #    using self._config.timeout_seconds (default: 30.0s)
+            # 5. Transform the node response to MCP-compatible format
+            # 6. Handle dispatcher errors (timeout, node not found, execution failure)
+            #
             # For now, return a placeholder response
             logger.info(
                 "Tool execution requested",
@@ -568,12 +613,6 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                     "correlation_id": str(correlation_id),
                 },
             )
-
-            # Placeholder - actual implementation will:
-            # 1. Look up the ONEX node that provides this tool
-            # 2. Build an envelope for the node
-            # 3. Dispatch to the node via the ONEX runtime
-            # 4. Return the result
 
             result: dict[str, object] = {
                 "message": f"Tool '{tool_name}' executed successfully",
