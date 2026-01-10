@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Tests for IntentRegistry and ModelRegistryIntent.
+"""Tests for RegistryIntent and ModelRegistryIntent.
 
 This module validates the registry pattern for registration intents,
 serving as the template for other payload registry tests (HTTP, Vault, Consul).
 
-The IntentRegistry provides a decorator-based registration mechanism that
+The RegistryIntent provides a decorator-based registration mechanism that
 enables dynamic type resolution during Pydantic validation without requiring
 explicit union type definitions. This pattern:
 - Eliminates duplicate union definitions across modules
@@ -40,7 +40,6 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.nodes.node_registration_orchestrator.models import (
-    IntentRegistry,
     ModelConsulIntentPayload,
     ModelConsulRegistrationIntent,
     ModelPostgresIntentPayload,
@@ -48,6 +47,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.models import (
     ModelReducerExecutionResult,
     ModelReducerState,
     ModelRegistryIntent,
+    RegistryIntent,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_registration_intent import (
     get_union_intent_types,
@@ -114,33 +114,33 @@ def initial_state() -> ModelReducerState:
 
 
 # ============================================================================
-# Tests for IntentRegistry
+# Tests for RegistryIntent
 # ============================================================================
 
 
 @pytest.mark.unit
-class TestIntentRegistry:
-    """Tests for IntentRegistry class methods and registration behavior.
+class TestRegistryIntent:
+    """Tests for RegistryIntent class methods and registration behavior.
 
-    The IntentRegistry provides a decorator-based mechanism for registering
+    The RegistryIntent provides a decorator-based mechanism for registering
     intent model types, enabling dynamic type resolution during Pydantic
     validation without explicit union type definitions.
     """
 
     def test_get_type_returns_correct_class_for_consul(self) -> None:
         """Registry returns correct class for consul kind."""
-        intent_cls = IntentRegistry.get_type("consul")
+        intent_cls = RegistryIntent.get_type("consul")
         assert intent_cls is ModelConsulRegistrationIntent
 
     def test_get_type_returns_correct_class_for_postgres(self) -> None:
         """Registry returns correct class for postgres kind."""
-        intent_cls = IntentRegistry.get_type("postgres")
+        intent_cls = RegistryIntent.get_type("postgres")
         assert intent_cls is ModelPostgresUpsertIntent
 
     def test_get_type_unknown_kind_raises_keyerror(self) -> None:
         """Registry raises KeyError for unknown kind with helpful message."""
         with pytest.raises(KeyError) as exc_info:
-            IntentRegistry.get_type("unknown_kind")
+            RegistryIntent.get_type("unknown_kind")
 
         # Verify error message contains useful information
         error_msg = str(exc_info.value)
@@ -150,7 +150,7 @@ class TestIntentRegistry:
     def test_get_type_unknown_kind_lists_registered_kinds(self) -> None:
         """KeyError message includes list of registered kinds."""
         with pytest.raises(KeyError) as exc_info:
-            IntentRegistry.get_type("nonexistent")
+            RegistryIntent.get_type("nonexistent")
 
         error_msg = str(exc_info.value)
         # Should mention at least consul and postgres
@@ -158,7 +158,7 @@ class TestIntentRegistry:
 
     def test_get_all_types_returns_dict_of_registered_types(self) -> None:
         """get_all_types returns dict mapping kind strings to classes."""
-        all_types = IntentRegistry.get_all_types()
+        all_types = RegistryIntent.get_all_types()
 
         assert isinstance(all_types, dict)
         assert "consul" in all_types
@@ -168,32 +168,32 @@ class TestIntentRegistry:
 
     def test_get_all_types_returns_copy_not_reference(self) -> None:
         """get_all_types returns a copy, not the internal registry."""
-        all_types = IntentRegistry.get_all_types()
+        all_types = RegistryIntent.get_all_types()
 
         # Mutating the returned dict should not affect the registry
         original_count = len(all_types)
         all_types["fake"] = type("FakeIntent", (), {})  # type: ignore[assignment]
 
         # Registry should be unchanged
-        assert len(IntentRegistry.get_all_types()) == original_count
+        assert len(RegistryIntent.get_all_types()) == original_count
 
     def test_is_registered_returns_true_for_consul(self) -> None:
         """is_registered returns True for registered consul kind."""
-        assert IntentRegistry.is_registered("consul") is True
+        assert RegistryIntent.is_registered("consul") is True
 
     def test_is_registered_returns_true_for_postgres(self) -> None:
         """is_registered returns True for registered postgres kind."""
-        assert IntentRegistry.is_registered("postgres") is True
+        assert RegistryIntent.is_registered("postgres") is True
 
     def test_is_registered_returns_false_for_unknown_kind(self) -> None:
         """is_registered returns False for unknown kinds."""
-        assert IntentRegistry.is_registered("unknown") is False
-        assert IntentRegistry.is_registered("vault") is False
-        assert IntentRegistry.is_registered("http") is False
+        assert RegistryIntent.is_registered("unknown") is False
+        assert RegistryIntent.is_registered("vault") is False
+        assert RegistryIntent.is_registered("http") is False
 
     def test_is_registered_empty_string_returns_false(self) -> None:
         """is_registered returns False for empty string."""
-        assert IntentRegistry.is_registered("") is False
+        assert RegistryIntent.is_registered("") is False
 
     def test_register_decorator_returns_class_unchanged(self) -> None:
         """The @register decorator returns the class unchanged.
@@ -203,13 +203,13 @@ class TestIntentRegistry:
         clear() for test isolation (clear() is designed for testing only).
         """
         # Save original registry state
-        original_types = IntentRegistry.get_all_types()
+        original_types = RegistryIntent.get_all_types()
 
         try:
             # Clear to test registration in isolation
-            IntentRegistry.clear()
+            RegistryIntent.clear()
 
-            @IntentRegistry.register("test_kind")
+            @RegistryIntent.register("test_kind")
             class TestIntent(ModelRegistryIntent):
                 kind: Literal["test_kind"] = "test_kind"
 
@@ -218,14 +218,14 @@ class TestIntentRegistry:
             assert TestIntent.model_fields["kind"].default == "test_kind"
 
             # Verify it was registered
-            assert IntentRegistry.is_registered("test_kind")
-            assert IntentRegistry.get_type("test_kind") is TestIntent
+            assert RegistryIntent.is_registered("test_kind")
+            assert RegistryIntent.get_type("test_kind") is TestIntent
 
         finally:
             # Restore original registry state
-            IntentRegistry.clear()
+            RegistryIntent.clear()
             for kind, cls in original_types.items():
-                IntentRegistry._types[kind] = cls
+                RegistryIntent._types[kind] = cls
 
     def test_register_duplicate_kind_raises_valueerror(self) -> None:
         """Registering the same kind twice raises ValueError.
@@ -233,20 +233,20 @@ class TestIntentRegistry:
         This prevents accidental overwrites of existing intent types.
         """
         # Save original registry state
-        original_types = IntentRegistry.get_all_types()
+        original_types = RegistryIntent.get_all_types()
 
         try:
-            IntentRegistry.clear()
+            RegistryIntent.clear()
 
             # First registration should succeed
-            @IntentRegistry.register("duplicate_test")
+            @RegistryIntent.register("duplicate_test")
             class FirstIntent(ModelRegistryIntent):
                 kind: Literal["duplicate_test"] = "duplicate_test"
 
             # Second registration with same kind should fail
             with pytest.raises(ValueError) as exc_info:
 
-                @IntentRegistry.register("duplicate_test")
+                @RegistryIntent.register("duplicate_test")
                 class SecondIntent(ModelRegistryIntent):
                     kind: Literal["duplicate_test"] = "duplicate_test"
 
@@ -257,9 +257,9 @@ class TestIntentRegistry:
 
         finally:
             # Restore original registry state
-            IntentRegistry.clear()
+            RegistryIntent.clear()
             for kind, cls in original_types.items():
-                IntentRegistry._types[kind] = cls
+                RegistryIntent._types[kind] = cls
 
     def test_clear_removes_all_registered_types(self) -> None:
         """clear() removes all registered types from the registry.
@@ -268,24 +268,24 @@ class TestIntentRegistry:
         used in production code.
         """
         # Save original registry state
-        original_types = IntentRegistry.get_all_types()
+        original_types = RegistryIntent.get_all_types()
 
         try:
             # Registry should have types before clear
-            assert len(IntentRegistry.get_all_types()) > 0
+            assert len(RegistryIntent.get_all_types()) > 0
 
-            IntentRegistry.clear()
+            RegistryIntent.clear()
 
             # Registry should be empty after clear
-            assert len(IntentRegistry.get_all_types()) == 0
-            assert IntentRegistry.is_registered("consul") is False
-            assert IntentRegistry.is_registered("postgres") is False
+            assert len(RegistryIntent.get_all_types()) == 0
+            assert RegistryIntent.is_registered("consul") is False
+            assert RegistryIntent.is_registered("postgres") is False
 
         finally:
             # Restore original registry state
-            IntentRegistry.clear()
+            RegistryIntent.clear()
             for kind, cls in original_types.items():
-                IntentRegistry._types[kind] = cls
+                RegistryIntent._types[kind] = cls
 
 
 # ============================================================================
@@ -412,7 +412,7 @@ class TestConcreteIntentModels:
 
     These tests verify that ModelConsulRegistrationIntent and
     ModelPostgresUpsertIntent correctly inherit from ModelRegistryIntent
-    and are properly registered in the IntentRegistry.
+    and are properly registered in the RegistryIntent.
     """
 
     def test_consul_intent_inherits_from_base(self) -> None:
@@ -425,13 +425,13 @@ class TestConcreteIntentModels:
 
     def test_consul_intent_is_registered_in_registry(self) -> None:
         """ModelConsulRegistrationIntent is registered with kind='consul'."""
-        assert IntentRegistry.is_registered("consul")
-        assert IntentRegistry.get_type("consul") is ModelConsulRegistrationIntent
+        assert RegistryIntent.is_registered("consul")
+        assert RegistryIntent.get_type("consul") is ModelConsulRegistrationIntent
 
     def test_postgres_intent_is_registered_in_registry(self) -> None:
         """ModelPostgresUpsertIntent is registered with kind='postgres'."""
-        assert IntentRegistry.is_registered("postgres")
-        assert IntentRegistry.get_type("postgres") is ModelPostgresUpsertIntent
+        assert RegistryIntent.is_registered("postgres")
+        assert RegistryIntent.get_type("postgres") is ModelPostgresUpsertIntent
 
     def test_consul_intent_kind_field_is_literal_consul(
         self, sample_consul_intent: ModelConsulRegistrationIntent
@@ -638,8 +638,8 @@ class TestIntentSerialization:
         }
 
         # Use registry to get correct class based on kind
-        consul_cls = IntentRegistry.get_type(consul_data["kind"])
-        postgres_cls = IntentRegistry.get_type(postgres_data["kind"])
+        consul_cls = RegistryIntent.get_type(consul_data["kind"])
+        postgres_cls = RegistryIntent.get_type(postgres_data["kind"])
 
         consul_intent = consul_cls.model_validate(consul_data)
         postgres_intent = postgres_cls.model_validate(postgres_data)
@@ -675,7 +675,7 @@ class TestReducerExecutionResultIntegration:
     """Tests for integration with ModelReducerExecutionResult.
 
     ModelReducerExecutionResult uses a field_validator to resolve intent
-    types dynamically from the IntentRegistry during deserialization.
+    types dynamically from the RegistryIntent during deserialization.
     """
 
     def test_result_accepts_consul_intent(
@@ -728,7 +728,7 @@ class TestReducerExecutionResultIntegration:
     ) -> None:
         """ModelReducerExecutionResult deserializes Consul intent from dict.
 
-        The validate_intents validator uses IntentRegistry to resolve the
+        The validate_intents validator uses RegistryIntent to resolve the
         correct intent class based on the kind field.
 
         Note: Uses UUID objects (not strings) because intent models have
@@ -966,21 +966,21 @@ class TestReducerExecutionResultIntegration:
 class TestIntentThreadSafety:
     """Tests for thread safety and immutability of intent models.
 
-    All intent models and the IntentRegistry are designed to be thread-safe:
-    - IntentRegistry is populated at module import time and read-only after
+    All intent models and the RegistryIntent are designed to be thread-safe:
+    - RegistryIntent is populated at module import time and read-only after
     - All intent models are frozen (immutable)
     - Tuple fields ensure container immutability
     """
 
     def test_intent_registry_class_var_is_shared(self) -> None:
-        """IntentRegistry._types is a ClassVar shared across all usage.
+        """RegistryIntent._types is a ClassVar shared across all usage.
 
         This ensures the registry is consistent regardless of where it's
         accessed in the codebase.
         """
         # Access registry from different import paths (would be same in practice)
-        types1 = IntentRegistry.get_all_types()
-        types2 = IntentRegistry.get_all_types()
+        types1 = RegistryIntent.get_all_types()
+        types2 = RegistryIntent.get_all_types()
 
         # Should return equivalent copies
         assert types1 == types2
@@ -1160,10 +1160,10 @@ class TestUnionRegistrySync:
     """Tests for union and registry synchronization.
 
     These tests verify that the ModelRegistrationIntent discriminated union
-    and the IntentRegistry stay in sync. This is critical because:
+    and the RegistryIntent stay in sync. This is critical because:
 
     1. ModelRegistrationIntent (static union) is used for Pydantic field validation
-    2. IntentRegistry (dynamic) is used for runtime type resolution
+    2. RegistryIntent (dynamic) is used for runtime type resolution
 
     If they drift, validation and deserialization may behave inconsistently.
 
@@ -1199,7 +1199,7 @@ class TestUnionRegistrySync:
     def test_union_types_match_registry_count(self) -> None:
         """Number of union types matches number of registered types."""
         union_types = get_union_intent_types()
-        registry_types = IntentRegistry.get_all_types()
+        registry_types = RegistryIntent.get_all_types()
 
         assert len(union_types) == len(registry_types), (
             f"Union has {len(union_types)} types but registry has "
@@ -1207,7 +1207,7 @@ class TestUnionRegistrySync:
         )
 
     def test_all_union_types_are_registered(self) -> None:
-        """All types in the union are registered in IntentRegistry."""
+        """All types in the union are registered in RegistryIntent."""
         union_types = get_union_intent_types()
 
         for union_type in union_types:
@@ -1218,15 +1218,15 @@ class TestUnionRegistrySync:
             )
 
             kind_value = kind_default.default
-            assert IntentRegistry.is_registered(kind_value), (
+            assert RegistryIntent.is_registered(kind_value), (
                 f"{union_type.__name__} with kind='{kind_value}' is not "
-                f"registered in IntentRegistry"
+                f"registered in RegistryIntent"
             )
 
     def test_all_registered_types_are_in_union(self) -> None:
-        """All types in IntentRegistry are included in the union."""
+        """All types in RegistryIntent are included in the union."""
         union_types = set(get_union_intent_types())
-        registry_types = IntentRegistry.get_all_types()
+        registry_types = RegistryIntent.get_all_types()
 
         for kind, registered_type in registry_types.items():
             assert registered_type in union_types, (
@@ -1238,7 +1238,7 @@ class TestUnionRegistrySync:
     def test_registry_types_match_union_types_exactly(self) -> None:
         """Registry and union contain exactly the same type instances."""
         union_types = set(get_union_intent_types())
-        registry_types = set(IntentRegistry.get_all_types().values())
+        registry_types = set(RegistryIntent.get_all_types().values())
 
         assert union_types == registry_types, (
             f"Union types {union_types} do not match registry types {registry_types}"
@@ -1251,11 +1251,11 @@ class TestUnionRegistrySync:
         validation function catches the inconsistency.
         """
         # Save original registry state
-        original_types = IntentRegistry.get_all_types()
+        original_types = RegistryIntent.get_all_types()
 
         try:
             # Register a fake type that won't be in the union
-            @IntentRegistry.register("fake_test_kind")
+            @RegistryIntent.register("fake_test_kind")
             class FakeIntent(ModelRegistryIntent):
                 kind: Literal["fake_test_kind"] = "fake_test_kind"
 
@@ -1269,6 +1269,6 @@ class TestUnionRegistrySync:
 
         finally:
             # Restore original registry state
-            IntentRegistry.clear()
+            RegistryIntent.clear()
             for kind, cls in original_types.items():
-                IntentRegistry._types[kind] = cls
+                RegistryIntent._types[kind] = cls

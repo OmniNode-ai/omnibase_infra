@@ -216,6 +216,20 @@ pattern_exemptions:
       - CLAUDE.md (Infrastructure Patterns - Adapter Pattern)
     ticket: OMN-1092
   # ==========================================================================
+  # Projector Schema Model Exemptions (OMN-1168)
+  # ==========================================================================
+  # ModelProjectorSchema requires multiple methods for SQL generation, validation,
+  # and schema introspection operations.
+  - file_pattern: 'model_projector_schema\.py'
+    class_pattern: "Class 'ModelProjectorSchema'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Schema model requires SQL generation methods (to_create_table_sql, to_full_migration_sql), schema introspection (get_column_names, get_primary_key_columns), validation methods, and identifier quoting for complete projector schema management.
+
+    documentation:
+      - src/omnibase_infra/models/projectors/model_projector_schema.py (class docstring)
+    ticket: OMN-1168
+  # ==========================================================================
   # Execution Shape Validator Exemptions (OMN-958)
   # ==========================================================================
   - file_pattern: 'enum_handler_type\.py'
@@ -256,6 +270,29 @@ pattern_exemptions:
       - docs/validation/validator_reference.md
     ticket: OMN-958
   # ==========================================================================
+  # Any Type Validator Exemptions (OMN-1276)
+  # ==========================================================================
+  # AST-based validator for Any type usage enforcement. The class requires
+  # multiple visitor methods and helper methods for comprehensive detection.
+  - file_pattern: 'any_type_validator\.py'
+    class_pattern: "Class 'AnyTypeDetector'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      AST visitor class requires multiple methods for comprehensive Any type detection: visit methods (ClassDef, FunctionDef, AsyncFunctionDef, AnnAssign, Assign, Subscript), helper methods (_check_annotation_for_any, _check_subscript_for_any, _is_field_call, _is_field_with_note, _contains_any, _add_violation), and exemption handling (_has_allow_decorator, _allow_all_lines_in_node). Standard AST visitor pattern.
+
+    documentation:
+      - docs/decisions/adr-any-type-pydantic-workaround.md
+      - CLAUDE.md (Any Type CI Enforcement)
+    ticket: OMN-1276
+  - file_pattern: 'model_any_type_violation\.py'
+    violation_pattern: "Field 'context_name' might reference an entity"
+    reason: >
+      context_name is descriptive metadata (e.g., "process_event(payload)") showing where the violation occurred, not an entity reference requiring ID + display_name. It provides human-readable context for error messages.
+
+    documentation:
+      - docs/decisions/adr-any-type-pydantic-workaround.md
+    ticket: OMN-1276
+  # ==========================================================================
   # AST Visitor Method Naming Exemptions
   # ==========================================================================
   # Python ast.NodeVisitor convention uses visit_ClassDef, visit_Call, etc.
@@ -267,13 +304,14 @@ pattern_exemptions:
   # - validator_no_handler_publishing.py
   # - validator_no_direct_dispatch.py
   # - validator_no_orchestrator_fsm.py
+  # - any_type_validator.py (OMN-1276)
   #
   # Common AST visitor methods:
   # - visit_ClassDef, visit_FunctionDef, visit_AsyncFunctionDef
-  # - visit_Assign, visit_AnnAssign, visit_Call
+  # - visit_Assign, visit_AnnAssign, visit_Call, visit_Subscript
   #
   # Generic pattern for all AST visitor methods across all validator files
-  - file_pattern: '(topic_category_validator|validator_no_handler_publishing|validator_no_direct_dispatch|validator_no_orchestrator_fsm)\.py'
+  - file_pattern: '(topic_category_validator|validator_no_handler_publishing|validator_no_direct_dispatch|validator_no_orchestrator_fsm|any_type_validator)\.py'
     violation_pattern: "Function name 'visit_[A-Z][a-zA-Z]+' should use snake_case"
     reason: >
       Python ast.NodeVisitor convention. Methods named visit_<NodeType> (e.g., visit_ClassDef, visit_FunctionDef, visit_Call) are standard AST visitor methods that the ast module dispatches to based on the node type being visited. These CANNOT be renamed as they are part of the visitor dispatch protocol.
@@ -470,10 +508,10 @@ pattern_exemptions:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
     ticket: OMN-990
   # ==========================================================================
-  # DispatcherRegistry Exemptions (OMN-934)
+  # RegistryDispatcher Exemptions (OMN-934)
   # ==========================================================================
   - file_pattern: 'registry_dispatcher\.py'
-    class_pattern: "Class 'DispatcherRegistry'"
+    class_pattern: "Class 'RegistryDispatcher'"
     violation_pattern: 'has \d+ methods'
     reason: >
       Domain registry pattern requires CRUD + query operations: registration (register, unregister), lookup (get_by_id, get_by_type, get_all), metrics (get_metrics). This is an established domain registry pattern.
@@ -677,7 +715,7 @@ pattern_exemptions:
   # RegistryCompute Exemptions (OMN-811)
   # ==========================================================================
   # Central registry pattern for compute plugins follows same patterns as
-  # PolicyRegistry, MessageTypeRegistry, and DispatcherRegistry.
+  # PolicyRegistry, MessageTypeRegistry, and RegistryDispatcher.
   - file_pattern: 'registry_compute\.py'
     class_pattern: "Class 'RegistryCompute'"
     violation_pattern: 'has \d+ methods'
@@ -711,6 +749,34 @@ pattern_exemptions:
       - docs/patterns/error_handling_patterns.md
       - CLAUDE.md (Infrastructure Error Patterns)
     ticket: OMN-811
+  # ==========================================================================
+  # EventBusRegistryError Exemptions (OMN-1276)
+  # ==========================================================================
+  # Error classes require multiple context parameters for comprehensive error reporting.
+  - file_pattern: 'error_event_bus_registry\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Error class requires multiple contextual parameters for debugging: message, bus_kind, bus_class, available_kinds, existing_class, context, and **extra_context. These are distinct error context fields needed for comprehensive error reporting.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+      - CLAUDE.md (Infrastructure Error Patterns)
+    ticket: OMN-1276
+  # ==========================================================================
+  # MessageTypeRegistryError Exemptions (OMN-983)
+  # ==========================================================================
+  # Error classes require multiple context parameters for comprehensive error reporting.
+  - file_pattern: 'registry_message_type\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Error class requires multiple contextual parameters for debugging: message, message_type, domain, category, context, and **extra_context. These are distinct error context fields needed for comprehensive error reporting.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+      - CLAUDE.md (Infrastructure Error Patterns)
+    ticket: OMN-983
   # ==========================================================================
   # Compute Plugin ID Exemptions (OMN-811)
   # ==========================================================================
@@ -777,6 +843,21 @@ pattern_exemptions:
     documentation:
       - docs/patterns/correlation_id_tracking.md
     ticket: OMN-811
+  # ==========================================================================
+  # MCP Handler Model Exemptions (OMN-1288)
+  # ==========================================================================
+  # tool_name in ModelMcpToolCall is the MCP protocol identifier for the tool
+  # to invoke (e.g., "get_weather", "search_documents"). It is NOT an entity
+  # reference requiring UUID + display_name pattern - it's a protocol-level
+  # identifier defined by the MCP specification.
+  - file_pattern: 'model_mcp_tool_call\.py'
+    violation_pattern: "Field 'tool_name' might reference an entity"
+    reason: >
+      tool_name is an MCP protocol identifier for the tool to invoke (e.g., "get_weather"). This is a protocol-level identifier from the Model Context Protocol specification, not an entity reference.
+
+    documentation:
+      - Model Context Protocol Specification (https://modelcontextprotocol.io/)
+    ticket: OMN-1288
   # ==========================================================================
   # Union Reduction Phase 2 Model Exemptions (OMN-1002)
   # ==========================================================================
@@ -1361,28 +1442,39 @@ pattern_exemptions:
       - CLAUDE.md (ONEX Architecture - Handler Validation)
     ticket: OMN-1263
   # ==========================================================================
-  # Architecture Validator OMN-1099 Exemptions (AST Visitor Pattern)
+  # ProjectorPluginLoader Exemptions (OMN-1168)
   # ==========================================================================
-  # OMN-1099 validators (no-direct-dispatch, no-handler-publishing, no-orchestrator-fsm)
-  # use Python AST visitor pattern which requires visit_* method names per Python stdlib.
-  # NOTE: model_architecture_violation.py exemptions for rule_id/rule_name are defined earlier
-  # in the "Architecture Violation Model Exemptions (OMN-1099)" section.
-  - file_pattern: 'validator_no_handler_publishing\.py'
-    violation_pattern: "Class name .* contains anti-pattern 'Handler'"
+  # Plugin loader pattern requires multiple discovery methods:
+  # - load_from_contract, load_from_directory, discover_and_load
+  # - Security validation methods (_validate_file_security, _sanitize_path)
+  # - Contract parsing (_load_contract, _parse_yaml)
+  # - Error handling (discover_with_errors, graceful mode support)
+  - file_pattern: 'projector_plugin_loader\.py'
+    class_pattern: "Class 'ProjectorPluginLoader'"
+    violation_pattern: 'has \d+ methods'
     reason: >
-      HandlerPublishingVisitor is an AST visitor class that detects handler publishing patterns. The name correctly describes its purpose: visiting AST nodes to find handlers that incorrectly publish events.
+      Plugin loader pattern requires multiple discovery methods (load_from_contract, load_from_directory, discover_and_load), security validation, contract parsing, and error handling methods. Mirrors handler_contract_source.py pattern.
 
     documentation:
-      - Python ast module (NodeVisitor pattern)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_.*\.py'
-    violation_pattern: "Function name 'visit_.*' should use snake_case"
+      - src/omnibase_infra/runtime/handler_contract_source.py (reference pattern)
+    ticket: OMN-1168
+  # ==========================================================================
+  # Projector Schema Model Exemptions (OMN-1168)
+  # ==========================================================================
+  # table_name is a standard database identifier, not an entity reference.
+  # This pattern is ubiquitous in database-related models.
+  # NOTE: Projector models are temporarily in omnibase_infra until omnibase_core
+  # provides canonical projector model types.
+  - file_pattern: 'model_projector_schema\.py'
+    violation_pattern: "Field 'table_name' might reference an entity"
     reason: >
-      AST visitor methods must follow Python's ast.NodeVisitor naming convention. visit_ClassDef, visit_FunctionDef, etc. are required method names for the AST visitor pattern from Python stdlib.
+      table_name is a PostgreSQL table identifier (e.g., 'node_registrations'), not an entity reference. Standard database schema pattern. Note: Projector models are temporarily located in omnibase_infra until omnibase_core provides canonical projector model types.
 
     documentation:
-      - Python ast module documentation (NodeVisitor.visit_* methods)
-    ticket: OMN-1099
+      - PostgreSQL CREATE TABLE syntax
+      - src/omnibase_infra/schemas/schema_registration_projection.sql (example usage)
+      - src/omnibase_infra/models/projectors/model_projector_schema.py (ModelProjectorSchema defines table_name as identifier, temporary location in omnibase_infra)
+    ticket: OMN-1168
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

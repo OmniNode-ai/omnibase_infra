@@ -56,6 +56,8 @@ from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
 )
 from omnibase_infra.handlers.models.vault.model_payload_vault import (
     ModelPayloadVault,
+)
+from omnibase_infra.handlers.models.vault.registry_payload_vault import (
     RegistryPayloadVault,
 )
 

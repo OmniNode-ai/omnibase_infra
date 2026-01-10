@@ -27,9 +27,29 @@ import pytest
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
-from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
 
-# Import and re-export models from helpers for backwards compatibility
+# =============================================================================
+# Cross-Module Fixture Imports
+# =============================================================================
+# These imports bring in shared test utilities from tests/helpers/:
+#
+# From tests/helpers/deterministic.py:
+#   - DeterministicClock: Controllable clock for reproducible timestamps
+#     Starts at 2025-01-01 00:00:00 UTC by default.
+#   - DeterministicIdGenerator: Deterministic UUID generator for reproducible IDs
+#     Uses a counter-based approach for predictable UUID values.
+#
+# From tests/helpers/replay_utils.py:
+#   - EventFactory: Factory for creating deterministic introspection events
+#     Combines DeterministicClock and DeterministicIdGenerator for reproducible
+#     event sequences suitable for snapshot testing and replay verification.
+#   - EventSequenceLog: Tracks event processing order and results
+#     Used for verifying replay behavior matches original execution.
+#   - NodeType: Type alias for ONEX node types ("effect", "compute", etc.)
+#
+# These utilities ensure replay tests produce deterministic, reproducible results.
+# =============================================================================
+from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
 from tests.helpers.replay_utils import (
     EventFactory,
     EventSequenceLog,

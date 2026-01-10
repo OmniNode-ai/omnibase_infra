@@ -82,11 +82,12 @@ from __future__ import annotations
 import asyncio
 import functools
 import threading
+import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from omnibase_core.models.errors.model_onex_error import ModelOnexError
-from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_core.models.errors import ModelOnexError
+from omnibase_core.models.primitives import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumPolicyType
@@ -468,6 +469,73 @@ class PolicyRegistry:
         # Maps policy_id -> list of ModelPolicyKey instances
         self._policy_id_index: dict[str, list[ModelPolicyKey]] = {}
 
+    def _validate_protocol_implementation(
+        self,
+        policy_id: str,
+        policy_class: type[ProtocolPolicy],
+    ) -> None:
+        """Validate that policy class implements ProtocolPolicy protocol.
+
+        Performs runtime type validation using duck typing to ensure the policy
+        class has the required methods and properties before registration.
+
+        Validation Order:
+            Validations are performed in fail-fast order with cheap checks first:
+
+            1. **Comprehensive check**: If class is missing all required attributes
+               (policy_id, policy_type, evaluate), raise a comprehensive error
+               listing all missing requirements.
+
+            2. **evaluate() existence** (O(1) hasattr check):
+               Verifies policy_class has evaluate() method.
+
+            3. **evaluate() callability** (O(1) callable check):
+               Verifies evaluate is actually callable.
+
+        Args:
+            policy_id: Unique identifier for the policy being validated
+            policy_class: The policy class to validate
+
+        Raises:
+            PolicyRegistryError: If policy_class does not implement ProtocolPolicy:
+                - Missing all required attributes (comprehensive error)
+                - Missing evaluate() method
+                - evaluate is not callable
+        """
+        # Check for required attributes
+        has_policy_id = hasattr(policy_class, "policy_id")
+        has_policy_type = hasattr(policy_class, "policy_type")
+        has_evaluate = hasattr(policy_class, "evaluate")
+
+        # If all required attributes are missing, provide comprehensive error
+        if not has_policy_id and not has_policy_type and not has_evaluate:
+            raise PolicyRegistryError(
+                f"Policy class {policy_class.__name__!r} does not implement "
+                f"ProtocolPolicy protocol. Missing: policy_id property, "
+                f"policy_type property, evaluate() method",
+                policy_id=policy_id,
+                policy_class=policy_class.__name__,
+            )
+
+        # Check evaluate() method exists
+        if not has_evaluate:
+            raise PolicyRegistryError(
+                f"Policy class {policy_class.__name__!r} is missing evaluate() "
+                f"method from ProtocolPolicy protocol",
+                policy_id=policy_id,
+                policy_class=policy_class.__name__,
+            )
+
+        # Check evaluate is callable
+        evaluate_attr = getattr(policy_class, "evaluate", None)
+        if not callable(evaluate_attr):
+            raise PolicyRegistryError(
+                f"Policy class {policy_class.__name__!r} has evaluate() method "
+                f"(not callable) - must be a callable method",
+                policy_id=policy_id,
+                policy_class=policy_class.__name__,
+            )
+
     def _validate_sync_enforcement(
         self,
         policy_id: str,
@@ -667,6 +735,9 @@ class PolicyRegistry:
         policy_type = registration.policy_type
         version = registration.version
         allow_async = registration.allow_async
+
+        # Validate protocol implementation (evaluate() method exists and is callable)
+        self._validate_protocol_implementation(policy_id, policy_class)
 
         # Validate sync enforcement
         self._validate_sync_enforcement(policy_id, policy_class, allow_async)
@@ -1428,7 +1499,11 @@ class PolicyRegistry:
         """Clear all policy registrations.
 
         Removes all registered policies from the registry.
-        This is useful for testing scenarios.
+
+        Warning:
+            This method is intended for **testing purposes only**.
+            Calling it in production code will emit a warning.
+            It breaks the immutability guarantee after startup.
 
         Example:
             >>> registry = PolicyRegistry()
@@ -1437,6 +1512,12 @@ class PolicyRegistry:
             >>> registry.list_keys()
             []
         """
+        warnings.warn(
+            "PolicyRegistry.clear() is intended for testing only. "
+            "Do not use in production code.",
+            UserWarning,
+            stacklevel=2,
+        )
         with self._lock:
             self._registry.clear()
             self._policy_id_index.clear()

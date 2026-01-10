@@ -90,6 +90,77 @@ handler_routing:
 - **One model per file** - Each file contains exactly one `Model*` class
 - **PEP 604 unions** - Use `X | None` not `Optional[X]`
 
+### Any Type CI Enforcement
+
+The `Any` type policy is enforced via pre-commit hook and CI check (`scripts/validate.py any_types`).
+
+**Enforcement Levels:**
+1. **Pre-commit Hook**: Runs `poetry run python scripts/validate.py any_types` before commit
+2. **CI Pipeline**: Runs as part of `ONEX Validators` job - blocks merge on violations (non-zero exit)
+
+| Context | Allowed | Enforcement |
+|---------|---------|-------------|
+| Function parameters | NO - use `object` | CI BLOCKED |
+| Return types | NO - use `object` | CI BLOCKED |
+| Pydantic `Field()` with `NOTE:` comment | YES | CI ALLOWED |
+| Pydantic `Field()` without `NOTE:` comment | NO | CI BLOCKED |
+| Variables, type aliases | NO | CI BLOCKED |
+
+**Pydantic Workaround** (only when technically required):
+```python
+from typing import Any
+from pydantic import Field
+
+class MyModel(BaseModel):
+    # NOTE: Any required for Pydantic discriminated union - see ADR
+    payload: Any = Field(...)
+```
+
+**Exemption Mechanisms**:
+- `@allow_any` decorator with documented reason
+- `ONEX_EXCLUDE: any_type` inline comment (use sparingly)
+
+**Related**: `docs/decisions/adr-any-type-pydantic-workaround.md`
+
+### Any Type Validator Detection and Limitations
+
+The AST-based Any type validator scans Python source files to detect `Any` usage.
+
+**What IS Detected** (will trigger violations):
+- Direct `Any` annotations: `def foo(x: Any) -> Any`
+- `Any` in Pydantic fields: `field: Any = Field(...)`
+- `Any` as generic argument: `list[Any]`, `dict[str, Any]`, `Callable[..., Any]`
+- Type aliases with `Any`: `MyType = dict[str, Any]`
+- String annotations: `from __future__ import annotations` - these ARE correctly resolved by the AST parser
+
+**What is NOT Detected** (validator limitations):
+1. **External type aliases**: When `Any` is hidden behind an imported alias:
+   ```python
+   from external_lib import DynamicType  # If DynamicType = Any, NOT detected
+   def process(data: DynamicType): ...   # Violation NOT caught
+   ```
+
+2. **Runtime type construction**: Factory patterns creating types dynamically:
+   ```python
+   def make_type() -> type:
+       return Any  # NOT detected - evaluated at runtime
+   DynamicType = make_type()
+   ```
+
+3. **Indirect imports**: `Any` re-exported through intermediate modules may not be traced.
+
+**Example @allow_any Usage**:
+```python
+from omnibase_infra.decorators import allow_any
+
+@allow_any("Required for legacy API compatibility - see OMN-1234")
+def legacy_handler(data: Any) -> Any:
+    """Handle legacy API payloads."""
+    return process_legacy(data)
+```
+
+The `@allow_any` decorator is recognized by the validator when applied to functions or classes. The decorator is a no-op at runtime - it only serves as an AST marker for the validator to skip the decorated definition.
+
 ### File & Class Naming
 
 | Type | File Pattern | Class Pattern |
@@ -138,9 +209,16 @@ output_type.is_routable()  # False for PROJECTION
 
 Result models may override `__bool__` to enable idiomatic conditional checks. This differs from standard Pydantic behavior where `bool(model)` always returns `True`.
 
-**Current implementations**:
-- `ModelReducerExecutionResult`: Returns `True` only if `has_intents` (intents tuple is non-empty)
-- `ModelCategoryMatchResult`: Returns `True` only if `matched` is True
+**Related**: `docs/decisions/adr-custom-bool-result-models.md`
+
+**Categories of implementations**:
+
+| Category | Models | Condition |
+|----------|--------|-----------|
+| Validity/Success | `ModelSecurityValidationResult`, `ModelValidationOutcome`, `ModelLifecycleResult` | Returns `True` when `valid`/`success`/`is_valid` is True |
+| Collection-Based | `ModelReducerExecutionResult`, `ModelDispatchOutputs` | Returns `True` when intents/topics non-empty |
+| Optional Wrappers | `ModelOptionalString`, `ModelOptionalUUID`, `ModelOptionalCorrelationId` | Returns `True` when value present |
+| Matching Results | `ModelCategoryMatchResult`, `ModelExecutionShapeValidationResult` | Returns `True` when `matched`/`passed` is True |
 
 **Usage pattern**:
 ```python
@@ -169,6 +247,199 @@ async def process_event(envelope: ModelEventEnvelope[object]) -> str | None:
 _IntentUnion = ModelCommandIntent | ModelEventIntent  # Pydantic validation
 def process(intent: ProtocolRegistrationIntent): ...  # Function signature
 ```
+
+### JsonType Usage
+
+**`JsonType` is the canonical type alias for JSON-compatible values** (from `omnibase_core.types`).
+
+**Definition**: `JsonType = str | int | float | bool | None | list[JsonType] | dict[str, JsonType]`
+
+**Import Pattern**:
+```python
+# Preferred: Import from omnibase_core
+from omnibase_core.types import JsonType
+
+# Also available: Import from omnibase_infra (re-exports)
+from omnibase_infra.models.types import JsonType
+```
+
+**Related Type Aliases**:
+| Type | Purpose | Use Case |
+|------|---------|----------|
+| `JsonType` | Recursive JSON union | Generic JSON values, configs, payloads |
+| `JsonPrimitive` | Atomic JSON values | When only primitives needed (no containers) |
+| `JsonDict` | `dict[str, object]` | When `.get()` or key access is needed |
+
+**When to Use**:
+```python
+# For generic JSON data structures
+def process_config(config: JsonType) -> None: ...
+
+# For typed dict access with .get() method
+def parse_payload(data: JsonDict) -> str:
+    return str(data.get("key", "default"))
+
+# For return types with JSON serialization
+async def fetch_data() -> JsonType:
+    return {"status": "ok", "items": [1, 2, 3]}
+```
+
+### Intent Model Architecture
+
+**Overview**: Reducers emit intents that orchestrators route to Effect layer nodes. The implementation uses typed payload models that extend `ModelIntentPayloadBase`.
+
+**Extension-Type Intent Pattern**: All infrastructure intents use `intent_type="extension"` at the outer `ModelIntent` level. The actual routing key is in `payload.intent_type` (e.g., `"consul.register"`, `"postgres.upsert_registration"`). This two-layer approach enables generic routing while preserving type-safe payloads.
+
+**Two-Layer Intent Structure**:
+
+| Layer | Model | Purpose |
+|-------|-------|---------|
+| 1. Typed Payload | `ModelPayloadConsulRegister` | Domain-specific Pydantic model with typed fields and `intent_type` |
+| 2. Outer Container | `ModelIntent` | Standard intent envelope with `intent_type="extension"` |
+
+**Defining Typed Payload Models** (in `nodes/reducers/models/`):
+```python
+from omnibase_core.models.reducer.payloads import ModelIntentPayloadBase
+from pydantic import Field
+from typing import Literal
+from uuid import UUID
+
+class ModelPayloadConsulRegister(ModelIntentPayloadBase):
+    """Typed payload for Consul service registration."""
+    intent_type: Literal["consul.register"] = Field(default="consul.register")
+    correlation_id: UUID
+    service_id: str
+    service_name: str
+    tags: list[str]
+    health_check: dict[str, str] | None = None
+```
+
+**Building Intents in Reducers**:
+```python
+from omnibase_core.models.reducer.model_intent import ModelIntent
+from omnibase_infra.nodes.reducers.models import ModelPayloadConsulRegister
+
+# Build typed payload with domain data
+consul_payload = ModelPayloadConsulRegister(
+    correlation_id=correlation_id,
+    service_id=f"onex-{node_type}-{node_id}",
+    service_name=f"onex-{node_type}",
+    tags=["node_type:effect"],
+)
+
+# Return as ModelIntent from reducer
+return ModelIntent(
+    intent_type="extension",
+    target=f"consul://service/{service_name}",
+    payload=consul_payload,
+)
+```
+
+**Intent Type Routing**:
+- `ModelIntent.intent_type` is always `"extension"` for extension-based intents
+- `payload.intent_type` contains the specific routing key (e.g., `"consul.register"`, `"postgres.upsert_registration"`)
+- Effect layer routes based on `payload.intent_type`
+
+**Target URI Convention**:
+- Format: `{protocol}://{resource}/{identifier}`
+- Examples: `postgres://node_registrations/{node_id}`, `consul://service/{service_name}`
+
+**Serialization with Nested Models**:
+
+When payload contains complex nested models (e.g., `ModelNodeRegistrationRecord`), use `SerializeAsAny`:
+```python
+from pydantic import BaseModel, Field, SerializeAsAny
+
+class ModelPayloadPostgresUpsertRegistration(ModelIntentPayloadBase):
+    """Typed payload for PostgreSQL upsert operations."""
+    intent_type: Literal["postgres.upsert_registration"] = Field(
+        default="postgres.upsert_registration"
+    )
+    correlation_id: UUID
+    record: SerializeAsAny[BaseModel]  # Preserves subclass fields during serialization
+```
+
+**Why `SerializeAsAny`**: When a field is typed as `BaseModel` but contains a subclass, Pydantic only serializes base fields without this type wrapper.
+
+**Accessing Payload Fields**:
+
+Intent payloads use **direct typed field access** - no `.data` dict wrapper:
+```python
+# Typed intent payloads - direct field access
+if isinstance(intent.payload, ModelPayloadConsulRegister):
+    service_name = intent.payload.service_name
+    tags = intent.payload.tags
+
+# Handler response payloads - use .data for inner payload
+result = await handler.handle(envelope)
+payload_data = result.result.payload.data  # Access handler-specific data
+```
+
+**Key Distinction**:
+| Context | Access Pattern | Example |
+|---------|---------------|---------|
+| Intent Payloads | Direct fields | `intent.payload.service_name` |
+| Handler Responses | Via `.data` field | `result.result.payload.data.operation_type` |
+
+**Effect Layer Routing**:
+
+Effect nodes use `payload.intent_type` to route intents to appropriate handlers:
+```python
+from omnibase_infra.nodes.reducers.models import (
+    ModelPayloadConsulRegister,
+    ModelPayloadPostgresUpsertRegistration,
+)
+
+routing_table = {
+    "consul.register": ConsulAdapter.handle_register,
+    "postgres.upsert_registration": PostgresAdapter.handle_upsert,
+}
+
+async def route_intent(intent: ModelIntent) -> None:
+    if intent.intent_type == "extension" and hasattr(intent.payload, "intent_type"):
+        handler = routing_table.get(intent.payload.intent_type)
+        if handler:
+            await handler(intent.payload)
+        else:
+            raise ValueError(f"Unknown intent_type: {intent.payload.intent_type}")
+```
+
+**Reference Implementation**: `src/omnibase_infra/nodes/reducers/registration_reducer.py`
+**Payload Models**: `src/omnibase_infra/nodes/reducers/models/model_payload_*.py`
+
+**Envelope-Based Handler Routing**:
+
+Infrastructure handlers (`HandlerConsul`, `HandlerDb`, etc.) work with envelope-based operation routing, NOT raw `ModelIntent` objects. Routing is based on `envelope["operation"]` field values, not `intent_type`.
+
+When reducers emit intents with:
+- `intent_type="extension"`
+- `payload.intent_type="consul.register"` (or `"postgres.upsert_registration"`)
+
+The Orchestrator/Runtime layer translates these to envelope format:
+```python
+# Consul example
+{
+    "operation": "consul.register",
+    "payload": {...},  # Consul-specific data from intent.payload
+    "correlation_id": "...",
+}
+
+# PostgreSQL example
+{
+    "operation": "db.execute",
+    "payload": {
+        "sql": "...",
+        "parameters": [...],
+    },
+    "correlation_id": "...",
+}
+```
+
+This design keeps infrastructure handlers decoupled from the intent format, allowing them to be reused for:
+- Direct envelope-based invocation (CLI tools, direct API calls)
+- Intent-driven workflows (via orchestrator translation)
+
+**Handler Implementations**: `src/omnibase_infra/handlers/handler_consul.py`, `src/omnibase_infra/handlers/handler_db.py`
 
 ### ONEX Architecture
 - **Contract-Driven** - All tools/services follow contract patterns

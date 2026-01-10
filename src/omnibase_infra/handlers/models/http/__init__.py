@@ -33,6 +33,8 @@ from omnibase_infra.handlers.models.http.model_http_post_payload import (
 )
 from omnibase_infra.handlers.models.http.model_payload_http import (
     ModelPayloadHttp,
+)
+from omnibase_infra.handlers.models.http.registry_payload_http import (
     RegistryPayloadHttp,
 )
 

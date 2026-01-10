@@ -19,6 +19,7 @@ Exports:
     UnknownHandlerTypeError: Unknown handler type prefix errors
     PolicyRegistryError: Policy registry operation errors
     ComputeRegistryError: Compute registry operation errors
+    EventBusRegistryError: Event bus registry operation errors
     ChainPropagationError: Correlation/causation chain validation errors
     ArchitectureViolationError: Architecture validation errors (blocks startup)
 
@@ -98,6 +99,7 @@ from omnibase_infra.errors.error_container_wiring import (
     ServiceRegistryUnavailableError,
     ServiceResolutionError,
 )
+from omnibase_infra.errors.error_event_bus_registry import EventBusRegistryError
 from omnibase_infra.errors.error_infra import (
     EnvelopeValidationError,
     InfraAuthenticationError,
@@ -123,6 +125,7 @@ __all__: list[str] = [
     # Container wiring errors
     "ContainerWiringError",
     "EnvelopeValidationError",
+    "EventBusRegistryError",
     "InfraAuthenticationError",
     "InfraConnectionError",
     "InfraTimeoutError",

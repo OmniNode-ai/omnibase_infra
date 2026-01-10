@@ -94,8 +94,7 @@ See Also:
     omnibase_core.models.events.ModelEventEnvelope: Event wrapper with routing info
 """
 
-from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
-from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
+from omnibase_infra.enums import EnumDispatchStatus, EnumTopicStandard
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_error import ModelDispatchError
 from omnibase_infra.models.dispatch.model_dispatch_log_context import (

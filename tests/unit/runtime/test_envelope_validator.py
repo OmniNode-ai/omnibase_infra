@@ -36,6 +36,14 @@ def mock_registry() -> ProtocolBindingRegistry:
 
     # Create a minimal mock handler class
     class MockHandler:
+        async def handle(
+            self,
+            envelope: dict[str, object],
+            correlation_id: UUID | None = None,
+        ) -> dict[str, object]:
+            """Handle envelope - mock implementation for unit tests."""
+            return {"handled": True}
+
         async def execute(self, envelope: dict) -> dict:
             return {"success": True}
 

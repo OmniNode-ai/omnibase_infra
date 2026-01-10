@@ -50,7 +50,16 @@ from omnibase_infra.dlq import (
 # Database Environment Configuration
 # =============================================================================
 # Read configuration from environment variables (set via docker-compose or .env)
-# Uses infrastructure_config for consistent default values
+#
+# Cross-Module Import: Infrastructure Configuration
+# From tests/infrastructure_config.py:
+#   - REMOTE_INFRA_HOST: Default infrastructure server IP (192.168.86.200)
+#     Used as fallback when POSTGRES_HOST is not set.
+#
+# This ensures consistent infrastructure endpoint configuration across all
+# DLQ integration tests. See tests/infrastructure_config.py for full
+# documentation on environment variable overrides and CI/CD graceful skip behavior.
+# =============================================================================
 from tests.infrastructure_config import REMOTE_INFRA_HOST
 
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", REMOTE_INFRA_HOST)

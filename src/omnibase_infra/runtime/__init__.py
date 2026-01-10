@@ -35,7 +35,7 @@ Runtime Components
 Message Dispatch Engine
 -----------------------
 - **MessageDispatchEngine**: Runtime dispatch engine for message routing
-- **DispatcherRegistry**: Thread-safe registry for dispatchers with freeze pattern
+- **RegistryDispatcher**: Thread-safe registry for dispatchers with freeze pattern
 - **ProtocolMessageDispatcher**: Protocol for category-based message dispatchers
 
 Chain-Aware Dispatch (OMN-951)
@@ -58,8 +58,8 @@ from __future__ import annotations
 
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.runtime.registry_dispatcher import (
-    DispatcherRegistry,
     ProtocolMessageDispatcher,
+    RegistryDispatcher,
 )
 from omnibase_infra.runtime.envelope_validator import (
     PAYLOAD_REQUIRED_OPERATIONS,
@@ -154,10 +154,25 @@ from omnibase_infra.runtime.protocol_handler_plugin_loader import (
     ProtocolHandlerPluginLoader,
 )
 
+# Projector plugin loading and schema validation (OMN-1168)
+from omnibase_infra.runtime.projector_plugin_loader import (
+    ProjectorPluginLoader,
+)
+from omnibase_infra.runtime.projector_schema_manager import (
+    ProjectorSchemaError,
+    ProjectorSchemaValidator,
+)
+
 # Invocation security enforcer (OMN-1098)
 from omnibase_infra.runtime.invocation_security_enforcer import (
     InvocationSecurityEnforcer,
     SecurityViolationError,
+)
+
+# Security metadata validator (OMN-1137)
+from omnibase_infra.runtime.security_metadata_validator import (
+    SecurityMetadataValidator,
+    validate_handler_security,
 )
 
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
@@ -187,7 +202,6 @@ __all__: list[str] = [
     "ChainAwareDispatcher",
     # Context enforcement
     "DispatchContextEnforcer",
-    "DispatcherRegistry",
     "EventBusBindingRegistry",
     # Message dispatch engine
     "MessageDispatchEngine",
@@ -206,6 +220,8 @@ __all__: list[str] = [
     "ProtocolMessageTypeRegistry",
     # Policy protocol and registry
     "ProtocolPolicy",
+    # Dispatcher registry
+    "RegistryDispatcher",
     # Runtime scheduler (OMN-953)
     "ProtocolRuntimeScheduler",
     # Error class
@@ -259,7 +275,14 @@ __all__: list[str] = [
     "HandlerPluginLoader",
     "MAX_CONTRACT_SIZE",
     "ProtocolHandlerPluginLoader",
+    # Projector schema validation (OMN-1168)
+    "ProjectorSchemaError",
+    "ProjectorPluginLoader",
+    "ProjectorSchemaValidator",
     # Invocation security enforcer (OMN-1098)
     "InvocationSecurityEnforcer",
     "SecurityViolationError",
+    # Security metadata validator (OMN-1137)
+    "SecurityMetadataValidator",
+    "validate_handler_security",
 ]

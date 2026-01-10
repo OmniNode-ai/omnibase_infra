@@ -38,6 +38,11 @@ from omnibase_infra.models.projection import (
     ModelSequenceInfo,
     ModelSnapshotTopicConfig,
 )
+from omnibase_infra.models.projectors import (
+    ModelProjectorColumn,
+    ModelProjectorIndex,
+    ModelProjectorSchema,
+)
 from omnibase_infra.models.registration import (
     ModelIntrospectionMetrics,
     ModelNodeCapabilities,
@@ -65,8 +70,6 @@ __all__: list[str] = [
     "EnumTopicStandard",
     # Resilience models
     "ModelCircuitBreakerConfig",
-    # SemVer models - REMOVED: Use omnibase_core.models.primitives.model_semver instead
-    # (model_semver.py now raises ImportError on import)
     # Validation models
     "ModelCoverageMetrics",
     "ModelDispatchLogContext",
@@ -98,6 +101,10 @@ __all__: list[str] = [
     "ModelParsedTopic",
     # Projection models
     "ModelRegistrationProjection",
+    # Projector schema models
+    "ModelProjectorColumn",
+    "ModelProjectorIndex",
+    "ModelProjectorSchema",
     "ModelRegistrationSnapshot",
     # Retry models
     "ModelRetryErrorClassification",

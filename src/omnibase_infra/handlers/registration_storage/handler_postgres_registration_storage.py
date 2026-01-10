@@ -45,6 +45,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+# Import asyncpg at module level to avoid redundant imports inside methods
+import asyncpg
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -55,24 +57,22 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.registration_storage.models import (
     ModelDeleteRegistrationRequest,
-    ModelRegistrationRecord,
-    ModelStorageResult,
     ModelUpdateRegistrationRequest,
-    ModelUpsertResult,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelDeleteResult,
+    ModelRegistrationRecord,
     ModelRegistrationUpdate,
     ModelStorageHealthCheckDetails,
     ModelStorageHealthCheckResult,
     ModelStorageQuery,
+    ModelStorageResult,
+    ModelUpsertResult,
 )
 
 if TYPE_CHECKING:
-    import asyncpg
-
     from omnibase_infra.nodes.effects.protocol_postgres_adapter import (
         ProtocolPostgresAdapter,
     )
@@ -287,8 +287,6 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
                 return self._pool
 
             try:
-                import asyncpg
-
                 if self._dsn:
                     self._pool = await asyncpg.create_pool(
                         dsn=self._dsn,

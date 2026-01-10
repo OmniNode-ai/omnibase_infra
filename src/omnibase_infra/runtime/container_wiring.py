@@ -46,6 +46,7 @@ Integration Notes:
 - Services registered as global scope (singleton per container)
 - Type-safe resolution via interface types
 - Compatible with omnibase_core v0.5.6 and later (async service registry)
+- For omnibase_core v0.6.2+: Validates service_registry availability before operations
 """
 
 from __future__ import annotations
@@ -53,14 +54,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_core.models.primitives import ModelSemVer
 
+from omnibase_infra.errors import ServiceRegistryUnavailableError
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.registry_compute import RegistryCompute
-
-# Default semantic version for infrastructure components (from omnibase_core)
-SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 
 if TYPE_CHECKING:
     import asyncpg
@@ -78,7 +77,8 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
-from omnibase_infra.errors import ServiceRegistryUnavailableError
+# Default semantic version for infrastructure components (from omnibase_core)
+SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,11 @@ def _validate_service_registry(
         )
 
     if container.service_registry is None:
+        # TODO(OMN-1265): Request upstream API - add public method
+        # `container.initialize_service_registry(config)` in omnibase_core.
+        # Current behavior: service_registry returns None under several conditions, requiring
+        # downstream validation. Proposed improvement: provide a factory method or builder pattern
+        # that ensures service_registry is always initialized with clear diagnostics.
         raise ServiceRegistryUnavailableError(
             "Container service_registry is None",
             operation=operation,
@@ -1215,7 +1220,7 @@ async def wire_registration_dispatchers(
     # Deferred imports: These imports are placed inside the function to avoid circular
     # import issues and to delay loading dispatcher infrastructure until this function
     # is actually called.
-    from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+    from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,

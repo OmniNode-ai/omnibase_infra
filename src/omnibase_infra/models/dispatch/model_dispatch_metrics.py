@@ -54,7 +54,7 @@ See Also:
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
     ModelDispatcherMetrics,
 )

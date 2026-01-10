@@ -289,9 +289,16 @@ class TestSyncEnforcement:
                 deterministic_async=False,
             )
 
+        # Verify error message is informative
         error_msg = str(exc_info.value)
         assert "async execute()" in error_msg
         assert "deterministic_async=True not specified" in error_msg
+
+        # Verify error has context dict and includes plugin_id
+        error = exc_info.value
+        assert hasattr(error.model, "context"), "Error should have context dict"
+        context = error.model.context
+        assert context.get("plugin_id") == "async_plugin"
 
     def test_accept_async_with_flag(self, registry: RegistryCompute) -> None:
         """Test that async is accepted when explicitly flagged."""
@@ -312,9 +319,14 @@ class TestSyncEnforcement:
                 deterministic_async=False,
             )
 
-        # Should mention the async method name
+        # Verify error message mentions the async method name
         error_msg = str(exc_info.value)
         assert "validate" in error_msg
+
+        # Verify error has context and includes plugin_id
+        error = exc_info.value
+        context = error.model.context
+        assert context.get("plugin_id") == "partial_async"
 
     def test_allow_private_async_methods(self, registry: RegistryCompute) -> None:
         """Test that private async methods (prefixed with _) are allowed."""

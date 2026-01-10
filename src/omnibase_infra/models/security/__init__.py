@@ -7,6 +7,7 @@ security validation system (OMN-1098). These models define:
 
 1. Handler-declared security policies (what a handler needs)
 2. Environment-level constraints (what an environment permits)
+3. Validation results with errors and warnings (OMN-1137)
 
 The security validation system uses these models to:
 - Validate handler security requirements at registration time
@@ -28,10 +29,22 @@ from omnibase_infra.models.security.model_environment_policy import (
 from omnibase_infra.models.security.model_handler_security_policy import (
     ModelHandlerSecurityPolicy,
 )
+from omnibase_infra.models.security.model_security_error import (
+    ModelSecurityError,
+)
+from omnibase_infra.models.security.model_security_validation_result import (
+    ModelSecurityValidationResult,
+)
+from omnibase_infra.models.security.model_security_warning import (
+    ModelSecurityWarning,
+)
 
 __all__ = [
     "CLASSIFICATION_SECURITY_LEVELS",
     "ModelEnvironmentPolicy",
     "ModelHandlerSecurityPolicy",
+    "ModelSecurityError",
+    "ModelSecurityValidationResult",
+    "ModelSecurityWarning",
     "get_security_level",
 ]

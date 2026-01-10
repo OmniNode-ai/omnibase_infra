@@ -27,6 +27,24 @@ Circuit Breaker Pattern:
     - Transitions to HALF_OPEN after timeout to test recovery
     - Raises InfraUnavailableError when circuit is OPEN
 
+Typing Note (ModelEventEnvelope[object]):
+    The ``handle()`` method uses ``ModelEventEnvelope[object]`` instead of ``Any``
+    per CLAUDE.md guidance: "Use ``object`` for generic payloads".
+
+    This is intentional:
+    - CLAUDE.md mandates "NEVER use ``Any``" for type annotations
+    - Generic dispatchers must accept envelopes with any payload type at the
+      protocol level (routing is based on topic/category/message_type)
+    - Payload extraction uses ``isinstance()`` type guards for runtime safety::
+
+        payload = envelope.payload
+        if not isinstance(payload, ModelRuntimeTick):
+            # Attempt deserialization from dict
+            ...
+
+    - ``object`` provides better type safety than ``Any`` while allowing the
+      flexibility required for polymorphic dispatch
+
 Related:
     - OMN-888: Registration Orchestrator
     - OMN-932: Durable Timeout Handling
@@ -43,13 +61,15 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from pydantic import ValidationError
 
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import (
+    EnumDispatchStatus,
+    EnumInfraTransportType,
+    EnumMessageCategory,
+)
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult

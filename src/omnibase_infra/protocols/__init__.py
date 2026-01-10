@@ -58,6 +58,7 @@ from omnibase_infra.protocols.protocol_capability_projection import (
     ProtocolCapabilityProjection,
 )
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
+from omnibase_infra.protocols.protocol_event_projector import ProtocolEventProjector
 from omnibase_infra.protocols.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
@@ -68,6 +69,9 @@ from omnibase_infra.protocols.protocol_message_type_registry import (
     ProtocolMessageTypeRegistry,
 )
 from omnibase_infra.protocols.protocol_plugin_compute import ProtocolPluginCompute
+from omnibase_infra.protocols.protocol_projector_schema_validator import (
+    ProtocolProjectorSchemaValidator,
+)
 from omnibase_infra.protocols.protocol_registry_metrics import ProtocolRegistryMetrics
 from omnibase_infra.protocols.protocol_snapshot_publisher import (
     ProtocolSnapshotPublisher,
@@ -76,10 +80,12 @@ from omnibase_infra.protocols.protocol_snapshot_publisher import (
 __all__: list[str] = [
     "ProtocolCapabilityProjection",
     "ProtocolEventBusLike",
+    "ProtocolEventProjector",
     "ProtocolIdempotencyStore",
     "ProtocolMessageDispatcher",
     "ProtocolMessageTypeRegistry",
     "ProtocolPluginCompute",
+    "ProtocolProjectorSchemaValidator",
     "ProtocolRegistryMetrics",
     "ProtocolSnapshotPublisher",
 ]
