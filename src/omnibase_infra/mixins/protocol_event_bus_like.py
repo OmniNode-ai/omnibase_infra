@@ -8,12 +8,7 @@
 
         from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
-    Or via the mixins package re-export::
-
-        from omnibase_infra.mixins import ProtocolEventBusLike
-
-    This file is retained for backwards compatibility but may be removed in a
-    future release.
+    This file will be removed in a future release.
 
 This module defines a narrow interface following the Interface Segregation Principle.
 Components that only need to publish events can depend on ProtocolEventBusLike
@@ -21,7 +16,7 @@ instead of the full ProtocolEventBus, reducing coupling and simplifying testing.
 
 Example Usage:
     ```python
-    from omnibase_infra.mixins import ProtocolEventBusLike
+    from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
     class TimeoutEmitter:
         def __init__(self, event_bus: ProtocolEventBusLike):
