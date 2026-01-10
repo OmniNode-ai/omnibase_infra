@@ -37,9 +37,9 @@ from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
 from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
     ProtocolCircuitBreakerAware,
 )
-from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.models import ModelRetryErrorClassification
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
+from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.types.typed_dict import TypedDictPerformanceMetricsCache
 
 __all__: list[str] = [

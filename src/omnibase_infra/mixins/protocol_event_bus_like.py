@@ -2,6 +2,19 @@
 # Copyright (c) 2025 OmniNode Team
 """Minimal event bus protocol for components that only need publish capability.
 
+.. deprecated::
+    This module is deprecated. Import ProtocolEventBusLike from the canonical
+    location instead::
+
+        from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
+
+    Or via the mixins package re-export::
+
+        from omnibase_infra.mixins import ProtocolEventBusLike
+
+    This file is retained for backwards compatibility but may be removed in a
+    future release.
+
 This module defines a narrow interface following the Interface Segregation Principle.
 Components that only need to publish events can depend on ProtocolEventBusLike
 instead of the full ProtocolEventBus, reducing coupling and simplifying testing.
@@ -24,9 +37,10 @@ Related:
     - ProtocolEventBus: Full event bus protocol (omnibase_spi)
 """
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
+@runtime_checkable
 class ProtocolEventBusLike(Protocol):
     """Minimal protocol for event bus operations needed by timeout emitter.
 
