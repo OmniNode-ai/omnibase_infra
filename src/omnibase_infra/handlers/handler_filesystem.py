@@ -32,8 +32,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import errno
 import fnmatch
 import logging
+import os
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -214,17 +216,20 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
     @transport_type.setter
     def transport_type(self, value: EnumInfraTransportType) -> None:
-        """Allow setting transport_type for MixinAsyncCircuitBreaker compatibility.
+        """Prevent modification of transport_type after initialization.
 
-        This setter exists to support the MixinAsyncCircuitBreaker which assigns
-        to self.transport_type during initialization. The value is ignored since
-        the getter always returns FILESYSTEM.
+        The transport_type is immutable for this handler - it is always FILESYSTEM.
+        This setter raises an AttributeError if modification is attempted.
 
         Args:
-            value: The transport type value (ignored, property always returns FILESYSTEM)
+            value: The transport type value (assignment always raises error)
+
+        Raises:
+            AttributeError: Always raised - transport_type is read-only.
         """
-        # Intentionally no-op: property getter always returns FILESYSTEM
-        _ = value  # Acknowledge the parameter to satisfy linter
+        raise AttributeError(
+            "transport_type is read-only; it is set during handler initialization"
+        )
 
     async def initialize(self, config: dict[str, object]) -> None:
         """Initialize filesystem handler with path whitelist and size limits.
@@ -857,9 +862,12 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                     context=ctx,
                 )
 
-        resolved_path = (
-            path.resolve() if path.exists() else path.parent.resolve() / path.name
-        )
+        # Compute resolved_path for validation and return value, but preserve
+        # write_path for the actual write operation to enable O_NOFOLLOW check.
+        # We use parent.resolve() / name to avoid resolving symlinks in the final component.
+        resolved_parent = path.parent.resolve()
+        write_path = resolved_parent / path.name
+        resolved_path = path.resolve() if path.exists() else write_path
 
         # Check circuit breaker before I/O operation
         async with self._circuit_breaker_lock:
@@ -874,29 +882,51 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 )
 
             # Check if file exists (for return value)
-            file_existed = resolved_path.exists()
+            file_existed = write_path.exists()
 
             # Create parent directories if requested
-            if create_dirs and not resolved_path.parent.exists():
+            if create_dirs and not resolved_parent.exists():
                 try:
-                    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+                    resolved_parent.mkdir(parents=True, exist_ok=True)
                 except OSError as e:
                     raise InfraConnectionError(
                         f"Failed to create parent directories: {e}",
                         context=ctx,
                     ) from e
 
-            # Check if symlink exists and validate target
-            if resolved_path.exists():
-                self._validate_symlink_target(resolved_path, correlation_id, operation)
+            # Check if symlink exists and validate target is within allowed paths.
+            # This provides a helpful error message for symlinks pointing outside.
+            # The O_NOFOLLOW check below will reject ALL symlinks for security.
+            if write_path.is_symlink():
+                self._validate_symlink_target(write_path, correlation_id, operation)
 
-            # Write file content
+            # Write file content using O_NOFOLLOW to prevent symlink following.
+            # This eliminates the TOCTOU race condition where an attacker could
+            # replace the file with a symlink between validation and write.
+            # We use write_path (not resolved_path) to detect symlinks.
             try:
-                if binary:
-                    resolved_path.write_bytes(content_bytes)
-                else:
-                    resolved_path.write_text(content_str)
+                # O_NOFOLLOW causes the open to fail with ELOOP if the path is a symlink
+                # This is atomic and cannot be raced, unlike checking is_symlink() first
+                flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+                fd = os.open(str(write_path), flags, 0o644)
+                try:
+                    if binary:
+                        with os.fdopen(fd, "wb") as f:
+                            f.write(content_bytes)
+                    else:
+                        with os.fdopen(fd, "w", encoding="utf-8") as f:
+                            f.write(content_str)
+                except Exception:
+                    # fdopen takes ownership of fd, but if write fails after fdopen
+                    # the context manager will close it. Re-raise to outer handler.
+                    raise
             except OSError as e:
+                if e.errno == errno.ELOOP:
+                    # ELOOP indicates the path is a symlink - reject the write
+                    raise ProtocolConfigurationError(
+                        f"Cannot write to symlink: {write_path.name}",
+                        context=ctx,
+                    ) from e
                 raise InfraConnectionError(
                     f"Failed to write file: {e}",
                     context=ctx,
@@ -1191,6 +1221,24 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             created = False
             if not already_existed:
                 try:
+                    # Final symlink check immediately before I/O to minimize TOCTOU window.
+                    # An attacker could create a symlink at the target path between earlier
+                    # validation and this point. Re-checking here reduces the window to
+                    # the minimum possible (between this check and the actual mkdir).
+                    # For mkdir, we also check parent directories in case a symlink was
+                    # inserted in the path hierarchy.
+                    if path.is_symlink():
+                        self._validate_symlink_target(path, correlation_id, operation)
+                    # Also check if any parent became a symlink
+                    for parent in path.parents:
+                        if parent.is_symlink():
+                            self._validate_symlink_target(
+                                parent, correlation_id, operation
+                            )
+                        # Stop at allowed paths boundary
+                        if parent in self._allowed_paths:
+                            break
+
                     path.mkdir(parents=True, exist_ok=exist_ok)
                     created = True
                 except FileExistsError:
@@ -1337,6 +1385,15 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
                 # Delete file
                 try:
+                    # Final symlink check immediately before I/O to minimize TOCTOU window.
+                    # An attacker could replace the file with a symlink between earlier
+                    # validation and this point. Re-checking here reduces the window to
+                    # the minimum possible (between this check and the actual unlink).
+                    if resolved_path.is_symlink():
+                        self._validate_symlink_target(
+                            resolved_path, correlation_id, operation
+                        )
+
                     resolved_path.unlink()
                     deleted = True
                 except OSError as e:

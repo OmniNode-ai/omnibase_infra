@@ -521,6 +521,88 @@ class TestHandlerFileSystemWriteFile:
             or "allowed" in error_msg
         )
 
+    @pytest.mark.asyncio
+    async def test_write_file_rejects_symlink_via_o_nofollow(
+        self, initialized_handler, temp_dir: Path
+    ) -> None:
+        """Test write_file rejects writing to symlink using O_NOFOLLOW.
+
+        This tests the TOCTOU race condition fix. The handler uses O_NOFOLLOW
+        flag when opening files, which atomically rejects symlinks at open time
+        rather than checking is_symlink() first (which could be raced).
+
+        The symlink points to a valid file within allowed paths, but the write
+        is still rejected because we don't follow symlinks during write operations.
+        """
+        # Create a real file within allowed paths
+        real_file = temp_dir / "real_file.txt"
+        real_file.write_text("original content")
+
+        # Create a symlink pointing to the real file (within allowed paths)
+        symlink_path = temp_dir / "symlink_to_real"
+        try:
+            symlink_path.symlink_to(real_file)
+        except OSError:
+            pytest.skip("Cannot create symlinks on this system")
+
+        envelope: dict[str, object] = {
+            "operation": "filesystem.write_file",
+            "payload": {"path": str(symlink_path), "content": "new content"},
+            "correlation_id": str(uuid4()),
+        }
+
+        # Should reject the write because the path is a symlink
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await initialized_handler.execute(envelope)
+
+        error_msg = str(exc_info.value).lower()
+        assert "symlink" in error_msg
+
+        # Verify the original file was not modified
+        assert real_file.read_text() == "original content"
+
+    @pytest.mark.asyncio
+    async def test_write_file_binary_rejects_symlink_via_o_nofollow(
+        self, initialized_handler, temp_dir: Path
+    ) -> None:
+        """Test write_file in binary mode also rejects symlinks using O_NOFOLLOW."""
+        # Create a real file within allowed paths
+        real_file = temp_dir / "real_binary.bin"
+        original_content = b"\x00\x01\x02\x03"
+        real_file.write_bytes(original_content)
+
+        # Create a symlink pointing to the real file (within allowed paths)
+        symlink_path = temp_dir / "symlink_to_binary"
+        try:
+            symlink_path.symlink_to(real_file)
+        except OSError:
+            pytest.skip("Cannot create symlinks on this system")
+
+        # Base64-encoded new content
+        import base64
+
+        new_content_b64 = base64.b64encode(b"\xff\xfe\xfd").decode("ascii")
+
+        envelope: dict[str, object] = {
+            "operation": "filesystem.write_file",
+            "payload": {
+                "path": str(symlink_path),
+                "content": new_content_b64,
+                "binary": True,
+            },
+            "correlation_id": str(uuid4()),
+        }
+
+        # Should reject the write because the path is a symlink
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await initialized_handler.execute(envelope)
+
+        error_msg = str(exc_info.value).lower()
+        assert "symlink" in error_msg
+
+        # Verify the original file was not modified
+        assert real_file.read_bytes() == original_content
+
 
 # ============================================================================
 # TestHandlerFileSystemListDirectory
