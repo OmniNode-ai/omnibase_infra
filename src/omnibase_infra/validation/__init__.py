@@ -100,6 +100,15 @@ from omnibase_core.validation import (
     validate_union_usage,
 )
 
+# AST-based Any type validation for strong typing policy (OMN-1276)
+from omnibase_infra.validation.any_type_validator import (
+    AnyTypeDetector,
+    ModelAnyTypeValidationResult,
+    validate_any_types,
+    validate_any_types_ci,
+    validate_any_types_in_file,
+)
+
 # Chain propagation validation for correlation and causation chains (OMN-951)
 from omnibase_infra.validation.chain_propagation_validator import (
     ChainPropagationError,
@@ -215,11 +224,13 @@ __all__: list[str] = [
     "EnumContractViolationSeverity",  # Contract violation severity
     "SecurityRuleId",  # Security rule identifiers
     # Models
+    "ModelAnyTypeValidationResult",  # Any type validation result (OMN-1276)
     "ModelContractLintResult",  # Contract lint result
     "ModelContractViolation",  # Contract violation model
     "ModelDetectedNodeInfo",  # Detected node info
     "ModelExecutionShapeValidationResult",  # Execution shape result
     # Validators
+    "AnyTypeDetector",  # Any type AST detector (OMN-1276)
     "ChainPropagationValidator",  # Chain propagation validator (OMN-951)
     "CircularImportValidator",  # Circular import validator
     "ContractLinter",  # Contract linter (PR #57)
@@ -246,6 +257,9 @@ __all__: list[str] = [
     "lint_contracts_ci",  # CI contract linting
     "lint_contracts_in_directory",  # Directory contract linting
     "validate_all",  # Re-export from omnibase_core
+    "validate_any_types",  # Any type validation (OMN-1276)
+    "validate_any_types_ci",  # Any type CI validation (OMN-1276)
+    "validate_any_types_in_file",  # Any type file validation (OMN-1276)
     "validate_architecture",  # Re-export from omnibase_core
     "validate_contracts",  # Re-export from omnibase_core
     "validate_execution_shapes",  # Execution shape validation

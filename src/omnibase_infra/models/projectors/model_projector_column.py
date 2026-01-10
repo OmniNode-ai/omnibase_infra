@@ -125,6 +125,31 @@ class ModelProjectorColumn(BaseModel):
             )
         return v
 
+    @field_validator("default")
+    @classmethod
+    def validate_default(cls, v: str | None) -> str | None:
+        """Validate default value for SQL safety.
+
+        Prevents SQL injection by rejecting line breaks in default values.
+        Default values are raw SQL expressions by design (e.g., 'now()', 'true'),
+        so contract sources must be trusted. This validator prevents accidental
+        line breaks that could enable multi-statement injection.
+
+        Args:
+            v: Default value to validate.
+
+        Returns:
+            Validated default value.
+
+        Raises:
+            ValueError: If the default contains line breaks.
+        """
+        if v is None:
+            return v
+        if "\n" in v or "\r" in v:
+            raise ValueError("default value must not contain line breaks")
+        return v
+
     def to_sql_definition(self) -> str:
         """Generate SQL column definition for CREATE TABLE statement.
 

@@ -152,6 +152,18 @@ from omnibase_infra.runtime.projector_schema_manager import (
     ProjectorSchemaValidator,
 )
 
+# Invocation security enforcer (OMN-1098)
+from omnibase_infra.runtime.invocation_security_enforcer import (
+    InvocationSecurityEnforcer,
+    SecurityViolationError,
+)
+
+# Security metadata validator (OMN-1137)
+from omnibase_infra.runtime.security_metadata_validator import (
+    SecurityMetadataValidator,
+    validate_handler_security,
+)
+
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
 from omnibase_infra.runtime.chain_aware_dispatch import (
     ChainAwareDispatcher,
@@ -250,4 +262,10 @@ __all__: list[str] = [
     "ProjectorSchemaError",
     "ProjectorPluginLoader",
     "ProjectorSchemaValidator",
+    # Invocation security enforcer (OMN-1098)
+    "InvocationSecurityEnforcer",
+    "SecurityViolationError",
+    # Security metadata validator (OMN-1137)
+    "SecurityMetadataValidator",
+    "validate_handler_security",
 ]

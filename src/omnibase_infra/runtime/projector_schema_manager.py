@@ -22,7 +22,7 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import asyncpg
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -126,9 +126,9 @@ class ProjectorSchemaValidator:
     This class validates schemas exist, does NOT auto-create.
 
     The validator provides:
-    - Schema validation (ensure_schema): Verifies table and columns exist
+    - Schema validation (ensure_schema_exists): Verifies table and columns exist
     - Migration generation (generate_migration): Creates SQL for manual application
-    - Table existence checks (_table_exists): Low-level table verification
+    - Table existence checks (table_exists): Low-level table verification
     - Column introspection (_get_table_columns): Lists existing columns
 
     Design Philosophy:
@@ -150,7 +150,7 @@ class ProjectorSchemaValidator:
         >>>
         >>> # Validate schema exists
         >>> try:
-        ...     await validator.ensure_schema(schema)
+        ...     await validator.ensure_schema_exists(schema)
         ... except ProjectorSchemaError as e:
         ...     print(f"Schema missing: {e}")
         ...     print(await validator.generate_migration(schema))
@@ -169,10 +169,10 @@ class ProjectorSchemaValidator:
         """
         self._pool = db_pool
 
-    async def ensure_schema(
+    async def ensure_schema_exists(
         self,
         schema: ModelProjectorSchema,
-        correlation_id: UUID | None = None,
+        correlation_id: str | None = None,
     ) -> None:
         """Verify that the projection table schema exists.
 
@@ -196,7 +196,7 @@ class ProjectorSchemaValidator:
 
         Example:
             >>> try:
-            ...     await manager.ensure_schema(schema)
+            ...     await manager.ensure_schema_exists(schema)
             ...     print("Schema valid")
             ... except ProjectorSchemaError as e:
             ...     print(f"Migration needed: {e}")
@@ -205,19 +205,19 @@ class ProjectorSchemaValidator:
             logger.warning(
                 "Missing correlation_id in %s - generating new UUID. "
                 "This may break distributed tracing chains.",
-                "ensure_schema",
+                "ensure_schema_exists",
             )
-        corr_id = correlation_id or uuid4()
+        corr_id = correlation_id or str(uuid4())
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
-            operation="ensure_schema",
+            operation="ensure_schema_exists",
             target_name=f"schema.{schema.table_name}",
             correlation_id=corr_id,
         )
 
         # Check table exists
-        table_exists = await self._table_exists(schema.table_name, corr_id)
-        if not table_exists:
+        exists = await self.table_exists(schema.table_name, correlation_id=corr_id)
+        if not exists:
             migration_hint = (
                 "Run migration first. Generate migration SQL with:\n"
                 "  manager.generate_migration(schema)\n"
@@ -255,14 +255,14 @@ class ProjectorSchemaValidator:
             extra={
                 "table_name": schema.table_name,
                 "column_count": len(required_columns),
-                "correlation_id": str(corr_id),
+                "correlation_id": corr_id,
             },
         )
 
     async def generate_migration(
         self,
         schema: ModelProjectorSchema,
-        correlation_id: UUID | None = None,
+        correlation_id: str | None = None,
     ) -> str:
         """Generate CREATE TABLE SQL for manual application.
 
@@ -293,24 +293,25 @@ class ProjectorSchemaValidator:
                 "This may break distributed tracing chains.",
                 "generate_migration",
             )
-        corr_id = correlation_id or uuid4()
+        corr_id = correlation_id or str(uuid4())
 
         logger.debug(
             "Generating migration SQL",
             extra={
                 "table_name": schema.table_name,
                 "schema_version": schema.schema_version,
-                "correlation_id": str(corr_id),
+                "correlation_id": corr_id,
             },
         )
 
         # Use the schema's built-in SQL generation
         return schema.to_full_migration_sql()
 
-    async def _table_exists(
+    async def table_exists(
         self,
         table_name: str,
-        correlation_id: UUID | None = None,
+        schema_name: str | None = None,
+        correlation_id: str | None = None,
     ) -> bool:
         """Check if a table exists in the database.
 
@@ -318,6 +319,7 @@ class ProjectorSchemaValidator:
 
         Args:
             table_name: Name of the table to check.
+            schema_name: Optional database schema name. Defaults to 'public'.
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
@@ -332,13 +334,14 @@ class ProjectorSchemaValidator:
             logger.warning(
                 "Missing correlation_id in %s - generating new UUID. "
                 "This may break distributed tracing chains.",
-                "_table_exists",
+                "table_exists",
             )
-        corr_id = correlation_id or uuid4()
+        corr_id = correlation_id or str(uuid4())
+        effective_schema = schema_name or "public"
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="table_exists",
-            target_name=f"schema.{table_name}",
+            target_name=f"{effective_schema}.{table_name}",
             correlation_id=corr_id,
         )
 
@@ -346,32 +349,29 @@ class ProjectorSchemaValidator:
             SELECT EXISTS (
                 SELECT 1
                 FROM information_schema.tables
-                WHERE table_schema = 'public'
-                AND table_name = $1
+                WHERE table_schema = $1
+                AND table_name = $2
             )
         """
 
         try:
             async with self._pool.acquire() as conn:
-                result = await conn.fetchval(query, table_name)
+                result = await conn.fetchval(query, effective_schema, table_name)
                 return bool(result)
 
+        except asyncpg.PostgresConnectionError as e:
+            raise InfraConnectionError(
+                "Failed to connect to database for table existence check",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            raise InfraTimeoutError(
+                "Table existence check timed out",
+                context=ctx,
+            ) from e
+
         except Exception as e:
-            # Import asyncpg errors here to avoid import issues
-            import asyncpg
-
-            if isinstance(e, asyncpg.PostgresConnectionError):
-                raise InfraConnectionError(
-                    "Failed to connect to database for table existence check",
-                    context=ctx,
-                ) from e
-
-            if isinstance(e, asyncpg.QueryCanceledError):
-                raise InfraTimeoutError(
-                    "Table existence check timed out",
-                    context=ctx,
-                ) from e
-
             raise RuntimeHostError(
                 f"Failed to check table existence: {type(e).__name__}",
                 context=ctx,
@@ -380,7 +380,8 @@ class ProjectorSchemaValidator:
     async def _get_table_columns(
         self,
         table_name: str,
-        correlation_id: UUID | None = None,
+        correlation_id: str | None = None,
+        schema_name: str | None = None,
     ) -> list[str]:
         """Get list of existing column names for a table.
 
@@ -390,6 +391,7 @@ class ProjectorSchemaValidator:
         Args:
             table_name: Name of the table to inspect.
             correlation_id: Optional correlation ID for tracing.
+            schema_name: Optional database schema name. Defaults to 'public'.
 
         Returns:
             List of column names in the table. Empty list if table doesn't exist.
@@ -405,43 +407,41 @@ class ProjectorSchemaValidator:
                 "This may break distributed tracing chains.",
                 "_get_table_columns",
             )
-        corr_id = correlation_id or uuid4()
+        corr_id = correlation_id or str(uuid4())
+        effective_schema = schema_name or "public"
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="get_table_columns",
-            target_name=f"schema.{table_name}",
+            target_name=f"{effective_schema}.{table_name}",
             correlation_id=corr_id,
         )
 
         query = """
             SELECT column_name
             FROM information_schema.columns
-            WHERE table_schema = 'public'
-            AND table_name = $1
+            WHERE table_schema = $1
+            AND table_name = $2
             ORDER BY ordinal_position
         """
 
         try:
             async with self._pool.acquire() as conn:
-                rows = await conn.fetch(query, table_name)
+                rows = await conn.fetch(query, effective_schema, table_name)
                 return [row["column_name"] for row in rows]
 
+        except asyncpg.PostgresConnectionError as e:
+            raise InfraConnectionError(
+                "Failed to connect to database for column introspection",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            raise InfraTimeoutError(
+                "Column introspection timed out",
+                context=ctx,
+            ) from e
+
         except Exception as e:
-            # Import asyncpg errors here to avoid import issues
-            import asyncpg
-
-            if isinstance(e, asyncpg.PostgresConnectionError):
-                raise InfraConnectionError(
-                    "Failed to connect to database for column introspection",
-                    context=ctx,
-                ) from e
-
-            if isinstance(e, asyncpg.QueryCanceledError):
-                raise InfraTimeoutError(
-                    "Column introspection timed out",
-                    context=ctx,
-                ) from e
-
             raise RuntimeHostError(
                 f"Failed to get table columns: {type(e).__name__}",
                 context=ctx,

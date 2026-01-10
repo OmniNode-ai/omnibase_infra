@@ -16,6 +16,8 @@ Related Tickets:
 
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from omnibase_infra.models.projectors.model_projector_column import (
@@ -124,6 +126,29 @@ class ModelProjectorSchema(BaseModel):
                 "[A-Za-z_][A-Za-z0-9_]* (letters, digits, underscores only, "
                 "starting with letter or underscore)"
             )
+        return v
+
+    @field_validator("schema_version")
+    @classmethod
+    def validate_schema_version(cls, v: str) -> str:
+        """Validate schema_version format and reject line breaks.
+
+        Prevents SQL comment injection by rejecting line breaks and ensures
+        the version follows semantic versioning format.
+
+        Args:
+            v: Schema version to validate.
+
+        Returns:
+            Validated schema version.
+
+        Raises:
+            ValueError: If the version contains line breaks or invalid format.
+        """
+        if "\n" in v or "\r" in v:
+            raise ValueError("schema_version must not contain line breaks")
+        if not re.fullmatch(r"\d+\.\d+\.\d+", v):
+            raise ValueError("schema_version must match semver 'MAJOR.MINOR.PATCH'")
         return v
 
     @field_validator("columns")

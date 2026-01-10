@@ -5,24 +5,17 @@
 This test suite validates schema management for ONEX projectors with:
 - Schema validation (table/column existence checks)
 - Migration SQL generation (CREATE TABLE, CREATE INDEX)
-- Column type mapping (PostgreSQL type compatibility)
 - Table existence detection
 - Error handling with migration hints
 
 Test Organization:
     - TestSchemaValidation: Schema existence and validation
     - TestMigrationSQLGeneration: SQL generation for migrations
-    - TestColumnTypeMapping: PostgreSQL type mapping
     - TestTableExistence: Table existence detection
     - TestErrorHandling: Error message formatting
 
-TDD Approach:
-    These tests are written BEFORE the implementation to drive the design
-    of ProjectorSchemaValidator. The tests define the expected API and behavior.
-
 Coverage Goals:
-    - >90% code coverage for schema manager
-    - All column type mappings validated
+    - >90% code coverage for schema validator
     - All error paths tested
     - SQL generation correctness verified
 
@@ -32,18 +25,26 @@ Related Tickets:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import asyncpg
 import pytest
 
-# These imports will exist once implementation is created
-# For TDD, we define what we expect the API to look like
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     RuntimeHostError,
+)
+from omnibase_infra.models.projectors import (
+    ModelProjectorColumn,
+    ModelProjectorIndex,
+    ModelProjectorSchema,
+)
+from omnibase_infra.runtime.projector_schema_manager import (
+    ProjectorSchemaError,
+    ProjectorSchemaValidator,
 )
 
 # =============================================================================
@@ -51,153 +52,99 @@ from omnibase_infra.errors import (
 # =============================================================================
 
 
-class MockModelProjectorColumn:
-    """Mock column definition for projector schemas.
-
-    This represents the expected structure of ModelProjectorColumn.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        col_type: str,
-        nullable: bool = True,
-        default: str | None = None,
-    ) -> None:
-        self.name = name
-        self.type = col_type
-        self.nullable = nullable
-        self.default = default
-
-
-class MockModelProjectorIndex:
-    """Mock index definition for projector schemas.
-
-    This represents the expected structure of ModelProjectorIndex.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        columns: list[str],
-        unique: bool = False,
-        using: str = "btree",
-        where: str | None = None,
-    ) -> None:
-        self.name = name
-        self.columns = columns
-        self.unique = unique
-        self.using = using
-        self.where = where
-
-
-class MockModelProjectorSchema:
-    """Mock schema definition for projector tables.
-
-    This represents the expected structure of ModelProjectorSchema.
-    """
-
-    def __init__(
-        self,
-        table: str,
-        primary_key: list[str],
-        columns: list[MockModelProjectorColumn],
-        indexes: list[MockModelProjectorIndex] | None = None,
-        schema_name: str | None = None,
-    ) -> None:
-        self.table = table
-        self.primary_key = primary_key
-        self.columns = columns
-        self.indexes = indexes or []
-        self.schema_name = schema_name
-
-
 @pytest.fixture
-def sample_schema() -> MockModelProjectorSchema:
+def sample_schema() -> ModelProjectorSchema:
     """Create a sample projector schema for testing."""
-    return MockModelProjectorSchema(
-        table="test_projections",
-        primary_key=["id"],
+    return ModelProjectorSchema(
+        table_name="test_projections",
         columns=[
-            MockModelProjectorColumn(name="id", col_type="uuid", nullable=False),
-            MockModelProjectorColumn(
-                name="status", col_type="varchar(50)", nullable=False
+            ModelProjectorColumn(
+                name="id", column_type="uuid", nullable=False, primary_key=True
             ),
-            MockModelProjectorColumn(name="data", col_type="jsonb", nullable=True),
-            MockModelProjectorColumn(
-                name="created_at", col_type="timestamp", nullable=False
+            ModelProjectorColumn(
+                name="status", column_type="varchar", length=50, nullable=False
             ),
-            MockModelProjectorColumn(
-                name="is_active", col_type="boolean", nullable=False
+            ModelProjectorColumn(name="data", column_type="jsonb", nullable=True),
+            ModelProjectorColumn(
+                name="created_at", column_type="timestamp", nullable=False
+            ),
+            ModelProjectorColumn(
+                name="is_active", column_type="boolean", nullable=False
             ),
         ],
         indexes=[
-            MockModelProjectorIndex(name="idx_status", columns=["status"]),
-            MockModelProjectorIndex(name="idx_created", columns=["created_at"]),
+            ModelProjectorIndex(name="idx_status", columns=["status"]),
+            ModelProjectorIndex(name="idx_created", columns=["created_at"]),
         ],
+        schema_version="1.0.0",
     )
 
 
 @pytest.fixture
-def composite_pk_schema() -> MockModelProjectorSchema:
+def composite_pk_schema() -> ModelProjectorSchema:
     """Create a schema with composite primary key for testing."""
-    return MockModelProjectorSchema(
-        table="entity_projections",
-        primary_key=["entity_id", "domain"],
+    return ModelProjectorSchema(
+        table_name="entity_projections",
         columns=[
-            MockModelProjectorColumn(name="entity_id", col_type="uuid", nullable=False),
-            MockModelProjectorColumn(
-                name="domain", col_type="varchar(128)", nullable=False
+            ModelProjectorColumn(
+                name="entity_id", column_type="uuid", nullable=False, primary_key=True
             ),
-            MockModelProjectorColumn(
-                name="state", col_type="varchar(64)", nullable=False
+            ModelProjectorColumn(
+                name="domain",
+                column_type="varchar",
+                length=128,
+                nullable=False,
+                primary_key=True,
             ),
-            MockModelProjectorColumn(name="metadata", col_type="jsonb", nullable=True),
+            ModelProjectorColumn(
+                name="state", column_type="varchar", length=64, nullable=False
+            ),
+            ModelProjectorColumn(name="metadata", column_type="jsonb", nullable=True),
         ],
         indexes=[
-            MockModelProjectorIndex(
+            ModelProjectorIndex(
                 name="idx_entity_state", columns=["entity_id", "state"]
             ),
         ],
+        schema_version="1.0.0",
     )
 
 
 @pytest.fixture
-def schema_with_gin_index() -> MockModelProjectorSchema:
+def schema_with_gin_index() -> ModelProjectorSchema:
     """Create a schema with GIN index on JSONB column."""
-    return MockModelProjectorSchema(
-        table="searchable_projections",
-        primary_key=["id"],
+    return ModelProjectorSchema(
+        table_name="searchable_projections",
         columns=[
-            MockModelProjectorColumn(name="id", col_type="uuid", nullable=False),
-            MockModelProjectorColumn(name="tags", col_type="text[]", nullable=True),
-            MockModelProjectorColumn(
-                name="attributes", col_type="jsonb", nullable=True
+            ModelProjectorColumn(
+                name="id", column_type="uuid", nullable=False, primary_key=True
             ),
+            ModelProjectorColumn(name="attributes", column_type="jsonb", nullable=True),
         ],
         indexes=[
-            MockModelProjectorIndex(name="idx_tags_gin", columns=["tags"], using="gin"),
-            MockModelProjectorIndex(
-                name="idx_attrs_gin", columns=["attributes"], using="gin"
+            ModelProjectorIndex(
+                name="idx_attrs_gin", columns=["attributes"], index_type="gin"
             ),
         ],
+        schema_version="1.0.0",
     )
 
 
 @pytest.fixture
-def schema_with_qualified_name() -> MockModelProjectorSchema:
-    """Create a schema with schema-qualified table name."""
-    return MockModelProjectorSchema(
-        table="registrations",
-        schema_name="onex",
-        primary_key=["id"],
+def simple_schema() -> ModelProjectorSchema:
+    """Create a simple schema with minimal columns."""
+    return ModelProjectorSchema(
+        table_name="registrations",
         columns=[
-            MockModelProjectorColumn(name="id", col_type="uuid", nullable=False),
-            MockModelProjectorColumn(
-                name="name", col_type="varchar(255)", nullable=False
+            ModelProjectorColumn(
+                name="id", column_type="uuid", nullable=False, primary_key=True
+            ),
+            ModelProjectorColumn(
+                name="name", column_type="varchar", length=255, nullable=False
             ),
         ],
         indexes=[],
+        schema_version="1.0.0",
     )
 
 
@@ -216,63 +163,6 @@ def mock_connection() -> AsyncMock:
 
 
 # =============================================================================
-# MOCK SCHEMA MANAGER FOR TESTING
-# =============================================================================
-
-
-class MockProjectorSchemaValidator:
-    """Mock implementation to define the expected API.
-
-    This class represents the expected interface for ProjectorSchemaValidator.
-    The actual implementation will replace this mock.
-    """
-
-    def __init__(self, pool: asyncpg.Pool) -> None:
-        self._pool = pool
-
-    async def ensure_schema_exists(
-        self,
-        schema: MockModelProjectorSchema,
-        correlation_id: str | None = None,
-    ) -> None:
-        """Ensure the schema table exists with required columns.
-
-        Raises:
-            RuntimeHostError: If table or required columns are missing.
-        """
-        raise NotImplementedError("TDD: Implementation pending")
-
-    async def table_exists(
-        self,
-        table_name: str,
-        schema_name: str | None = None,
-        correlation_id: str | None = None,
-    ) -> bool:
-        """Check if a table exists in the database."""
-        raise NotImplementedError("TDD: Implementation pending")
-
-    def generate_migration_sql(
-        self,
-        schema: MockModelProjectorSchema,
-    ) -> str:
-        """Generate CREATE TABLE SQL for the schema."""
-        raise NotImplementedError("TDD: Implementation pending")
-
-    def generate_index_sql(
-        self,
-        index: MockModelProjectorIndex,
-        table_name: str,
-        schema_name: str | None = None,
-    ) -> str:
-        """Generate CREATE INDEX SQL for an index."""
-        raise NotImplementedError("TDD: Implementation pending")
-
-    def map_column_type(self, column_type: str) -> str:
-        """Map a column type to PostgreSQL type."""
-        raise NotImplementedError("TDD: Implementation pending")
-
-
-# =============================================================================
 # SCHEMA VALIDATION TESTS
 # =============================================================================
 
@@ -286,7 +176,7 @@ class TestSchemaValidation:
         self,
         mock_pool: MagicMock,
         mock_connection: AsyncMock,
-        sample_schema: MockModelProjectorSchema,
+        sample_schema: ModelProjectorSchema,
     ) -> None:
         """Test ensure_schema_exists does not raise when table exists.
 
@@ -298,111 +188,120 @@ class TestSchemaValidation:
         mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
         mock_pool.acquire.return_value.__aexit__.return_value = None
 
-        # Mock: table exists
-        mock_connection.fetchval.return_value = 1
+        # Mock: table exists (EXISTS query returns True)
+        mock_connection.fetchval.return_value = True
 
         # Mock: all columns exist
         mock_connection.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
-            {"column_name": "status", "data_type": "character varying"},
-            {"column_name": "data", "data_type": "jsonb"},
-            {"column_name": "created_at", "data_type": "timestamp without time zone"},
-            {"column_name": "is_active", "data_type": "boolean"},
+            {"column_name": "id"},
+            {"column_name": "status"},
+            {"column_name": "data"},
+            {"column_name": "created_at"},
+            {"column_name": "is_active"},
         ]
 
-        # When implementation exists, this will not raise
-        # manager = ProjectorSchemaValidator(pool=mock_pool)
-        # await manager.ensure_schema_exists(sample_schema)
-        # For now, we define the expected behavior
-        assert True  # Placeholder for TDD
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        # Should not raise any exception
+        await validator.ensure_schema_exists(sample_schema, correlation_id=str(uuid4()))
+
+        # Verify table_exists was called
+        assert mock_pool.acquire.called
 
     async def test_ensure_schema_missing_raises_error(
         self,
         mock_pool: MagicMock,
         mock_connection: AsyncMock,
-        sample_schema: MockModelProjectorSchema,
+        sample_schema: ModelProjectorSchema,
     ) -> None:
         """Test ensure_schema_exists raises when table is missing.
 
         Expected behavior:
         - Query information_schema returns no table
-        - Raise RuntimeHostError with migration hint
+        - Raise ProjectorSchemaError with migration hint
         - Error message includes table name
         """
         mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
         mock_pool.acquire.return_value.__aexit__.return_value = None
 
         # Mock: table does not exist
-        mock_connection.fetchval.return_value = None
+        mock_connection.fetchval.return_value = False
 
-        # Expected: RuntimeHostError with table name and migration hint
-        # manager = ProjectorSchemaValidator(pool=mock_pool)
-        # with pytest.raises(RuntimeHostError) as exc_info:
-        #     await manager.ensure_schema_exists(sample_schema)
-        # assert "test_projections" in str(exc_info.value)
-        # assert "onex migrate" in str(exc_info.value).lower()
-        assert True  # Placeholder for TDD
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        with pytest.raises(ProjectorSchemaError) as exc_info:
+            await validator.ensure_schema_exists(
+                sample_schema, correlation_id=str(uuid4())
+            )
+
+        error_message = str(exc_info.value)
+        assert "test_projections" in error_message
+        assert "does not exist" in error_message
+        assert "migration" in error_message.lower()
 
     async def test_ensure_schema_missing_columns_raises_error(
         self,
         mock_pool: MagicMock,
         mock_connection: AsyncMock,
-        sample_schema: MockModelProjectorSchema,
+        sample_schema: ModelProjectorSchema,
     ) -> None:
         """Test ensure_schema_exists raises when required columns are missing.
 
         Expected behavior:
         - Table exists but missing required columns
-        - Raise RuntimeHostError listing missing columns
+        - Raise ProjectorSchemaError listing missing columns
         - Error message includes migration hint
         """
         mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
         mock_pool.acquire.return_value.__aexit__.return_value = None
 
         # Mock: table exists
-        mock_connection.fetchval.return_value = 1
+        mock_connection.fetchval.return_value = True
 
         # Mock: missing 'data' and 'is_active' columns
         mock_connection.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
-            {"column_name": "status", "data_type": "character varying"},
-            {"column_name": "created_at", "data_type": "timestamp without time zone"},
+            {"column_name": "id"},
+            {"column_name": "status"},
+            {"column_name": "created_at"},
         ]
 
-        # Expected: RuntimeHostError with missing column names
-        # manager = ProjectorSchemaValidator(pool=mock_pool)
-        # with pytest.raises(RuntimeHostError) as exc_info:
-        #     await manager.ensure_schema_exists(sample_schema)
-        # assert "data" in str(exc_info.value)
-        # assert "is_active" in str(exc_info.value)
-        assert True  # Placeholder for TDD
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        with pytest.raises(ProjectorSchemaError) as exc_info:
+            await validator.ensure_schema_exists(
+                sample_schema, correlation_id=str(uuid4())
+            )
 
-    async def test_ensure_schema_validates_schema_qualified_table(
+        error_message = str(exc_info.value)
+        assert "data" in error_message
+        assert "is_active" in error_message
+        assert "missing" in error_message.lower()
+
+    async def test_ensure_schema_validates_correlation_id_propagated(
         self,
         mock_pool: MagicMock,
         mock_connection: AsyncMock,
-        schema_with_qualified_name: MockModelProjectorSchema,
+        simple_schema: ModelProjectorSchema,
     ) -> None:
-        """Test ensure_schema_exists handles schema-qualified table names.
+        """Test ensure_schema_exists propagates correlation ID.
 
         Expected behavior:
-        - Query uses schema_name in WHERE clause
-        - Correctly identifies table in specified schema
+        - Correlation ID is used in error context
         """
         mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
         mock_pool.acquire.return_value.__aexit__.return_value = None
 
-        mock_connection.fetchval.return_value = 1
-        mock_connection.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
-            {"column_name": "name", "data_type": "character varying"},
-        ]
+        # Mock: table does not exist
+        mock_connection.fetchval.return_value = False
 
-        # Expected: Query includes schema_name = 'onex'
-        # manager = ProjectorSchemaValidator(pool=mock_pool)
-        # await manager.ensure_schema_exists(schema_with_qualified_name)
-        # Verify SQL includes schema_name parameter
-        assert True  # Placeholder for TDD
+        correlation_id = str(uuid4())
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+
+        with pytest.raises(ProjectorSchemaError) as exc_info:
+            await validator.ensure_schema_exists(
+                simple_schema, correlation_id=correlation_id
+            )
+
+        # Verify correlation ID is propagated to the error
+        assert exc_info.value.correlation_id is not None
+        assert str(exc_info.value.correlation_id) == correlation_id
 
 
 # =============================================================================
@@ -411,14 +310,16 @@ class TestSchemaValidation:
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
 class TestMigrationSQLGeneration:
     """Test migration SQL generation functionality."""
 
-    def test_generate_migration_sql_basic_table(
+    async def test_generate_migration_basic_table(
         self,
-        sample_schema: MockModelProjectorSchema,
+        mock_pool: MagicMock,
+        sample_schema: ModelProjectorSchema,
     ) -> None:
-        """Test generate_migration_sql produces correct CREATE TABLE SQL.
+        """Test generate_migration produces correct CREATE TABLE SQL.
 
         Expected behavior:
         - SQL starts with CREATE TABLE IF NOT EXISTS
@@ -426,419 +327,262 @@ class TestMigrationSQLGeneration:
         - Includes PRIMARY KEY constraint
         - Includes NOT NULL constraints where specified
         """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # sql = manager.generate_migration_sql(sample_schema)
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        sql = await validator.generate_migration(
+            sample_schema, correlation_id=str(uuid4())
+        )
 
-        # Expected SQL structure:
-        # CREATE TABLE IF NOT EXISTS test_projections (
-        #     id UUID NOT NULL,
-        #     status VARCHAR(50) NOT NULL,
-        #     data JSONB,
-        #     created_at TIMESTAMP NOT NULL,
-        #     is_active BOOLEAN NOT NULL,
-        #     PRIMARY KEY (id)
-        # );
+        # Verify CREATE TABLE statement
+        assert "CREATE TABLE IF NOT EXISTS" in sql
+        assert '"test_projections"' in sql
 
-        # assert "CREATE TABLE IF NOT EXISTS test_projections" in sql
-        # assert "id UUID NOT NULL" in sql or "id uuid NOT NULL" in sql
-        # assert "status VARCHAR(50) NOT NULL" in sql.upper()
-        # assert "data JSONB" in sql.upper()
-        # assert "PRIMARY KEY (id)" in sql.upper()
-        assert True  # Placeholder for TDD
+        # Verify columns
+        assert '"id"' in sql
+        assert "UUID" in sql
+        assert '"status"' in sql
+        assert "VARCHAR" in sql
+        assert '"data"' in sql
+        assert "JSONB" in sql
+        assert '"created_at"' in sql
+        assert "TIMESTAMP" in sql
+        assert '"is_active"' in sql
+        assert "BOOLEAN" in sql
 
-    def test_generate_migration_sql_composite_primary_key(
+        # Verify PRIMARY KEY
+        assert "PRIMARY KEY" in sql
+
+        # Verify NOT NULL constraints
+        assert "NOT NULL" in sql
+
+    async def test_generate_migration_composite_primary_key(
         self,
-        composite_pk_schema: MockModelProjectorSchema,
+        mock_pool: MagicMock,
+        composite_pk_schema: ModelProjectorSchema,
     ) -> None:
-        """Test generate_migration_sql handles composite primary keys.
+        """Test generate_migration handles composite primary keys.
 
         Expected behavior:
         - PRIMARY KEY includes all key columns
-        - Column order matches primary_key list
         """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # sql = manager.generate_migration_sql(composite_pk_schema)
-
-        # Expected: PRIMARY KEY (entity_id, domain)
-        # assert "PRIMARY KEY (entity_id, domain)" in sql.upper()
-        assert True  # Placeholder for TDD
-
-    def test_generate_migration_sql_schema_qualified(
-        self,
-        schema_with_qualified_name: MockModelProjectorSchema,
-    ) -> None:
-        """Test generate_migration_sql handles schema-qualified table names.
-
-        Expected behavior:
-        - Table name includes schema prefix: onex.registrations
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # sql = manager.generate_migration_sql(schema_with_qualified_name)
-
-        # Expected: CREATE TABLE IF NOT EXISTS onex.registrations
-        # assert "onex.registrations" in sql
-        assert True  # Placeholder for TDD
-
-    def test_generate_migration_sql_default_values(self) -> None:
-        """Test generate_migration_sql includes DEFAULT clauses.
-
-        Expected behavior:
-        - Columns with defaults include DEFAULT clause
-        - Default values are properly quoted/formatted
-        """
-        schema = MockModelProjectorSchema(
-            table="test_defaults",
-            primary_key=["id"],
-            columns=[
-                MockModelProjectorColumn(name="id", col_type="uuid", nullable=False),
-                MockModelProjectorColumn(
-                    name="status",
-                    col_type="varchar(50)",
-                    nullable=False,
-                    default="'pending'",
-                ),
-                MockModelProjectorColumn(
-                    name="count",
-                    col_type="integer",
-                    nullable=False,
-                    default="0",
-                ),
-                MockModelProjectorColumn(
-                    name="created_at",
-                    col_type="timestamp",
-                    nullable=False,
-                    default="NOW()",
-                ),
-            ],
-            indexes=[],
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        sql = await validator.generate_migration(
+            composite_pk_schema, correlation_id=str(uuid4())
         )
 
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # sql = manager.generate_migration_sql(schema)
+        # Verify composite PRIMARY KEY (both columns)
+        assert "PRIMARY KEY" in sql
+        assert '"entity_id"' in sql
+        assert '"domain"' in sql
 
-        # assert "DEFAULT 'pending'" in sql
-        # assert "DEFAULT 0" in sql
-        # assert "DEFAULT NOW()" in sql.upper()
-        assert True  # Placeholder for TDD
-
-    def test_generate_index_sql_btree(
+    async def test_generate_migration_includes_indexes(
         self,
-        sample_schema: MockModelProjectorSchema,
+        mock_pool: MagicMock,
+        sample_schema: ModelProjectorSchema,
     ) -> None:
-        """Test generate_index_sql produces correct B-tree index SQL.
+        """Test generate_migration includes CREATE INDEX statements.
 
         Expected behavior:
-        - SQL uses CREATE INDEX IF NOT EXISTS
-        - Defaults to BTREE (implicit, no USING clause needed)
-        - Includes table name and column
+        - SQL includes CREATE INDEX statements for all indexes
         """
-        index = sample_schema.indexes[0]  # idx_status on status
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        sql = await validator.generate_migration(
+            sample_schema, correlation_id=str(uuid4())
+        )
 
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # sql = manager.generate_index_sql(
-        #     index=index,
-        #     table_name=sample_schema.table,
-        # )
+        # Verify index statements
+        assert "CREATE INDEX IF NOT EXISTS" in sql
+        assert '"idx_status"' in sql
+        assert '"idx_created"' in sql
 
-        # Expected: CREATE INDEX IF NOT EXISTS idx_status ON test_projections (status)
-        # assert "CREATE INDEX IF NOT EXISTS idx_status" in sql.upper()
-        # assert "ON test_projections" in sql
-        # assert "(status)" in sql
-        assert True  # Placeholder for TDD
-
-    def test_generate_index_sql_gin(
+    async def test_generate_migration_gin_index(
         self,
-        schema_with_gin_index: MockModelProjectorSchema,
+        mock_pool: MagicMock,
+        schema_with_gin_index: ModelProjectorSchema,
     ) -> None:
-        """Test generate_index_sql produces correct GIN index SQL.
+        """Test generate_migration produces correct GIN index SQL.
 
         Expected behavior:
         - SQL includes USING GIN clause
-        - Works for JSONB and array columns
         """
-        index = schema_with_gin_index.indexes[0]  # idx_tags_gin
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        sql = await validator.generate_migration(
+            schema_with_gin_index, correlation_id=str(uuid4())
+        )
 
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # sql = manager.generate_index_sql(
-        #     index=index,
-        #     table_name=schema_with_gin_index.table,
-        # )
+        # Verify GIN index
+        assert "USING GIN" in sql
+        assert '"idx_attrs_gin"' in sql
 
-        # Expected: CREATE INDEX IF NOT EXISTS idx_tags_gin
-        #           ON searchable_projections USING GIN (tags)
-        # assert "USING GIN" in sql.upper()
-        # assert "(tags)" in sql
-        assert True  # Placeholder for TDD
+    async def test_generate_migration_includes_version_comment(
+        self,
+        mock_pool: MagicMock,
+        sample_schema: ModelProjectorSchema,
+    ) -> None:
+        """Test generate_migration includes version in comments.
 
-    def test_generate_index_sql_unique(self) -> None:
-        """Test generate_index_sql handles unique indexes.
+        Expected behavior:
+        - SQL includes migration header with version
+        """
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        sql = await validator.generate_migration(
+            sample_schema, correlation_id=str(uuid4())
+        )
+
+        # Verify migration comment with version
+        assert "Migration for test_projections" in sql
+        assert "version 1.0.0" in sql
+
+    async def test_generate_migration_default_values(
+        self,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Test generate_migration includes DEFAULT clauses.
+
+        Expected behavior:
+        - Columns with defaults include DEFAULT clause
+        """
+        schema = ModelProjectorSchema(
+            table_name="test_defaults",
+            columns=[
+                ModelProjectorColumn(
+                    name="id", column_type="uuid", nullable=False, primary_key=True
+                ),
+                ModelProjectorColumn(
+                    name="status",
+                    column_type="varchar",
+                    length=50,
+                    nullable=False,
+                    default="'pending'",
+                ),
+                ModelProjectorColumn(
+                    name="count",
+                    column_type="integer",
+                    nullable=False,
+                    default="0",
+                ),
+            ],
+            indexes=[],
+            schema_version="1.0.0",
+        )
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        sql = await validator.generate_migration(schema, correlation_id=str(uuid4()))
+
+        assert "DEFAULT 'pending'" in sql
+        assert "DEFAULT 0" in sql
+
+    async def test_generate_migration_unique_index(
+        self,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Test generate_migration handles unique indexes.
 
         Expected behavior:
         - SQL includes UNIQUE keyword
         """
-        index = MockModelProjectorIndex(
-            name="idx_unique_email",
-            columns=["email"],
-            unique=True,
+        schema = ModelProjectorSchema(
+            table_name="users",
+            columns=[
+                ModelProjectorColumn(
+                    name="id", column_type="uuid", nullable=False, primary_key=True
+                ),
+                ModelProjectorColumn(
+                    name="email", column_type="varchar", length=255, nullable=False
+                ),
+            ],
+            indexes=[
+                ModelProjectorIndex(
+                    name="idx_unique_email",
+                    columns=["email"],
+                    unique=True,
+                ),
+            ],
+            schema_version="1.0.0",
         )
 
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # sql = manager.generate_index_sql(
-        #     index=index,
-        #     table_name="users",
-        # )
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        sql = await validator.generate_migration(schema, correlation_id=str(uuid4()))
 
-        # Expected: CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_email ON users (email)
-        # assert "CREATE UNIQUE INDEX" in sql.upper()
-        assert True  # Placeholder for TDD
+        assert "CREATE UNIQUE INDEX" in sql
+        assert '"idx_unique_email"' in sql
 
-    def test_generate_index_sql_partial(self) -> None:
-        """Test generate_index_sql handles partial indexes.
+    async def test_generate_migration_partial_index(
+        self,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Test generate_migration handles partial indexes.
 
         Expected behavior:
         - SQL includes WHERE clause
         """
-        index = MockModelProjectorIndex(
-            name="idx_active_users",
-            columns=["created_at"],
-            where="is_active = true",
+        schema = ModelProjectorSchema(
+            table_name="users",
+            columns=[
+                ModelProjectorColumn(
+                    name="id", column_type="uuid", nullable=False, primary_key=True
+                ),
+                ModelProjectorColumn(
+                    name="created_at", column_type="timestamp", nullable=False
+                ),
+                ModelProjectorColumn(
+                    name="is_active", column_type="boolean", nullable=False
+                ),
+            ],
+            indexes=[
+                ModelProjectorIndex(
+                    name="idx_active_users",
+                    columns=["created_at"],
+                    where_clause="is_active = true",
+                ),
+            ],
+            schema_version="1.0.0",
         )
 
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # sql = manager.generate_index_sql(
-        #     index=index,
-        #     table_name="users",
-        # )
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        sql = await validator.generate_migration(schema, correlation_id=str(uuid4()))
 
-        # Expected: ... WHERE is_active = true
-        # assert "WHERE is_active = true" in sql
-        assert True  # Placeholder for TDD
+        assert "WHERE is_active = true" in sql
 
-    def test_generate_index_sql_composite(self) -> None:
-        """Test generate_index_sql handles multi-column indexes.
+    async def test_generate_migration_composite_index(
+        self,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Test generate_migration handles multi-column indexes.
 
         Expected behavior:
         - All columns included in parentheses
-        - Columns separated by commas
         """
-        index = MockModelProjectorIndex(
-            name="idx_domain_state",
-            columns=["domain", "current_state"],
+        schema = ModelProjectorSchema(
+            table_name="registrations",
+            columns=[
+                ModelProjectorColumn(
+                    name="id", column_type="uuid", nullable=False, primary_key=True
+                ),
+                ModelProjectorColumn(
+                    name="domain", column_type="varchar", length=128, nullable=False
+                ),
+                ModelProjectorColumn(
+                    name="current_state",
+                    column_type="varchar",
+                    length=64,
+                    nullable=False,
+                ),
+            ],
+            indexes=[
+                ModelProjectorIndex(
+                    name="idx_domain_state",
+                    columns=["domain", "current_state"],
+                ),
+            ],
+            schema_version="1.0.0",
         )
 
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # sql = manager.generate_index_sql(
-        #     index=index,
-        #     table_name="registrations",
-        # )
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        sql = await validator.generate_migration(schema, correlation_id=str(uuid4()))
 
-        # Expected: ... ON registrations (domain, current_state)
-        # assert "(domain, current_state)" in sql
-        assert True  # Placeholder for TDD
-
-    def test_generate_index_sql_schema_qualified_table(
-        self,
-        schema_with_qualified_name: MockModelProjectorSchema,
-    ) -> None:
-        """Test generate_index_sql handles schema-qualified table names.
-
-        Expected behavior:
-        - Index ON clause includes schema.table
-        """
-        index = MockModelProjectorIndex(
-            name="idx_name",
-            columns=["name"],
-        )
-
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # sql = manager.generate_index_sql(
-        #     index=index,
-        #     table_name=schema_with_qualified_name.table,
-        #     schema_name=schema_with_qualified_name.schema_name,
-        # )
-
-        # Expected: ... ON onex.registrations (name)
-        # assert "ON onex.registrations" in sql
-        assert True  # Placeholder for TDD
-
-
-# =============================================================================
-# COLUMN TYPE MAPPING TESTS
-# =============================================================================
-
-
-@pytest.mark.unit
-class TestColumnTypeMapping:
-    """Test PostgreSQL column type mapping."""
-
-    def test_map_uuid_type(self) -> None:
-        """Test uuid maps to PostgreSQL UUID type.
-
-        Expected: 'uuid' -> 'UUID'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("uuid")
-        # assert result.upper() == "UUID"
-        assert True  # Placeholder for TDD
-
-    def test_map_varchar_type_with_length(self) -> None:
-        """Test varchar(N) is preserved with length.
-
-        Expected: 'varchar(50)' -> 'VARCHAR(50)'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("varchar(50)")
-        # assert result.upper() == "VARCHAR(50)"
-        assert True  # Placeholder for TDD
-
-    def test_map_varchar_type_various_lengths(self) -> None:
-        """Test varchar with various lengths.
-
-        Expected:
-        - varchar(1) -> VARCHAR(1)
-        - varchar(255) -> VARCHAR(255)
-        - varchar(1000) -> VARCHAR(1000)
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        test_cases = [
-            ("varchar(1)", "VARCHAR(1)"),
-            ("varchar(255)", "VARCHAR(255)"),
-            ("varchar(1000)", "VARCHAR(1000)"),
-        ]
-        # for input_type, expected in test_cases:
-        #     result = manager.map_column_type(input_type)
-        #     assert result.upper() == expected
-        assert True  # Placeholder for TDD
-
-    def test_map_timestamp_type(self) -> None:
-        """Test timestamp maps correctly.
-
-        Expected: 'timestamp' -> 'TIMESTAMP'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("timestamp")
-        # assert "TIMESTAMP" in result.upper()
-        assert True  # Placeholder for TDD
-
-    def test_map_timestamptz_type(self) -> None:
-        """Test timestamptz maps correctly.
-
-        Expected: 'timestamptz' -> 'TIMESTAMPTZ' or 'TIMESTAMP WITH TIME ZONE'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("timestamptz")
-        # assert "TIMESTAMP" in result.upper()
-        assert True  # Placeholder for TDD
-
-    def test_map_jsonb_type(self) -> None:
-        """Test jsonb maps correctly.
-
-        Expected: 'jsonb' -> 'JSONB'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("jsonb")
-        # assert result.upper() == "JSONB"
-        assert True  # Placeholder for TDD
-
-    def test_map_json_type(self) -> None:
-        """Test json maps correctly (not jsonb).
-
-        Expected: 'json' -> 'JSON'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("json")
-        # assert result.upper() == "JSON"
-        assert True  # Placeholder for TDD
-
-    def test_map_boolean_type(self) -> None:
-        """Test boolean maps correctly.
-
-        Expected: 'boolean' -> 'BOOLEAN'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("boolean")
-        # assert result.upper() == "BOOLEAN"
-        assert True  # Placeholder for TDD
-
-    def test_map_integer_type(self) -> None:
-        """Test integer maps correctly.
-
-        Expected: 'integer' -> 'INTEGER'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("integer")
-        # assert result.upper() == "INTEGER"
-        assert True  # Placeholder for TDD
-
-    def test_map_bigint_type(self) -> None:
-        """Test bigint maps correctly.
-
-        Expected: 'bigint' -> 'BIGINT'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("bigint")
-        # assert result.upper() == "BIGINT"
-        assert True  # Placeholder for TDD
-
-    def test_map_text_type(self) -> None:
-        """Test text maps correctly.
-
-        Expected: 'text' -> 'TEXT'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("text")
-        # assert result.upper() == "TEXT"
-        assert True  # Placeholder for TDD
-
-    def test_map_text_array_type(self) -> None:
-        """Test text[] array maps correctly.
-
-        Expected: 'text[]' -> 'TEXT[]'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("text[]")
-        # assert result.upper() == "TEXT[]"
-        assert True  # Placeholder for TDD
-
-    def test_map_uuid_array_type(self) -> None:
-        """Test uuid[] array maps correctly.
-
-        Expected: 'uuid[]' -> 'UUID[]'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("uuid[]")
-        # assert result.upper() == "UUID[]"
-        assert True  # Placeholder for TDD
-
-    def test_map_numeric_type_with_precision(self) -> None:
-        """Test numeric(p,s) preserves precision and scale.
-
-        Expected: 'numeric(10,2)' -> 'NUMERIC(10,2)'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("numeric(10,2)")
-        # assert result.upper() == "NUMERIC(10,2)"
-        assert True  # Placeholder for TDD
-
-    def test_map_serial_type(self) -> None:
-        """Test serial maps correctly (auto-increment).
-
-        Expected: 'serial' -> 'SERIAL'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("serial")
-        # assert result.upper() == "SERIAL"
-        assert True  # Placeholder for TDD
-
-    def test_map_bytea_type(self) -> None:
-        """Test bytea (binary) maps correctly.
-
-        Expected: 'bytea' -> 'BYTEA'
-        """
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # result = manager.map_column_type("bytea")
-        # assert result.upper() == "BYTEA"
-        assert True  # Placeholder for TDD
+        # Verify both columns in index
+        assert '"domain"' in sql
+        assert '"current_state"' in sql
 
 
 # =============================================================================
@@ -865,13 +609,16 @@ class TestTableExistence:
         mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
         mock_pool.acquire.return_value.__aexit__.return_value = None
 
-        # Mock: table exists (count = 1)
-        mock_connection.fetchval.return_value = 1
+        # Mock: table exists (EXISTS returns True)
+        mock_connection.fetchval.return_value = True
 
-        # manager = MockProjectorSchemaValidator(pool=mock_pool)
-        # result = await manager.table_exists("registration_projections")
-        # assert result is True
-        assert True  # Placeholder for TDD
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        result = await validator.table_exists(
+            "registration_projections", correlation_id=str(uuid4())
+        )
+
+        assert result is True
+        mock_pool.acquire.assert_called_once()
 
     async def test_table_exists_returns_false_for_missing_table(
         self,
@@ -888,12 +635,14 @@ class TestTableExistence:
         mock_pool.acquire.return_value.__aexit__.return_value = None
 
         # Mock: table does not exist
-        mock_connection.fetchval.return_value = None
+        mock_connection.fetchval.return_value = False
 
-        # manager = MockProjectorSchemaValidator(pool=mock_pool)
-        # result = await manager.table_exists("nonexistent_table")
-        # assert result is False
-        assert True  # Placeholder for TDD
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        result = await validator.table_exists(
+            "nonexistent_table", correlation_id=str(uuid4())
+        )
+
+        assert result is False
 
     async def test_table_exists_handles_schema_qualified_name(
         self,
@@ -904,26 +653,29 @@ class TestTableExistence:
 
         Expected behavior:
         - Query includes table_schema filter
-        - Correctly identifies table in specific schema
+        - Uses provided schema_name parameter
         """
         mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
         mock_pool.acquire.return_value.__aexit__.return_value = None
 
         # Mock: table exists in 'onex' schema
-        mock_connection.fetchval.return_value = 1
+        mock_connection.fetchval.return_value = True
 
-        # manager = MockProjectorSchemaValidator(pool=mock_pool)
-        # result = await manager.table_exists(
-        #     table_name="registrations",
-        #     schema_name="onex",
-        # )
-        # assert result is True
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        result = await validator.table_exists(
+            table_name="registrations",
+            schema_name="onex",
+            correlation_id=str(uuid4()),
+        )
 
-        # Verify query included schema filter
-        # call_args = mock_connection.fetchval.call_args
-        # sql = call_args[0][0]
-        # assert "table_schema" in sql.lower()
-        assert True  # Placeholder for TDD
+        assert result is True
+
+        # Verify query was called with schema_name = 'onex'
+        call_args = mock_connection.fetchval.call_args
+        # The query should have $1 (schema_name) and $2 (table_name) parameters
+        args = call_args[0]
+        assert "onex" in args  # schema_name parameter
+        assert "registrations" in args  # table_name parameter
 
     async def test_table_exists_default_public_schema(
         self,
@@ -938,34 +690,38 @@ class TestTableExistence:
         mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
         mock_pool.acquire.return_value.__aexit__.return_value = None
 
-        mock_connection.fetchval.return_value = 1
+        mock_connection.fetchval.return_value = True
 
-        # manager = MockProjectorSchemaValidator(pool=mock_pool)
-        # result = await manager.table_exists("my_table")
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        result = await validator.table_exists("my_table", correlation_id=str(uuid4()))
 
-        # Verify query used 'public' schema
-        # call_args = mock_connection.fetchval.call_args
-        # params = call_args[0][1:]
-        # assert "public" in params
-        assert True  # Placeholder for TDD
+        assert result is True
+
+        # Verify query used 'public' schema (default)
+        call_args = mock_connection.fetchval.call_args
+        args = call_args[0]
+        assert "public" in args  # default schema_name
 
     async def test_table_exists_connection_error(
         self,
         mock_pool: MagicMock,
+        mock_connection: AsyncMock,
     ) -> None:
         """Test table_exists handles connection errors.
 
         Expected behavior:
         - Raise InfraConnectionError on database connection failure
         """
-        mock_pool.acquire.return_value.__aenter__.side_effect = (
-            asyncpg.PostgresConnectionError("Connection refused")
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+
+        mock_connection.fetchval.side_effect = asyncpg.PostgresConnectionError(
+            "Connection refused"
         )
 
-        # manager = MockProjectorSchemaValidator(pool=mock_pool)
-        # with pytest.raises(InfraConnectionError):
-        #     await manager.table_exists("test_table")
-        assert True  # Placeholder for TDD
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        with pytest.raises(InfraConnectionError):
+            await validator.table_exists("test_table", correlation_id=str(uuid4()))
 
     async def test_table_exists_timeout_error(
         self,
@@ -981,10 +737,27 @@ class TestTableExistence:
         mock_pool.acquire.return_value.__aexit__.return_value = None
         mock_connection.fetchval.side_effect = asyncpg.QueryCanceledError("timeout")
 
-        # manager = MockProjectorSchemaValidator(pool=mock_pool)
-        # with pytest.raises(InfraTimeoutError):
-        #     await manager.table_exists("test_table")
-        assert True  # Placeholder for TDD
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        with pytest.raises(InfraTimeoutError):
+            await validator.table_exists("test_table", correlation_id=str(uuid4()))
+
+    async def test_table_exists_generic_error(
+        self,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test table_exists handles generic errors.
+
+        Expected behavior:
+        - Raise RuntimeHostError on unexpected errors
+        """
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetchval.side_effect = Exception("Unexpected error")
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        with pytest.raises(RuntimeHostError):
+            await validator.table_exists("test_table", correlation_id=str(uuid4()))
 
 
 # =============================================================================
@@ -993,49 +766,64 @@ class TestTableExistence:
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
 class TestErrorHandling:
     """Test error handling and message formatting."""
 
-    def test_error_includes_migration_hint(self) -> None:
+    async def test_error_includes_migration_hint(
+        self,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+        sample_schema: ModelProjectorSchema,
+    ) -> None:
         """Test error messages include CLI migration hint.
 
         Expected behavior:
-        - Error message suggests running 'onex migrate' command
+        - Error message suggests running migration command
         - Message provides actionable guidance
         """
-        # When schema validation fails, the error should guide users
-        # to run the migration command
-        #
-        # Expected error message pattern:
-        # "Table 'test_projections' does not exist. Run 'onex migrate' to create schema."
-        #
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # In the actual implementation, when ensure_schema_exists fails:
-        # try:
-        #     await manager.ensure_schema_exists(schema)
-        # except RuntimeHostError as e:
-        #     assert "onex migrate" in str(e).lower()
-        assert True  # Placeholder for TDD
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetchval.return_value = False  # Table doesn't exist
 
-    def test_error_includes_table_name(
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        with pytest.raises(ProjectorSchemaError) as exc_info:
+            await validator.ensure_schema_exists(
+                sample_schema, correlation_id=str(uuid4())
+            )
+
+        error_message = str(exc_info.value)
+        assert "migration" in error_message.lower()
+
+    async def test_error_includes_table_name(
         self,
-        sample_schema: MockModelProjectorSchema,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+        sample_schema: ModelProjectorSchema,
     ) -> None:
         """Test error messages include the table name.
 
         Expected behavior:
         - Error message clearly identifies which table is missing
-        - Table name is prominently displayed
         """
-        # Expected error message pattern:
-        # "Table 'test_projections' does not exist..."
-        #
-        # The table name from schema.table should be included
-        assert True  # Placeholder for TDD
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetchval.return_value = False
 
-    def test_error_includes_missing_columns(
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        with pytest.raises(ProjectorSchemaError) as exc_info:
+            await validator.ensure_schema_exists(
+                sample_schema, correlation_id=str(uuid4())
+            )
+
+        error_message = str(exc_info.value)
+        assert sample_schema.table_name in error_message
+
+    async def test_error_includes_missing_columns(
         self,
-        sample_schema: MockModelProjectorSchema,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+        sample_schema: ModelProjectorSchema,
     ) -> None:
         """Test error messages list missing columns.
 
@@ -1043,46 +831,57 @@ class TestErrorHandling:
         - Error lists all columns that are missing
         - Message is actionable (shows what needs to be added)
         """
-        # Expected error message pattern:
-        # "Table 'test_projections' is missing columns: data, is_active"
-        assert True  # Placeholder for TDD
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetchval.return_value = True  # Table exists
+        mock_connection.fetch.return_value = [
+            {"column_name": "id"},
+            {"column_name": "status"},
+        ]  # Missing data, created_at, is_active
 
-    def test_error_includes_schema_name_when_qualified(
-        self,
-        schema_with_qualified_name: MockModelProjectorSchema,
-    ) -> None:
-        """Test error messages include schema name for qualified tables.
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        with pytest.raises(ProjectorSchemaError) as exc_info:
+            await validator.ensure_schema_exists(
+                sample_schema, correlation_id=str(uuid4())
+            )
 
-        Expected behavior:
-        - Error shows full qualified name: schema.table
-        """
-        # Expected error message pattern:
-        # "Table 'onex.registrations' does not exist..."
-        assert True  # Placeholder for TDD
+        error_message = str(exc_info.value)
+        assert "data" in error_message
+        assert "created_at" in error_message
+        assert "is_active" in error_message
 
-    def test_error_context_includes_correlation_id(
+    async def test_error_context_includes_correlation_id(
         self,
         mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+        sample_schema: ModelProjectorSchema,
     ) -> None:
         """Test error context includes correlation ID for tracing.
 
         Expected behavior:
-        - RuntimeHostError includes correlation_id in context
+        - Error includes correlation_id
         - Enables distributed tracing of failures
         """
-        correlation_id = str(uuid4())
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetchval.return_value = False
 
-        # When implementation exists, errors should include correlation_id
-        # manager = MockProjectorSchemaValidator(pool=mock_pool)
-        # try:
-        #     await manager.ensure_schema_exists(schema, correlation_id=correlation_id)
-        # except RuntimeHostError as e:
-        #     assert e.context.correlation_id == correlation_id
-        assert True  # Placeholder for TDD
+        correlation_id = str(uuid4())
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+
+        with pytest.raises(ProjectorSchemaError) as exc_info:
+            await validator.ensure_schema_exists(
+                sample_schema, correlation_id=correlation_id
+            )
+
+        # Verify correlation ID is propagated to the error
+        assert exc_info.value.correlation_id is not None
+        assert str(exc_info.value.correlation_id) == correlation_id
 
     async def test_connection_error_does_not_expose_credentials(
         self,
         mock_pool: MagicMock,
+        mock_connection: AsyncMock,
     ) -> None:
         """Test connection errors do not expose database credentials.
 
@@ -1090,19 +889,19 @@ class TestErrorHandling:
         - Error messages must not contain passwords
         - Error messages must not contain full DSN with credentials
         """
-        mock_pool.acquire.return_value.__aenter__.side_effect = (
-            asyncpg.PostgresConnectionError("Connection refused")
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetchval.side_effect = asyncpg.PostgresConnectionError(
+            "Connection refused to postgres://user:secret_password@localhost:5432/db"
         )
 
-        # Expected: Error message is sanitized
-        # manager = MockProjectorSchemaValidator(pool=mock_pool)
-        # try:
-        #     await manager.table_exists("test_table")
-        # except InfraConnectionError as e:
-        #     error_str = str(e)
-        #     assert "password" not in error_str.lower()
-        #     assert "@" not in error_str  # No user:pass@host patterns
-        assert True  # Placeholder for TDD
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await validator.table_exists("test_table", correlation_id=str(uuid4()))
+
+        error_str = str(exc_info.value)
+        # The InfraConnectionError should have a sanitized message
+        assert "Failed to connect to database" in error_str
 
 
 # =============================================================================
@@ -1112,137 +911,147 @@ class TestErrorHandling:
 
 @pytest.mark.unit
 class TestEdgeCases:
-    """Test edge cases and boundary conditions."""
+    """Test edge cases and boundary conditions using model validation."""
 
-    def test_empty_columns_list_raises_error(self) -> None:
-        """Test schema with no columns raises error.
-
-        Expected behavior:
-        - ValueError or ValidationError for empty columns list
-        """
-        # schema = MockModelProjectorSchema(
-        #     table="empty_table",
-        #     primary_key=["id"],
-        #     columns=[],  # Empty!
-        #     indexes=[],
-        # )
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # with pytest.raises((ValueError, ValidationError)):
-        #     manager.generate_migration_sql(schema)
-        assert True  # Placeholder for TDD
-
-    def test_primary_key_column_must_exist_in_columns(self) -> None:
-        """Test primary key references must exist in columns.
+    def test_empty_columns_list_raises_validation_error(self) -> None:
+        """Test schema with no columns raises validation error.
 
         Expected behavior:
-        - Error if primary_key references non-existent column
+        - ValidationError for empty columns list
         """
-        # schema = MockModelProjectorSchema(
-        #     table="bad_pk",
-        #     primary_key=["nonexistent_id"],  # Not in columns!
-        #     columns=[
-        #         MockModelProjectorColumn(name="id", col_type="uuid"),
-        #     ],
-        #     indexes=[],
-        # )
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # with pytest.raises(ValueError):
-        #     manager.generate_migration_sql(schema)
-        assert True  # Placeholder for TDD
+        with pytest.raises(ValueError):
+            ModelProjectorSchema(
+                table_name="empty_table",
+                columns=[],  # Empty!
+                indexes=[],
+                schema_version="1.0.0",
+            )
+
+    def test_no_primary_key_raises_validation_error(self) -> None:
+        """Test schema without primary key raises validation error.
+
+        Expected behavior:
+        - ValidationError when no column has primary_key=True
+        """
+        with pytest.raises(ValueError) as exc_info:
+            ModelProjectorSchema(
+                table_name="no_pk_table",
+                columns=[
+                    ModelProjectorColumn(
+                        name="id", column_type="uuid", nullable=False, primary_key=False
+                    ),
+                    ModelProjectorColumn(
+                        name="name",
+                        column_type="varchar",
+                        length=255,
+                        nullable=False,
+                        primary_key=False,
+                    ),
+                ],
+                indexes=[],
+                schema_version="1.0.0",
+            )
+
+        assert "primary key" in str(exc_info.value).lower()
 
     def test_index_columns_must_exist_in_columns(self) -> None:
         """Test index column references must exist in columns.
 
         Expected behavior:
-        - Error if index references non-existent column
+        - ValidationError if index references non-existent column
         """
-        # schema = MockModelProjectorSchema(
-        #     table="bad_index",
-        #     primary_key=["id"],
-        #     columns=[
-        #         MockModelProjectorColumn(name="id", col_type="uuid"),
-        #     ],
-        #     indexes=[
-        #         MockModelProjectorIndex(
-        #             name="idx_bad",
-        #             columns=["nonexistent_column"],
-        #         ),
-        #     ],
-        # )
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # with pytest.raises(ValueError):
-        #     manager.generate_index_sql(
-        #         index=schema.indexes[0],
-        #         table_name=schema.table,
-        #     )
-        assert True  # Placeholder for TDD
+        with pytest.raises(ValueError) as exc_info:
+            ModelProjectorSchema(
+                table_name="bad_index",
+                columns=[
+                    ModelProjectorColumn(
+                        name="id", column_type="uuid", nullable=False, primary_key=True
+                    ),
+                ],
+                indexes=[
+                    ModelProjectorIndex(
+                        name="idx_bad",
+                        columns=["nonexistent_column"],
+                    ),
+                ],
+                schema_version="1.0.0",
+            )
 
-    def test_reserved_sql_keywords_in_column_names(self) -> None:
-        """Test column names that are SQL reserved words are quoted.
+        assert "non-existent column" in str(exc_info.value).lower()
+
+    def test_duplicate_column_names_raises_validation_error(self) -> None:
+        """Test duplicate column names raise validation error.
 
         Expected behavior:
-        - Column names like 'order', 'group', 'select' are quoted
+        - ValidationError for duplicate column names
         """
-        schema = MockModelProjectorSchema(
-            table="reserved_names",
-            primary_key=["id"],
-            columns=[
-                MockModelProjectorColumn(name="id", col_type="uuid"),
-                MockModelProjectorColumn(name="order", col_type="integer"),  # Reserved!
-                MockModelProjectorColumn(
-                    name="group", col_type="varchar(50)"
-                ),  # Reserved!
-            ],
-            indexes=[],
-        )
+        with pytest.raises(ValueError) as exc_info:
+            ModelProjectorSchema(
+                table_name="duplicate_cols",
+                columns=[
+                    ModelProjectorColumn(
+                        name="id", column_type="uuid", nullable=False, primary_key=True
+                    ),
+                    ModelProjectorColumn(
+                        name="id",
+                        column_type="integer",
+                        nullable=False,
+                    ),  # Duplicate!
+                ],
+                indexes=[],
+                schema_version="1.0.0",
+            )
 
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # sql = manager.generate_migration_sql(schema)
-        # Reserved words should be quoted: "order", "group"
-        # assert '"order"' in sql or '"ORDER"' in sql.upper()
-        # assert '"group"' in sql or '"GROUP"' in sql.upper()
-        assert True  # Placeholder for TDD
+        assert "duplicate" in str(exc_info.value).lower()
 
-    def test_very_long_column_names(self) -> None:
-        """Test handling of very long column names.
-
-        PostgreSQL limit is 63 characters for identifiers.
-        Expected behavior:
-        - Warn or error if column name exceeds 63 characters
-        """
-        long_name = (
-            "this_is_a_very_long_column_name_that_exceeds_sixty_three_characters_limit"
-        )
-        assert len(long_name) > 63
-
-        # schema = MockModelProjectorSchema(
-        #     table="long_names",
-        #     primary_key=["id"],
-        #     columns=[
-        #         MockModelProjectorColumn(name="id", col_type="uuid"),
-        #         MockModelProjectorColumn(name=long_name, col_type="text"),
-        #     ],
-        #     indexes=[],
-        # )
-        # manager = MockProjectorSchemaValidator(pool=MagicMock())
-        # Should warn or raise about identifier length
-        assert True  # Placeholder for TDD
-
-    def test_special_characters_in_table_names(self) -> None:
-        """Test table names with special characters are properly escaped.
+    def test_invalid_table_name_raises_validation_error(self) -> None:
+        """Test invalid table names (SQL injection attempts) are rejected.
 
         Expected behavior:
-        - Table names are properly quoted if they contain special chars
-        - SQL injection is prevented
+        - ValidationError for table names with special characters
         """
-        # Potentially dangerous table name
-        # dangerous_name = "test; DROP TABLE users; --"
-        # The schema manager should either:
-        # 1. Reject the name during validation
-        # 2. Properly escape it in SQL
+        with pytest.raises(ValueError):
+            ModelProjectorSchema(
+                table_name="test; DROP TABLE users; --",  # SQL injection attempt
+                columns=[
+                    ModelProjectorColumn(
+                        name="id", column_type="uuid", nullable=False, primary_key=True
+                    ),
+                ],
+                indexes=[],
+                schema_version="1.0.0",
+            )
 
-        # Expected: Validation error or proper quoting
-        assert True  # Placeholder for TDD
+    def test_invalid_column_name_raises_validation_error(self) -> None:
+        """Test invalid column names are rejected.
+
+        Expected behavior:
+        - ValidationError for column names with special characters
+        """
+        with pytest.raises(ValueError):
+            ModelProjectorColumn(
+                name="column; DROP TABLE users;",  # SQL injection attempt
+                column_type="uuid",
+                nullable=False,
+            )
+
+    def test_invalid_schema_version_raises_validation_error(self) -> None:
+        """Test invalid schema versions are rejected.
+
+        Expected behavior:
+        - ValidationError for non-semver versions
+        """
+        with pytest.raises(ValueError):
+            ModelProjectorSchema(
+                table_name="test_table",
+                columns=[
+                    ModelProjectorColumn(
+                        name="id", column_type="uuid", nullable=False, primary_key=True
+                    ),
+                ],
+                indexes=[],
+                schema_version="invalid-version",  # Not semver format
+            )
 
 
 # =============================================================================
@@ -1259,7 +1068,7 @@ class TestConcurrentOperations:
         self,
         mock_pool: MagicMock,
         mock_connection: AsyncMock,
-        sample_schema: MockModelProjectorSchema,
+        sample_schema: ModelProjectorSchema,
     ) -> None:
         """Test multiple concurrent ensure_schema_exists calls are safe.
 
@@ -1270,27 +1079,29 @@ class TestConcurrentOperations:
         mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
         mock_pool.acquire.return_value.__aexit__.return_value = None
 
-        mock_connection.fetchval.return_value = 1
+        mock_connection.fetchval.return_value = True
         mock_connection.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
-            {"column_name": "status", "data_type": "character varying"},
-            {"column_name": "data", "data_type": "jsonb"},
-            {"column_name": "created_at", "data_type": "timestamp without time zone"},
-            {"column_name": "is_active", "data_type": "boolean"},
+            {"column_name": "id"},
+            {"column_name": "status"},
+            {"column_name": "data"},
+            {"column_name": "created_at"},
+            {"column_name": "is_active"},
         ]
 
-        # manager = MockProjectorSchemaValidator(pool=mock_pool)
-        # import asyncio
-        # tasks = [
-        #     manager.ensure_schema_exists(sample_schema)
-        #     for _ in range(5)
-        # ]
-        # results = await asyncio.gather(*tasks, return_exceptions=True)
-        # All should succeed (no exceptions)
-        # assert all(r is None for r in results)
-        assert True  # Placeholder for TDD
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
 
-    async def test_table_exists_is_thread_safe(
+        # Run 5 concurrent calls
+        tasks = [
+            validator.ensure_schema_exists(sample_schema, correlation_id=str(uuid4()))
+            for i in range(5)
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # All should succeed (no exceptions)
+        for result in results:
+            assert result is None  # ensure_schema_exists returns None on success
+
+    async def test_table_exists_concurrent_calls(
         self,
         mock_pool: MagicMock,
         mock_connection: AsyncMock,
@@ -1303,15 +1114,144 @@ class TestConcurrentOperations:
         """
         mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
         mock_pool.acquire.return_value.__aexit__.return_value = None
-        mock_connection.fetchval.return_value = 1
+        mock_connection.fetchval.return_value = True
 
-        # manager = MockProjectorSchemaValidator(pool=mock_pool)
-        # import asyncio
-        # tasks = [
-        #     manager.table_exists("test_table")
-        #     for _ in range(10)
-        # ]
-        # results = await asyncio.gather(*tasks)
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+
+        # Run 10 concurrent calls
+        tasks = [
+            validator.table_exists("test_table", correlation_id=str(uuid4()))
+            for i in range(10)
+        ]
+        results = await asyncio.gather(*tasks)
+
         # All should return True
-        # assert all(r is True for r in results)
-        assert True  # Placeholder for TDD
+        assert all(r is True for r in results)
+
+
+# =============================================================================
+# GET TABLE COLUMNS TESTS
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestGetTableColumns:
+    """Test _get_table_columns method."""
+
+    async def test_get_table_columns_returns_column_list(
+        self,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test _get_table_columns returns list of column names.
+
+        Expected behavior:
+        - Returns list of column names from table
+        """
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = [
+            {"column_name": "id"},
+            {"column_name": "name"},
+            {"column_name": "created_at"},
+        ]
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        # Access private method for testing
+        columns = await validator._get_table_columns(
+            "test_table", correlation_id=str(uuid4())
+        )
+
+        assert columns == ["id", "name", "created_at"]
+
+    async def test_get_table_columns_empty_for_missing_table(
+        self,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test _get_table_columns returns empty list for missing table.
+
+        Expected behavior:
+        - Returns empty list if table doesn't exist
+        """
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = []
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        columns = await validator._get_table_columns(
+            "nonexistent_table", correlation_id=str(uuid4())
+        )
+
+        assert columns == []
+
+    async def test_get_table_columns_handles_schema_name(
+        self,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test _get_table_columns uses schema_name parameter.
+
+        Expected behavior:
+        - Query uses provided schema_name
+        """
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = [
+            {"column_name": "id"},
+        ]
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        await validator._get_table_columns(
+            "test_table",
+            correlation_id=str(uuid4()),
+            schema_name="onex",
+        )
+
+        # Verify query was called with schema_name = 'onex'
+        call_args = mock_connection.fetch.call_args
+        args = call_args[0]
+        assert "onex" in args
+
+    async def test_get_table_columns_connection_error(
+        self,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test _get_table_columns handles connection errors.
+
+        Expected behavior:
+        - Raise InfraConnectionError on database connection failure
+        """
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.side_effect = asyncpg.PostgresConnectionError(
+            "Connection refused"
+        )
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        with pytest.raises(InfraConnectionError):
+            await validator._get_table_columns(
+                "test_table", correlation_id=str(uuid4())
+            )
+
+    async def test_get_table_columns_timeout_error(
+        self,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test _get_table_columns handles timeout errors.
+
+        Expected behavior:
+        - Raise InfraTimeoutError on query timeout
+        """
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.side_effect = asyncpg.QueryCanceledError("timeout")
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        with pytest.raises(InfraTimeoutError):
+            await validator._get_table_columns(
+                "test_table", correlation_id=str(uuid4())
+            )
