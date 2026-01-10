@@ -172,6 +172,7 @@ def _scan_file_for_imports(
 
             # Skip lines that are single-line docstrings
             # (check after multiline handling to avoid double-processing)
+            skip_line = False
             if stripped.startswith(('"""', "'''", 'r"""', "r'''")):
                 # Check if it's a complete single-line string
                 for delimiter in ('"""', "'''"):
@@ -180,8 +181,11 @@ def _scan_file_for_imports(
                         first_pos = stripped.find(delimiter)
                         rest = stripped[first_pos + 3 :]
                         if delimiter in rest:
-                            # Single-line docstring, skip
-                            continue
+                            # Single-line docstring, skip this line
+                            skip_line = True
+                            break
+            if skip_line:
+                continue
 
             if import_regex.match(line):
                 violations.append(
@@ -276,68 +280,42 @@ class TestArchitectureCompliance:
 
     CORE_PACKAGE = "omnibase_core"
 
-    def test_no_kafka_in_core(self) -> None:
-        """Core should not import kafka (infra dependency).
-
-        Kafka is an infrastructure concern for event streaming. All kafka
-        usage must be in omnibase_infra, never in omnibase_core.
-        """
-        pattern = "kafka"
-        violations = _scan_package_for_forbidden_imports(
-            self.CORE_PACKAGE,
-            [pattern],
-        )
-
-        filtered = [v for v in violations if v.import_pattern == pattern]
-        if filtered:
-            pytest.fail(_format_violation_report(filtered, pattern, self.CORE_PACKAGE))
-
-    def test_no_httpx_in_core(self) -> None:
-        """Core should not import httpx (infra dependency).
-
-        HTTP client libraries are infrastructure concerns. All HTTP
-        operations must be in omnibase_infra, never in omnibase_core.
-        """
-        pattern = "httpx"
-        violations = _scan_package_for_forbidden_imports(
-            self.CORE_PACKAGE,
-            [pattern],
-        )
-
-        filtered = [v for v in violations if v.import_pattern == pattern]
-        if filtered:
-            pytest.fail(_format_violation_report(filtered, pattern, self.CORE_PACKAGE))
-
-    def test_no_asyncpg_in_core(self) -> None:
-        """Core should not import asyncpg (infra dependency).
-
-        Database drivers are infrastructure concerns. All database
-        operations must be in omnibase_infra, never in omnibase_core.
-        """
-        pattern = "asyncpg"
-        violations = _scan_package_for_forbidden_imports(
-            self.CORE_PACKAGE,
-            [pattern],
-        )
-
-        filtered = [v for v in violations if v.import_pattern == pattern]
-        if filtered:
-            pytest.fail(_format_violation_report(filtered, pattern, self.CORE_PACKAGE))
-
-    @pytest.mark.xfail(
-        reason="Known issue: aiohttp in omnibase_core tracked in OMN-1015",
-        strict=False,
+    @pytest.mark.parametrize(
+        ("pattern", "description"),
+        [
+            pytest.param("kafka", "event streaming", id="no-kafka"),
+            pytest.param("httpx", "HTTP client", id="no-httpx"),
+            pytest.param("asyncpg", "database driver", id="no-asyncpg"),
+            pytest.param(
+                "aiohttp",
+                "async HTTP",
+                marks=pytest.mark.xfail(
+                    reason="Known issue: tracked in OMN-1015", strict=False
+                ),
+                id="no-aiohttp",
+            ),
+            pytest.param(
+                "redis",
+                "cache",
+                marks=pytest.mark.xfail(
+                    reason="Known issue: tracked in OMN-1295", strict=False
+                ),
+                id="no-redis",
+            ),
+            pytest.param("psycopg", "PostgreSQL driver (v3)", id="no-psycopg"),
+            pytest.param("psycopg2", "PostgreSQL driver (v2)", id="no-psycopg2"),
+        ],
     )
-    def test_no_aiohttp_in_core(self) -> None:
-        """Core should not import aiohttp (infra dependency).
+    def test_no_infra_import_in_core(self, pattern: str, description: str) -> None:
+        """Core should not import infrastructure dependencies.
 
-        Async HTTP libraries are infrastructure concerns. All HTTP
-        operations must be in omnibase_infra, never in omnibase_core.
+        Infrastructure libraries belong in omnibase_infra, not omnibase_core.
+        This test checks for forbidden import patterns.
 
-        Note: Currently xfail due to OMN-1015. Remove xfail marker when
-        omnibase_core removes aiohttp dependency.
+        Args:
+            pattern: The import pattern to check (e.g., 'kafka', 'httpx').
+            description: Human-readable description of the dependency type.
         """
-        pattern = "aiohttp"
         violations = _scan_package_for_forbidden_imports(
             self.CORE_PACKAGE,
             [pattern],
@@ -346,53 +324,6 @@ class TestArchitectureCompliance:
         filtered = [v for v in violations if v.import_pattern == pattern]
         if filtered:
             pytest.fail(_format_violation_report(filtered, pattern, self.CORE_PACKAGE))
-
-    @pytest.mark.xfail(
-        reason="Known issue: redis in omnibase_core tracked in OMN-1295",
-        strict=False,
-    )
-    def test_no_redis_in_core(self) -> None:
-        """Core should not import redis (infra dependency).
-
-        Redis client libraries are infrastructure concerns. All cache
-        operations must be in omnibase_infra, never in omnibase_core.
-
-        Note: Currently xfail due to OMN-1295. Remove xfail marker when
-        omnibase_core removes redis dependency.
-        """
-        pattern = "redis"
-        violations = _scan_package_for_forbidden_imports(
-            self.CORE_PACKAGE,
-            [pattern],
-        )
-
-        filtered = [v for v in violations if v.import_pattern == pattern]
-        if filtered:
-            pytest.fail(_format_violation_report(filtered, pattern, self.CORE_PACKAGE))
-
-    def test_no_psycopg_in_core(self) -> None:
-        """Core should not import psycopg (infra dependency).
-
-        PostgreSQL drivers are infrastructure concerns. All database
-        operations must be in omnibase_infra, never in omnibase_core.
-        """
-        # Check both psycopg2 and psycopg3 (psycopg)
-        patterns = ["psycopg", "psycopg2"]
-        violations = _scan_package_for_forbidden_imports(
-            self.CORE_PACKAGE,
-            patterns,
-        )
-
-        if violations:
-            # Group by pattern for reporting
-            report_lines = []
-            for pattern in patterns:
-                filtered = [v for v in violations if v.import_pattern == pattern]
-                if filtered:
-                    report_lines.append(
-                        _format_violation_report(filtered, pattern, self.CORE_PACKAGE)
-                    )
-            pytest.fail("\n\n".join(report_lines))
 
     def test_core_package_exists(self) -> None:
         """Verify omnibase_core package can be located.
