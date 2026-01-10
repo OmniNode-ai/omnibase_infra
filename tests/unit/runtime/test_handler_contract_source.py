@@ -3,8 +3,6 @@
 """
 Unit tests for HandlerContractSource filesystem discovery.
 
-TDD RED Phase - Tests written before implementation.
-
 Tests the HandlerContractSource functionality including:
 - Recursive discovery of handler_contract.yaml files in nested directories
 - Transformation of contracts to ModelHandlerDescriptor instances
@@ -13,14 +11,14 @@ Tests the HandlerContractSource functionality including:
 
 Related:
     - OMN-1097: HandlerContractSource + Filesystem Discovery
-    - src/omnibase_infra/runtime/handler_contract_source.py (to be created)
+    - src/omnibase_infra/runtime/handler_contract_source.py
     - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
 
 Expected Behavior:
-    HandlerContractSource implements ProtocolHandlerSource from omnibase_spi.
+    HandlerContractSource implements ProtocolContractSource from omnibase_infra.
     It discovers handler contracts from the filesystem by recursively scanning
     configured paths for handler_contract.yaml files, parsing them, and
-    transforming them into ProtocolHandlerDescriptor instances.
+    transforming them into ModelHandlerDescriptor instances.
 
     The source_type property returns "CONTRACT" as per the protocol.
 """
@@ -35,9 +33,19 @@ from omnibase_infra.runtime.protocol_contract_descriptor import (
     ProtocolContractDescriptor,
 )
 
-# Protocol imports - use local protocols that HandlerContractSource implements
-# These protocols define the interface used by HandlerContractSource, not the
-# different ProtocolHandlerSource from omnibase_spi (which has list_handler_descriptors).
+# Protocol imports from omnibase_infra - HandlerContractSource implements
+# ProtocolContractSource, NOT omnibase_spi's ProtocolHandlerSource.
+#
+# Why local ProtocolContractSource is used instead of SPI ProtocolHandlerSource:
+#   - omnibase_spi.ProtocolHandlerSource.discover_handlers() returns
+#     list[ProtocolHandlerDescriptor] (simple list of descriptors)
+#   - ProtocolContractSource.discover_handlers() returns
+#     ModelContractDiscoveryResult (with both descriptors AND validation_errors)
+#
+# The local ProtocolContractSource provides graceful error handling with
+# structured validation error collection that the SPI protocol doesn't support.
+# This enables the graceful_mode=True pattern where discovery continues despite
+# errors and returns both valid descriptors and collected validation errors.
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 from tests.helpers.mock_helpers import MockStatResult, create_mock_stat_result
 
@@ -201,20 +209,15 @@ class TestHandlerContractSourceImport:
     """Tests for HandlerContractSource import and instantiation.
 
     These tests verify the class can be imported from the expected location
-    and implements the ProtocolHandlerSource protocol.
-
-    RED Phase: These tests will FAIL with ImportError until implementation.
+    and implements the ProtocolContractSource protocol.
     """
 
     def test_handler_contract_source_can_be_imported(self) -> None:
         """HandlerContractSource should be importable from omnibase_infra.runtime.
 
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
-
         Expected import path:
             from omnibase_infra.runtime.handler_contract_source import HandlerContractSource
         """
-        # This import will fail in RED phase - that's expected!
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
         )
@@ -224,14 +227,11 @@ class TestHandlerContractSourceImport:
     def test_handler_contract_source_implements_protocol(
         self, single_contract_path: Path
     ) -> None:
-        """HandlerContractSource should implement ProtocolHandlerSource.
+        """HandlerContractSource should implement ProtocolContractSource.
 
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
-
-        The implementation must satisfy the ProtocolHandlerSource protocol from
-        omnibase_spi with:
+        The implementation must satisfy ProtocolContractSource with:
         - source_type property returning "CONTRACT"
-        - async discover_handlers() method returning list[ProtocolHandlerDescriptor]
+        - async discover_handlers() method returning ModelContractDiscoveryResult
         """
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
@@ -244,12 +244,13 @@ class TestHandlerContractSourceImport:
         assert hasattr(source, "discover_handlers")
         assert callable(source.discover_handlers)
 
+        # Runtime checkable protocol verification
+        assert isinstance(source, ProtocolContractSource)
+
     def test_handler_contract_source_type_is_contract(
         self, single_contract_path: Path
     ) -> None:
         """HandlerContractSource.source_type should return "CONTRACT".
-
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
 
         The source_type is used for observability and debugging purposes only.
         The runtime MUST NOT branch on this value.
@@ -273,9 +274,7 @@ class TestHandlerContractSourceDiscovery:
 
     These tests verify that HandlerContractSource correctly discovers
     handler_contract.yaml files in nested directory structures and transforms
-    them into ProtocolHandlerDescriptor instances.
-
-    RED Phase: These tests will FAIL until implementation exists.
+    them into ModelHandlerDescriptor instances.
     """
 
     @pytest.mark.asyncio
@@ -283,8 +282,6 @@ class TestHandlerContractSourceDiscovery:
         self, tmp_path: Path, nested_contract_structure: dict[str, Path]
     ) -> None:
         """discover_handlers() should find contracts in nested directories.
-
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
 
         The source should recursively scan all configured paths for files matching
         the pattern **/handler_contract.yaml and return descriptors for each.
@@ -339,10 +336,7 @@ class TestHandlerContractSourceDiscovery:
 
     @pytest.mark.asyncio
     async def test_discovers_single_contract(self, single_contract_path: Path) -> None:
-        """discover_handlers() should find a single contract in a directory.
-
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
-        """
+        """discover_handlers() should find a single contract in a directory."""
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
         )
@@ -359,10 +353,7 @@ class TestHandlerContractSourceDiscovery:
     async def test_returns_empty_list_for_empty_directory(
         self, empty_directory: Path
     ) -> None:
-        """discover_handlers() should return empty list when no contracts found.
-
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
-        """
+        """discover_handlers() should return empty list when no contracts found."""
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
         )
@@ -383,7 +374,6 @@ class TestHandlerContractSourceDiscovery:
     ) -> None:
         """discover_handlers() should aggregate contracts from multiple paths.
 
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
 
         When multiple contract_paths are provided, all should be scanned and
         results aggregated into a single list.
@@ -407,7 +397,6 @@ class TestHandlerContractSourceDiscovery:
     ) -> None:
         """Discovered descriptors should have all required properties.
 
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
 
         Each descriptor must have:
         - handler_id: str
@@ -453,8 +442,6 @@ class TestHandlerContractSourceErrors:
 
     These tests verify proper error handling for invalid contracts,
     missing files, and other failure scenarios.
-
-    RED Phase: These tests will FAIL until implementation exists.
     """
 
     @pytest.mark.asyncio
@@ -463,7 +450,6 @@ class TestHandlerContractSourceErrors:
     ) -> None:
         """discover_handlers() should raise for malformed YAML contracts.
 
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
 
         Malformed YAML should result in a clear error indicating which file
         failed to parse, not a generic YAML parsing error.
@@ -487,10 +473,7 @@ class TestHandlerContractSourceErrors:
 
     @pytest.mark.asyncio
     async def test_raises_on_nonexistent_path(self, tmp_path: Path) -> None:
-        """discover_handlers() should raise for non-existent contract paths.
-
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
-        """
+        """discover_handlers() should raise for non-existent contract paths."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
         from omnibase_infra.runtime.handler_contract_source import (
@@ -510,10 +493,7 @@ class TestHandlerContractSourceErrors:
         )
 
     def test_raises_on_empty_contract_paths(self) -> None:
-        """HandlerContractSource should raise if contract_paths is empty.
-
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
-        """
+        """HandlerContractSource should raise if contract_paths is empty."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
         from omnibase_infra.runtime.handler_contract_source import (
@@ -537,20 +517,15 @@ class TestHandlerContractSourceErrors:
 class TestHandlerContractSourceIdempotency:
     """Tests for idempotency of discover_handlers().
 
-    Per ProtocolHandlerSource contract, discover_handlers() may be called
+    Per ProtocolContractSource contract, discover_handlers() may be called
     multiple times and should return consistent results.
-
-    RED Phase: These tests will FAIL until implementation exists.
     """
 
     @pytest.mark.asyncio
     async def test_discover_handlers_is_idempotent(
         self, nested_contract_structure: dict[str, Path], tmp_path: Path
     ) -> None:
-        """discover_handlers() should return same results on multiple calls.
-
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
-        """
+        """discover_handlers() should return same results on multiple calls."""
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
         )
@@ -593,15 +568,12 @@ class TestHandlerContractSourceFilePattern:
 
     The source should only discover files named exactly 'handler_contract.yaml',
     ignoring other YAML files and variations.
-
-    RED Phase: These tests will FAIL until implementation exists.
     """
 
     @pytest.mark.asyncio
     async def test_ignores_other_yaml_files(self, tmp_path: Path) -> None:
         """discover_handlers() should only find handler_contract.yaml files.
 
-        RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
 
         Other YAML files (e.g., config.yaml, contract.yaml) should be ignored.
         """
@@ -645,7 +617,7 @@ class TestHandlerContractSourceFilePattern:
 
 
 # =============================================================================
-# Malformed Contract Validation Tests (OMN-1097 - TDD RED Phase)
+# Malformed Contract Validation Tests (OMN-1097)
 # =============================================================================
 
 
@@ -659,11 +631,6 @@ class TestHandlerContractSourceValidation:
 
     Part of OMN-1097: HandlerContractSource + Filesystem Discovery.
 
-    TDD RED Phase Notes:
-        - These tests will fail with ImportError initially (expected)
-        - Import error is acceptable for RED phase
-        - Tests define the expected behavior before implementation
-
     Key Behavior:
         - Malformed contracts produce ModelHandlerValidationError, not exceptions
         - Valid contracts are still discovered (error isolation)
@@ -674,7 +641,7 @@ class TestHandlerContractSourceValidation:
         The existing error tests expect exceptions to be raised for malformed contracts.
         These validation tests expect GRACEFUL handling with structured errors.
 
-        The implementation should support BOTH modes:
+        The implementation supports BOTH modes:
         - Strict mode (default): Raise on malformed contracts
         - Graceful mode: Continue discovery, collect errors
     """
@@ -686,7 +653,7 @@ class TestHandlerContractSourceValidation:
 handler_id: "test.handler.valid"
 name: "Test Valid Handler"
 version: "1.0.0"
-description: "A valid test handler for TDD"
+description: "A valid test handler"
 descriptor:
   handler_kind: "compute"
 input_model: "omnibase_infra.models.test.ModelTestInput"

@@ -1026,6 +1026,117 @@ class TestProjectionReaderCapabilityQueries:
         assert EnumRegistrationState.ACTIVE.value in args
 
     # ============================================================
+    # get_by_intent_types (bulk) tests
+    # ============================================================
+
+    async def test_get_by_intent_types_returns_matching(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_intent_types returns registrations matching ANY intent type."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+
+        mock_rows = [
+            create_mock_row(intent_types=["postgres.upsert", "postgres.query"]),
+            create_mock_row(intent_types=["postgres.delete"]),
+        ]
+        mock_connection.fetch.return_value = mock_rows
+
+        result = await reader.get_by_intent_types(
+            ["postgres.upsert", "postgres.delete"]
+        )
+
+        assert len(result) == 2
+        # Verify SQL uses && (array overlap) operator
+        call_args = mock_connection.fetch.call_args
+        sql = call_args[0][0]
+        assert "&&" in sql
+
+    async def test_get_by_intent_types_with_state_filter(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_intent_types with state filter."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = []
+
+        await reader.get_by_intent_types(
+            ["postgres.query", "postgres.upsert"],
+            state=EnumRegistrationState.ACTIVE,
+        )
+
+        # Verify SQL includes state filter (4 params: domain, intent_types, state, limit)
+        call_args = mock_connection.fetch.call_args
+        args = call_args[0]
+        assert len(args) == 5  # sql + 4 params
+        assert EnumRegistrationState.ACTIVE.value in args
+
+    async def test_get_by_intent_types_without_state_filter(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_intent_types without state filter queries all states."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = []
+
+        await reader.get_by_intent_types(["postgres.storage"])
+
+        # Verify SQL does NOT include state filter (3 params: domain, intent_types, limit)
+        call_args = mock_connection.fetch.call_args
+        args = call_args[0]
+        assert len(args) == 4  # sql + 3 params
+
+    async def test_get_by_intent_types_rejects_empty_list(
+        self,
+        reader: ProjectionReaderRegistration,
+    ) -> None:
+        """Empty intent_types list should raise ProtocolConfigurationError."""
+        with pytest.raises(
+            ProtocolConfigurationError, match="intent_types list cannot be empty"
+        ):
+            await reader.get_by_intent_types([])
+
+    async def test_get_by_intent_types_connection_error(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Test get_by_intent_types handles connection errors."""
+        mock_pool.acquire.return_value.__aenter__.side_effect = (
+            asyncpg.PostgresConnectionError("Connection refused")
+        )
+
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await reader.get_by_intent_types(["postgres.query"])
+
+        assert "Failed to connect" in str(exc_info.value)
+
+    async def test_get_by_intent_types_timeout_error(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Test get_by_intent_types handles timeout errors."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.side_effect = asyncpg.QueryCanceledError("timeout")
+
+        with pytest.raises(InfraTimeoutError) as exc_info:
+            await reader.get_by_intent_types(["postgres.query"])
+
+        assert "timed out" in str(exc_info.value)
+
+    # ============================================================
     # get_by_protocol tests
     # ============================================================
 
