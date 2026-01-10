@@ -29,6 +29,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_infra.runtime.protocol_contract_descriptor import (
+    ProtocolContractDescriptor,
+)
+
 # Protocol imports from omnibase_infra - HandlerContractSource implements
 # ProtocolContractSource, NOT omnibase_spi's ProtocolHandlerSource.
 #
@@ -42,10 +46,17 @@ import pytest
 # structured validation error collection that the SPI protocol doesn't support.
 # This enables the graceful_mode=True pattern where discovery continues despite
 # errors and returns both valid descriptors and collected validation errors.
+from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
+from tests.helpers.mock_helpers import MockStatResult, create_mock_stat_result
+
+# Alias for test readability - HandlerContractSource implements ProtocolContractSource
+ProtocolHandlerSource = ProtocolContractSource
+ProtocolHandlerDescriptor = ProtocolContractDescriptor
+
+# Import the actual model returned by HandlerContractSource
 from omnibase_infra.models.handlers.model_handler_descriptor import (
     ModelHandlerDescriptor,
 )
-from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
 # =============================================================================
 # Constants for Test Contracts
@@ -306,9 +317,15 @@ class TestHandlerContractSourceDiscovery:
             f"Expected 0 validation errors in strict mode, got {len(result.validation_errors)}"
         )
 
-        # Verify each descriptor is a ModelHandlerDescriptor
+        # Verify each descriptor has required attributes (duck-typing convention)
         for descriptor in result.descriptors:
-            assert isinstance(descriptor, ModelHandlerDescriptor)
+            # Check for required ProtocolContractDescriptor attributes
+            assert hasattr(descriptor, "handler_id"), "Missing handler_id attribute"
+            assert hasattr(descriptor, "name"), "Missing name attribute"
+            assert hasattr(descriptor, "version"), "Missing version attribute"
+            assert hasattr(descriptor, "handler_kind"), "Missing handler_kind attribute"
+            assert hasattr(descriptor, "input_model"), "Missing input_model attribute"
+            assert hasattr(descriptor, "output_model"), "Missing output_model attribute"
 
         # Verify the expected handler_ids were discovered
         discovered_ids = {d.handler_id for d in result.descriptors}
@@ -788,20 +805,23 @@ output_model: "omnibase_infra.models.test.ModelTestOutput"
             "Each malformed contract should produce a structured error."
         )
 
-        # Verify all errors are properly structured ModelHandlerValidationError
+        # Verify all errors have required attributes (duck-typing convention)
         for error in result.validation_errors:
-            assert isinstance(error, ModelHandlerValidationError), (
-                f"Expected ModelHandlerValidationError, got {type(error).__name__}"
+            # Check for required validation error attributes
+            assert hasattr(error, "error_type"), "Missing error_type attribute"
+            assert hasattr(error, "rule_id"), "Missing rule_id attribute"
+            assert hasattr(error, "file_path"), "Missing file_path attribute"
+            assert hasattr(error, "message"), "Missing message attribute"
+            assert hasattr(error, "remediation_hint"), (
+                "Missing remediation_hint attribute"
             )
-            # All errors should have file_path for debugging
+            # All errors should have non-None values for debugging
             assert error.file_path is not None, (
                 "Validation error must include file_path for debugging"
             )
-            # All errors should have rule_id
             assert error.rule_id is not None, (
                 "Validation error must include rule_id for categorization"
             )
-            # All errors should have remediation_hint
             assert error.remediation_hint is not None, (
                 "Validation error must include remediation_hint for fix guidance"
             )
@@ -1779,50 +1799,14 @@ def _permissions_are_enforced() -> bool:
         finally:
             temp_path.chmod(0o644)
             temp_path.unlink()
-    except Exception:
-        # If something goes wrong, assume permissions aren't enforced
+    except OSError:
+        # Filesystem-related errors (permissions, missing files, etc.)
+        # indicate permissions aren't reliably enforceable
         return False
 
 
-def _create_mock_stat_result(real_stat_result: object, override_size: int) -> object:
-    """Create a mock stat result object with overridden st_size.
-
-    This factory reduces duplication in file size limit tests by creating
-    mock stat result objects that report a specific file size while preserving
-    all other stat attributes from the original file.
-
-    Args:
-        real_stat_result: The actual os.stat_result from Path.stat()
-        override_size: The file size (st_size) to report
-
-    Returns:
-        A mock object with st_size set to override_size and all other
-        attributes copied from real_stat_result.
-
-    Example:
-        >>> original_stat = Path.stat
-        >>> def mock_stat(self, **kwargs):
-        ...     result = original_stat(self, **kwargs)
-        ...     if self.name == "handler_contract.yaml":
-        ...         return _create_mock_stat_result(result, 10 * 1024 * 1024 + 1)
-        ...     return result
-    """
-
-    class MockStatResult:
-        """Mock stat result with configurable st_size."""
-
-        st_size = override_size
-        st_mode = real_stat_result.st_mode  # type: ignore[union-attr]
-        st_ino = real_stat_result.st_ino  # type: ignore[union-attr]
-        st_dev = real_stat_result.st_dev  # type: ignore[union-attr]
-        st_nlink = real_stat_result.st_nlink  # type: ignore[union-attr]
-        st_uid = real_stat_result.st_uid  # type: ignore[union-attr]
-        st_gid = real_stat_result.st_gid  # type: ignore[union-attr]
-        st_atime = real_stat_result.st_atime  # type: ignore[union-attr]
-        st_mtime = real_stat_result.st_mtime  # type: ignore[union-attr]
-        st_ctime = real_stat_result.st_ctime  # type: ignore[union-attr]
-
-    return MockStatResult()
+# MockStatResult and create_mock_stat_result are imported from tests.helpers.mock_helpers
+# at the top of this file. See tests/helpers/mock_helpers.py for implementation details.
 
 
 class TestHandlerContractSourcePermissionErrors:
@@ -1981,8 +1965,12 @@ output_model: "test.models.Output"
             assert "permission denied" in str(error).lower(), (
                 f"Error message should mention permission issue: {error}"
             )
-            # Verify original error is preserved as __cause__
-            assert isinstance(error.__cause__, PermissionError | OSError)
+            # Verify original error is preserved as __cause__ (duck-type check)
+            assert error.__cause__ is not None, "Error should preserve original cause"
+            assert hasattr(error.__cause__, "args"), "Cause should be an exception"
+            assert hasattr(error.__cause__, "errno"), (
+                "Cause should be an OS-level error"
+            )
         finally:
             # Restore permissions for cleanup
             unreadable_contract.chmod(stat.S_IRUSR | stat.S_IWUSR)
@@ -2061,7 +2049,7 @@ output_model: "test.models.Output"
             """Mock stat that returns oversized value for contract files."""
             result = original_stat(self, **kwargs)
             if self.name == "handler_contract.yaml":
-                return _create_mock_stat_result(result, oversized_bytes)
+                return create_mock_stat_result(result, oversized_bytes)
             return result
 
         source = HandlerContractSource(
@@ -2122,7 +2110,7 @@ output_model: "test.models.Output"
             """Mock stat that returns oversized value only for specific file."""
             result = original_stat(self, **kwargs)
             if self == oversized_file:
-                return _create_mock_stat_result(result, oversized_bytes)
+                return create_mock_stat_result(result, oversized_bytes)
             return result
 
         source = HandlerContractSource(
@@ -2179,7 +2167,7 @@ output_model: "test.models.Output"
             """Mock stat that returns exactly MAX_CONTRACT_SIZE for contract files."""
             result = original_stat(self, **kwargs)
             if self.name == "handler_contract.yaml":
-                return _create_mock_stat_result(result, exactly_max_bytes)
+                return create_mock_stat_result(result, exactly_max_bytes)
             return result
 
         source = HandlerContractSource(
@@ -2234,12 +2222,14 @@ output_model: "test.models.Output"
         assert len(result.validation_errors) == 0
         assert result.descriptors[0].handler_id == "test.handler.size_limit"
 
-    @pytest.mark.asyncio
-    async def test_max_contract_size_constant_is_exported(self) -> None:
+    def test_max_contract_size_constant_is_exported(self) -> None:
         """Verify MAX_CONTRACT_SIZE is exported from the module.
 
         The constant should be accessible for documentation and configuration
         purposes.
+
+        Note: This test is synchronous as it only performs imports and assertions
+        without any I/O operations.
         """
         from omnibase_infra.runtime.handler_contract_source import MAX_CONTRACT_SIZE
 

@@ -143,6 +143,15 @@ from omnibase_infra.runtime.introspection_event_router import (
     IntrospectionEventRouter,
 )
 
+# Projector plugin loading and schema validation (OMN-1168)
+from omnibase_infra.runtime.projector_plugin_loader import (
+    ProjectorPluginLoader,
+)
+from omnibase_infra.runtime.projector_schema_manager import (
+    ProjectorSchemaError,
+    ProjectorSchemaValidator,
+)
+
 # Invocation security enforcer (OMN-1098)
 from omnibase_infra.runtime.invocation_security_enforcer import (
     InvocationSecurityEnforcer,
@@ -249,6 +258,10 @@ __all__: list[str] = [
     "DispatcherNodeRegistrationAcked",
     # Introspection event router (PR #101)
     "IntrospectionEventRouter",
+    # Projector schema validation (OMN-1168)
+    "ProjectorSchemaError",
+    "ProjectorPluginLoader",
+    "ProjectorSchemaValidator",
     # Invocation security enforcer (OMN-1098)
     "InvocationSecurityEnforcer",
     "SecurityViolationError",
