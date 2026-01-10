@@ -218,12 +218,13 @@ class TransportMCPStreamableHttp:
         if not self._running:
             return
 
+        # Signal the uvicorn server to exit gracefully
         if self._server is not None:
             self._server.should_exit = True
-            self._server = None
 
         self._running = False
         self._app = None
+        self._server = None
         self._tool_handlers.clear()
 
         logger.info("MCP streamable HTTP transport stopped")

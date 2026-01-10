@@ -218,7 +218,7 @@ class ONEXToMCPAdapter:
             Tool execution result.
 
         Raises:
-            InfraUnavailableError: If tool not found in registry.
+            InfraUnavailableError: If tool not found.
             ProtocolConfigurationError: If node executor not configured.
         """
         if tool_name not in self._tool_cache:
