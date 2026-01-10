@@ -309,7 +309,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             )
             raise ProtocolConfigurationError(
                 f"Handler class {handler_class_path} does not implement "
-                "ProtocolHandler (missing 'describe' method)",
+                "ProtocolHandler (missing required method(s): handler_type, "
+                "initialize, shutdown, execute, or describe)",
                 context=context,
                 loader_error=EnumHandlerLoaderError.PROTOCOL_NOT_IMPLEMENTED.value,
                 contract_path=str(contract_path),
