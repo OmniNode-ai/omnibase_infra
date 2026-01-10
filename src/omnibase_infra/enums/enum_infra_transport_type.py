@@ -14,6 +14,7 @@ Supported transport types:
     - VALKEY: Valkey (Redis-compatible) cache/messaging
     - GRPC: gRPC protocol
     - RUNTIME: Runtime host internal transport
+    - MCP: Model Context Protocol (AI agent tool interface)
     - FILESYSTEM: Local filesystem operations
 
 Each transport type has a corresponding handler implementation:
@@ -21,6 +22,7 @@ Each transport type has a corresponding handler implementation:
     - HandlerVault: Secret retrieval, token management, lease renewal
     - KafkaEventBus: Event publishing/subscription, consumer groups
     - PostgresConnectionManager: Connection pooling, query execution
+    - HandlerMCP: MCP server for exposing ONEX nodes as AI agent tools
     - HandlerFileSystem: File read/write, directory operations
 """
 
@@ -42,6 +44,7 @@ class EnumInfraTransportType(str, Enum):
         VALKEY: Valkey (Redis-compatible) cache/message transport
         GRPC: gRPC protocol transport
         RUNTIME: Runtime host process internal transport
+        MCP: Model Context Protocol transport for AI agent integration
         FILESYSTEM: Local filesystem transport
     """
 
@@ -53,6 +56,7 @@ class EnumInfraTransportType(str, Enum):
     VALKEY = "valkey"
     GRPC = "grpc"
     RUNTIME = "runtime"
+    MCP = "mcp"
     FILESYSTEM = "filesystem"
 
 

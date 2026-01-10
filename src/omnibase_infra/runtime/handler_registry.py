@@ -107,6 +107,12 @@ Valkey is a Redis-compatible fork; we use valkey-py (redis-py compatible)."""
 HANDLER_TYPE_GRPC: str = "grpc"
 """gRPC protocol handler type."""
 
+HANDLER_TYPE_MCP: str = "mcp"
+"""MCP (Model Context Protocol) handler type for AI agent tool integration.
+
+The MCP handler exposes ONEX nodes as tools for AI agents via streamable HTTP.
+Supports tools/list and tools/call operations per the MCP specification."""
+
 
 # =============================================================================
 # Event Bus Kind Constants
@@ -295,6 +301,7 @@ __all__: list[str] = [
     # Handler type constants
     "HANDLER_TYPE_HTTP",
     "HANDLER_TYPE_KAFKA",
+    "HANDLER_TYPE_MCP",
     "HANDLER_TYPE_VALKEY",
     "HANDLER_TYPE_VAULT",
     "EventBusBindingRegistry",
