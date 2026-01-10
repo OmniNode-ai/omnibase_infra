@@ -1412,7 +1412,7 @@ pattern_exemptions:
     documentation:
       - PostgreSQL CREATE TABLE syntax
       - src/omnibase_infra/schemas/schema_registration_projection.sql (example usage)
-      - ModelProjectorSchema (temporarily defined in omnibase_infra) defines table_name as identifier
+      - src/omnibase_infra/models/projectors/model_projector_schema.py (ModelProjectorSchema defines table_name as identifier)
     ticket: OMN-1168
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols

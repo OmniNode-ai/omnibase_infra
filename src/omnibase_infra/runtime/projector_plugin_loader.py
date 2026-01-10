@@ -398,8 +398,8 @@ class ProjectorPluginLoader:
         file_size = contract_path.stat().st_size
         if file_size > MAX_CONTRACT_SIZE:
             raise ModelOnexError(
-                f"Contract file exceeds size limit: {file_size} bytes "
-                f"(max: {MAX_CONTRACT_SIZE} bytes)",
+                f"Contract file exceeds size limit: {self._format_file_size(file_size)} "
+                f"(max: {MAX_CONTRACT_SIZE // (1024 * 1024)} MB)",
                 error_code=EnumCoreErrorCode.VALIDATION_FAILED,
             )
 
@@ -823,7 +823,13 @@ class ProjectorPluginLoader:
                 validation_errors.append(error)
             except ModelOnexError as e:
                 error_code = getattr(e, "error_code", None)
-                if error_code == EnumCoreErrorCode.VALIDATION_FAILED:
+                error_message = str(e)
+                # Check specifically for size limit errors by both error_code AND message
+                is_size_limit_error = (
+                    error_code == EnumCoreErrorCode.VALIDATION_FAILED
+                    and "size limit" in error_message.lower()
+                )
+                if is_size_limit_error:
                     # File size limit error
                     try:
                         file_size = contract_file.stat().st_size
@@ -848,7 +854,7 @@ class ProjectorPluginLoader:
                     )
                     validation_errors.append(error)
                 else:
-                    # Re-raise unexpected ModelOnexError types
+                    # Re-raise other ModelOnexError types (not size limit errors)
                     raise
             except OSError as e:
                 if not self._graceful_mode:
@@ -936,7 +942,22 @@ class ProjectorPluginLoader:
             pattern_path = Path(pattern)
 
             # Use glob from cwd for relative patterns
-            if pattern_path.is_absolute():
+            if not pattern_path.is_absolute():
+                # Security: If base_paths is configured, ensure cwd is within allowed paths
+                # to prevent bypassing path restrictions with relative patterns
+                if self._base_paths:
+                    cwd_resolved = cwd.resolve()
+                    cwd_allowed = any(
+                        cwd_resolved.is_relative_to(base.resolve())
+                        for base in self._base_paths
+                    )
+                    if not cwd_allowed:
+                        raise ModelOnexError(
+                            "Relative patterns require cwd to be within allowed base_paths",
+                            error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+                        )
+                matched_files = list(cwd.glob(pattern))
+            else:
                 # Reject absolute glob patterns unless explicit base_paths configured
                 if not self._base_paths:
                     raise ModelOnexError(
@@ -978,15 +999,28 @@ class ProjectorPluginLoader:
 
                 # Glob from the allowed base, using relative pattern portion
                 try:
-                    relative_pattern = str(pattern_path.relative_to(allowed_base))
+                    # Use the resolved pattern_prefix (non-glob prefix) to compute
+                    # the relative path, then reconstruct the pattern
+                    relative_prefix = pattern_prefix.relative_to(allowed_base)
+                    # Get the glob suffix (parts after the concrete prefix)
+                    glob_suffix_parts = pattern_path.parts[len(concrete_parts) :]
+                    if glob_suffix_parts:
+                        relative_pattern = str(
+                            relative_prefix / Path(*glob_suffix_parts)
+                        )
+                    else:
+                        relative_pattern = str(relative_prefix)
                 except ValueError:
-                    # Pattern doesn't start exactly at base, glob from base
-                    # with the full pattern (already validated to be under base)
-                    relative_pattern = pattern.lstrip("/")
+                    # If relative_to fails even after is_relative_to succeeded,
+                    # this indicates a path resolution issue (e.g., symlinks)
+                    # Reject the pattern to prevent potential security bypass
+                    raise ModelOnexError(
+                        "Absolute pattern path resolution failed - "
+                        "possible symlink security issue",
+                        error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+                    )
 
                 matched_files = list(allowed_base.glob(relative_pattern))
-            else:
-                matched_files = list(cwd.glob(pattern))
 
             # Filter to projector contracts
             matched_files = [
@@ -1081,10 +1115,13 @@ class ProjectorPluginLoader:
                 validation_errors.append(error)
             except ModelOnexError as e:
                 error_code = getattr(e, "error_code", None)
-                if (
+                error_message = str(e)
+                # Check specifically for size limit errors by both error_code AND message
+                is_size_limit_error = (
                     error_code == EnumCoreErrorCode.VALIDATION_FAILED
-                    and self._graceful_mode
-                ):
+                    and "size limit" in error_message.lower()
+                )
+                if is_size_limit_error and self._graceful_mode:
                     try:
                         file_size = contract_file.stat().st_size
                     except OSError:
@@ -1236,7 +1273,13 @@ class ProjectorPluginLoader:
                 validation_errors.append(error)
             except ModelOnexError as e:
                 error_code = getattr(e, "error_code", None)
-                if error_code == EnumCoreErrorCode.VALIDATION_FAILED:
+                error_message = str(e)
+                # Check specifically for size limit errors by both error_code AND message
+                is_size_limit_error = (
+                    error_code == EnumCoreErrorCode.VALIDATION_FAILED
+                    and "size limit" in error_message.lower()
+                )
+                if is_size_limit_error:
                     # File size limit error
                     try:
                         file_size = contract_file.stat().st_size
@@ -1262,7 +1305,7 @@ class ProjectorPluginLoader:
                     error = ModelProjectorValidationError(
                         error_type="ONEX_ERROR",
                         contract_path=self._sanitize_path_for_logging(contract_file),
-                        message=str(e),
+                        message=error_message,
                         remediation_hint="Check the contract file for issues",
                         correlation_id=discovery_correlation_id,
                     )

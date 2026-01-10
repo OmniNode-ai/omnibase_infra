@@ -471,8 +471,9 @@ class TestDeepValidation:
         validator = ProjectorSchemaValidator(db_pool=mock_pool)
         result = validator.validate_schema_deeply(schema)
 
-        # Should return a list without await
-        assert isinstance(result, list)
+        # Should return a list without await (duck-type check via iteration)
+        assert hasattr(result, "__iter__"), "Result should be iterable"
+        assert hasattr(result, "__len__"), "Result should have length"
         # Pool should NOT have been accessed
         assert not mock_pool.acquire.called
 

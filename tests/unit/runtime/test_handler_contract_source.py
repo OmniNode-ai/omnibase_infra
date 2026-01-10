@@ -2052,8 +2052,12 @@ output_model: "test.models.Output"
             assert "permission denied" in str(error).lower(), (
                 f"Error message should mention permission issue: {error}"
             )
-            # Verify original error is preserved as __cause__
-            assert isinstance(error.__cause__, (PermissionError, OSError))
+            # Verify original error is preserved as __cause__ (duck-type check)
+            assert error.__cause__ is not None, "Error should preserve original cause"
+            assert hasattr(error.__cause__, "args"), "Cause should be an exception"
+            assert hasattr(error.__cause__, "errno"), (
+                "Cause should be an OS-level error"
+            )
         finally:
             # Restore permissions for cleanup
             unreadable_contract.chmod(stat.S_IRUSR | stat.S_IWUSR)
