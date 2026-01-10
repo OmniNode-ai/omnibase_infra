@@ -1695,9 +1695,12 @@ Use this checklist before deploying to production:
 - [Correlation ID Tracking](./correlation_id_tracking.md) - Request tracing
 - [Policy Registry Trust Model](./policy_registry_trust_model.md) - Policy security model
 - [Container Dependency Injection](./container_dependency_injection.md) - Service resolution
+- [Handler Plugin Loader](./handler_plugin_loader.md#security-considerations) - Dynamic import security, threat model, deployment checklist
 
 ## See Also
 
 - [CLAUDE.md - Error Sanitization Guidelines](../../CLAUDE.md#error-sanitization-guidelines)
 - [CLAUDE.md - Node Introspection Security Considerations](../../CLAUDE.md#node-introspection-security-considerations)
+- [CLAUDE.md - Handler Plugin Loader Security](../../CLAUDE.md#handler-plugin-loader-patterns) - Security model and error codes
+- [ADR: Handler Plugin Loader Security Model](../decisions/adr-handler-plugin-loader-security.md) - Security architecture decisions
 - [MixinNodeIntrospection](../../src/omnibase_infra/mixins/mixin_node_introspection.py) - Security documentation in docstring

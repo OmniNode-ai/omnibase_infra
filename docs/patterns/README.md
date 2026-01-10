@@ -27,6 +27,7 @@ This directory contains detailed implementation guides and best practices for ON
 ### Security
 - **[Security Patterns](./security_patterns.md)** - Comprehensive security guide covering error sanitization, input validation, authentication, authorization, secret management, network security, and production checklists
 - **[Policy Registry Trust Model](./policy_registry_trust_model.md)** - Trust assumptions, validation boundaries, and security mitigations for policy registration
+- **[Handler Plugin Loader](./handler_plugin_loader.md)** - Contract-driven handler discovery with comprehensive security documentation for dynamic imports, threat model, and deployment checklist
 
 ### Testing
 - **[Testing Patterns](./testing_patterns.md)** - Assertion patterns, "HOW TO FIX" error messages, and test best practices
@@ -76,6 +77,9 @@ This directory contains detailed implementation guides and best practices for ON
 | Consul health checks | [Consul Integration](./consul_integration.md) | Health Checks |
 | Implement authentication | [Security Patterns](./security_patterns.md) | Authentication and Authorization |
 | Review production security | [Security Patterns](./security_patterns.md) | Production Security Checklist |
+| Secure handler loading | [Handler Plugin Loader](./handler_plugin_loader.md) | Security Considerations |
+| Dynamic import security | [Handler Plugin Loader](./handler_plugin_loader.md) | Threat Model |
+| Handler deployment security | [Handler Plugin Loader](./handler_plugin_loader.md) | Secure Deployment Checklist |
 | Write actionable assertions | [Testing Patterns](./testing_patterns.md) | The "HOW TO FIX" Pattern |
 | Improve test error messages | [Testing Patterns](./testing_patterns.md) | Writing Effective Messages |
 
@@ -160,6 +164,12 @@ Security Patterns
     ├── Includes: Error sanitization, input validation, auth, secrets, network security
     ├── Depends on: All error patterns, Correlation ID Tracking
     └── References: Vault, Kafka, PostgreSQL, TLS configuration
+
+Handler Plugin Loader
+    ├── Contract-driven handler discovery with dynamic imports
+    ├── Security: Threat model, trust boundaries, deployment checklist
+    ├── Depends on: Security Patterns, Correlation ID Tracking
+    └── References: importlib, yaml.safe_load, ProtocolHandler
 
 Testing Patterns
     ├── Assertion patterns and "HOW TO FIX" error messages

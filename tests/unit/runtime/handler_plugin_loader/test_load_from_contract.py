@@ -119,6 +119,7 @@ class TestHandlerPluginLoaderLoadFromContract:
 
     def test_reject_invalid_yaml(self, tmp_path: Path) -> None:
         """Test error when contract has invalid YAML syntax."""
+        from omnibase_infra.enums import EnumHandlerLoaderError
         from omnibase_infra.errors import ProtocolConfigurationError
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
@@ -131,7 +132,14 @@ class TestHandlerPluginLoaderLoadFromContract:
             loader.load_from_contract(contract_file)
 
         # Verify error message indicates YAML parsing failure
-        assert "yaml" in str(exc_info.value).lower()
+        assert "Invalid YAML syntax" in str(exc_info.value)
+
+        # Verify correct error code is set
+        error = exc_info.value
+        assert (
+            error.model.context.get("loader_error")
+            == EnumHandlerLoaderError.INVALID_YAML_SYNTAX.value
+        )
 
     def test_reject_empty_contract_file(self, tmp_path: Path) -> None:
         """Test error when contract file is empty."""

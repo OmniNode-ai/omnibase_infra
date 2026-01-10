@@ -38,7 +38,10 @@ class ModelPluginLoadContext(BaseModel):
         handlers: List of successfully loaded handlers.
         failed_plugins: List of plugins that failed to load.
         duration_seconds: Total operation time in seconds.
-        correlation_id: Correlation ID for distributed tracing.
+        correlation_id: Correlation ID for distributed tracing (UUID for models).
+        original_correlation_id: Original correlation ID string for logging.
+            Preserves the exact string passed by the caller, even if it's not
+            a valid UUID format. Used in log extra fields for traceability.
     """
 
     model_config = ConfigDict(
@@ -75,7 +78,16 @@ class ModelPluginLoadContext(BaseModel):
     )
     correlation_id: UUID = Field(
         ...,
-        description="Correlation ID for distributed tracing",
+        description="Correlation ID for distributed tracing (UUID for models)",
+    )
+    # NOTE: This field intentionally uses str (not UUID) to preserve the exact
+    # caller-provided value for logging. The caller may provide a non-UUID format
+    # correlation ID (e.g., 'test-correlation-12345' or OpenTelemetry trace IDs).
+    # The UUID-typed 'correlation_id' field is used for model validation.
+    caller_correlation_string: str = Field(
+        ...,
+        min_length=1,
+        description="Original correlation string from caller for logging (may be non-UUID)",
     )
 
 

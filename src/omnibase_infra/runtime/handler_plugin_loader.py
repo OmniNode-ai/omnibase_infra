@@ -13,17 +13,56 @@ The loader implements ProtocolHandlerPluginLoader and supports:
 - Directory-based discovery with recursive scanning
 - Glob pattern-based discovery for flexible matching
 
+Error Codes:
+    This module uses structured error codes from ``EnumHandlerLoaderError`` for
+    precise error classification. Error codes are organized by category:
+
+    **File-Level Errors (HANDLER_LOADER_001 - HANDLER_LOADER_009)**:
+        - ``HANDLER_LOADER_001`` (FILE_NOT_FOUND): Contract file path does not exist
+        - ``HANDLER_LOADER_002`` (INVALID_YAML_SYNTAX): Contract file has invalid YAML
+        - ``HANDLER_LOADER_003`` (SCHEMA_VALIDATION_FAILED): Contract fails Pydantic validation
+        - ``HANDLER_LOADER_004`` (MISSING_REQUIRED_FIELDS): Required contract fields missing
+        - ``HANDLER_LOADER_005`` (FILE_SIZE_EXCEEDED): Contract exceeds 10MB size limit
+        - ``HANDLER_LOADER_006`` (PROTOCOL_NOT_IMPLEMENTED): Handler missing protocol methods
+        - ``HANDLER_LOADER_007`` (NOT_A_FILE): Path exists but is not a regular file
+        - ``HANDLER_LOADER_008`` (FILE_READ_ERROR): Failed to read contract file (I/O)
+        - ``HANDLER_LOADER_009`` (FILE_STAT_ERROR): Failed to stat contract file (I/O)
+
+    **Import Errors (HANDLER_LOADER_010 - HANDLER_LOADER_012)**:
+        - ``HANDLER_LOADER_010`` (MODULE_NOT_FOUND): Handler module not found
+        - ``HANDLER_LOADER_011`` (CLASS_NOT_FOUND): Handler class not found in module
+        - ``HANDLER_LOADER_012`` (IMPORT_ERROR): Import error (syntax/dependency)
+
+    **Directory Errors (HANDLER_LOADER_020 - HANDLER_LOADER_022)**:
+        - ``HANDLER_LOADER_020`` (DIRECTORY_NOT_FOUND): Directory does not exist
+        - ``HANDLER_LOADER_021`` (PERMISSION_DENIED): Permission denied accessing directory
+        - ``HANDLER_LOADER_022`` (NOT_A_DIRECTORY): Path exists but is not a directory
+
+    **Pattern Errors (HANDLER_LOADER_030 - HANDLER_LOADER_031)**:
+        - ``HANDLER_LOADER_030`` (EMPTY_PATTERNS_LIST): Patterns list cannot be empty
+        - ``HANDLER_LOADER_031`` (INVALID_GLOB_PATTERN): Invalid glob pattern syntax
+
+    Error codes are accessible via ``error.model.context.get("loader_error")`` on
+    raised exceptions.
+
 Concurrency Notes:
     The loader is stateless and reentrant - each load operation is independent:
 
     - No instance state is stored after ``__init__`` (empty constructor)
     - All method variables are local to each call
-    - ``importlib.import_module()`` is thread-safe in CPython (uses import lock)
+    - ``importlib.import_module()`` is thread-safe in CPython (uses GIL and import lock)
     - File operations use independent file handles per call
 
-    For concurrent calls loading the SAME handler module, Python's import lock
-    serializes the imports automatically. Repeated loads of the same handler
-    are idempotent - the second call returns the cached module.
+    **Thread Safety Guarantees**:
+        - Multiple threads can safely call any loader method concurrently
+        - Concurrent imports of the SAME module are serialized by Python's import lock
+        - Repeated loads of the same handler are idempotent (cached by Python)
+
+    **Thread Safety Limitations**:
+        - The loader does NOT provide transactional semantics across multiple calls
+        - If contracts change on disk during concurrent loading, results may be inconsistent
+        - The ``discover_and_load()`` method's default ``Path.cwd()`` behavior is
+          process-global; if cwd changes between calls, results will differ
 
     Working Directory Dependency:
         The ``discover_and_load()`` method uses ``Path.cwd()`` by default,
@@ -34,6 +73,7 @@ See Also:
     - ProtocolHandlerPluginLoader: Protocol definition for plugin loaders
     - HandlerContractSource: Contract discovery and parsing
     - ModelLoadedHandler: Model representing loaded handler metadata
+    - EnumHandlerLoaderError: Structured error codes for loader operations
 
 Security Considerations:
     This loader dynamically imports Python classes specified in YAML contracts.
@@ -43,6 +83,20 @@ Security Considerations:
     - Be aware that module side effects execute during import
     - Consider allowlisting import paths in high-security environments
 
+    **Error Message Sanitization**:
+        Error messages are designed to be safe for end users and prevent
+        information disclosure:
+
+        - User-facing error messages use filename only (not full filesystem paths)
+        - System exception details are sanitized to prevent path disclosure
+        - Full paths are stored in error context for internal debugging only
+        - Correlation IDs enable tracing without exposing sensitive information
+        - Exception messages from underlying libraries are sanitized before inclusion
+
+        The ``_sanitize_exception_message()`` helper strips filesystem paths from
+        exception messages while preserving useful diagnostic information like
+        line numbers and error types.
+
 .. versionadded:: 0.7.0
     Created as part of OMN-1132 handler plugin loader implementation.
 """
@@ -51,6 +105,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -76,12 +131,89 @@ from omnibase_infra.runtime.protocol_handler_plugin_loader import (
 
 logger = logging.getLogger(__name__)
 
+# Regex pattern for detecting filesystem paths in error messages
+# Matches Unix paths (/path/to/file) and Windows paths (C:\path\to\file)
+_PATH_PATTERN = re.compile(
+    r"""
+    (?:                             # Non-capturing group for path types
+        /(?:[\w.-]+/)+[\w.-]+       # Unix absolute path: /path/to/file
+        |
+        [A-Za-z]:\\(?:[\w.-]+\\)*[\w.-]+  # Windows path: C:\path\to\file
+        |
+        \.\.?/(?:[\w.-]+/)*[\w.-]*  # Relative path: ./path or ../path
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def _sanitize_exception_message(exception: BaseException) -> str:
+    """Sanitize exception message to prevent information disclosure.
+
+    Removes or masks filesystem paths from exception messages to prevent
+    exposing internal directory structures in user-facing error messages.
+    Preserves useful diagnostic information like line numbers and error types.
+
+    Args:
+        exception: The exception whose message should be sanitized.
+
+    Returns:
+        A sanitized version of the exception message with paths removed.
+
+    Example:
+        >>> e = OSError("[Errno 13] Permission denied: '/etc/secrets/key.pem'")
+        >>> _sanitize_exception_message(e)
+        "[Errno 13] Permission denied: '<path>'"
+
+        >>> e = yaml.YAMLError("expected ... in '/home/user/config.yaml', line 10")
+        >>> _sanitize_exception_message(e)
+        "expected ... in '<path>', line 10"
+    """
+    message = str(exception)
+
+    # Replace filesystem paths with <path> placeholder
+    sanitized = _PATH_PATTERN.sub("<path>", message)
+
+    # Also handle quoted paths that might have been missed
+    # Pattern: 'path/to/file' or "path/to/file"
+    sanitized = re.sub(r"['\"](?:[^'\"]*[/\\][^'\"]+)['\"]", "'<path>'", sanitized)
+
+    return sanitized
+
+
 # File pattern for handler contracts
 HANDLER_CONTRACT_FILENAME = "handler_contract.yaml"
 CONTRACT_YAML_FILENAME = "contract.yaml"
 
 # Maximum contract file size (10MB) to prevent memory exhaustion
 MAX_CONTRACT_SIZE = 10 * 1024 * 1024
+
+# ---------------------------------------------------------------------------
+# Correlation ID Design Decision: String Type
+# ---------------------------------------------------------------------------
+# The correlation_id parameter is typed as `str` rather than `UUID` because:
+#
+# 1. **External System Compatibility**: Upstream systems (API gateways, message
+#    brokers, distributed tracing tools) may provide correlation IDs in various
+#    formats - not all are valid UUIDs. Accepting strings allows seamless
+#    propagation of externally-generated IDs.
+#
+# 2. **Flexibility for Tracing Standards**: OpenTelemetry trace IDs, Zipkin
+#    span IDs, and custom correlation schemes use different formats. String
+#    type accommodates all without forcing UUID conversion at boundaries.
+#
+# 3. **Graceful Degradation**: When a UUID is required (e.g., for observability
+#    models that expect UUID type), the `_parse_correlation_id_to_uuid` helper
+#    converts valid UUIDs and generates new ones for non-UUID strings. This
+#    ensures observability infrastructure functions while preserving the
+#    original ID in log extra fields for debugging.
+#
+# 4. **Auto-Generation Pattern**: Methods auto-generate correlation IDs via
+#    `str(uuid4())` when not provided, ensuring all operations are traceable.
+#    Using string type makes this pattern consistent throughout.
+#
+# See: ONEX correlation ID conventions in omnibase_core.
+# ---------------------------------------------------------------------------
 
 
 def _parse_correlation_id_to_uuid(correlation_id: str) -> UUID:
@@ -253,8 +385,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 operation="load_from_contract",
                 correlation_id=correlation_id,
             )
+            # Sanitize exception message to prevent path disclosure
+            sanitized_msg = _sanitize_exception_message(e)
             raise ProtocolConfigurationError(
-                f"Invalid YAML syntax in contract: {e}",
+                f"Invalid YAML syntax in contract: {sanitized_msg}",
                 context=context,
                 loader_error=EnumHandlerLoaderError.INVALID_YAML_SYNTAX.value,
                 contract_path=str(contract_path),
@@ -265,8 +399,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 operation="load_from_contract",
                 correlation_id=correlation_id,
             )
+            # Sanitize exception message to prevent path disclosure
+            sanitized_msg = _sanitize_exception_message(e)
             raise ProtocolConfigurationError(
-                f"Failed to read contract file: {e}",
+                f"Failed to read contract file: {sanitized_msg}",
                 context=context,
                 loader_error=EnumHandlerLoaderError.FILE_READ_ERROR.value,
                 contract_path=str(contract_path),
@@ -330,8 +466,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             )
             missing_str = ", ".join(missing_methods)
             raise ProtocolConfigurationError(
-                f"Handler class {handler_class_path} does not implement "
-                f"ProtocolHandler (missing required method(s): {missing_str})",
+                f"Handler class {handler_class_path} is missing required "
+                f"ProtocolHandler methods: {missing_str}",
                 context=context,
                 loader_error=EnumHandlerLoaderError.PROTOCOL_NOT_IMPLEMENTED.value,
                 contract_path=str(contract_path),
@@ -348,6 +484,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 "handler_class": handler_class_path,
                 "handler_type": handler_type.value,
                 "contract_path": str(contract_path),
+                "correlation_id": correlation_id,
             },
         )
 
@@ -454,6 +591,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             extra={
                 "directory": str(directory),
                 "contract_count": len(contract_files),
+                "correlation_id": correlation_id,
             },
         )
 
@@ -504,6 +642,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 failed_plugins=failed_handlers,
                 duration_seconds=duration_seconds,
                 correlation_id=_parse_correlation_id_to_uuid(correlation_id),
+                caller_correlation_string=correlation_id,
             )
         )
 
@@ -657,6 +796,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 "patterns": patterns,
                 "discovered_count": len(discovered_paths),
                 "limit_reached": limit_reached,
+                "correlation_id": correlation_id,
             },
         )
 
@@ -710,6 +850,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 failed_plugins=failed_handlers,
                 duration_seconds=duration_seconds,
                 correlation_id=_parse_correlation_id_to_uuid(correlation_id),
+                caller_correlation_string=correlation_id,
             )
         )
 
@@ -819,7 +960,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 "total_loaded": len(context.handlers),
                 "total_failed": len(context.failed_plugins),
                 "duration_seconds": context.duration_seconds,
-                "correlation_id": str(context.correlation_id),
+                "correlation_id": context.caller_correlation_string,
                 "handler_names": [h.handler_name for h in context.handlers],
                 "handler_classes": [h.handler_class for h in context.handlers],
                 "failed_paths": [str(f.contract_path) for f in context.failed_plugins],
@@ -994,8 +1135,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 operation="import_handler_class",
                 correlation_id=correlation_id,
             )
+            # Sanitize exception message to prevent path disclosure
+            sanitized_msg = _sanitize_exception_message(e)
             raise InfraConnectionError(
-                f"Import error loading module {module_path}: {e}",
+                f"Import error loading module {module_path}: {sanitized_msg}",
                 context=context,
                 loader_error=EnumHandlerLoaderError.IMPORT_ERROR.value,
                 module_path=module_path,
@@ -1081,6 +1224,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             with path.open("r", encoding="utf-8") as f:
                 yaml.safe_load(f)
         except yaml.YAMLError as e:
+            # Sanitize exception message to prevent path disclosure
+            sanitized_msg = _sanitize_exception_message(e)
             if raise_on_error:
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.RUNTIME,
@@ -1088,7 +1233,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     correlation_id=correlation_id,
                 )
                 raise ProtocolConfigurationError(
-                    f"Invalid YAML syntax in contract file '{path.name}': {e}",
+                    f"Invalid YAML syntax in contract file '{path.name}': {sanitized_msg}",
                     context=context,
                     loader_error=EnumHandlerLoaderError.INVALID_YAML_SYNTAX.value,
                     contract_path=str(path),
@@ -1096,15 +1241,17 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             logger.warning(
                 "Skipping contract file with invalid YAML syntax %s: %s",
                 path.name,
-                e,
+                sanitized_msg,
                 extra={
                     "path": str(path),
-                    "error": str(e),
+                    "error": sanitized_msg,
                     "correlation_id": correlation_id,
                 },
             )
             return False
         except OSError as e:
+            # Sanitize exception message to prevent path disclosure
+            sanitized_msg = _sanitize_exception_message(e)
             if raise_on_error:
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.RUNTIME,
@@ -1112,7 +1259,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     correlation_id=correlation_id,
                 )
                 raise ProtocolConfigurationError(
-                    f"Failed to read contract file '{path.name}': {e}",
+                    f"Failed to read contract file '{path.name}': {sanitized_msg}",
                     context=context,
                     loader_error=EnumHandlerLoaderError.FILE_READ_ERROR.value,
                     contract_path=str(path),
@@ -1120,10 +1267,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             logger.warning(
                 "Failed to read contract file %s: %s",
                 path.name,
-                e,
+                sanitized_msg,
                 extra={
                     "path": str(path),
-                    "error": str(e),
+                    "error": sanitized_msg,
                     "correlation_id": correlation_id,
                 },
             )
@@ -1166,6 +1313,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         try:
             file_size = path.stat().st_size
         except OSError as e:
+            # Sanitize exception message to prevent path disclosure
+            sanitized_msg = _sanitize_exception_message(e)
             if raise_on_error:
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.RUNTIME,
@@ -1173,7 +1322,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     correlation_id=correlation_id,
                 )
                 raise ProtocolConfigurationError(
-                    f"Failed to stat contract file: {e}",
+                    f"Failed to stat contract file: {sanitized_msg}",
                     context=context,
                     loader_error=EnumHandlerLoaderError.FILE_STAT_ERROR.value,
                     contract_path=str(path),
@@ -1181,10 +1330,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             logger.warning(
                 "Failed to stat contract file %s: %s",
                 path.name,
-                e,
+                sanitized_msg,
                 extra={
                     "path": str(path),
-                    "error": str(e),
+                    "error": sanitized_msg,
                     "correlation_id": correlation_id,
                 },
             )
@@ -1342,13 +1491,15 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             try:
                 resolved = path.resolve()
             except OSError as e:
+                # Sanitize exception message to prevent path disclosure
+                sanitized_msg = _sanitize_exception_message(e)
                 logger.warning(
                     "Failed to resolve path %s: %s",
                     path.name,
-                    e,
+                    sanitized_msg,
                     extra={
                         "path": str(path),
-                        "error": str(e),
+                        "error": sanitized_msg,
                         "correlation_id": correlation_id,
                     },
                 )

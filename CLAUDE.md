@@ -372,33 +372,47 @@ handler_routing:
       handler_module: "omnibase_infra.handlers.handler_node_introspected"
 ```
 
-**Security Trade-offs and Mitigations:**
+**Security Model:**
 
-Dynamic imports (`importlib.import_module`) introduce security considerations:
+**CRITICAL**: YAML contracts are treated as **executable code**, not mere configuration. Dynamic imports via `importlib.import_module()` execute module-level code during import.
 
-| Risk | Mitigation |
-|------|------------|
-| Arbitrary code execution | Validate handler paths against allowlist |
-| Path traversal | Reject paths with `..` or absolute paths |
-| Untrusted modules | Only load from trusted package namespaces |
+| Risk | Status | Description |
+|------|--------|-------------|
+| YAML deserialization attacks | **MITIGATED** | `yaml.safe_load()` blocks `!!python/object` tags |
+| Memory exhaustion | **MITIGATED** | 10MB file size limit enforced |
+| Arbitrary class loading | **MITIGATED** | Protocol validation requires 5 `ProtocolHandler` methods |
+| Arbitrary code execution | **NOT MITIGATED** | Any module on `sys.path` can be imported |
+| Path traversal in module paths | **NOT MITIGATED** | No path validation in loader |
+| Untrusted namespace imports | **NOT MITIGATED** | No built-in allowlist enforcement |
 
-**Built-in Security Controls:**
-- **Protocol validation**: Loaded classes must implement `ProtocolHandler`
-- **Namespace restriction**: Only `omnibase_*` packages are trusted by default
-- **Path normalization**: Module paths are validated before import
-- **Correlation tracking**: All load operations are logged with correlation IDs
+**Built-in Security Controls** (implemented in loader):
+- **YAML safe loading**: `yaml.safe_load()` prevents deserialization attacks
+- **File size limits**: Contracts exceeding 10MB are rejected
+- **Protocol validation**: Classes must implement all 5 `ProtocolHandler` methods
+- **Error containment**: Single bad contract doesn't crash the system
+- **Correlation tracking**: All load operations logged with UUID correlation IDs
+
+**NOT Implemented** (must be added at deployment level):
+- Namespace allowlisting (e.g., only `omnibase_*` packages)
+- Module path validation (no `..` or path traversal checks)
+- Import hook filtering
+- Runtime isolation
 
 **Secure Deployment Checklist:**
-1. **Trusted paths only**: Configure `allowed_handler_namespaces` in runtime config
-2. **No user input**: Handler paths must come from validated contracts, never user input
-3. **Audit logging**: Enable handler load logging for security monitoring
-4. **Contract validation**: Run `onex validate` in CI to catch malformed contracts
+1. **File permissions**: Contract directories readable only by runtime user
+2. **Write protection**: Mount contract directories as read-only at runtime
+3. **Source validation**: Contracts from version-controlled, reviewed sources only
+4. **Namespace allowlisting**: Implement application-level wrapper for high-security environments
+5. **Audit logging**: Enable INFO-level logging for handler loader
+6. **Contract validation**: Run `onex validate` in CI to catch malformed contracts
 
 **Error Codes:**
-- `HANDLER_LOAD_FAILED` - Module import failed
-- `HANDLER_CLASS_NOT_FOUND` - Class not found in module
-- `HANDLER_PROTOCOL_VIOLATION` - Class does not implement `ProtocolHandler`
-- `HANDLER_PATH_INVALID` - Module path failed security validation
+- `MODULE_NOT_FOUND` (HANDLER_LOADER_010) - Handler module not found
+- `CLASS_NOT_FOUND` (HANDLER_LOADER_011) - Class not found in module
+- `IMPORT_ERROR` (HANDLER_LOADER_012) - Module import failed (syntax/dependency)
+- `PROTOCOL_NOT_IMPLEMENTED` (HANDLER_LOADER_006) - Class missing required `ProtocolHandler` methods
+
+**See**: `docs/patterns/handler_plugin_loader.md` and `docs/decisions/adr-handler-plugin-loader-security.md` for complete security documentation.
 
 ### Service Integration Architecture
 - **Adapter Pattern** - External services wrapped in ONEX adapters

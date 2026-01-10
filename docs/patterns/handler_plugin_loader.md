@@ -264,37 +264,139 @@ ONEX uses duck typing for protocol validation to:
 
 **CRITICAL**: YAML contracts are treated as executable code, not mere configuration.
 
-### Why Contracts Equal Code
+This section provides comprehensive security documentation for the handler plugin loader's dynamic import mechanism. Understanding these security implications is essential for safe production deployment.
+
+---
+
+### Dynamic Import Security Model
+
+The `HandlerPluginLoader` uses Python's `importlib.import_module()` to dynamically load handler classes. This is a powerful but security-sensitive operation.
+
+#### Why Dynamic Import Is Used
+
+| Benefit | Explanation |
+|---------|-------------|
+| **Contract-driven architecture** | Handler bindings defined in YAML, not hardcoded |
+| **Plugin extensibility** | Third-party handlers load without core runtime changes |
+| **Deployment flexibility** | Different environments use different handlers via contracts |
+| **Zero coupling** | Runtime has no compile-time dependency on handler implementations |
+
+#### Why Contracts Equal Code
 
 When the loader processes a contract:
-1. It reads the `handler_class` fully-qualified path
+1. It reads the `handler_class` fully-qualified path (e.g., `myapp.handlers.AuthHandler`)
 2. It calls `importlib.import_module()` on the module path
-3. The module's top-level code executes during import
+3. **The module's top-level code executes during import**
 
 This means:
-- Module-level side effects execute immediately
+- Module-level side effects execute immediately when a contract is loaded
 - Malicious contracts can execute arbitrary code if an attacker can write to contract directories
 - Import-time vulnerabilities in handler modules are triggered by contract discovery
 
-### Built-in Protections
+---
 
-| Protection | Implementation | Mitigates |
-|------------|----------------|-----------|
-| File size limits | `MAX_CONTRACT_SIZE = 10MB` | Memory exhaustion |
-| YAML safe loading | `yaml.safe_load()` | YAML deserialization attacks |
-| Protocol validation | Duck typing checks | Loading arbitrary non-handler classes |
-| Error containment | Graceful failure per contract | Single bad contract doesn't crash system |
-| Correlation ID tracking | UUID4 for all operations | Audit trail for security events |
+### Threat Model
+
+Understanding what the loader protects against (and what it doesn't) is critical for secure deployment.
+
+#### Attack Vectors
+
+| Attack Vector | Description | Risk Level |
+|---------------|-------------|------------|
+| **Malicious contract injection** | Attacker writes contract pointing to malicious module | CRITICAL |
+| **Module path manipulation** | Contract specifies path to unintended module | HIGH |
+| **YAML deserialization attack** | Malicious YAML constructs execute code | HIGH (mitigated) |
+| **Memory exhaustion** | Oversized contract files consume memory | MEDIUM (mitigated) |
+| **Import side effects** | Legitimate modules have unintended import-time behavior | MEDIUM |
+| **Handler instantiation exploits** | Malicious code runs when handler is instantiated | HIGH |
+
+#### Trust Boundaries
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                      TRUSTED ZONE                                    │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐  │
+│  │ Contract Files  │───>│ HandlerPlugin   │───>│ Handler Modules │  │
+│  │ (YAML)          │    │ Loader          │    │ (Python)        │  │
+│  └─────────────────┘    └─────────────────┘    └─────────────────┘  │
+│         │                        │                      │           │
+│         ▼                        ▼                      ▼           │
+│  Filesystem access       importlib.import_module   Arbitrary code   │
+│  controls                                          execution        │
+└─────────────────────────────────────────────────────────────────────┘
+         │
+         │ TRUST BOUNDARY: Everything entering this zone must be trusted
+         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      UNTRUSTED ZONE                                  │
+│  User input, external APIs, unverified sources                       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Key principle**: Contract files and handler modules MUST come from trusted sources. The loader cannot distinguish between legitimate and malicious module paths.
+
+---
+
+### Built-in Security Controls
+
+The loader implements several protections:
+
+| Protection | Implementation | Mitigates | Location |
+|------------|----------------|-----------|----------|
+| **File size limits** | `MAX_CONTRACT_SIZE = 10MB` | Memory exhaustion, DoS | `_validate_file_size()` |
+| **YAML safe loading** | `yaml.safe_load()` | YAML deserialization attacks (`!!python/object`) | `load_from_contract()` |
+| **Protocol validation** | Duck typing checks for all 5 `ProtocolHandler` methods | Loading arbitrary non-handler classes | `_validate_handler_protocol()` |
+| **Error containment** | Graceful failure per contract | Single bad contract doesn't crash system | `load_from_directory()` |
+| **Correlation ID tracking** | UUID4 for all operations | Audit trail for security events | All public methods |
+| **Class type verification** | `isinstance(handler_class, type)` check | Loading non-class objects | `_import_handler_class()` |
+
+#### Protocol Validation Details
+
+The loader verifies loaded classes implement `ProtocolHandler` via duck typing:
+
+```python
+# Required methods checked by _validate_handler_protocol():
+required_methods = [
+    "handler_type",   # Property: handler type identifier
+    "initialize",     # Async: connection/pool setup
+    "shutdown",       # Async: resource cleanup
+    "execute",        # Async: operation execution
+    "describe",       # Sync: handler metadata
+]
+```
+
+A class **fails validation** if any of these 5 methods are missing, preventing loading of arbitrary classes that don't implement the handler contract.
+
+---
 
 ### What the Loader Does NOT Protect Against
 
-The loader explicitly does NOT provide:
-- Path sandboxing (any module on `sys.path` can be imported)
-- Module signature verification
-- Allowlist enforcement (no built-in restriction on module paths)
-- Import hook filtering
+**CRITICAL**: The following protections are NOT built into the loader and must be implemented at the deployment level:
+
+| Gap | Description | Recommended Mitigation |
+|-----|-------------|------------------------|
+| **Path sandboxing** | Any module on `sys.path` can be imported | Application-level allowlist (see below) |
+| **Module signature verification** | No cryptographic validation of handler code | Use signed container images |
+| **Namespace restriction** | No built-in restriction on allowed module paths | Implement allowlist wrapper |
+| **Import hook filtering** | No interception of `importlib` calls | Add custom `MetaPathFinder` |
+| **Runtime isolation** | Handlers run in same process as loader | Use subprocess isolation for untrusted code |
+| **Mutation prevention** | Loaded modules can modify global state | Run in separate process or container |
+
+#### Why `yaml.safe_load()` Is Not Sufficient
+
+`yaml.safe_load()` prevents YAML deserialization attacks (e.g., `!!python/object` tags) but does NOT prevent:
+
+- Malicious `handler_class` values that point to attacker-controlled modules
+- Module side effects during `import_module()` execution
+- Post-import exploitation via handler instantiation
+
+---
 
 ### Secure Deployment Checklist
+
+#### Minimum Requirements (All Deployments)
+
+All production deployments MUST implement:
 
 1. **File permissions**: Contract directories readable only by runtime user
    ```bash
@@ -313,30 +415,208 @@ The loader explicitly does NOT provide:
    ```
 
 3. **Source validation**: Contracts from trusted sources only
-   - Version-controlled repositories
+   - Version-controlled repositories with code review
    - Signed container images
    - Verified artifact registries
 
-4. **Path allowlisting** (high-security environments):
+4. **Logging enabled**: Ensure handler loading is logged
    ```python
-   ALLOWED_MODULE_PREFIXES = (
-       "myapp.handlers.",
-       "approved_plugins.",
-   )
-
-   def secure_load_from_contract(loader: HandlerPluginLoader, path: Path) -> ModelLoadedHandler:
-       """Load with module path validation."""
-       with open(path) as f:
-           contract_data = yaml.safe_load(f)
-
-       handler_class = contract_data.get("handler_class", "")
-       if not any(handler_class.startswith(prefix) for prefix in ALLOWED_MODULE_PREFIXES):
-           raise SecurityError(f"Module path not in allowlist: {handler_class}")
-
-       return loader.load_from_contract(path)
+   import logging
+   logging.getLogger("omnibase_infra.runtime.handler_plugin_loader").setLevel(logging.INFO)
    ```
 
-**For complete security guidance, see**: [ADR: Handler Plugin Loader Security Model](../decisions/adr-handler-plugin-loader-security.md)
+#### High-Security Environments
+
+For elevated security requirements, implement additional controls:
+
+##### Path Allowlisting (Recommended)
+
+Implement an application-level wrapper that validates module paths before loading:
+
+```python
+from pathlib import Path
+from typing import Final
+
+import yaml
+
+from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+from omnibase_infra.models.runtime import ModelLoadedHandler
+
+# Define trusted namespace prefixes
+ALLOWED_MODULE_PREFIXES: Final[tuple[str, ...]] = (
+    "omnibase_infra.handlers.",     # First-party handlers
+    "myapp.handlers.",              # Application handlers
+    "approved_plugins.",            # Vetted third-party
+)
+
+
+class SecurityError(Exception):
+    """Raised when security validation fails."""
+    pass
+
+
+def secure_load_from_contract(
+    loader: HandlerPluginLoader,
+    path: Path,
+    correlation_id: str | None = None,
+) -> ModelLoadedHandler:
+    """Load handler with module path validation.
+
+    Args:
+        loader: The handler plugin loader
+        path: Path to contract file
+        correlation_id: Optional correlation ID for tracing
+
+    Returns:
+        Loaded handler if path passes validation
+
+    Raises:
+        SecurityError: If module path is not in allowlist
+    """
+    # Pre-validate module path before loader processes it
+    with open(path) as f:
+        contract_data = yaml.safe_load(f)
+
+    handler_class = contract_data.get("handler_class", "")
+
+    # Check against allowlist
+    if not any(handler_class.startswith(prefix) for prefix in ALLOWED_MODULE_PREFIXES):
+        raise SecurityError(
+            f"Handler module path '{handler_class}' not in allowlist. "
+            f"Allowed prefixes: {ALLOWED_MODULE_PREFIXES}"
+        )
+
+    # Path validated, proceed with loading
+    return loader.load_from_contract(path, correlation_id)
+```
+
+##### Import Hook Monitoring
+
+Use Python's import system to audit dynamic imports:
+
+```python
+import logging
+import sys
+from importlib.abc import MetaPathFinder
+
+logger = logging.getLogger("security.imports")
+
+
+class SecurityAuditFinder(MetaPathFinder):
+    """Meta path finder that logs all dynamic imports."""
+
+    def find_module(self, fullname: str, path=None):
+        """Log import attempt without blocking.
+
+        Returns None to allow the import to proceed via normal mechanisms.
+        """
+        logger.info(
+            "Dynamic import: %s",
+            fullname,
+            extra={"module": fullname, "path": path},
+        )
+        return None  # Allow import to proceed
+
+
+# Install the audit hook at application startup
+sys.meta_path.insert(0, SecurityAuditFinder())
+```
+
+##### Subprocess Isolation
+
+For complete isolation, run handlers in separate processes:
+
+```python
+import multiprocessing
+from typing import Any
+
+
+def run_handler_isolated(
+    handler_module: str,
+    handler_class: str,
+    method: str,
+    args: tuple[Any, ...],
+) -> Any:
+    """Execute handler method in isolated subprocess.
+
+    The subprocess has its own memory space, so malicious code
+    cannot affect the parent process.
+    """
+    def worker(queue, module, cls, method, args):
+        import importlib
+        mod = importlib.import_module(module)
+        handler = getattr(mod, cls)()
+        result = getattr(handler, method)(*args)
+        queue.put(result)
+
+    queue = multiprocessing.Queue()
+    process = multiprocessing.Process(
+        target=worker,
+        args=(queue, handler_module, handler_class, method, args),
+    )
+    process.start()
+    process.join(timeout=30)
+
+    if process.is_alive():
+        process.terminate()
+        raise TimeoutError("Handler execution timed out")
+
+    return queue.get()
+```
+
+---
+
+### Monitoring and Incident Response
+
+#### Security Event Logging
+
+The loader logs security-relevant events with correlation IDs:
+
+| Event | Log Level | When |
+|-------|-----------|------|
+| Contract load success | INFO | Handler successfully loaded |
+| Contract load failure | WARNING | Individual contract failed |
+| Protocol validation failure | WARNING | Class missing required methods |
+| Module import error | WARNING | `importlib.import_module()` failed |
+| File size exceeded | WARNING | Contract exceeds 10MB limit |
+| Ambiguous contract configuration | WARNING | Both contract types in same directory |
+
+#### Alerting Recommendations
+
+Configure alerts for:
+
+1. **Unexpected handler paths**: New module paths not seen before
+2. **High failure rates**: Many contracts failing to load
+3. **Import errors from unknown modules**: May indicate probing attacks
+4. **File system changes**: Modifications to contract directories
+
+#### Incident Response
+
+If a malicious contract is suspected:
+
+1. **Isolate**: Stop loading new contracts immediately
+2. **Identify**: Check logs for correlation IDs of suspicious loads
+3. **Contain**: Remove compromised contract files
+4. **Analyze**: Review what code was executed during import
+5. **Remediate**: Rotate any secrets that may have been exposed
+6. **Prevent**: Implement additional controls (allowlisting, monitoring)
+
+---
+
+### Security Decision Trade-offs
+
+| Decision | Trade-off |
+|----------|-----------|
+| **Plugin architecture vs hardcoded registry** | Flexibility vs compile-time safety |
+| **Dynamic import vs static binding** | Runtime extensibility vs predictable behavior |
+| **YAML contracts vs Python decorators** | Machine-readable config vs AST safety |
+| **Duck typing vs explicit inheritance** | Loose coupling vs type guarantees |
+
+The loader prioritizes flexibility and loose coupling, placing security responsibility on deployment configuration rather than runtime enforcement.
+
+---
+
+**For complete security rationale, see**: [ADR: Handler Plugin Loader Security Model](../decisions/adr-handler-plugin-loader-security.md)
 
 ---
 
