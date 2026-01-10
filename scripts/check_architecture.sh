@@ -48,6 +48,11 @@ FORBIDDEN_IMPORTS=(
 # These are included in FORBIDDEN_IMPORTS for completeness, but have
 # corresponding xfail markers in the Python test suite.
 # Format: "import_name|ticket_id|description"
+#
+# NOTE: This array is intentionally defined for documentation purposes and
+# future use (e.g., reporting known issues with ticket links). The data is
+# also referenced in the --help output. Suppress shellcheck unused warning.
+# shellcheck disable=SC2034
 KNOWN_ISSUES=(
     "aiohttp|OMN-1015|async HTTP client usage in core - needs migration to infra"
     "redis|OMN-1295|Redis client usage in core - needs migration to infra"
@@ -134,6 +139,7 @@ print_info() {
     echo -e "  ${BLUE}[INFO]${NC} $1"
 }
 
+# shellcheck disable=SC2317  # Function defined for future use in verbose mode
 print_warn() {
     echo -e "  ${YELLOW}[WARN]${NC} $1"
 }
@@ -282,7 +288,7 @@ find_omnibase_core_path() {
 
     for path in "${local_paths[@]}"; do
         if [[ -d "$path" ]]; then
-            echo "$(cd "$path" && pwd)"
+            (cd "$path" && pwd)
             return 0
         fi
     done

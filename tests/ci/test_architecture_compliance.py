@@ -196,6 +196,12 @@ def _scan_file_for_imports(
             # (modified when closing a multiline string to only check content after)
             line_to_check = line
 
+            # Track if we need to enter a new multiline AFTER processing this line.
+            # This is set when closing a multiline reveals a new one starting,
+            # but we need to check content before the new delimiter first.
+            pending_multiline_entry = False
+            pending_multiline_delim: str | None = None
+
             # Skip comment lines (only if not in multiline string)
             if not in_multiline_string and stripped.startswith("#"):
                 continue
@@ -225,16 +231,28 @@ def _scan_file_for_imports(
                     after_close = line[closing_pos + 3 :]
 
                     # Check if the remainder starts a NEW multiline string
-                    new_delim, _ = _find_first_unquoted_delimiter(after_close)
-                    if new_delim is not None:
-                        if not _is_balanced_string_line(after_close, new_delim):
-                            # Unbalanced - entering a new multiline string
+                    new_delim, new_delim_pos = _find_first_unquoted_delimiter(
+                        after_close
+                    )
+                    if new_delim is not None and not _is_balanced_string_line(
+                        after_close, new_delim
+                    ):
+                        # Unbalanced - will enter a new multiline string
+                        # First, check content BEFORE the new delimiter for imports
+                        content_before = after_close[:new_delim_pos]
+                        if not content_before.strip():
+                            # No code before new multiline, enter and skip
                             in_multiline_string = True
                             multiline_delimiter = new_delim
-                            # Skip this line entirely as it's inside a new multiline
                             continue
-
-                    line_to_check = after_close
+                        # There's code between closing and new multiline
+                        # Check it for imports, then enter new multiline after
+                        line_to_check = content_before
+                        pending_multiline_entry = True
+                        pending_multiline_delim = new_delim
+                    else:
+                        # Either no new delimiter, or balanced single-line string
+                        line_to_check = after_close
 
             # Skip lines inside multiline strings (docstrings)
             if in_multiline_string:
@@ -276,6 +294,13 @@ def _scan_file_for_imports(
                                     check_stripped = ""
                                 break  # Restart with updated check_stripped
             line_to_check = check_stripped
+
+            # Apply pending multiline state before final checks.
+            # This handles the case where closing a multiline revealed
+            # a new one starting - we need to enter it for the next iteration.
+            if pending_multiline_entry:
+                in_multiline_string = True
+                multiline_delimiter = pending_multiline_delim
 
             # Skip if line_to_check is empty (was only a docstring)
             if not line_to_check.strip():
@@ -501,55 +526,34 @@ class TestHelperFunctions:
 
     # --- Tests for _is_requirements_file ---
 
-    def test_is_requirements_file_detects_requirements_txt(
-        self, tmp_path: Path
+    @pytest.mark.parametrize(
+        ("filename", "expected"),
+        [
+            pytest.param("requirements.txt", True, id="requirements-txt"),
+            pytest.param("requirements-dev.txt", True, id="requirements-dev-txt"),
+            pytest.param("requirements_test.txt", True, id="requirements-underscore"),
+            pytest.param("setup.py", True, id="setup-py"),
+            pytest.param("setup.cfg", True, id="setup-cfg"),
+            pytest.param("pyproject.toml", True, id="pyproject-toml"),
+            pytest.param("my_module.py", False, id="regular-module"),
+            pytest.param("test_something.py", False, id="test-file"),
+            pytest.param("conftest.py", False, id="conftest"),
+            pytest.param("__init__.py", False, id="init-file"),
+        ],
+    )
+    def test_is_requirements_file(
+        self, tmp_path: Path, filename: str, expected: bool
     ) -> None:
-        """Verify _is_requirements_file detects requirements.txt files."""
-        requirements_file = tmp_path / "requirements.txt"
-        requirements_file.touch()
-        assert _is_requirements_file(requirements_file) is True
+        """Verify _is_requirements_file correctly identifies config/requirements files.
 
-    def test_is_requirements_file_detects_requirements_dev_txt(
-        self, tmp_path: Path
-    ) -> None:
-        """Verify _is_requirements_file detects requirements-dev.txt variants."""
-        requirements_file = tmp_path / "requirements-dev.txt"
-        requirements_file.touch()
-        assert _is_requirements_file(requirements_file) is True
-
-    def test_is_requirements_file_detects_setup_py(self, tmp_path: Path) -> None:
-        """Verify _is_requirements_file detects setup.py files."""
-        setup_file = tmp_path / "setup.py"
-        setup_file.touch()
-        assert _is_requirements_file(setup_file) is True
-
-    def test_is_requirements_file_detects_setup_cfg(self, tmp_path: Path) -> None:
-        """Verify _is_requirements_file detects setup.cfg files."""
-        setup_cfg_file = tmp_path / "setup.cfg"
-        setup_cfg_file.touch()
-        assert _is_requirements_file(setup_cfg_file) is True
-
-    def test_is_requirements_file_detects_pyproject_toml(self, tmp_path: Path) -> None:
-        """Verify _is_requirements_file detects pyproject.toml files."""
-        pyproject_file = tmp_path / "pyproject.toml"
-        pyproject_file.touch()
-        assert _is_requirements_file(pyproject_file) is True
-
-    def test_is_requirements_file_returns_false_for_regular_py(
-        self, tmp_path: Path
-    ) -> None:
-        """Verify _is_requirements_file returns False for regular Python files."""
-        regular_file = tmp_path / "my_module.py"
-        regular_file.touch()
-        assert _is_requirements_file(regular_file) is False
-
-    def test_is_requirements_file_returns_false_for_test_file(
-        self, tmp_path: Path
-    ) -> None:
-        """Verify _is_requirements_file returns False for test files."""
-        test_file = tmp_path / "test_something.py"
+        Args:
+            tmp_path: Pytest fixture for temporary directory.
+            filename: Name of the file to test.
+            expected: Whether the file should be identified as a requirements file.
+        """
+        test_file = tmp_path / filename
         test_file.touch()
-        assert _is_requirements_file(test_file) is False
+        assert _is_requirements_file(test_file) is expected
 
     # --- Tests for _find_python_files ---
 
@@ -780,22 +784,29 @@ import kafka
 
     # --- Tests for _get_package_source_path ---
 
-    def test_get_package_source_path_returns_none_for_nonexistent(self) -> None:
-        """Verify _get_package_source_path returns None for nonexistent packages."""
-        result = _get_package_source_path("nonexistent_package_xyz_12345")
-        assert result is None
+    @pytest.mark.parametrize(
+        ("package_name", "expect_found"),
+        [
+            pytest.param("pytest", True, id="pytest-installed"),
+            pytest.param("pathlib", True, id="pathlib-stdlib"),
+            pytest.param("nonexistent_package_xyz_12345", False, id="nonexistent"),
+        ],
+    )
+    def test_get_package_source_path_behavior(
+        self, package_name: str, expect_found: bool
+    ) -> None:
+        """Verify _get_package_source_path behaves correctly for different packages.
 
-    def test_get_package_source_path_finds_installed_package(self) -> None:
-        """Verify _get_package_source_path finds an installed package."""
-        # Use a standard library package that's guaranteed to exist
-        result = _get_package_source_path("os")
-        # os is a builtin, should return None or a path
-        # Let's try with pathlib which is definitely a package
-        result = _get_package_source_path("pathlib")
-        # pathlib may also be builtin, try pytest which we know is installed
-        result = _get_package_source_path("pytest")
-        assert result is not None
-        assert result.exists()
+        Args:
+            package_name: Name of the package to locate.
+            expect_found: Whether the package is expected to be found.
+        """
+        result = _get_package_source_path(package_name)
+        if expect_found:
+            assert result is not None, f"Expected to find package: {package_name}"
+            assert result.exists(), f"Package path should exist: {result}"
+        else:
+            assert result is None, f"Expected package not found: {package_name}"
 
     # --- Tests for _scan_package_for_forbidden_imports ---
 
@@ -889,15 +900,36 @@ but is never closed
         violations = _scan_file_for_imports(test_file, ["kafka"])
         assert len(violations) == 0
 
-    def test_scan_file_for_imports_fstring_docstring(self, tmp_path: Path) -> None:
-        """Verify f-string prefixed docstrings are handled correctly.
+    @pytest.mark.parametrize(
+        ("prefix", "description"),
+        [
+            pytest.param("f", "f-string", id="f-prefix"),
+            pytest.param("r", "raw string", id="r-prefix"),
+            pytest.param("b", "bytes string", id="b-prefix"),
+            pytest.param("br", "raw bytes", id="br-prefix"),
+            pytest.param("rb", "raw bytes (reversed)", id="rb-prefix"),
+            pytest.param("fr", "raw f-string", id="fr-prefix"),
+            pytest.param("rf", "raw f-string (reversed)", id="rf-prefix"),
+            pytest.param("F", "uppercase f-string", id="F-prefix"),
+            pytest.param("R", "uppercase raw", id="R-prefix"),
+            pytest.param("BR", "uppercase raw bytes", id="BR-prefix"),
+            pytest.param("RF", "uppercase raw f-string", id="RF-prefix"),
+        ],
+    )
+    def test_scan_file_for_imports_prefixed_string(
+        self, tmp_path: Path, prefix: str, description: str
+    ) -> None:
+        """Verify prefixed docstrings are handled correctly.
 
-        Content inside f-string formatted docstrings should not trigger
-        violations.
+        Content inside prefixed strings should not trigger violations.
+
+        Args:
+            tmp_path: Pytest fixture for temporary directory.
+            prefix: The string prefix to test (f, r, b, br, etc.).
+            description: Human-readable description of the prefix type.
         """
         test_file = tmp_path / "test_module.py"
-        content = '''\
-f"""docstring with import kafka"""
+        content = f'''{prefix}"""docstring with import kafka"""
 
 def my_func():
     pass
@@ -905,25 +937,7 @@ def my_func():
         test_file.write_text(content)
 
         violations = _scan_file_for_imports(test_file, ["kafka"])
-        assert len(violations) == 0
-
-    def test_scan_file_for_imports_raw_string_docstring(self, tmp_path: Path) -> None:
-        """Verify r-string prefixed docstrings are handled correctly.
-
-        Content inside raw string formatted docstrings should not trigger
-        violations.
-        """
-        test_file = tmp_path / "test_module.py"
-        content = '''\
-r"""raw docstring with import kafka"""
-
-def my_func():
-    pass
-'''
-        test_file.write_text(content)
-
-        violations = _scan_file_for_imports(test_file, ["kafka"])
-        assert len(violations) == 0
+        assert len(violations) == 0, f"Unexpected violation for {description} prefix"
 
     def test_scan_file_for_imports_mixed_delimiters(self, tmp_path: Path) -> None:
         """Verify files with both triple-quote delimiters are handled.
@@ -1089,57 +1103,33 @@ def my_func():
         assert violations[0].line_number == 3
         assert violations[0].import_pattern == "kafka"
 
-    def test_scan_file_for_imports_br_prefix_string(self, tmp_path: Path) -> None:
-        """Verify br (raw bytes) string prefix is handled correctly.
+    def test_scan_file_for_imports_code_between_close_and_new_multiline(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify import between closing and new multiline start is detected.
 
-        Content inside br-prefixed strings should not trigger violations.
+        When closing a multiline string and a new multiline starts on the
+        same line, any code (including imports) between them should be
+        detected. This tests the fix for the bug where such imports were
+        missed because the scanner would skip directly to the new multiline.
         """
         test_file = tmp_path / "test_module.py"
-        content = '''\
-br"""raw bytes docstring with import kafka"""
-
-def my_func():
-    pass
-'''
+        # Close first multiline, import, then start new multiline
+        content = (
+            '"""\n'
+            "Starting a multiline docstring\n"
+            '""" import kafka; """\n'  # Close first, import, start new multiline
+            "content in new multiline\n"
+            '"""\n'
+            "x = 1\n"
+        )
         test_file.write_text(content)
 
         violations = _scan_file_for_imports(test_file, ["kafka"])
-        assert len(violations) == 0
-
-    def test_scan_file_for_imports_rb_prefix_string(self, tmp_path: Path) -> None:
-        """Verify rb (raw bytes) string prefix is handled correctly.
-
-        Content inside rb-prefixed strings should not trigger violations.
-        """
-        test_file = tmp_path / "test_module.py"
-        content = '''\
-rb"""raw bytes docstring with import kafka"""
-
-def my_func():
-    pass
-'''
-        test_file.write_text(content)
-
-        violations = _scan_file_for_imports(test_file, ["kafka"])
-        assert len(violations) == 0
-
-    def test_scan_file_for_imports_uppercase_prefix(self, tmp_path: Path) -> None:
-        """Verify uppercase string prefixes are handled correctly.
-
-        Python allows uppercase prefixes like R, F, B, RF, BR, etc.
-        """
-        test_file = tmp_path / "test_module.py"
-        content = '''\
-RF"""uppercase raw f-string with import kafka"""
-BR"""uppercase raw bytes with from kafka import X"""
-
-def my_func():
-    pass
-'''
-        test_file.write_text(content)
-
-        violations = _scan_file_for_imports(test_file, ["kafka"])
-        assert len(violations) == 0
+        # Import is between two strings, should be detected
+        assert len(violations) == 1
+        assert violations[0].line_number == 3
+        assert violations[0].import_pattern == "kafka"
 
     def test_scan_file_for_imports_docstring_immediate_import_no_space(
         self, tmp_path: Path
@@ -1172,3 +1162,188 @@ def my_func():
 
         violations = _scan_file_for_imports(test_file, ["kafka"])
         assert len(violations) == 0
+
+    # --- Additional edge case tests for comprehensive coverage ---
+
+    def test_scan_file_for_imports_empty_file(self, tmp_path: Path) -> None:
+        """Verify empty files are handled without errors.
+
+        An empty file should not produce any violations or errors.
+        """
+        test_file = tmp_path / "empty_module.py"
+        test_file.write_text("")
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_only_comments(self, tmp_path: Path) -> None:
+        """Verify files containing only comments are handled correctly.
+
+        A file with only comment lines should not produce any violations.
+        """
+        test_file = tmp_path / "comments_only.py"
+        content = """\
+# This is a comment mentioning import kafka
+# from kafka import Producer
+# Another comment about kafka
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_only_docstrings(self, tmp_path: Path) -> None:
+        """Verify files containing only docstrings are handled correctly.
+
+        A file with only docstring content should not produce any violations
+        even if the docstrings mention import patterns.
+        """
+        test_file = tmp_path / "docstrings_only.py"
+        content = '''\
+"""
+Module docstring that mentions import kafka.
+from kafka import Producer
+
+This is documentation only.
+"""
+
+"""
+Another docstring with kafka mentioned.
+"""
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_deeply_nested_docstrings(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify deeply nested function docstrings are handled correctly.
+
+        Docstrings within nested class/function definitions should all be
+        properly identified and their content ignored for import scanning.
+        """
+        test_file = tmp_path / "nested_module.py"
+        content = '''\
+"""Module docstring mentioning import kafka."""
+
+class OuterClass:
+    """Class docstring with from kafka import Producer."""
+
+    def outer_method(self):
+        """Method docstring about kafka."""
+
+        class InnerClass:
+            """Inner class docstring - import kafka."""
+
+            def inner_method(self):
+                """Deeply nested - from kafka import Consumer."""
+                pass
+
+def outer_function():
+    """Function docstring about kafka."""
+
+    def inner_function():
+        """Inner function - import kafka."""
+        pass
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_consecutive_multiline_strings(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify consecutive multiline strings are handled correctly.
+
+        Multiple multiline strings appearing one after another should all
+        be properly identified and their content ignored.
+        """
+        test_file = tmp_path / "consecutive_strings.py"
+        content = '''\
+"""First multiline
+with import kafka
+mentioned here."""
+
+"""Second multiline
+from kafka import Producer
+also mentioned."""
+
+"""Third multiline
+import kafka again."""
+
+x = 1  # No violation here
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_mixed_quotes_consecutive(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify consecutive strings with mixed quote types are handled.
+
+        Alternating between triple-double and triple-single quotes in
+        consecutive strings should all be properly handled.
+        """
+        test_file = tmp_path / "mixed_quotes.py"
+        content = """\
+\"\"\"Double quoted with import kafka.\"\"\"
+
+'''Single quoted with from kafka import X.'''
+
+\"\"\"Back to double with kafka.\"\"\"
+
+'''Again single with import kafka.'''
+
+y = 2
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_whitespace_only_lines(self, tmp_path: Path) -> None:
+        """Verify files with whitespace-only lines are handled correctly.
+
+        Whitespace-only lines should not cause issues with parsing
+        and should not be treated as imports.
+        """
+        test_file = tmp_path / "whitespace_module.py"
+        content = """\
+
+\t
+   \t
+
+import os
+
+
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_indented_import(self, tmp_path: Path) -> None:
+        """Verify indented imports (inside functions/classes) are detected.
+
+        Imports can appear inside function or class bodies with indentation.
+        These should still be detected as violations.
+        """
+        test_file = tmp_path / "indented_import.py"
+        content = """\
+def my_func():
+    import kafka
+
+class MyClass:
+    from kafka import Producer
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 2
+        assert violations[0].line_number == 2
+        assert violations[1].line_number == 5
