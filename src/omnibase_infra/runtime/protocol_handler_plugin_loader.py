@@ -158,7 +158,7 @@ class ProtocolHandlerPluginLoader(Protocol):
                 handler = loader.load_from_contract(
                     Path("src/handlers/user_handler/contract.yaml")
                 )
-                print(f"Loaded handler: {handler.handler_id}")
+                print(f"Loaded handler: {handler.handler_name}")
         """
         ...
 
@@ -209,7 +209,7 @@ class ProtocolHandlerPluginLoader(Protocol):
                 )
                 print(f"Loaded {len(handlers)} handlers")
                 for handler in handlers:
-                    print(f"  - {handler.handler_id}")
+                    print(f"  - {handler.handler_name}")
 
                 # Limit discovery to prevent runaway resource usage
                 handlers = loader.load_from_directory(
