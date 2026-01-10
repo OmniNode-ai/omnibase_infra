@@ -38,6 +38,11 @@ from omnibase_infra.models.projection import (
     ModelSequenceInfo,
     ModelSnapshotTopicConfig,
 )
+from omnibase_infra.models.projectors import (
+    ModelProjectorColumn,
+    ModelProjectorIndex,
+    ModelProjectorSchema,
+)
 from omnibase_infra.models.registration import (
     ModelIntrospectionMetrics,
     ModelNodeCapabilities,
@@ -93,6 +98,10 @@ __all__: list[str] = [
     "ModelParsedTopic",
     # Projection models
     "ModelRegistrationProjection",
+    # Projector schema models
+    "ModelProjectorColumn",
+    "ModelProjectorIndex",
+    "ModelProjectorSchema",
     "ModelRegistrationSnapshot",
     # Retry models
     "ModelRetryErrorClassification",
