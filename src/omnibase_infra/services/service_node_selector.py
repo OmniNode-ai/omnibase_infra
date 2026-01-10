@@ -31,9 +31,11 @@ import asyncio
 import logging
 import random
 from typing import TYPE_CHECKING, assert_never
+from uuid import UUID, uuid4
 
 from omnibase_core.container import ModelONEXContainer
 
+from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.services.enum_selection_strategy import EnumSelectionStrategy
 
 if TYPE_CHECKING:
@@ -61,7 +63,7 @@ class ServiceNodeSelector:
         - FIRST: Return first candidate (deterministic)
         - RANDOM: Random selection (stateless load distribution)
         - ROUND_ROBIN: Sequential cycling (stateful, even distribution)
-        - LEAST_LOADED: Not implemented (raises NotImplementedError)
+        - LEAST_LOADED: Not implemented (raises RuntimeHostError)
 
     State Management:
         Round-robin state is tracked per selection_key. This allows independent
@@ -110,7 +112,7 @@ class ServiceNodeSelector:
                 - FIRST: Return first candidate (deterministic)
                 - RANDOM: Random selection (stateless load distribution)
                 - ROUND_ROBIN: Sequential cycling (stateful, even distribution)
-                - LEAST_LOADED: Not yet implemented (raises NotImplementedError)
+                - LEAST_LOADED: Not yet implemented (raises RuntimeHostError)
             selection_key: Optional key for state tracking (recommended for round-robin).
                 If None, round-robin uses a shared "_default" key.
                 Different keys maintain independent round-robin sequences.
@@ -121,7 +123,7 @@ class ServiceNodeSelector:
             Selected node, or None if candidates is empty.
 
         Raises:
-            NotImplementedError: If LEAST_LOADED strategy is requested.
+            RuntimeHostError: If LEAST_LOADED strategy is requested.
             AssertionError: If strategy is not a valid EnumSelectionStrategy value.
                 This should never happen with properly typed code, as all enum
                 values are explicitly handled. The check exists for runtime
@@ -141,6 +143,9 @@ class ServiceNodeSelector:
             >>> result == candidates[0]
             True
         """
+        # Auto-generate correlation_id if not provided for distributed tracing
+        correlation_id = correlation_id or str(uuid4())
+
         if not candidates:
             logger.debug(
                 "No candidates provided for selection",
@@ -167,10 +172,15 @@ class ServiceNodeSelector:
                 candidates, selection_key, correlation_id
             )
         elif strategy == EnumSelectionStrategy.LEAST_LOADED:
-            raise NotImplementedError(
-                f"LEAST_LOADED selection strategy is not yet implemented "
-                f"(selection_key={selection_key!r}). "
-                "Use FIRST, RANDOM, or ROUND_ROBIN instead."
+            raise RuntimeHostError(
+                "LEAST_LOADED selection strategy is not yet implemented",
+                context=ModelInfraErrorContext(
+                    operation="select",
+                    correlation_id=UUID(correlation_id),
+                ),
+                strategy=strategy.value,
+                selection_key=selection_key,
+                candidates_count=len(candidates),
             )
         else:
             # Type-safe exhaustiveness check: ensures all enum values are handled.

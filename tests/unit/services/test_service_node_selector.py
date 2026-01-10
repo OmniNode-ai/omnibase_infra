@@ -4,14 +4,14 @@
 
 This test suite validates the node selection service that implements various
 strategies for selecting nodes from a candidate list (FIRST, RANDOM, ROUND_ROBIN).
-Note: LEAST_LOADED is not yet implemented and raises NotImplementedError.
+Note: LEAST_LOADED is not yet implemented and raises RuntimeHostError.
 
 Test Organization:
     - TestEnumSelectionStrategy: Enum definition tests
     - TestSelectionStrategyFirst: FIRST strategy tests
     - TestSelectionStrategyRandom: RANDOM strategy tests
     - TestSelectionStrategyRoundRobin: ROUND_ROBIN strategy tests
-    - TestSelectionStrategyLeastLoaded: LEAST_LOADED strategy tests (NotImplementedError)
+    - TestSelectionStrategyLeastLoaded: LEAST_LOADED strategy tests (RuntimeHostError)
     - TestServiceNodeSelectorEdgeCases: Edge cases and error handling
     - TestServiceNodeSelectorThreadSafety: Async lock thread safety tests
 
@@ -38,6 +38,7 @@ from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
@@ -385,15 +386,15 @@ class TestSelectionStrategyRoundRobin:
 
 @pytest.mark.unit
 class TestSelectionStrategyLeastLoaded:
-    """Tests for LEAST_LOADED selection strategy (NotImplementedError)."""
+    """Tests for LEAST_LOADED selection strategy (RuntimeHostError)."""
 
     @pytest.mark.asyncio
-    async def test_least_loaded_raises_not_implemented_error(self) -> None:
-        """Should raise NotImplementedError when LEAST_LOADED is requested.
+    async def test_least_loaded_raises_runtime_host_error(self) -> None:
+        """Should raise RuntimeHostError when LEAST_LOADED is requested.
 
         Given: LEAST_LOADED strategy (requires load metrics)
         When: select is called with multiple candidates
-        Then: Raises NotImplementedError with clear message
+        Then: Raises RuntimeHostError with clear message and context
 
         Note: Full implementation requires load metrics from monitoring system.
         """
@@ -401,7 +402,7 @@ class TestSelectionStrategyLeastLoaded:
 
         selector = ServiceNodeSelector()
 
-        with pytest.raises(NotImplementedError) as exc_info:
+        with pytest.raises(RuntimeHostError) as exc_info:
             await selector.select(
                 candidates=candidates,
                 strategy=EnumSelectionStrategy.LEAST_LOADED,
@@ -410,11 +411,10 @@ class TestSelectionStrategyLeastLoaded:
         assert "LEAST_LOADED selection strategy is not yet implemented" in str(
             exc_info.value
         )
-        assert "FIRST, RANDOM, or ROUND_ROBIN" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_least_loaded_with_empty_list(self) -> None:
-        """Should return None when candidate list is empty (before NotImplementedError)."""
+        """Should return None when candidate list is empty (before RuntimeHostError)."""
         candidates: list[ModelRegistrationProjection] = []
 
         selector = ServiceNodeSelector()
@@ -615,7 +615,7 @@ class TestSelectionStrategyExhaustiveness:
         are handled. At runtime, this test confirms no unexpected fallback
         behavior exists.
 
-        Note: LEAST_LOADED raises NotImplementedError (expected behavior).
+        Note: LEAST_LOADED raises RuntimeHostError (expected behavior).
         """
         candidates = create_candidate_list(3)
         selector = ServiceNodeSelector()
@@ -631,8 +631,8 @@ class TestSelectionStrategyExhaustiveness:
                 # Strategy was handled (returned a result)
                 assert result is not None
                 handled_strategies.append(strategy)
-            except NotImplementedError:
-                # LEAST_LOADED raises NotImplementedError - this is expected
+            except RuntimeHostError:
+                # LEAST_LOADED raises RuntimeHostError - this is expected
                 assert strategy == EnumSelectionStrategy.LEAST_LOADED
                 handled_strategies.append(strategy)
             except AssertionError:

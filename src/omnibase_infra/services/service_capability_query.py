@@ -36,7 +36,9 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+from omnibase_core.container import ModelONEXContainer
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import ProtocolConfigurationError
@@ -116,6 +118,7 @@ class ServiceCapabilityQuery:
     def __init__(
         self,
         projection_reader: ProjectionReaderRegistration,
+        container: ModelONEXContainer | None = None,
         node_selector: ServiceNodeSelector | None = None,
     ) -> None:
         """Initialize the capability query service.
@@ -123,6 +126,8 @@ class ServiceCapabilityQuery:
         Args:
             projection_reader: The projection reader for database queries.
                 Must be initialized with an asyncpg connection pool.
+            container: Optional ONEX container for dependency injection.
+                Passed to default ServiceNodeSelector if node_selector is None.
             node_selector: Optional node selector for selection strategies.
                 If None, creates a new ServiceNodeSelector instance.
 
@@ -132,14 +137,15 @@ class ServiceCapabilityQuery:
             >>> query = ServiceCapabilityQuery(reader)
         """
         self._projection_reader = projection_reader
-        self._node_selector = node_selector or ServiceNodeSelector()
+        self._container = container
+        self._node_selector = node_selector or ServiceNodeSelector(container=container)
 
     async def find_nodes_by_capability(
         self,
         capability: str,
         contract_type: str | None = None,
         state: EnumRegistrationState | None = None,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find nodes that provide a specific capability.
 
@@ -154,7 +160,7 @@ class ServiceCapabilityQuery:
             state: Registration state filter. When None (default), filters to
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
-                nodes in other states (e.g., PENDING, INACTIVE).
+                nodes in other states (e.g., PENDING, DEREGISTERED).
             correlation_id: Optional correlation ID for distributed tracing.
                 When provided, included in all log messages for request tracking.
 
@@ -184,7 +190,7 @@ class ServiceCapabilityQuery:
                 "capability": capability,
                 "contract_type": contract_type,
                 "state": str(state),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -192,6 +198,7 @@ class ServiceCapabilityQuery:
         results = await self._projection_reader.get_by_capability_tag(
             tag=capability,
             state=state,
+            correlation_id=correlation_id,
         )
 
         results = self._filter_by_contract_type(results, contract_type)
@@ -201,7 +208,7 @@ class ServiceCapabilityQuery:
             extra={
                 "capability": capability,
                 "result_count": len(results),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -212,7 +219,7 @@ class ServiceCapabilityQuery:
         intent_type: str,
         contract_type: str = "effect",
         state: EnumRegistrationState | None = None,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find effect nodes that handle a specific intent type.
 
@@ -227,7 +234,7 @@ class ServiceCapabilityQuery:
             state: Registration state filter. When None (default), filters to
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
-                nodes in other states (e.g., PENDING, INACTIVE).
+                nodes in other states (e.g., PENDING, DEREGISTERED).
             correlation_id: Optional correlation ID for distributed tracing.
                 When provided, included in all log messages for request tracking.
 
@@ -257,7 +264,7 @@ class ServiceCapabilityQuery:
                 "intent_type": intent_type,
                 "contract_type": contract_type,
                 "state": str(state),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -265,6 +272,7 @@ class ServiceCapabilityQuery:
         results = await self._projection_reader.get_by_intent_type(
             intent_type=intent_type,
             state=state,
+            correlation_id=correlation_id,
         )
 
         results = self._filter_by_contract_type(results, contract_type)
@@ -274,7 +282,7 @@ class ServiceCapabilityQuery:
             extra={
                 "intent_type": intent_type,
                 "result_count": len(results),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -285,7 +293,7 @@ class ServiceCapabilityQuery:
         intent_types: list[str],
         contract_type: str = "effect",
         state: EnumRegistrationState | None = None,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find effect nodes that handle ANY of the specified intent types.
 
@@ -307,7 +315,7 @@ class ServiceCapabilityQuery:
             state: Registration state filter. When None (default), filters to
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
-                nodes in other states (e.g., PENDING, INACTIVE).
+                nodes in other states (e.g., PENDING, DEREGISTERED).
             correlation_id: Optional correlation ID for distributed tracing.
                 When provided, included in all log messages for request tracking.
 
@@ -342,7 +350,7 @@ class ServiceCapabilityQuery:
                 "intent_count": len(intent_types),
                 "contract_type": contract_type,
                 "state": str(state),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -350,6 +358,7 @@ class ServiceCapabilityQuery:
         results = await self._projection_reader.get_by_intent_types(
             intent_types=intent_types,
             state=state,
+            correlation_id=correlation_id,
         )
 
         results = self._filter_by_contract_type(results, contract_type)
@@ -359,7 +368,7 @@ class ServiceCapabilityQuery:
             extra={
                 "intent_types": intent_types,
                 "result_count": len(results),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -370,7 +379,7 @@ class ServiceCapabilityQuery:
         protocol: str,
         contract_type: str | None = None,
         state: EnumRegistrationState | None = None,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find nodes implementing a specific protocol.
 
@@ -385,7 +394,7 @@ class ServiceCapabilityQuery:
             state: Registration state filter. When None (default), filters to
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
-                nodes in other states (e.g., PENDING, INACTIVE).
+                nodes in other states (e.g., PENDING, DEREGISTERED).
             correlation_id: Optional correlation ID for distributed tracing.
                 When provided, included in all log messages for request tracking.
 
@@ -413,7 +422,7 @@ class ServiceCapabilityQuery:
                 "protocol": protocol,
                 "contract_type": contract_type,
                 "state": str(state),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -421,6 +430,7 @@ class ServiceCapabilityQuery:
         results = await self._projection_reader.get_by_protocol(
             protocol_name=protocol,
             state=state,
+            correlation_id=correlation_id,
         )
 
         results = self._filter_by_contract_type(results, contract_type)
@@ -430,7 +440,7 @@ class ServiceCapabilityQuery:
             extra={
                 "protocol": protocol,
                 "result_count": len(results),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -439,7 +449,7 @@ class ServiceCapabilityQuery:
     async def resolve_dependency(
         self,
         dependency_spec: ModelDependencySpec,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
     ) -> ModelRegistrationProjection | None:
         """Resolve a dependency specification to a concrete node.
 
@@ -491,7 +501,7 @@ class ServiceCapabilityQuery:
                 "intent_types": dependency_spec.intent_types,
                 "protocol": dependency_spec.protocol,
                 "selection_strategy": dependency_spec.selection_strategy,
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -538,7 +548,7 @@ class ServiceCapabilityQuery:
                 "Dependency spec has no discovery filters",
                 extra={
                     "dependency_name": dependency_spec.name,
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id),
                 },
             )
             return None
@@ -555,7 +565,7 @@ class ServiceCapabilityQuery:
                 "No candidates found for dependency",
                 extra={
                     "dependency_name": dependency_spec.name,
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id),
                 },
             )
             return None
@@ -568,7 +578,7 @@ class ServiceCapabilityQuery:
             candidates=candidates,
             strategy=strategy,
             selection_key=dependency_spec.name,
-            correlation_id=correlation_id,
+            correlation_id=str(correlation_id),
         )
 
         if selected:
@@ -579,7 +589,7 @@ class ServiceCapabilityQuery:
                     "selected_entity_id": str(selected.entity_id),
                     "total_candidates": len(candidates),
                     "strategy": dependency_spec.selection_strategy,
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id),
                 },
             )
         else:
@@ -587,35 +597,37 @@ class ServiceCapabilityQuery:
                 "No node selected for dependency",
                 extra={
                     "dependency_name": dependency_spec.name,
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id),
                 },
             )
 
         return selected
 
-    def _ensure_correlation_id(self, correlation_id: str | None) -> str:
+    def _ensure_correlation_id(self, correlation_id: UUID | None) -> UUID:
         """Ensure correlation ID is present, generating one if missing.
 
         Args:
-            correlation_id: Optional correlation ID from caller.
+            correlation_id: Optional correlation ID from caller. Accepts UUID
+                or None.
 
         Returns:
-            The provided correlation ID, or a newly generated UUID4 string.
+            The provided correlation ID, or a newly generated UUID4.
         """
-        return correlation_id or str(uuid4())
+        return correlation_id or uuid4()
 
     def _parse_state(
         self,
-        state_value: EnumRegistrationState | str,
-        correlation_id: str | None = None,
+        state_value: EnumRegistrationState | str | None,
+        correlation_id: UUID | None = None,
     ) -> EnumRegistrationState:
         """Parse state value to EnumRegistrationState.
 
-        Accepts either an EnumRegistrationState enum value (returned as-is)
-        or a string representation (parsed to enum).
+        Accepts either an EnumRegistrationState enum value (returned as-is),
+        a string representation (parsed to enum), or None (defaults to ACTIVE).
 
         Args:
-            state_value: State as EnumRegistrationState or string (e.g., "ACTIVE", "active").
+            state_value: State as EnumRegistrationState, string (e.g., "ACTIVE", "active"),
+                or None. When None, defaults to EnumRegistrationState.ACTIVE.
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
@@ -624,6 +636,10 @@ class ServiceCapabilityQuery:
         Raises:
             ProtocolConfigurationError: If state string is not a valid state.
         """
+        # Handle None - default to ACTIVE
+        if state_value is None:
+            return EnumRegistrationState.ACTIVE
+
         # If already an enum, return directly
         if isinstance(state_value, EnumRegistrationState):
             return state_value
@@ -631,7 +647,7 @@ class ServiceCapabilityQuery:
         # Parse string to enum
         try:
             return EnumRegistrationState(state_value.lower())
-        except ValueError:
+        except ValueError as e:
             valid_states = [s.value for s in EnumRegistrationState]
             raise ProtocolConfigurationError(
                 f"Invalid registration state '{state_value}'. "
@@ -641,10 +657,10 @@ class ServiceCapabilityQuery:
                     "valid_states": valid_states,
                     "correlation_id": correlation_id,
                 },
-            )
+            ) from e
 
     def _parse_selection_strategy(
-        self, strategy_str: str, correlation_id: str | None = None
+        self, strategy_str: str, correlation_id: UUID | None = None
     ) -> EnumSelectionStrategy:
         """Parse selection strategy string to enum.
 
@@ -660,7 +676,7 @@ class ServiceCapabilityQuery:
         """
         try:
             return EnumSelectionStrategy(strategy_str.lower())
-        except ValueError:
+        except ValueError as e:
             valid_strategies = [s.value for s in EnumSelectionStrategy]
             raise ProtocolConfigurationError(
                 f"Invalid selection strategy '{strategy_str}'. "
@@ -670,7 +686,7 @@ class ServiceCapabilityQuery:
                     "valid_strategies": valid_strategies,
                     "correlation_id": correlation_id,
                 },
-            )
+            ) from e
 
     def _filter_by_contract_type(
         self,

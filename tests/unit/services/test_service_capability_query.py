@@ -31,7 +31,7 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -203,6 +203,7 @@ class TestFindNodesByCapability:
         mock_projection_reader.get_by_capability_tag.assert_called_once_with(
             tag="consul.registration",
             state=EnumRegistrationState.ACTIVE,
+            correlation_id=ANY,
         )
 
     async def test_find_by_capability_with_custom_state(
@@ -231,6 +232,7 @@ class TestFindNodesByCapability:
         mock_projection_reader.get_by_capability_tag.assert_called_once_with(
             tag="consul.registration",
             state=EnumRegistrationState.PENDING_REGISTRATION,
+            correlation_id=ANY,
         )
 
     async def test_find_by_capability_empty_results(
@@ -318,6 +320,7 @@ class TestFindNodesByIntentType:
         mock_projection_reader.get_by_intent_type.assert_called_once_with(
             intent_type="postgres.query",
             state=EnumRegistrationState.ACTIVE,
+            correlation_id=ANY,
         )
 
     async def test_find_by_intent_type_with_custom_contract_type(
@@ -406,6 +409,7 @@ class TestFindNodesByIntentTypes:
         mock_projection_reader.get_by_intent_types.assert_called_once_with(
             intent_types=["postgres.query", "postgres.delete"],
             state=EnumRegistrationState.ACTIVE,
+            correlation_id=ANY,
         )
 
     async def test_find_by_intent_types_empty_list_returns_empty(
@@ -473,6 +477,7 @@ class TestFindNodesByIntentTypes:
         mock_projection_reader.get_by_intent_types.assert_called_once_with(
             intent_types=["postgres.query"],
             state=EnumRegistrationState.PENDING_REGISTRATION,
+            correlation_id=ANY,
         )
 
     async def test_find_by_intent_types_defaults_to_active_state(
@@ -554,6 +559,7 @@ class TestFindNodesByProtocol:
         mock_projection_reader.get_by_protocol.assert_called_once_with(
             protocol_name="ProtocolEventPublisher",
             state=EnumRegistrationState.ACTIVE,
+            correlation_id=ANY,
         )
 
     async def test_find_by_protocol_empty_results(
@@ -589,6 +595,7 @@ class TestFindNodesByProtocol:
         mock_projection_reader.get_by_protocol.assert_called_once_with(
             protocol_name="ProtocolHealthCheck",
             state=EnumRegistrationState.AWAITING_ACK,
+            correlation_id=ANY,
         )
 
 
