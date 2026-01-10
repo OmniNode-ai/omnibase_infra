@@ -365,7 +365,7 @@ class ProjectorPluginLoader:
         """
         return ModelProjectorValidationError(
             error_type="CONTRACT_PARSE_ERROR",
-            contract_path=str(contract_path),
+            contract_path=self._sanitize_path_for_logging(contract_path),
             message=f"Failed to parse YAML in {self._sanitize_path_for_logging(contract_path)}: {error}",
             remediation_hint="Check YAML syntax and ensure proper indentation",
         )
@@ -395,7 +395,7 @@ class ProjectorPluginLoader:
 
         return ModelProjectorValidationError(
             error_type="CONTRACT_VALIDATION_ERROR",
-            contract_path=str(contract_path),
+            contract_path=self._sanitize_path_for_logging(contract_path),
             message=f"Contract validation failed in {self._sanitize_path_for_logging(contract_path)}: {error_msg} at {field_loc}",
             remediation_hint=f"Check the '{field_loc}' field in the contract",
         )
@@ -416,7 +416,7 @@ class ProjectorPluginLoader:
         """
         return ModelProjectorValidationError(
             error_type="SIZE_LIMIT_ERROR",
-            contract_path=str(contract_path),
+            contract_path=self._sanitize_path_for_logging(contract_path),
             message=(
                 f"Contract file {self._sanitize_path_for_logging(contract_path)} exceeds size limit: "
                 f"{file_size} bytes (max: {MAX_CONTRACT_SIZE} bytes)"
@@ -445,8 +445,8 @@ class ProjectorPluginLoader:
 
         return ModelProjectorValidationError(
             error_type="IO_ERROR",
-            contract_path=str(contract_path),
-            message=f"Failed to read contract file: {error_message}",
+            contract_path=self._sanitize_path_for_logging(contract_path),
+            message=f"Failed to read contract file {self._sanitize_path_for_logging(contract_path)}: {error_message}",
             remediation_hint="Check file permissions and ensure the file exists",
         )
 
@@ -466,7 +466,7 @@ class ProjectorPluginLoader:
         """
         return ModelProjectorValidationError(
             error_type="SECURITY_ERROR",
-            contract_path=str(contract_path),
+            contract_path=self._sanitize_path_for_logging(contract_path),
             message=message,
             remediation_hint="Ensure contract files are within allowed directories and not symlinks to external locations",
         )
@@ -587,7 +587,7 @@ class ProjectorPluginLoader:
 
         logger.debug(
             "Successfully loaded projector contract: %s",
-            contract_path,
+            self._sanitize_path_for_logging(contract_path),
             extra={
                 "contract_path": self._sanitize_path_for_logging(contract_path),
                 "projector_id": contract.projector_id,
@@ -641,7 +641,7 @@ class ProjectorPluginLoader:
 
         logger.debug(
             "Scanning directory for projector contracts: %s",
-            directory,
+            self._sanitize_path_for_logging(directory),
             extra={
                 "directory": self._sanitize_path_for_logging(directory),
                 "contracts_found": len(contract_files),
@@ -685,7 +685,7 @@ class ProjectorPluginLoader:
                 projectors.append(projector)
                 logger.debug(
                     "Successfully parsed contract: %s",
-                    contract_file,
+                    self._sanitize_path_for_logging(contract_file),
                     extra={
                         "contract_file": self._sanitize_path_for_logging(contract_file),
                         "projector_id": contract.projector_id,
@@ -696,7 +696,7 @@ class ProjectorPluginLoader:
                 error = self._create_parse_error(contract_file, e)
                 if not self._graceful_mode:
                     raise ModelOnexError(
-                        f"Failed to parse YAML contract at {contract_file}: {e}",
+                        f"Failed to parse YAML contract at {self._sanitize_path_for_logging(contract_file)}: {e}",
                         error_code=EnumCoreErrorCode.VALIDATION_FAILED,
                     ) from e
                 logger.warning(
@@ -713,7 +713,7 @@ class ProjectorPluginLoader:
                 error = self._create_validation_error(contract_file, e)
                 if not self._graceful_mode:
                     raise ModelOnexError(
-                        f"Contract validation failed at {contract_file}: {e}",
+                        f"Contract validation failed at {self._sanitize_path_for_logging(contract_file)}: {e}",
                         error_code=EnumCoreErrorCode.VALIDATION_FAILED,
                     ) from e
                 logger.warning(
@@ -756,7 +756,7 @@ class ProjectorPluginLoader:
             except OSError as e:
                 if not self._graceful_mode:
                     raise ModelOnexError(
-                        f"Failed to read contract file at {contract_file}: {e}",
+                        f"Failed to read contract file at {self._sanitize_path_for_logging(contract_file)}: {e}",
                         error_code=EnumCoreErrorCode.VALIDATION_FAILED,
                     ) from e
                 error = self._create_io_error(contract_file, e)
@@ -856,7 +856,7 @@ class ProjectorPluginLoader:
                         if concrete_parts:
                             pattern_prefix = Path(*concrete_parts).resolve()
 
-                        if str(pattern_prefix).startswith(str(base_resolved)):
+                        if pattern_prefix.is_relative_to(base_resolved):
                             allowed_base = base_resolved
                             break
                     except (ValueError, OSError):
@@ -917,7 +917,7 @@ class ProjectorPluginLoader:
                     projectors.append(projector)
                     logger.debug(
                         "Successfully loaded contract from pattern: %s",
-                        contract_file,
+                        self._sanitize_path_for_logging(contract_file),
                         extra={
                             "contract_file": self._sanitize_path_for_logging(
                                 contract_file
@@ -930,7 +930,7 @@ class ProjectorPluginLoader:
                     error = self._create_parse_error(contract_file, e)
                     if not self._graceful_mode:
                         raise ModelOnexError(
-                            f"Failed to parse YAML contract at {contract_file}: {e}",
+                            f"Failed to parse YAML contract at {self._sanitize_path_for_logging(contract_file)}: {e}",
                             error_code=EnumCoreErrorCode.VALIDATION_FAILED,
                         ) from e
                     validation_errors.append(error)
@@ -938,7 +938,7 @@ class ProjectorPluginLoader:
                     error = self._create_validation_error(contract_file, e)
                     if not self._graceful_mode:
                         raise ModelOnexError(
-                            f"Contract validation failed at {contract_file}: {e}",
+                            f"Contract validation failed at {self._sanitize_path_for_logging(contract_file)}: {e}",
                             error_code=EnumCoreErrorCode.VALIDATION_FAILED,
                         ) from e
                     validation_errors.append(error)
@@ -960,7 +960,7 @@ class ProjectorPluginLoader:
                 except OSError as e:
                     if not self._graceful_mode:
                         raise ModelOnexError(
-                            f"Failed to read contract file at {contract_file}: {e}",
+                            f"Failed to read contract file at {self._sanitize_path_for_logging(contract_file)}: {e}",
                             error_code=EnumCoreErrorCode.VALIDATION_FAILED,
                         ) from e
                     validation_errors.append(self._create_io_error(contract_file, e))
@@ -1012,7 +1012,7 @@ class ProjectorPluginLoader:
 
         logger.debug(
             "Scanning directory for projector contracts with error collection: %s",
-            directory,
+            self._sanitize_path_for_logging(directory),
             extra={
                 "directory": self._sanitize_path_for_logging(directory),
                 "contracts_found": len(contract_files),
@@ -1049,7 +1049,7 @@ class ProjectorPluginLoader:
                 projectors.append(projector)
                 logger.debug(
                     "Successfully parsed contract: %s",
-                    contract_file,
+                    self._sanitize_path_for_logging(contract_file),
                     extra={
                         "contract_file": self._sanitize_path_for_logging(contract_file),
                         "projector_id": contract.projector_id,
@@ -1103,7 +1103,7 @@ class ProjectorPluginLoader:
                     # For other ModelOnexError types, create a generic validation error
                     error = ModelProjectorValidationError(
                         error_type="ONEX_ERROR",
-                        contract_path=str(contract_file),
+                        contract_path=self._sanitize_path_for_logging(contract_file),
                         message=str(e),
                         remediation_hint="Check the contract file for issues",
                     )
