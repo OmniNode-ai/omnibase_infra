@@ -75,7 +75,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata

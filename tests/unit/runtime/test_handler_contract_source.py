@@ -56,18 +56,10 @@ except ImportError:
             ...
 
 
-try:
-    from omnibase_spi.protocols.handlers.types import ProtocolHandlerDescriptor
-except ImportError:
-    # Fallback: import from our local protocol definition when omnibase_spi
-    # does not export ProtocolHandlerDescriptor. This is intentional for:
-    # 1. Backwards compatibility with older omnibase_spi versions
-    # 2. Running tests in isolation without full SPI installation
-    # The alias ensures the rest of the test file uses a consistent name.
-    from omnibase_infra.runtime.protocol_contract_descriptor import (
-        ProtocolContractDescriptor as ProtocolHandlerDescriptor,
-    )
-
+# Import the actual model returned by HandlerContractSource
+from omnibase_infra.models.handlers.model_handler_descriptor import (
+    ModelHandlerDescriptor,
+)
 
 # =============================================================================
 # Constants for Test Contracts
@@ -342,9 +334,9 @@ class TestHandlerContractSourceDiscovery:
             f"Expected 0 validation errors in strict mode, got {len(result.validation_errors)}"
         )
 
-        # Verify each descriptor is a ProtocolHandlerDescriptor
+        # Verify each descriptor is a ModelHandlerDescriptor
         for descriptor in result.descriptors:
-            assert isinstance(descriptor, ProtocolHandlerDescriptor)
+            assert isinstance(descriptor, ModelHandlerDescriptor)
 
         # Verify the expected handler_ids were discovered
         discovered_ids = {d.handler_id for d in result.descriptors}

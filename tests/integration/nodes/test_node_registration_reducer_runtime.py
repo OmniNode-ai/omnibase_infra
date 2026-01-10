@@ -184,8 +184,9 @@ class TestIntentEmissionOnIntrospectionEvent:
             f"Expected 2 intents (consul + postgres), got {len(output.intents)}"
         )
 
-        # Verify intent types
-        intent_types = {intent.intent_type for intent in output.intents}
+        # Verify intent types via payload.intent_type (two-layer architecture)
+        # Outer intent_type is always "extension", routing key is in payload
+        intent_types = {intent.payload.intent_type for intent in output.intents}
         assert "consul.register" in intent_types
         assert "postgres.upsert_registration" in intent_types
 
@@ -215,9 +216,9 @@ class TestIntentEmissionOnIntrospectionEvent:
         # Act
         output = reducer.reduce(initial_state, event)
 
-        # Find consul intent
+        # Find consul intent via payload.intent_type
         consul_intents = [
-            i for i in output.intents if i.intent_type == "consul.register"
+            i for i in output.intents if i.payload.intent_type == "consul.register"
         ]
         assert len(consul_intents) == 1
         consul_intent = consul_intents[0]
@@ -257,9 +258,11 @@ class TestIntentEmissionOnIntrospectionEvent:
         # Act
         output = reducer.reduce(initial_state, event)
 
-        # Find postgres intent
+        # Find postgres intent via payload.intent_type
         postgres_intents = [
-            i for i in output.intents if i.intent_type == "postgres.upsert_registration"
+            i
+            for i in output.intents
+            if i.payload.intent_type == "postgres.upsert_registration"
         ]
         assert len(postgres_intents) == 1
         postgres_intent = postgres_intents[0]
@@ -293,11 +296,11 @@ class TestIntentEmissionOnIntrospectionEvent:
         # Act
         output = reducer.reduce(initial_state, event)
 
-        # Verify targets
+        # Verify targets via payload.intent_type
         for intent in output.intents:
-            if intent.intent_type == "consul.register":
+            if intent.payload.intent_type == "consul.register":
                 assert intent.target == "consul://service/onex-reducer"
-            elif intent.intent_type == "postgres.upsert_registration":
+            elif intent.payload.intent_type == "postgres.upsert_registration":
                 assert intent.target == f"postgres://node_registrations/{node_id}"
 
 
@@ -921,9 +924,9 @@ class TestEndToEndWithMockedEffects:
         assert pending_state.status == "pending"
         assert len(output.intents) == 2
 
-        # Step 2: Execute intents against stubs
+        # Step 2: Execute intents against stubs (route via payload.intent_type)
         for intent in output.intents:
-            if intent.intent_type == "consul.register":
+            if intent.payload.intent_type == "consul.register":
                 payload = intent.payload
                 assert isinstance(payload, ModelPayloadConsulRegister)
                 result = await stub_consul_client.register_service(
@@ -934,7 +937,7 @@ class TestEndToEndWithMockedEffects:
                 )
                 assert result.success is True
 
-            elif intent.intent_type == "postgres.upsert_registration":
+            elif intent.payload.intent_type == "postgres.upsert_registration":
                 payload = intent.payload
                 assert isinstance(payload, ModelPayloadPostgresUpsertRegistration)
                 result = await stub_postgres_adapter.upsert(
@@ -982,12 +985,12 @@ class TestEndToEndWithMockedEffects:
         output = reducer.reduce(initial_state, event)
         pending_state = output.result
 
-        # Execute intents
+        # Execute intents (route via payload.intent_type)
         consul_result = None
         postgres_result = None
 
         for intent in output.intents:
-            if intent.intent_type == "consul.register":
+            if intent.payload.intent_type == "consul.register":
                 payload = intent.payload
                 assert isinstance(payload, ModelPayloadConsulRegister)
                 consul_result = await stub_consul_client.register_service(
@@ -996,7 +999,7 @@ class TestEndToEndWithMockedEffects:
                     tags=payload.tags,
                 )
 
-            elif intent.intent_type == "postgres.upsert_registration":
+            elif intent.payload.intent_type == "postgres.upsert_registration":
                 payload = intent.payload
                 assert isinstance(payload, ModelPayloadPostgresUpsertRegistration)
                 postgres_result = await stub_postgres_adapter.upsert(
@@ -1044,9 +1047,9 @@ class TestEndToEndWithMockedEffects:
         output = reducer.reduce(initial_state, event)
         pending_state = output.result
 
-        # Execute intents - both fail
+        # Execute intents - both fail (route via payload.intent_type)
         for intent in output.intents:
-            if intent.intent_type == "consul.register":
+            if intent.payload.intent_type == "consul.register":
                 payload = intent.payload
                 assert isinstance(payload, ModelPayloadConsulRegister)
                 result = await stub_consul_client.register_service(
@@ -1056,7 +1059,7 @@ class TestEndToEndWithMockedEffects:
                 )
                 assert result.success is False
 
-            elif intent.intent_type == "postgres.upsert_registration":
+            elif intent.payload.intent_type == "postgres.upsert_registration":
                 payload = intent.payload
                 assert isinstance(payload, ModelPayloadPostgresUpsertRegistration)
                 result = await stub_postgres_adapter.upsert(
@@ -1099,9 +1102,9 @@ class TestEndToEndWithMockedEffects:
         output1 = reducer.reduce(initial_state, event1)
         pending_state = output1.result
 
-        # Execute and fail
+        # Execute and fail (route via payload.intent_type)
         for intent in output1.intents:
-            if intent.intent_type == "consul.register":
+            if intent.payload.intent_type == "consul.register":
                 payload = intent.payload
                 assert isinstance(payload, ModelPayloadConsulRegister)
                 await stub_consul_client.register_service(
@@ -1131,9 +1134,9 @@ class TestEndToEndWithMockedEffects:
         assert output2.result.status == "pending"
         assert len(output2.intents) == 2
 
-        # Execute successfully
+        # Execute successfully (route via payload.intent_type)
         for intent in output2.intents:
-            if intent.intent_type == "consul.register":
+            if intent.payload.intent_type == "consul.register":
                 payload = intent.payload
                 assert isinstance(payload, ModelPayloadConsulRegister)
                 result = await stub_consul_client.register_service(
@@ -1257,8 +1260,8 @@ class TestNodeTypeValidation:
         with pytest.raises(ValidationError) as exc_info:
             ModelNodeIntrospectionEvent(
                 node_id=uuid_gen.next(),
-                node_type="invalid_type",  # Invalid - not in Literal
-                node_version="1.0.0",
+                node_type="invalid_type",  # Invalid - not in EnumNodeKind
+                node_version=ModelSemVer(major=1, minor=0, patch=0),
                 correlation_id=uuid_gen.next(),
                 endpoints={},
                 timestamp=datetime.now(UTC),

@@ -34,9 +34,7 @@ from typing import Literal, TypedDict
 
 # Third-party imports
 import yaml
-from omnibase_core.models.common.model_validation_metadata import (
-    ModelValidationMetadata,
-)
+from omnibase_core.models.common import ModelValidationMetadata
 from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
 from omnibase_core.validation import (
     CircularImportValidator,
@@ -47,6 +45,7 @@ from omnibase_core.validation import (
     validate_contracts,
     validate_patterns,
     validate_union_usage_file,
+    validate_yaml_file,
 )
 
 # Module-level initialization (AFTER all imports)
@@ -673,6 +672,58 @@ def _create_filtered_result(
         summary=base_summary,
         details=base_details,
         metadata=new_metadata,
+    )
+
+
+def validate_infra_contract_deep(
+    contract_path: str | Path,
+) -> ModelContractValidationResult:
+    """
+    Perform deep contract validation for ONEX compliance.
+
+    Uses validate_yaml_file() from omnibase_core for comprehensive contract
+    checking suitable for autonomous code generation.
+
+    Args:
+        contract_path: Path to the contract YAML file.
+
+    Returns:
+        ModelContractValidationResult with validation status, score, and any errors.
+
+    Raises:
+        OnexError: If YAML validation fails with an unexpected error.
+    """
+    from uuid import uuid4
+
+    from omnibase_core.enums import EnumCoreErrorCode
+    from omnibase_core.errors import OnexError
+
+    correlation_id = uuid4()
+
+    # Use the validation API from omnibase_core 0.6.x directly
+    try:
+        result = validate_yaml_file(Path(contract_path))
+    except Exception as e:
+        raise OnexError(
+            message=f"YAML validation failed for {contract_path}: {e}",
+            error_code=EnumCoreErrorCode.VALIDATION_ERROR,
+            correlation_id=correlation_id,
+            contract_path=str(contract_path),
+        ) from e
+
+    # Return a ModelContractValidationResult
+    # The API may return a different type, so we adapt it
+    if isinstance(result, ModelContractValidationResult):
+        return result
+
+    # If result is a different type, wrap it in ModelContractValidationResult
+    # Default to passed=False for unknown result types to avoid silently masking failures
+    # Check 'passed' first, then 'is_valid' as fallback (some validators use is_valid)
+    return ModelContractValidationResult(
+        passed=getattr(result, "passed", getattr(result, "is_valid", False)),
+        score=getattr(result, "score", 0.0),
+        errors=getattr(result, "errors", []),
+        warnings=getattr(result, "warnings", []),
     )
 
 

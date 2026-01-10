@@ -130,11 +130,17 @@ class TestA0PurityGate:
             f"got {len(output.intents)}"
         )
 
-        # Verify intent types
-        intent_types = {intent.intent_type for intent in output.intents}
-        assert "consul.register" in intent_types, "Missing consul.register intent"
+        # Verify intent types - extension intents with specific intent_type
+        intent_types = {
+            intent.payload.intent_type
+            for intent in output.intents
+            if intent.intent_type == "extension"
+        }
+        assert "consul.register" in intent_types, (
+            "Missing consul.register extension intent"
+        )
         assert "postgres.upsert_registration" in intent_types, (
-            "Missing postgres.upsert_registration intent"
+            "Missing postgres.upsert_registration extension intent"
         )
 
     async def test_a0_purity_gate_effect_performs_io(

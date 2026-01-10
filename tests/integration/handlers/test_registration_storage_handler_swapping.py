@@ -55,11 +55,9 @@ from omnibase_infra.handlers.registration_storage.protocol_registration_storage_
 )
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelDeleteResult,
+    ModelRegistrationRecord,
     ModelStorageHealthCheckResult,
     ModelStorageQuery,
-)
-from omnibase_infra.nodes.node_registration_storage_effect.models.model_registration_record import (
-    ModelRegistrationRecord,
 )
 
 if TYPE_CHECKING:

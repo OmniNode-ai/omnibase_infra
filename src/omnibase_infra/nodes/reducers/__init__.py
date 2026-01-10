@@ -16,10 +16,8 @@ Available Reducers:
   Located at: nodes/node_registration_reducer/node.py
   Uses contract.yaml for FSM state transitions.
 
-- RegistrationReducer: Pure function reducer (legacy interface).
+- RegistrationReducer: Pure function reducer implementation.
   Uses ModelReducerOutput from omnibase_core.
-  NOTE: This is maintained for backwards compatibility. New code should
-  use NodeRegistrationReducer from nodes.node_registration_reducer.
 
 Related:
     - OMN-1104: Refactor RegistrationReducer to be fully declarative

@@ -92,7 +92,7 @@ See Also:
 
 from __future__ import annotations
 
-from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+from omnibase_core.enums import EnumCoreErrorCode
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Sentinel values for "not set" state
