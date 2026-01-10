@@ -141,4 +141,61 @@ class TestModelDependencySpecFilterValidation:
         assert spec.has_any_filter()
 
 
+class TestModelDependencySpecIntentTypesNormalization:
+    """Test intent_types normalization in ModelDependencySpec."""
+
+    def test_empty_intent_types_normalized_to_none(self) -> None:
+        """Test that empty intent_types list is normalized to None.
+
+        This ensures consistent behavior: both None and [] mean "no intent filter".
+        """
+        # When capability is provided, empty intent_types should be normalized
+        spec = ModelDependencySpec(
+            name="test_dep",
+            type="node",
+            capability="test.capability",
+            intent_types=[],  # Empty list
+        )
+        # Empty list should be normalized to None
+        assert spec.intent_types is None
+        assert not spec.has_intent_filter()
+
+    def test_none_intent_types_stays_none(self) -> None:
+        """Test that None intent_types stays None."""
+        spec = ModelDependencySpec(
+            name="test_dep",
+            type="node",
+            capability="test.capability",
+            intent_types=None,
+        )
+        assert spec.intent_types is None
+        assert not spec.has_intent_filter()
+
+    def test_non_empty_intent_types_preserved(self) -> None:
+        """Test that non-empty intent_types list is preserved."""
+        spec = ModelDependencySpec(
+            name="test_dep",
+            type="node",
+            intent_types=["test.intent"],
+        )
+        assert spec.intent_types == ["test.intent"]
+        assert spec.has_intent_filter()
+
+    def test_empty_intent_types_alone_fails_validation(self) -> None:
+        """Test that empty intent_types alone fails validation.
+
+        Since empty list is normalized to None, a spec with only intent_types=[]
+        has no filters and should fail validation.
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            ModelDependencySpec(
+                name="test_dep",
+                type="node",
+                intent_types=[],  # Empty list, normalized to None
+            )
+
+        error_str = str(exc_info.value)
+        assert "must have at least one discovery filter" in error_str
+
+
 __all__: list[str] = []

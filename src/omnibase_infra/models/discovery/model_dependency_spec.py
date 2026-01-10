@@ -167,6 +167,24 @@ class ModelDependencySpec(BaseModel):
         description="Human-readable description of the dependency",
     )
 
+    @field_validator("intent_types", mode="before")
+    @classmethod
+    def normalize_empty_intent_types(cls, v: list[str] | None) -> list[str] | None:
+        """Normalize empty intent_types list to None.
+
+        This ensures consistent behavior: both None and [] mean "no intent filter".
+        The has_intent_filter() method can then simply check for None.
+
+        Args:
+            v: The intent_types value (list or None).
+
+        Returns:
+            None if v is None or empty list, otherwise the original list.
+        """
+        if v is not None and len(v) == 0:
+            return None
+        return v
+
     @field_validator("selection_strategy")
     @classmethod
     def validate_selection_strategy_implemented(cls, v: str) -> str:
@@ -233,8 +251,12 @@ class ModelDependencySpec(BaseModel):
 
         Returns:
             True if intent_types are specified, False otherwise.
+
+        Note:
+            Empty lists are normalized to None by the normalize_empty_intent_types
+            validator, so we only need to check for None.
         """
-        return self.intent_types is not None and len(self.intent_types) > 0
+        return self.intent_types is not None
 
     def has_protocol_filter(self) -> bool:
         """Check if protocol-based discovery is specified.

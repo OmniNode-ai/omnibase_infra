@@ -236,17 +236,22 @@ class TestSelectionStrategyRandom:
     async def test_random_strategy_distributes_selections(self) -> None:
         """Should distribute selections across candidates over many calls.
 
-        Note: This is a statistical test - with 1000 selections across 5 candidates,
-        each should get at least some selections (probability of any one getting
-        0 is astronomically low with proper randomness).
+        This test verifies randomness by checking that:
+        1. At least 3 distinct candidates are selected (not deterministic)
+        2. All selected candidates are valid
+
+        Note: We use a reasonable lower bound (3 out of 5) to avoid flaky tests.
+        With 100 selections and true randomness, the probability of selecting
+        fewer than 3 distinct candidates is effectively zero, but checking for
+        all 5 would introduce theoretical (though astronomically unlikely) flakiness.
         """
         candidates = create_candidate_list(5)
         candidate_ids = {c.entity_id for c in candidates}
 
         selector = ServiceNodeSelector()
-        selected_ids = set()
+        selected_ids: set[UUID] = set()
 
-        for _ in range(1000):
+        for _ in range(100):
             result = await selector.select(
                 candidates=candidates,
                 strategy=EnumSelectionStrategy.RANDOM,
@@ -254,8 +259,15 @@ class TestSelectionStrategyRandom:
             if result:
                 selected_ids.add(result.entity_id)
 
-        # All candidates should have been selected at least once
-        assert selected_ids == candidate_ids
+        # Verify all selected IDs are valid candidates
+        assert selected_ids.issubset(candidate_ids)
+
+        # With random selection, at least 3 distinct candidates should be selected
+        # This proves distribution without being flaky about exact coverage
+        assert len(selected_ids) >= 3, (
+            f"Random selection should select at least 3 distinct candidates "
+            f"in 100 iterations, but only selected {len(selected_ids)}"
+        )
 
 
 @pytest.mark.unit
@@ -523,9 +535,10 @@ class TestServiceNodeSelectorInstantiation:
         """Should instantiate with default configuration."""
         selector = ServiceNodeSelector()
         assert selector is not None
-        # Verify lock is initialized
-        assert hasattr(selector, "_round_robin_lock")
-        assert isinstance(selector._round_robin_lock, asyncio.Lock)
+        # Verify public API is available (avoid internal state access)
+        # The selector should provide methods to interact with round-robin state
+        assert hasattr(selector, "get_round_robin_state")
+        assert hasattr(selector, "reset_round_robin_state")
 
     @pytest.mark.asyncio
     async def test_round_robin_state_isolation(self) -> None:

@@ -17,10 +17,10 @@ Related:
     - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
 
 Expected Behavior:
-    HandlerContractSource implements ProtocolHandlerSource from omnibase_spi.
+    HandlerContractSource implements ProtocolContractSource from omnibase_infra.
     It discovers handler contracts from the filesystem by recursively scanning
     configured paths for handler_contract.yaml files, parsing them, and
-    transforming them into ProtocolHandlerDescriptor instances.
+    transforming them into ModelHandlerDescriptor instances.
 
     The source_type property returns "CONTRACT" as per the protocol.
 """
@@ -31,20 +31,21 @@ from pathlib import Path
 
 import pytest
 
-# Protocol imports from omnibase_infra - these are the actual protocols that
-# HandlerContractSource implements. The naming difference exists because:
-# - omnibase_spi has ProtocolHandlerSource/ProtocolHandlerDescriptor with different attributes
-# - omnibase_infra has ProtocolContractSource/ProtocolContractDescriptor that match the implementation
-# We use the local protocols and alias them to the names used in tests for clarity.
+# Protocol imports from omnibase_infra - HandlerContractSource implements
+# ProtocolContractSource, NOT omnibase_spi's ProtocolHandlerSource.
+#
+# Why local protocols are used instead of SPI protocols:
+#   - omnibase_spi.ProtocolHandlerSource has sync list_handler_descriptors()
+#     returning tuple[ModelHandlerDescriptor, ...]
+#   - ProtocolContractSource has async discover_handlers() returning
+#     ModelContractDiscoveryResult (with validation error collection)
+#
+# The local protocols provide the async discovery pattern with graceful error
+# handling that the implementation requires.
 from omnibase_infra.models.handlers.model_handler_descriptor import (
     ModelHandlerDescriptor,
 )
-from omnibase_infra.runtime.protocol_contract_descriptor import (
-    ProtocolContractDescriptor as ProtocolHandlerDescriptor,
-)
-from omnibase_infra.runtime.protocol_contract_source import (
-    ProtocolContractSource as ProtocolHandlerSource,
-)
+from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
 # =============================================================================
 # Constants for Test Contracts
@@ -197,7 +198,7 @@ class TestHandlerContractSourceImport:
     """Tests for HandlerContractSource import and instantiation.
 
     These tests verify the class can be imported from the expected location
-    and implements the ProtocolHandlerSource protocol.
+    and implements the ProtocolContractSource protocol.
 
     RED Phase: These tests will FAIL with ImportError until implementation.
     """
@@ -220,14 +221,13 @@ class TestHandlerContractSourceImport:
     def test_handler_contract_source_implements_protocol(
         self, single_contract_path: Path
     ) -> None:
-        """HandlerContractSource should implement ProtocolHandlerSource.
+        """HandlerContractSource should implement ProtocolContractSource.
 
         RED Phase: This test WILL FAIL until HandlerContractSource is implemented.
 
-        The implementation must satisfy the ProtocolHandlerSource protocol from
-        omnibase_spi with:
+        The implementation must satisfy ProtocolContractSource with:
         - source_type property returning "CONTRACT"
-        - async discover_handlers() method returning list[ProtocolHandlerDescriptor]
+        - async discover_handlers() method returning ModelContractDiscoveryResult
         """
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
@@ -241,7 +241,7 @@ class TestHandlerContractSourceImport:
         assert callable(source.discover_handlers)
 
         # Runtime checkable protocol verification
-        assert isinstance(source, ProtocolHandlerSource)
+        assert isinstance(source, ProtocolContractSource)
 
     def test_handler_contract_source_type_is_contract(
         self, single_contract_path: Path
@@ -272,7 +272,7 @@ class TestHandlerContractSourceDiscovery:
 
     These tests verify that HandlerContractSource correctly discovers
     handler_contract.yaml files in nested directory structures and transforms
-    them into ProtocolHandlerDescriptor instances.
+    them into ModelHandlerDescriptor instances.
 
     RED Phase: These tests will FAIL until implementation exists.
     """
@@ -530,7 +530,7 @@ class TestHandlerContractSourceErrors:
 class TestHandlerContractSourceIdempotency:
     """Tests for idempotency of discover_handlers().
 
-    Per ProtocolHandlerSource contract, discover_handlers() may be called
+    Per ProtocolContractSource contract, discover_handlers() may be called
     multiple times and should return consistent results.
 
     RED Phase: These tests will FAIL until implementation exists.

@@ -185,7 +185,7 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
             state: Registration state filter. When None (default), filters to
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
-                nodes in other states (e.g., PENDING, DEREGISTERED).
+                nodes in other states (e.g., PENDING_REGISTRATION, LIVENESS_EXPIRED).
             correlation_id: Optional correlation ID for distributed tracing.
                 When provided, included in all log messages for request tracking.
 
@@ -281,7 +281,7 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
             state: Registration state filter. When None (default), filters to
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
-                nodes in other states (e.g., PENDING, DEREGISTERED).
+                nodes in other states (e.g., PENDING_REGISTRATION, LIVENESS_EXPIRED).
             correlation_id: Optional correlation ID for distributed tracing.
                 When provided, included in all log messages for request tracking.
 
@@ -384,7 +384,7 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
             state: Registration state filter. When None (default), filters to
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
-                nodes in other states (e.g., PENDING, DEREGISTERED).
+                nodes in other states (e.g., PENDING_REGISTRATION, LIVENESS_EXPIRED).
             correlation_id: Optional correlation ID for distributed tracing.
                 When provided, included in all log messages for request tracking.
 
@@ -485,7 +485,7 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
             state: Registration state filter. When None (default), filters to
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
-                nodes in other states (e.g., PENDING, DEREGISTERED).
+                nodes in other states (e.g., PENDING_REGISTRATION, LIVENESS_EXPIRED).
             correlation_id: Optional correlation ID for distributed tracing.
                 When provided, included in all log messages for request tracking.
 
