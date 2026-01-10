@@ -96,6 +96,58 @@ def _is_requirements_file(file_path: Path) -> bool:
     return any(pattern in file_name for pattern in excluded_patterns)
 
 
+def _find_first_unquoted_delimiter(line: str) -> tuple[str | None, int]:
+    """Find the first triple-quote delimiter that starts a string on this line.
+
+    This function finds the position of the first occurring triple-quote
+    delimiter (either ''' or \"\"\") that would start a string, considering
+    that one delimiter type may be inside a string of the other type.
+
+    Args:
+        line: The line of code to analyze.
+
+    Returns:
+        Tuple of (delimiter, position) where delimiter is the first triple-quote
+        found, or (None, -1) if no triple-quote is found.
+    """
+    # Find positions of both delimiter types
+    pos_double = line.find('"""')
+    pos_single = line.find("'''")
+
+    # Neither found
+    if pos_double == -1 and pos_single == -1:
+        return None, -1
+
+    # Only one type found
+    if pos_double == -1:
+        return "'''", pos_single
+    if pos_single == -1:
+        return '"""', pos_double
+
+    # Both found - return the one that appears first
+    # (the first one is the "outer" delimiter, the other is inside the string)
+    if pos_double < pos_single:
+        return '"""', pos_double
+    return "'''", pos_single
+
+
+def _is_balanced_string_line(line: str, delimiter: str) -> bool:
+    """Check if a line contains a balanced (single-line) string.
+
+    A line is balanced if it contains an even number of the delimiter,
+    meaning every opened string is closed on the same line.
+
+    Args:
+        line: The line of code to check.
+        delimiter: The triple-quote delimiter to check for.
+
+    Returns:
+        True if the line contains balanced strings (or no strings).
+    """
+    count = line.count(delimiter)
+    return count % 2 == 0
+
+
 def _scan_file_for_imports(
     file_path: Path,
     forbidden_patterns: list[str],
@@ -103,7 +155,8 @@ def _scan_file_for_imports(
     """Scan a Python file for forbidden import patterns.
 
     Detects both `import X` and `from X import Y` patterns.
-    Properly handles multiline docstrings (both triple-quoted variants).
+    Properly handles multiline docstrings (both triple-quoted variants),
+    including edge cases where one delimiter type appears inside the other.
 
     Args:
         file_path: Path to the Python file to scan.
@@ -144,46 +197,42 @@ def _scan_file_for_imports(
                 continue
 
             # Handle multiline string tracking
-            # Check for docstring delimiters (""" or ''')
-            # Also handles raw strings (r""", r''') since we look for the quotes
-            for delimiter in ('"""', "'''"):
-                count = line.count(delimiter)
-                if count > 0:
-                    if not in_multiline_string:
-                        # Not currently in a multiline string
-                        if count >= 2:
-                            # Single-line string (opens and closes on same line)
-                            # Don't change state, but skip this line for import checking
-                            pass
-                        else:
-                            # Opening a multiline string (odd count = 1)
-                            in_multiline_string = True
-                            multiline_delimiter = delimiter
-                    elif delimiter == multiline_delimiter:
-                        # We're in a multiline string with this delimiter
-                        # Odd count means we're closing it
-                        if count % 2 == 1:
-                            in_multiline_string = False
-                            multiline_delimiter = None
+            if not in_multiline_string:
+                # Not in a multiline string - check if one starts on this line
+                first_delim, _ = _find_first_unquoted_delimiter(line)
+                if first_delim is not None:
+                    # Check if this delimiter is balanced (single-line string)
+                    if not _is_balanced_string_line(line, first_delim):
+                        # Unbalanced - we're entering a multiline string
+                        in_multiline_string = True
+                        multiline_delimiter = first_delim
+                    # else: balanced single-line string, continue to check imports
+            else:
+                # Already in a multiline string - check for closing delimiter
+                assert multiline_delimiter is not None
+                count = line.count(multiline_delimiter)
+                if count > 0 and count % 2 == 1:
+                    # Odd count of our delimiter means we're closing it
+                    in_multiline_string = False
+                    multiline_delimiter = None
 
             # Skip lines inside multiline strings (docstrings)
             if in_multiline_string:
                 continue
 
-            # Skip lines that are single-line docstrings
+            # Skip lines that contain only single-line docstrings
             # (check after multiline handling to avoid double-processing)
             skip_line = False
-            if stripped.startswith(('"""', "'''", 'r"""', "r'''")):
-                # Check if it's a complete single-line string
-                for delimiter in ('"""', "'''"):
-                    if delimiter in stripped:
-                        # Count occurrences after the first one
-                        first_pos = stripped.find(delimiter)
-                        rest = stripped[first_pos + 3 :]
-                        if delimiter in rest:
-                            # Single-line docstring, skip this line
-                            skip_line = True
-                            break
+            # Handle string prefixes: r, f, b, rf, fr, br, rb
+            prefix_pattern = r"^[rRfFbB]{0,2}"
+            for delimiter in ('"""', "'''"):
+                # Check if line starts with optional prefix + delimiter
+                if re.match(prefix_pattern + re.escape(delimiter), stripped):
+                    # Count occurrences of this delimiter
+                    if _is_balanced_string_line(stripped, delimiter):
+                        # Balanced means it's a single-line docstring
+                        skip_line = True
+                        break
             if skip_line:
                 continue
 
@@ -396,3 +445,339 @@ class TestArchitectureCompliance:
             )
 
             pytest.fail("\n".join(report_lines))
+
+
+class TestHelperFunctions:
+    """Unit tests for helper functions used in architecture compliance checks.
+
+    These tests verify the correct behavior of individual helper functions
+    in isolation, using pytest fixtures and tmp_path for file-based tests.
+    """
+
+    # --- Tests for _is_requirements_file ---
+
+    def test_is_requirements_file_detects_requirements_txt(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify _is_requirements_file detects requirements.txt files."""
+        requirements_file = tmp_path / "requirements.txt"
+        requirements_file.touch()
+        assert _is_requirements_file(requirements_file) is True
+
+    def test_is_requirements_file_detects_requirements_dev_txt(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify _is_requirements_file detects requirements-dev.txt variants."""
+        requirements_file = tmp_path / "requirements-dev.txt"
+        requirements_file.touch()
+        assert _is_requirements_file(requirements_file) is True
+
+    def test_is_requirements_file_detects_setup_py(self, tmp_path: Path) -> None:
+        """Verify _is_requirements_file detects setup.py files."""
+        setup_file = tmp_path / "setup.py"
+        setup_file.touch()
+        assert _is_requirements_file(setup_file) is True
+
+    def test_is_requirements_file_detects_setup_cfg(self, tmp_path: Path) -> None:
+        """Verify _is_requirements_file detects setup.cfg files."""
+        setup_cfg_file = tmp_path / "setup.cfg"
+        setup_cfg_file.touch()
+        assert _is_requirements_file(setup_cfg_file) is True
+
+    def test_is_requirements_file_detects_pyproject_toml(self, tmp_path: Path) -> None:
+        """Verify _is_requirements_file detects pyproject.toml files."""
+        pyproject_file = tmp_path / "pyproject.toml"
+        pyproject_file.touch()
+        assert _is_requirements_file(pyproject_file) is True
+
+    def test_is_requirements_file_returns_false_for_regular_py(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify _is_requirements_file returns False for regular Python files."""
+        regular_file = tmp_path / "my_module.py"
+        regular_file.touch()
+        assert _is_requirements_file(regular_file) is False
+
+    def test_is_requirements_file_returns_false_for_test_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify _is_requirements_file returns False for test files."""
+        test_file = tmp_path / "test_something.py"
+        test_file.touch()
+        assert _is_requirements_file(test_file) is False
+
+    # --- Tests for _find_python_files ---
+
+    def test_find_python_files_returns_empty_for_nonexistent_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify _find_python_files returns empty list for nonexistent directory."""
+        nonexistent = tmp_path / "does_not_exist"
+        result = _find_python_files(nonexistent)
+        assert result == []
+
+    def test_find_python_files_finds_py_files(self, tmp_path: Path) -> None:
+        """Verify _find_python_files finds .py files in directory."""
+        py_file = tmp_path / "module.py"
+        py_file.touch()
+        txt_file = tmp_path / "readme.txt"
+        txt_file.touch()
+
+        result = _find_python_files(tmp_path)
+        assert len(result) == 1
+        assert result[0].name == "module.py"
+
+    def test_find_python_files_finds_nested_files(self, tmp_path: Path) -> None:
+        """Verify _find_python_files finds .py files in nested directories."""
+        nested_dir = tmp_path / "subpackage"
+        nested_dir.mkdir()
+        nested_file = nested_dir / "nested_module.py"
+        nested_file.touch()
+        root_file = tmp_path / "root_module.py"
+        root_file.touch()
+
+        result = _find_python_files(tmp_path)
+        assert len(result) == 2
+        names = {p.name for p in result}
+        assert names == {"root_module.py", "nested_module.py"}
+
+    # --- Tests for _scan_file_for_imports ---
+
+    def test_scan_file_for_imports_detects_simple_import(self, tmp_path: Path) -> None:
+        """Verify _scan_file_for_imports detects 'import kafka' style imports."""
+        test_file = tmp_path / "test_module.py"
+        test_file.write_text("import kafka\n")
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].import_pattern == "kafka"
+        assert violations[0].line_number == 1
+
+    def test_scan_file_for_imports_detects_from_import(self, tmp_path: Path) -> None:
+        """Verify _scan_file_for_imports detects 'from kafka import X' imports."""
+        test_file = tmp_path / "test_module.py"
+        test_file.write_text("from kafka.producer import KafkaProducer\n")
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].import_pattern == "kafka"
+        assert violations[0].line_number == 1
+
+    def test_scan_file_for_imports_detects_submodule_import(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify _scan_file_for_imports detects 'import kafka.producer' imports."""
+        test_file = tmp_path / "test_module.py"
+        test_file.write_text("import kafka.producer\n")
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].import_pattern == "kafka"
+
+    def test_scan_file_for_imports_skips_comments(self, tmp_path: Path) -> None:
+        """Verify _scan_file_for_imports skips commented-out imports."""
+        test_file = tmp_path / "test_module.py"
+        test_file.write_text("# import kafka\n# from kafka import Producer\n")
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_skips_inline_comments(self, tmp_path: Path) -> None:
+        """Verify _scan_file_for_imports handles lines starting with comments."""
+        test_file = tmp_path / "test_module.py"
+        content = """\
+# This file used to use kafka
+# import kafka  # old import
+x = 1
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_skips_docstrings(self, tmp_path: Path) -> None:
+        """Verify _scan_file_for_imports skips imports mentioned in docstrings."""
+        test_file = tmp_path / "test_module.py"
+        content = '''\
+"""
+This module provides kafka integration.
+Example:
+    import kafka
+    from kafka import Producer
+"""
+
+def my_func():
+    pass
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_skips_single_quote_docstrings(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify _scan_file_for_imports skips single-quoted docstrings."""
+        test_file = tmp_path / "test_module.py"
+        content = """\
+'''
+import kafka
+from kafka import Producer
+'''
+
+def my_func():
+    pass
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_detects_real_import_after_docstring(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify _scan_file_for_imports detects imports after docstrings end."""
+        test_file = tmp_path / "test_module.py"
+        content = '''\
+"""Module docstring."""
+
+import kafka
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        # Line 1: docstring, Line 2: empty, Line 3: import kafka
+        assert violations[0].line_number == 3
+
+    def test_scan_file_for_imports_handles_unreadable_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify _scan_file_for_imports handles files that cannot be read."""
+        nonexistent = tmp_path / "does_not_exist.py"
+        violations = _scan_file_for_imports(nonexistent, ["kafka"])
+        assert violations == []
+
+    def test_scan_file_for_imports_no_violations_when_pattern_not_found(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify _scan_file_for_imports returns empty list when no violations."""
+        test_file = tmp_path / "test_module.py"
+        test_file.write_text("import os\nimport sys\n")
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert violations == []
+
+    # --- Tests for _format_violation_report ---
+
+    def test_format_violation_report_includes_file_path(self, tmp_path: Path) -> None:
+        """Verify _format_violation_report includes file path in output."""
+        test_file = tmp_path / "my_module.py"
+        violation = ArchitectureViolation(
+            file_path=test_file,
+            line_number=10,
+            line_content="import kafka",
+            import_pattern="kafka",
+        )
+
+        report = _format_violation_report([violation], "kafka", "omnibase_core")
+        assert str(test_file) in report
+        assert ":10:" in report
+
+    def test_format_violation_report_includes_pattern(self) -> None:
+        """Verify _format_violation_report includes the import pattern."""
+        violation = ArchitectureViolation(
+            file_path=Path("/fake/path.py"),
+            line_number=1,
+            line_content="import httpx",
+            import_pattern="httpx",
+        )
+
+        report = _format_violation_report([violation], "httpx", "omnibase_core")
+        assert "'httpx'" in report
+        assert "ARCHITECTURE VIOLATION" in report
+
+    def test_format_violation_report_includes_package_name(self) -> None:
+        """Verify _format_violation_report includes the package name."""
+        violation = ArchitectureViolation(
+            file_path=Path("/fake/path.py"),
+            line_number=1,
+            line_content="import kafka",
+            import_pattern="kafka",
+        )
+
+        report = _format_violation_report([violation], "kafka", "my_package")
+        assert "my_package" in report
+        assert "must not contain infrastructure dependencies" in report
+
+    def test_format_violation_report_multiple_violations(self) -> None:
+        """Verify _format_violation_report handles multiple violations."""
+        violations = [
+            ArchitectureViolation(
+                file_path=Path("/fake/module1.py"),
+                line_number=5,
+                line_content="import kafka",
+                import_pattern="kafka",
+            ),
+            ArchitectureViolation(
+                file_path=Path("/fake/module2.py"),
+                line_number=10,
+                line_content="from kafka import Producer",
+                import_pattern="kafka",
+            ),
+        ]
+
+        report = _format_violation_report(violations, "kafka", "omnibase_core")
+        assert "module1.py" in report
+        assert "module2.py" in report
+        assert ":5:" in report
+        assert ":10:" in report
+
+    # --- Tests for _get_package_source_path ---
+
+    def test_get_package_source_path_returns_none_for_nonexistent(self) -> None:
+        """Verify _get_package_source_path returns None for nonexistent packages."""
+        result = _get_package_source_path("nonexistent_package_xyz_12345")
+        assert result is None
+
+    def test_get_package_source_path_finds_installed_package(self) -> None:
+        """Verify _get_package_source_path finds an installed package."""
+        # Use a standard library package that's guaranteed to exist
+        result = _get_package_source_path("os")
+        # os is a builtin, should return None or a path
+        # Let's try with pathlib which is definitely a package
+        result = _get_package_source_path("pathlib")
+        # pathlib may also be builtin, try pytest which we know is installed
+        result = _get_package_source_path("pytest")
+        assert result is not None
+        assert result.exists()
+
+    # --- Tests for _scan_package_for_forbidden_imports ---
+
+    def test_scan_package_for_forbidden_imports_raises_for_unknown_package(
+        self,
+    ) -> None:
+        """Verify _scan_package_for_forbidden_imports raises for unknown package."""
+        with pytest.raises(ValueError, match="Could not locate package"):
+            _scan_package_for_forbidden_imports(
+                "nonexistent_package_xyz_12345", ["kafka"]
+            )
+
+    # --- Tests for ArchitectureViolation ---
+
+    def test_architecture_violation_str_format(self, tmp_path: Path) -> None:
+        """Verify ArchitectureViolation __str__ format is correct."""
+        test_file = tmp_path / "module.py"
+        violation = ArchitectureViolation(
+            file_path=test_file,
+            line_number=42,
+            line_content="  import kafka  ",
+            import_pattern="kafka",
+        )
+
+        result = str(violation)
+        assert str(test_file) in result
+        assert ":42:" in result
+        assert "import kafka" in result
+        # Verify content is stripped
+        assert "  import kafka  " not in result

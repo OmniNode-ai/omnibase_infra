@@ -27,10 +27,7 @@ Note:
 """
 
 from omnibase_infra.enums import EnumCircuitState, EnumRetryErrorCategory
-from omnibase_infra.mixins.mixin_async_circuit_breaker import (
-    MixinAsyncCircuitBreaker,
-    ModelCircuitBreakerConfig,
-)
+from omnibase_infra.mixins.mixin_async_circuit_breaker import MixinAsyncCircuitBreaker
 from omnibase_infra.mixins.mixin_envelope_extraction import MixinEnvelopeExtraction
 from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
 from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
@@ -38,6 +35,7 @@ from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
     ProtocolCircuitBreakerAware,
 )
 from omnibase_infra.models import ModelRetryErrorClassification
+from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 from omnibase_infra.types.typed_dict import TypedDictPerformanceMetricsCache
 
 __all__: list[str] = [

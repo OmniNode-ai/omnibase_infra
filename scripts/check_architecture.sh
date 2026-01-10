@@ -21,18 +21,31 @@ set -euo pipefail
 # =============================================================================
 
 # Forbidden imports that indicate layer violation
+# NOTE: All imports listed here will cause a hard failure if detected.
+# For known issues that are tracked in Linear, see KNOWN_ISSUES below.
+# The Python tests in tests/ci/test_architecture_compliance.py use xfail
+# markers for these known issues, but this script enforces the invariant.
 FORBIDDEN_IMPORTS=(
     "kafka"
     "httpx"
     "asyncpg"
-    "aiohttp"
-    "redis"
+    "aiohttp"      # Known issue: OMN-1015 (xfail in Python tests)
+    "redis"        # Known issue: OMN-1295 (xfail in Python tests)
     "psycopg"
     "psycopg2"
     "consul"
     "hvac"
     "aiokafka"
     "confluent_kafka"
+)
+
+# Known issues with Linear ticket references
+# These are included in FORBIDDEN_IMPORTS for completeness, but have
+# corresponding xfail markers in the Python test suite.
+# Format: "import_name|ticket_id|description"
+KNOWN_ISSUES=(
+    "aiohttp|OMN-1015|async HTTP client usage in core - needs migration to infra"
+    "redis|OMN-1295|Redis client usage in core - needs migration to infra"
 )
 
 # File patterns to exclude from checking
@@ -147,14 +160,28 @@ FORBIDDEN IMPORTS:
     - kafka           (Kafka client library - belongs in infra layer)
     - httpx           (HTTP client library - belongs in infra layer)
     - asyncpg         (PostgreSQL async driver - belongs in infra layer)
-    - aiohttp         (Async HTTP client - belongs in infra layer)
-    - redis           (Redis client library - belongs in infra layer)
+    - aiohttp         (Async HTTP client - belongs in infra layer) [*]
+    - redis           (Redis client library - belongs in infra layer) [*]
     - psycopg         (PostgreSQL driver - belongs in infra layer)
     - psycopg2        (PostgreSQL driver - belongs in infra layer)
     - consul          (Consul client library - belongs in infra layer)
     - hvac            (Vault client library - belongs in infra layer)
     - aiokafka        (Async Kafka client - belongs in infra layer)
     - confluent_kafka (Confluent Kafka client - belongs in infra layer)
+
+    [*] Known issues with tracking tickets - see KNOWN ISSUES below.
+
+KNOWN ISSUES:
+    Some imports have known violations that are tracked in Linear tickets.
+    The Python tests (tests/ci/test_architecture_compliance.py) use xfail
+    markers for these, but this script enforces the invariant strictly.
+
+    - aiohttp: OMN-1015 - async HTTP client needs migration to infra
+    - redis:   OMN-1295 - Redis client needs migration to infra
+
+    These violations will still cause the script to fail (exit code 1),
+    but they are documented for visibility. Fix them by addressing the
+    corresponding Linear tickets.
 
 EXIT CODES:
     0   All checks passed - no violations found

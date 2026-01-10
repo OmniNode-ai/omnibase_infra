@@ -88,6 +88,18 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
+      # Architecture layer validation - core/infra separation
+      # Verifies omnibase_core has no infrastructure dependencies (kafka, httpx, etc.)
+      # NOTE: Runs in 'manual' stage because it checks omnibase_core (external package).
+      # Known issues are tracked in Linear (OMN-1015 aiohttp, OMN-1295 redis).
+      # Run manually: pre-commit run onex-validate-architecture-layers --hook-stage manual
+      - id: onex-validate-architecture-layers
+        name: ONEX Architecture Layer Validation
+        entry: poetry run python scripts/validate.py architecture_layers
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [manual]
       # Contract validation - YAML contracts
       - id: onex-validate-contracts
         name: ONEX Contract Validation
@@ -156,4 +168,4 @@ ci:
   autoupdate_schedule: weekly
   submodules: false
   # Skip ONEX validation hooks in CI (they require omnibase_core)
-  skip: [onex-validate-architecture, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types]
+  skip: [onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types]

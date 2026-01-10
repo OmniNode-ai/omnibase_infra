@@ -8,6 +8,7 @@ Can be used standalone or as part of pre-commit hooks.
 Usage:
     python scripts/validate.py [--verbose] [--quick]
     python scripts/validate.py architecture
+    python scripts/validate.py architecture_layers
     python scripts/validate.py contracts
     python scripts/validate.py patterns
     python scripts/validate.py unions
@@ -48,6 +49,64 @@ def run_architecture(verbose: bool = False) -> bool:
     except ImportError as e:
         print(f"Skipping architecture validation: {e}")
         return True
+
+
+def run_architecture_layers(verbose: bool = False) -> bool:
+    """Run architecture layer validation.
+
+    Verifies that omnibase_core does not contain infrastructure dependencies
+    (kafka, httpx, asyncpg, etc.) to maintain proper layer separation.
+
+    This wraps scripts/check_architecture.sh for consistent validation interface.
+    """
+    import subprocess
+
+    script_path = Path(__file__).parent / "check_architecture.sh"
+
+    if not script_path.exists():
+        print(f"Architecture Layers: SKIP (script not found: {script_path})")
+        return True
+
+    try:
+        # Build command with appropriate flags
+        cmd = ["bash", str(script_path), "--no-color"]
+        if verbose:
+            cmd.append("--verbose")
+
+        result = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,  # 120 second timeout for large codebases
+        )
+
+        # Print output
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+
+        passed = result.returncode == 0
+
+        if not passed and result.returncode == 2:
+            # Exit code 2 means script error (path not found, etc.)
+            # This is not a violation, just skip
+            if verbose:
+                print("Architecture Layers: SKIP (omnibase_core not found)")
+            return True
+
+        return passed
+
+    except subprocess.TimeoutExpired:
+        print("Architecture Layers: ERROR (timeout after 120s)")
+        return False
+    except FileNotFoundError:
+        print("Architecture Layers: SKIP (bash not available)")
+        return True
+    except Exception as e:
+        print(f"Architecture Layers: ERROR ({type(e).__name__}: {e})")
+        return False
 
 
 def run_contracts(verbose: bool = False) -> bool:
@@ -374,6 +433,7 @@ def main() -> int:
         choices=[
             "all",
             "architecture",
+            "architecture_layers",
             "contracts",
             "patterns",
             "unions",
@@ -391,6 +451,7 @@ def main() -> int:
 
     validator_map = {
         "architecture": run_architecture,
+        "architecture_layers": run_architecture_layers,
         "contracts": run_contracts,
         "patterns": run_patterns,
         "unions": run_unions,
