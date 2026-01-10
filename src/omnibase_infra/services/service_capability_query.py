@@ -9,9 +9,17 @@ declare what they need, not who provides it.
 Core Principle: "I'm interested in what you do, not what you are."
 
 Coroutine Safety:
-    This service is stateless (except for node selector round-robin state)
-    and delegates database operations to ProjectionReaderRegistration, which
-    handles coroutine safety and circuit breaker protection.
+    This service uses MixinAsyncCircuitBreaker for coroutine-safe circuit
+    breaker protection. The circuit breaker provides defense-in-depth on top
+    of the underlying ProjectionReaderRegistration's circuit breaker.
+
+Circuit Breaker:
+    This service implements its own circuit breaker as a defense-in-depth layer.
+    While ProjectionReaderRegistration also has circuit breakers, having them
+    at the service layer provides:
+    - Service-level failure isolation
+    - Independent failure thresholds tuned for query patterns
+    - Protection against issues beyond database connectivity
 
 Related Tickets:
     - OMN-1135: ServiceCapabilityQuery for capability-based discovery
@@ -40,8 +48,9 @@ from uuid import UUID, uuid4
 
 from omnibase_core.container import ModelONEXContainer
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.discovery.model_dependency_spec import ModelDependencySpec
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.services.enum_selection_strategy import EnumSelectionStrategy
@@ -55,7 +64,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ServiceCapabilityQuery:
+class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
     """Queries registry for nodes by capability, not by name.
 
     Core Principle: "I'm interested in what you do, not what you are."
@@ -77,9 +86,17 @@ class ServiceCapabilityQuery:
         2. Queries the registry for matching nodes
         3. Applies the selection strategy to choose one node
 
+    Circuit Breaker:
+        This service implements MixinAsyncCircuitBreaker for defense-in-depth
+        protection. While ProjectionReaderRegistration has its own circuit
+        breakers, the service-level circuit breaker provides:
+        - Independent failure isolation at the service layer
+        - Service-specific failure thresholds (5 failures, 60s reset)
+        - Protection against issues beyond database connectivity
+
     Design Notes:
         - All queries delegate to ProjectionReaderRegistration
-        - Circuit breaker protection is inherited from the reader
+        - Service-level circuit breaker provides defense-in-depth
         - Node selection is handled by ServiceNodeSelector
         - Round-robin state is maintained per-service instance
 
@@ -136,6 +153,14 @@ class ServiceCapabilityQuery:
             >>> reader = ProjectionReaderRegistration(pool)
             >>> query = ServiceCapabilityQuery(reader)
         """
+        # Initialize circuit breaker for defense-in-depth protection
+        self._init_circuit_breaker(
+            threshold=5,
+            reset_timeout=60.0,
+            service_name="capability-query",
+            transport_type=EnumInfraTransportType.DATABASE,
+        )
+
         self._projection_reader = projection_reader
         self._container = container
         self._node_selector = node_selector or ServiceNodeSelector(container=container)
@@ -184,6 +209,14 @@ class ServiceCapabilityQuery:
         """
         correlation_id = self._ensure_correlation_id(correlation_id)
         state = state or EnumRegistrationState.ACTIVE
+
+        # Check circuit breaker before operation
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(
+                operation="find_nodes_by_capability",
+                correlation_id=correlation_id,
+            )
+
         logger.debug(
             "Finding nodes by capability",
             extra={
@@ -194,25 +227,39 @@ class ServiceCapabilityQuery:
             },
         )
 
-        # Query by capability tag
-        results = await self._projection_reader.get_by_capability_tag(
-            tag=capability,
-            state=state,
-            correlation_id=correlation_id,
-        )
+        try:
+            # Query by capability tag
+            results = await self._projection_reader.get_by_capability_tag(
+                tag=capability,
+                state=state,
+                correlation_id=correlation_id,
+            )
 
-        results = self._filter_by_contract_type(results, contract_type)
+            results = self._filter_by_contract_type(results, contract_type)
 
-        logger.debug(
-            "Capability query completed",
-            extra={
-                "capability": capability,
-                "result_count": len(results),
-                "correlation_id": str(correlation_id),
-            },
-        )
+            # Record success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
 
-        return results
+            logger.debug(
+                "Capability query completed",
+                extra={
+                    "capability": capability,
+                    "result_count": len(results),
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+            return results
+
+        except Exception:
+            # Record failure
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="find_nodes_by_capability",
+                    correlation_id=correlation_id,
+                )
+            raise
 
     async def find_nodes_by_intent_type(
         self,
@@ -258,6 +305,14 @@ class ServiceCapabilityQuery:
         """
         correlation_id = self._ensure_correlation_id(correlation_id)
         state = state or EnumRegistrationState.ACTIVE
+
+        # Check circuit breaker before operation
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(
+                operation="find_nodes_by_intent_type",
+                correlation_id=correlation_id,
+            )
+
         logger.debug(
             "Finding nodes by intent type",
             extra={
@@ -268,25 +323,39 @@ class ServiceCapabilityQuery:
             },
         )
 
-        # Query by intent type
-        results = await self._projection_reader.get_by_intent_type(
-            intent_type=intent_type,
-            state=state,
-            correlation_id=correlation_id,
-        )
+        try:
+            # Query by intent type
+            results = await self._projection_reader.get_by_intent_type(
+                intent_type=intent_type,
+                state=state,
+                correlation_id=correlation_id,
+            )
 
-        results = self._filter_by_contract_type(results, contract_type)
+            results = self._filter_by_contract_type(results, contract_type)
 
-        logger.debug(
-            "Intent type query completed",
-            extra={
-                "intent_type": intent_type,
-                "result_count": len(results),
-                "correlation_id": str(correlation_id),
-            },
-        )
+            # Record success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
 
-        return results
+            logger.debug(
+                "Intent type query completed",
+                extra={
+                    "intent_type": intent_type,
+                    "result_count": len(results),
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+            return results
+
+        except Exception:
+            # Record failure
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="find_nodes_by_intent_type",
+                    correlation_id=correlation_id,
+                )
+            raise
 
     async def find_nodes_by_intent_types(
         self,
@@ -343,6 +412,14 @@ class ServiceCapabilityQuery:
             return []
 
         state = state or EnumRegistrationState.ACTIVE
+
+        # Check circuit breaker before operation
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(
+                operation="find_nodes_by_intent_types",
+                correlation_id=correlation_id,
+            )
+
         logger.debug(
             "Finding nodes by intent types (bulk)",
             extra={
@@ -354,25 +431,39 @@ class ServiceCapabilityQuery:
             },
         )
 
-        # Query by intent types (bulk)
-        results = await self._projection_reader.get_by_intent_types(
-            intent_types=intent_types,
-            state=state,
-            correlation_id=correlation_id,
-        )
+        try:
+            # Query by intent types (bulk)
+            results = await self._projection_reader.get_by_intent_types(
+                intent_types=intent_types,
+                state=state,
+                correlation_id=correlation_id,
+            )
 
-        results = self._filter_by_contract_type(results, contract_type)
+            results = self._filter_by_contract_type(results, contract_type)
 
-        logger.debug(
-            "Intent types query completed (bulk)",
-            extra={
-                "intent_types": intent_types,
-                "result_count": len(results),
-                "correlation_id": str(correlation_id),
-            },
-        )
+            # Record success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
 
-        return results
+            logger.debug(
+                "Intent types query completed (bulk)",
+                extra={
+                    "intent_types": intent_types,
+                    "result_count": len(results),
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+            return results
+
+        except Exception:
+            # Record failure
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="find_nodes_by_intent_types",
+                    correlation_id=correlation_id,
+                )
+            raise
 
     async def find_nodes_by_protocol(
         self,
@@ -416,6 +507,14 @@ class ServiceCapabilityQuery:
         """
         correlation_id = self._ensure_correlation_id(correlation_id)
         state = state or EnumRegistrationState.ACTIVE
+
+        # Check circuit breaker before operation
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(
+                operation="find_nodes_by_protocol",
+                correlation_id=correlation_id,
+            )
+
         logger.debug(
             "Finding nodes by protocol",
             extra={
@@ -426,25 +525,39 @@ class ServiceCapabilityQuery:
             },
         )
 
-        # Query by protocol
-        results = await self._projection_reader.get_by_protocol(
-            protocol_name=protocol,
-            state=state,
-            correlation_id=correlation_id,
-        )
+        try:
+            # Query by protocol
+            results = await self._projection_reader.get_by_protocol(
+                protocol_name=protocol,
+                state=state,
+                correlation_id=correlation_id,
+            )
 
-        results = self._filter_by_contract_type(results, contract_type)
+            results = self._filter_by_contract_type(results, contract_type)
 
-        logger.debug(
-            "Protocol query completed",
-            extra={
-                "protocol": protocol,
-                "result_count": len(results),
-                "correlation_id": str(correlation_id),
-            },
-        )
+            # Record success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
 
-        return results
+            logger.debug(
+                "Protocol query completed",
+                extra={
+                    "protocol": protocol,
+                    "result_count": len(results),
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+            return results
+
+        except Exception:
+            # Record failure
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="find_nodes_by_protocol",
+                    correlation_id=correlation_id,
+                )
+            raise
 
     async def resolve_dependency(
         self,

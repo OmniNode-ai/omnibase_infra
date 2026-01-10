@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Never
 from uuid import UUID, uuid4
 
 from omnibase_core.container import ModelONEXContainer
@@ -123,12 +123,13 @@ class ServiceNodeSelector:
             Selected node, or None if candidates is empty.
 
         Raises:
-            RuntimeHostError: If LEAST_LOADED strategy is requested.
-            AssertionError: If strategy is not a valid EnumSelectionStrategy value.
-                This should never happen with properly typed code, as all enum
-                values are explicitly handled. The check exists for runtime
-                safety and to ensure exhaustive handling if new enum values
-                are added.
+            RuntimeHostError: If LEAST_LOADED strategy is requested, or if an
+                unhandled strategy value is encountered. The latter should never
+                happen with properly typed code, as all enum values are explicitly
+                handled. The check exists for runtime safety and to ensure
+                exhaustive handling if new enum values are added. When raised for
+                unhandled strategies, includes full context (correlation_id,
+                strategy, selection_key, candidates_count) for debugging.
 
         Example:
             >>> selector = ServiceNodeSelector()
@@ -186,7 +187,17 @@ class ServiceNodeSelector:
             # Type-safe exhaustiveness check: ensures all enum values are handled.
             # If a new EnumSelectionStrategy value is added, the type checker will
             # flag this as an error because strategy won't narrow to Never.
-            assert_never(strategy)
+            _: Never = strategy
+            raise RuntimeHostError(
+                f"Unhandled selection strategy: {strategy.value}",
+                context=ModelInfraErrorContext(
+                    operation="select",
+                    correlation_id=UUID(correlation_id),
+                ),
+                strategy=strategy.value,
+                selection_key=selection_key,
+                candidates_count=len(candidates),
+            )
 
     def _select_first(
         self,
@@ -263,6 +274,20 @@ class ServiceNodeSelector:
             # Get current index, default to -1 (so first selection is index 0)
             last_index = self._round_robin_state.get(key, -1)
             next_index = (last_index + 1) % len(candidates)
+
+            # Defensive bounds check - ensure index is valid for current candidates list
+            # This protects against edge cases where candidates list size changed
+            if next_index >= len(candidates):
+                next_index = 0
+                logger.warning(
+                    "Round-robin index out of bounds, resetting to 0",
+                    extra={
+                        "selection_key": key,
+                        "computed_index": (last_index + 1) % len(candidates),
+                        "candidates_count": len(candidates),
+                        "correlation_id": correlation_id,
+                    },
+                )
 
             # Update state
             self._round_robin_state[key] = next_index

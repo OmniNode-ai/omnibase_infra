@@ -21,7 +21,7 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
@@ -219,6 +219,7 @@ class TestResolutionFlowWithCapability:
         mock_projection_reader.get_by_capability_tag.assert_called_once_with(
             tag="postgres.storage",
             state=EnumRegistrationState.ACTIVE,
+            correlation_id=ANY,  # Auto-generated UUID
         )
 
     async def test_resolve_multiple_nodes_by_capability_selects_one(
@@ -356,6 +357,7 @@ class TestResolutionFlowWithProtocol:
         mock_projection_reader.get_by_protocol.assert_called_once_with(
             protocol_name="ProtocolEventPublisher",
             state=EnumRegistrationState.ACTIVE,
+            correlation_id=ANY,  # Auto-generated UUID
         )
 
 
