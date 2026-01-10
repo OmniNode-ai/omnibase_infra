@@ -39,6 +39,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SELECTION_KEY: str = "_default"
+"""Default key for round-robin state tracking when no selection_key is provided."""
+
 
 class ServiceNodeSelector:
     """Selects a node from candidates using various strategies.
@@ -235,7 +238,7 @@ class ServiceNodeSelector:
         Returns:
             Next candidate in the round-robin sequence.
         """
-        key = selection_key or "_default"
+        key = selection_key or DEFAULT_SELECTION_KEY
 
         async with self._round_robin_lock:
             # Get current index, default to -1 (so first selection is index 0)
@@ -245,7 +248,8 @@ class ServiceNodeSelector:
             # Update state
             self._round_robin_state[key] = next_index
 
-        selected = candidates[next_index]
+            # Access candidate inside lock for transaction safety
+            selected = candidates[next_index]
         logger.debug(
             "Selected round-robin candidate",
             extra={
@@ -301,4 +305,4 @@ class ServiceNodeSelector:
             return dict(self._round_robin_state)
 
 
-__all__: list[str] = ["ServiceNodeSelector"]
+__all__: list[str] = ["DEFAULT_SELECTION_KEY", "ServiceNodeSelector"]

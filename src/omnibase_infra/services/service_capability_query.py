@@ -104,6 +104,17 @@ class ServiceCapabilityQuery:
         InfraTimeoutError: If query times out
         InfraUnavailableError: If circuit breaker is open
         RuntimeHostError: For other database errors
+
+    Note:
+        Dependency Injection Pattern: This service is a leaf infrastructure
+        service that receives its dependencies directly via constructor
+        parameters rather than resolving them from a container. Unlike
+        orchestrators that use ``container.resolve()`` to obtain services
+        dynamically, leaf services like this one are instantiated with
+        concrete dependencies (projection_reader, node_selector) and are
+        themselves resolved by higher-level components. The optional
+        container parameter is reserved for future extension if this
+        service needs to resolve additional services at runtime.
     """
 
     def __init__(
@@ -120,7 +131,19 @@ class ServiceCapabilityQuery:
             node_selector: Optional node selector for selection strategies.
                 If None, creates a new ServiceNodeSelector instance.
             container: Optional ONEX dependency injection container.
-                When provided, enables container-based service resolution.
+                Currently reserved for future extension. This service is a
+                leaf infrastructure service that receives its dependencies
+                directly (projection_reader, node_selector) rather than
+                resolving them from a container. The optional container
+                parameter allows future versions to resolve additional
+                services if needed, while maintaining backward compatibility
+                with current instantiation patterns.
+
+                Unlike orchestrators that use ``container.resolve()`` to
+                obtain services dynamically, infrastructure services like
+                this one are typically instantiated directly with their
+                concrete dependencies by higher-level components that own
+                the container.
 
         Example:
             >>> pool = await asyncpg.create_pool(dsn)
@@ -191,9 +214,7 @@ class ServiceCapabilityQuery:
             state=state,
         )
 
-        # Filter by contract_type if specified
-        if contract_type is not None:
-            results = [r for r in results if r.contract_type == contract_type]
+        results = self._filter_by_contract_type(results, contract_type)
 
         logger.debug(
             "Capability query completed",
@@ -266,9 +287,7 @@ class ServiceCapabilityQuery:
             state=state,
         )
 
-        # Filter by contract_type if specified
-        if contract_type is not None:
-            results = [r for r in results if r.contract_type == contract_type]
+        results = self._filter_by_contract_type(results, contract_type)
 
         logger.debug(
             "Intent type query completed",
@@ -353,9 +372,7 @@ class ServiceCapabilityQuery:
             state=state,
         )
 
-        # Filter by contract_type if specified
-        if contract_type is not None:
-            results = [r for r in results if r.contract_type == contract_type]
+        results = self._filter_by_contract_type(results, contract_type)
 
         logger.debug(
             "Intent types query completed (bulk)",
@@ -426,9 +443,7 @@ class ServiceCapabilityQuery:
             state=state,
         )
 
-        # Filter by contract_type if specified
-        if contract_type is not None:
-            results = [r for r in results if r.contract_type == contract_type]
+        results = self._filter_by_contract_type(results, contract_type)
 
         logger.debug(
             "Protocol query completed",
@@ -610,12 +625,17 @@ class ServiceCapabilityQuery:
         return correlation_id or str(uuid4())
 
     def _parse_state(
-        self, state_str: str, correlation_id: str | None = None
+        self,
+        state_value: EnumRegistrationState | str,
+        correlation_id: str | None = None,
     ) -> EnumRegistrationState:
-        """Parse state string to EnumRegistrationState.
+        """Parse state value to EnumRegistrationState.
+
+        Accepts either an EnumRegistrationState enum value (returned as-is)
+        or a string representation (parsed to enum).
 
         Args:
-            state_str: State string (e.g., "ACTIVE", "active").
+            state_value: State as EnumRegistrationState or string (e.g., "ACTIVE", "active").
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
@@ -624,15 +644,20 @@ class ServiceCapabilityQuery:
         Raises:
             ProtocolConfigurationError: If state string is not a valid state.
         """
+        # If already an enum, return directly
+        if isinstance(state_value, EnumRegistrationState):
+            return state_value
+
+        # Parse string to enum
         try:
-            return EnumRegistrationState(state_str.lower())
+            return EnumRegistrationState(state_value.lower())
         except ValueError:
             valid_states = [s.value for s in EnumRegistrationState]
             raise ProtocolConfigurationError(
-                f"Invalid registration state '{state_str}'. "
+                f"Invalid registration state '{state_value}'. "
                 f"Valid states are: {valid_states}",
                 details={
-                    "state": state_str,
+                    "state": state_value,
                     "valid_states": valid_states,
                     "correlation_id": correlation_id,
                 },
@@ -666,6 +691,26 @@ class ServiceCapabilityQuery:
                     "correlation_id": correlation_id,
                 },
             )
+
+    def _filter_by_contract_type(
+        self,
+        results: list[ModelRegistrationProjection],
+        contract_type: str | None,
+    ) -> list[ModelRegistrationProjection]:
+        """Filter results by contract type if specified.
+
+        Args:
+            results: List of registration projections to filter.
+            contract_type: Optional contract type to filter by. If None, returns
+                results unchanged.
+
+        Returns:
+            Filtered list of projections matching the contract type, or original
+            list if contract_type is None.
+        """
+        if contract_type is None:
+            return results
+        return [r for r in results if r.contract_type == contract_type]
 
 
 __all__: list[str] = ["ServiceCapabilityQuery"]
