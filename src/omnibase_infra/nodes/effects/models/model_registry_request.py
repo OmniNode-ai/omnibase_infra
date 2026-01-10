@@ -27,8 +27,8 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 

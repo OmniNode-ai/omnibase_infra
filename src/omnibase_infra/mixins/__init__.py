@@ -28,6 +28,7 @@ Note:
 
 from omnibase_infra.enums import EnumCircuitState, EnumRetryErrorCategory
 from omnibase_infra.mixins.mixin_async_circuit_breaker import MixinAsyncCircuitBreaker
+from omnibase_infra.mixins.mixin_dict_like_accessors import MixinDictLikeAccessors
 from omnibase_infra.mixins.mixin_envelope_extraction import MixinEnvelopeExtraction
 from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
 from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
@@ -42,6 +43,7 @@ __all__: list[str] = [
     "EnumCircuitState",
     "EnumRetryErrorCategory",
     "MixinAsyncCircuitBreaker",
+    "MixinDictLikeAccessors",
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
     "MixinRetryExecution",

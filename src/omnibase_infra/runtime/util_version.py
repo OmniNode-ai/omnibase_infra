@@ -14,7 +14,7 @@ ModelPolicyKey, and ModelPolicyRegistration.
 
 from __future__ import annotations
 
-from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_core.models.primitives import ModelSemVer
 
 
 def normalize_version(version: str) -> str:

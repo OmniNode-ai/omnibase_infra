@@ -863,9 +863,11 @@ class TestDeterminismGates:
                 assert intent_payload.get("correlation_id") == first_intent_payload.get(
                     "correlation_id"
                 ), f"Thread {i}, intent {j}: correlation_id mismatch"
-                assert intent_payload.get("service_id") == first_intent_payload.get(
-                    "service_id"
-                ), f"Thread {i}, intent {j}: service_id mismatch"
+                # For Consul intents, compare service_id; skip for Postgres intents
+                if intent_payload.get("service_id") is not None:
+                    assert intent_payload.get("service_id") == first_intent_payload.get(
+                        "service_id"
+                    ), f"Thread {i}, intent {j}: service_id mismatch"
 
 
 # =============================================================================
@@ -1495,7 +1497,9 @@ class TestSecurityGates:
         """
         violations: list[str] = []
 
-        for key, value in data.items():
+        for key, value in (
+            data.model_dump() if hasattr(data, "model_dump") else data
+        ).items():
             current_path = f"{path}.{key}" if path else key
             key_lower = str(key).lower()
 

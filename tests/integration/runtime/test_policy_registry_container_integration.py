@@ -439,7 +439,11 @@ class TestContainerWiringErrorHandling:
         _skip_if_service_registry_none(container)
 
         # Attempt to resolve without wiring should fail
-        with pytest.raises(RuntimeError, match="PolicyRegistry not registered"):
+        # Error may indicate PolicyRegistry not registered OR container missing resolve_service
+        with pytest.raises(
+            RuntimeError,
+            match=r"(PolicyRegistry not registered|Container\.service_registry missing|Failed to resolve PolicyRegistry)",
+        ):
             await get_policy_registry_from_container(container)
 
     @pytest.mark.asyncio

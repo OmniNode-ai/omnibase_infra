@@ -93,6 +93,7 @@ Security Design (Intentional Fail-Open Architecture):
 
 from omnibase_core.validation import (
     CircularImportValidator,
+    ModelModuleImportResult,
     validate_all,
     validate_architecture,
     validate_contracts,
@@ -229,6 +230,7 @@ __all__: list[str] = [
     "ModelContractViolation",  # Contract violation model
     "ModelDetectedNodeInfo",  # Detected node info
     "ModelExecutionShapeValidationResult",  # Execution shape result
+    "ModelModuleImportResult",  # Module import result (from omnibase_core)
     # Validators
     "AnyTypeDetector",  # Any type AST detector (OMN-1276)
     "ChainPropagationValidator",  # Chain propagation validator (OMN-951)

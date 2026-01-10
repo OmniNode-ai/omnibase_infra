@@ -11,8 +11,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
-from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
+from omnibase_infra.enums import EnumNodeArchetype, EnumNodeOutputType
 
 
 class ModelExecutionShapeRule(BaseModel):

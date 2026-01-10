@@ -36,12 +36,12 @@ import logging
 import re
 from pathlib import Path
 
-from omnibase_infra.enums.enum_execution_shape_violation import (
+from omnibase_infra.enums import (
     EnumExecutionShapeViolation,
+    EnumMessageCategory,
+    EnumNodeArchetype,
+    EnumNodeOutputType,
 )
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
-from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )

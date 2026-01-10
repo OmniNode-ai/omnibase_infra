@@ -21,7 +21,7 @@ Related:
 
 from typing import Protocol, runtime_checkable
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.models.registry.model_message_type_entry import (
     ModelMessageTypeEntry,
 )

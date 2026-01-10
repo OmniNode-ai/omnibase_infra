@@ -388,19 +388,9 @@ class TestA5NormalizedDeterminism:
             assert intent1.intent_type == intent2.intent_type
             assert intent1.target == intent2.target
 
-            # Normalize and compare payloads (convert Pydantic models to dicts first)
-            payload1_dict = (
-                intent1.payload.model_dump(mode="json")
-                if hasattr(intent1.payload, "model_dump")
-                else dict(intent1.payload)
-            )
-            payload2_dict = (
-                intent2.payload.model_dump(mode="json")
-                if hasattr(intent2.payload, "model_dump")
-                else dict(intent2.payload)
-            )
-            payload1 = _normalize_dict(payload1_dict)
-            payload2 = _normalize_dict(payload2_dict)
+            # Normalize and compare payloads (use model_dump for typed payload models)
+            payload1 = _normalize_dict(intent1.payload.model_dump(mode="json"))
+            payload2 = _normalize_dict(intent2.payload.model_dump(mode="json"))
             assert payload1 == payload2, (
                 f"Payload mismatch for {intent1.intent_type}:\n"
                 f"Run 1: {json.dumps(payload1, indent=2, default=str)}\n"

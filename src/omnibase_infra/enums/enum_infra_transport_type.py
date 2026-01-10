@@ -14,12 +14,14 @@ Supported transport types:
     - VALKEY: Valkey (Redis-compatible) cache/messaging
     - GRPC: gRPC protocol
     - RUNTIME: Runtime host internal transport
+    - FILESYSTEM: Local filesystem operations
 
 Each transport type has a corresponding handler implementation:
     - HandlerConsul: Service registration, health checks, KV store operations
     - HandlerVault: Secret retrieval, token management, lease renewal
     - KafkaEventBus: Event publishing/subscription, consumer groups
     - PostgresConnectionManager: Connection pooling, query execution
+    - HandlerFileSystem: File read/write, directory operations
 """
 
 from enum import Enum
@@ -40,6 +42,7 @@ class EnumInfraTransportType(str, Enum):
         VALKEY: Valkey (Redis-compatible) cache/message transport
         GRPC: gRPC protocol transport
         RUNTIME: Runtime host process internal transport
+        FILESYSTEM: Local filesystem transport
     """
 
     HTTP = "http"
@@ -50,6 +53,7 @@ class EnumInfraTransportType(str, Enum):
     VALKEY = "valkey"
     GRPC = "grpc"
     RUNTIME = "runtime"
+    FILESYSTEM = "filesystem"
 
 
 __all__ = ["EnumInfraTransportType"]

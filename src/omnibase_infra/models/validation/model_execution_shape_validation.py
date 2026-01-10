@@ -33,10 +33,10 @@ Invalid Shapes:
 
 from __future__ import annotations
 
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums import EnumMessageCategory
 
 # Valid execution shapes: category -> allowed node kinds
 _VALID_SHAPES: dict[EnumMessageCategory, set[EnumNodeKind]] = {

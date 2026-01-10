@@ -118,6 +118,8 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from omnibase_core.types import JsonType
+
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.handlers.handler_consul import HandlerConsul
@@ -276,7 +278,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
 
 
 def wire_handlers_from_contract(
-    contract_config: Mapping[str, object],
+    contract_config: dict[str, JsonType],
 ) -> dict[str, list[str]]:
     """Register handlers and event buses based on contract configuration.
 

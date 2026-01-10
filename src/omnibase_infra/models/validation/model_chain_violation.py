@@ -14,7 +14,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
+from omnibase_infra.enums import EnumChainViolationType
 
 
 class ModelChainViolation(BaseModel):

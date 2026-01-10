@@ -121,10 +121,9 @@ Topic Taxonomy Reference:
 import re
 from functools import lru_cache
 
-from omnibase_core.enums.enum_topic_taxonomy import EnumTopicType
+from omnibase_core.enums import EnumTopicType
 
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
+from omnibase_infra.enums import EnumMessageCategory, EnumTopicStandard
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
 from omnibase_infra.types import TypeCacheInfo
 
