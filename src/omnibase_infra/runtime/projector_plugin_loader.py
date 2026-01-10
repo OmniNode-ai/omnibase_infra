@@ -375,7 +375,9 @@ class ProjectorPluginLoader:
                     f"Contract file exceeds size limit: {self._format_file_size(file_size)} (max: {MAX_CONTRACT_SIZE // (1024 * 1024)} MB)",
                 )
         except OSError as e:
-            return (False, f"Failed to stat file: {e}")
+            # Use strerror to avoid leaking full path in error message
+            error_msg = e.strerror or "unknown error"
+            return (False, f"Failed to stat file: {error_msg}")
 
         return (True, None)
 
@@ -513,7 +515,8 @@ class ProjectorPluginLoader:
         Returns:
             ModelProjectorValidationError with I/O error details.
         """
-        error_message = error.strerror or str(error)
+        # Use strerror to avoid leaking full paths, fallback to generic message
+        error_message = error.strerror or "I/O error occurred"
 
         return ModelProjectorValidationError(
             error_type="IO_ERROR",
@@ -822,6 +825,11 @@ class ProjectorPluginLoader:
                 )
                 validation_errors.append(error)
             except ModelOnexError as e:
+                # In strict mode, always re-raise
+                if not self._graceful_mode:
+                    raise
+
+                # Graceful mode: collect all ONEX errors
                 error_code = getattr(e, "error_code", None)
                 error_message = str(e)
                 # Check specifically for size limit errors by both error_code AND message
@@ -838,8 +846,6 @@ class ProjectorPluginLoader:
                     error = self._create_size_limit_error(
                         contract_file, file_size, discovery_correlation_id
                     )
-                    if not self._graceful_mode:
-                        raise
                     logger.warning(
                         "Contract file %s exceeds size limit, continuing in graceful mode",
                         self._sanitize_path_for_logging(contract_file),
@@ -854,8 +860,27 @@ class ProjectorPluginLoader:
                     )
                     validation_errors.append(error)
                 else:
-                    # Re-raise other ModelOnexError types (not size limit errors)
-                    raise
+                    # Other ONEX errors - collect in graceful mode
+                    error = ModelProjectorValidationError(
+                        error_type="ONEX_ERROR",
+                        contract_path=self._sanitize_path_for_logging(contract_file),
+                        message=error_message,
+                        remediation_hint="Check the contract file for issues",
+                        correlation_id=discovery_correlation_id,
+                    )
+                    logger.warning(
+                        "ONEX error processing %s, continuing in graceful mode",
+                        self._sanitize_path_for_logging(contract_file),
+                        extra={
+                            "contract_file": self._sanitize_path_for_logging(
+                                contract_file
+                            ),
+                            "error_type": "onex_error",
+                            "graceful_mode": self._graceful_mode,
+                            "correlation_id": str(discovery_correlation_id),
+                        },
+                    )
+                    validation_errors.append(error)
             except OSError as e:
                 if not self._graceful_mode:
                     raise ModelOnexError(
@@ -871,7 +896,8 @@ class ProjectorPluginLoader:
                     extra={
                         "contract_file": self._sanitize_path_for_logging(contract_file),
                         "error_type": "io_error",
-                        "error_message": str(e),
+                        # Use strerror to avoid leaking full paths
+                        "error_message": e.strerror or "unknown error",
                         "graceful_mode": self._graceful_mode,
                         "correlation_id": str(discovery_correlation_id),
                     },
@@ -965,9 +991,21 @@ class ProjectorPluginLoader:
                         error_code=EnumCoreErrorCode.VALIDATION_FAILED,
                     )
 
+                # Security: Explicitly reject patterns starting from root
+                # to prevent DoS via filesystem-wide glob scanning (e.g., "/**/foo.yaml")
+                pattern_resolved = pattern_path.resolve()
+                if (
+                    pattern_resolved == Path("/").resolve()
+                    or len(pattern_resolved.parts) <= 1
+                ):
+                    raise ModelOnexError(
+                        "Root-level absolute patterns are not allowed - "
+                        "would cause filesystem-wide scanning",
+                        error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+                    )
+
                 # Security: Validate absolute pattern is under an allowed base path
                 # to prevent DoS via filesystem-wide glob scanning
-                pattern_resolved = pattern_path.resolve()
                 allowed_base = None
                 for base in self._base_paths:
                     try:
@@ -1114,6 +1152,11 @@ class ProjectorPluginLoader:
                     ) from e
                 validation_errors.append(error)
             except ModelOnexError as e:
+                # In strict mode, always re-raise
+                if not self._graceful_mode:
+                    raise
+
+                # Graceful mode: collect all ONEX errors
                 error_code = getattr(e, "error_code", None)
                 error_message = str(e)
                 # Check specifically for size limit errors by both error_code AND message
@@ -1121,7 +1164,7 @@ class ProjectorPluginLoader:
                     error_code == EnumCoreErrorCode.VALIDATION_FAILED
                     and "size limit" in error_message.lower()
                 )
-                if is_size_limit_error and self._graceful_mode:
+                if is_size_limit_error:
                     try:
                         file_size = contract_file.stat().st_size
                     except OSError:
@@ -1132,7 +1175,18 @@ class ProjectorPluginLoader:
                         )
                     )
                 else:
-                    raise
+                    # Other ONEX errors - collect in graceful mode
+                    validation_errors.append(
+                        ModelProjectorValidationError(
+                            error_type="ONEX_ERROR",
+                            contract_path=self._sanitize_path_for_logging(
+                                contract_file
+                            ),
+                            message=error_message,
+                            remediation_hint="Check the contract file for issues",
+                            correlation_id=discovery_correlation_id,
+                        )
+                    )
             except OSError as e:
                 if not self._graceful_mode:
                     raise ModelOnexError(
@@ -1320,7 +1374,8 @@ class ProjectorPluginLoader:
                     extra={
                         "contract_file": self._sanitize_path_for_logging(contract_file),
                         "error_type": "io_error",
-                        "error_message": str(e),
+                        # Use strerror to avoid leaking full paths
+                        "error_message": e.strerror or "unknown error",
                         "correlation_id": str(discovery_correlation_id),
                     },
                 )

@@ -90,7 +90,18 @@ def mock_connection() -> AsyncMock:
 def _setup_pool_with_connection(
     mock_pool: MagicMock, mock_connection: AsyncMock
 ) -> None:
-    """Configure mock pool to return mock connection via async context manager."""
+    """Configure mock pool to return mock connection via async context manager.
+
+    Note on Concurrency Tests:
+        This setup shares a single mock_connection across all concurrent callers.
+        This is safe for our concurrency tests because:
+        1. The tests verify behavior (results, no exceptions), not call counts
+        2. AsyncMock is thread-safe for return_value access
+        3. We're testing the validator logic, not connection pool behavior
+
+        If testing connection pool behavior or call ordering, use separate
+        mock connections per acquire() call via side_effect.
+    """
     mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
     mock_pool.acquire.return_value.__aexit__.return_value = None
 
@@ -375,7 +386,11 @@ class TestDeepValidation:
             indexes=[],
             schema_version="1.0.0",
         )
-        # Modify to have nullable PK (bypasses model validation for testing)
+        # NOTE: Validation Bypass - Direct column mutation to create invalid state.
+        # Pydantic's model_validator would normally reject nullable=True on a
+        # primary_key column. We bypass this by mutating the schema after initial
+        # construction to test that validate_schema_deeply() produces warnings
+        # for edge cases that might arise from schema migrations or external data.
         schema.columns[0] = ModelProjectorColumn(
             name="id", column_type="uuid", nullable=True, primary_key=True
         )
@@ -605,7 +620,24 @@ class TestModelValidation:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestConcurrentSafety:
-    """Test validator behavior under concurrent access."""
+    """Test validator behavior under concurrent access.
+
+    Note on Mock Strategy:
+        These tests use a shared mock connection via _setup_pool_with_connection.
+        This is intentional - we're testing that the validator itself doesn't have
+        race conditions or state corruption when called concurrently, NOT testing
+        the connection pool's concurrency behavior.
+
+        The tests verify:
+        - All concurrent calls return expected results
+        - No exceptions are raised due to validator-internal race conditions
+        - Results are deterministic regardless of scheduling order
+
+        They do NOT verify:
+        - Call ordering or timing
+        - Connection pool acquire/release semantics
+        - Specific call counts (which could vary with scheduling)
+    """
 
     async def test_multiple_concurrent_table_exists_calls(
         self,
@@ -683,3 +715,109 @@ class TestGenerateMigration:
         # Should contain CREATE TABLE for the schema
         assert "CREATE TABLE" in result
         assert sample_schema.table_name in result
+
+
+# =============================================================================
+# PROTOCOL COMPLIANCE TESTS
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestProtocolCompliance:
+    """Test that ProjectorSchemaValidator implements ProtocolProjectorSchemaValidator.
+
+    The protocol is @runtime_checkable, enabling isinstance checks.
+    This verifies duck typing compliance at test time.
+    """
+
+    def test_validator_implements_protocol(self, mock_pool: MagicMock) -> None:
+        """ProjectorSchemaValidator passes runtime protocol check."""
+        from omnibase_infra.protocols import ProtocolProjectorSchemaValidator
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+
+        # @runtime_checkable protocol enables isinstance check
+        assert isinstance(validator, ProtocolProjectorSchemaValidator)
+
+    def test_validator_has_ensure_schema_exists_method(
+        self, mock_pool: MagicMock
+    ) -> None:
+        """Validator has ensure_schema_exists method with correct signature."""
+        import inspect
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+
+        assert hasattr(validator, "ensure_schema_exists")
+        assert callable(validator.ensure_schema_exists)
+
+        # Check signature matches protocol
+        sig = inspect.signature(validator.ensure_schema_exists)
+        params = list(sig.parameters.keys())
+        assert "schema" in params
+        assert "correlation_id" in params
+
+    def test_validator_has_table_exists_method(self, mock_pool: MagicMock) -> None:
+        """Validator has table_exists method with correct signature."""
+        import inspect
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+
+        assert hasattr(validator, "table_exists")
+        assert callable(validator.table_exists)
+
+        # Check signature matches protocol
+        sig = inspect.signature(validator.table_exists)
+        params = list(sig.parameters.keys())
+        assert "table_name" in params
+        assert "correlation_id" in params
+        assert "schema_name" in params
+
+
+# =============================================================================
+# COLUMN INTROSPECTION SCHEMA TESTS
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestColumnIntrospectionSchema:
+    """Test _get_table_columns schema_name parameter behavior."""
+
+    async def test_uses_public_schema_by_default(
+        self,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """_get_table_columns defaults to public schema when not specified."""
+        _setup_pool_with_connection(mock_pool, mock_connection)
+        mock_connection.fetch.return_value = [{"column_name": "id"}]
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        await validator._get_table_columns("test_table", correlation_id=uuid4())
+
+        # Verify query was called with public schema
+        call_args = mock_connection.fetch.call_args
+        assert call_args is not None
+        args = call_args[0]
+        assert "public" in args
+
+    async def test_uses_custom_schema_when_specified(
+        self,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """_get_table_columns uses provided schema_name parameter."""
+        _setup_pool_with_connection(mock_pool, mock_connection)
+        mock_connection.fetch.return_value = [{"column_name": "id"}]
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        await validator._get_table_columns(
+            table_name="test_table",
+            schema_name="analytics",
+            correlation_id=uuid4(),
+        )
+
+        call_args = mock_connection.fetch.call_args
+        assert call_args is not None
+        args = call_args[0]
+        assert "analytics" in args

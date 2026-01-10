@@ -28,7 +28,6 @@ Expected Behavior:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NamedTuple
 
 import pytest
 
@@ -40,6 +39,7 @@ from omnibase_infra.runtime.protocol_contract_descriptor import (
 # These protocols define the interface used by HandlerContractSource, not the
 # different ProtocolHandlerSource from omnibase_spi (which has list_handler_descriptors).
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
+from tests.helpers.mock_helpers import MockStatResult, create_mock_stat_result
 
 # Alias for test readability - HandlerContractSource implements ProtocolContractSource
 ProtocolHandlerSource = ProtocolContractSource
@@ -1838,62 +1838,8 @@ def _permissions_are_enforced() -> bool:
         return False
 
 
-class MockStatResult(NamedTuple):
-    """Mock stat result with typed fields matching os.stat_result.
-
-    Uses NamedTuple for clarity and type safety. Provides the same interface
-    as os.stat_result for file stat operations in tests.
-    """
-
-    st_size: int
-    st_mode: int
-    st_ino: int
-    st_dev: int
-    st_nlink: int
-    st_uid: int
-    st_gid: int
-    st_atime: float
-    st_mtime: float
-    st_ctime: float
-
-
-def _create_mock_stat_result(
-    real_stat_result: object, override_size: int
-) -> MockStatResult:
-    """Create a mock stat result object with overridden st_size.
-
-    This factory reduces duplication in file size limit tests by creating
-    mock stat result objects that report a specific file size while preserving
-    all other stat attributes from the original file.
-
-    Args:
-        real_stat_result: The actual os.stat_result from Path.stat()
-        override_size: The file size (st_size) to report
-
-    Returns:
-        A MockStatResult with st_size set to override_size and all other
-        attributes copied from real_stat_result.
-
-    Example:
-        >>> original_stat = Path.stat
-        >>> def mock_stat(self, **kwargs):
-        ...     result = original_stat(self, **kwargs)
-        ...     if self.name == "handler_contract.yaml":
-        ...         return _create_mock_stat_result(result, 10 * 1024 * 1024 + 1)
-        ...     return result
-    """
-    return MockStatResult(
-        st_size=override_size,
-        st_mode=real_stat_result.st_mode,  # type: ignore[union-attr]
-        st_ino=real_stat_result.st_ino,  # type: ignore[union-attr]
-        st_dev=real_stat_result.st_dev,  # type: ignore[union-attr]
-        st_nlink=real_stat_result.st_nlink,  # type: ignore[union-attr]
-        st_uid=real_stat_result.st_uid,  # type: ignore[union-attr]
-        st_gid=real_stat_result.st_gid,  # type: ignore[union-attr]
-        st_atime=real_stat_result.st_atime,  # type: ignore[union-attr]
-        st_mtime=real_stat_result.st_mtime,  # type: ignore[union-attr]
-        st_ctime=real_stat_result.st_ctime,  # type: ignore[union-attr]
-    )
+# MockStatResult and create_mock_stat_result are imported from tests.helpers.mock_helpers
+# at the top of this file. See tests/helpers/mock_helpers.py for implementation details.
 
 
 class TestHandlerContractSourcePermissionErrors:
@@ -2136,7 +2082,7 @@ output_model: "test.models.Output"
             """Mock stat that returns oversized value for contract files."""
             result = original_stat(self, **kwargs)
             if self.name == "handler_contract.yaml":
-                return _create_mock_stat_result(result, oversized_bytes)
+                return create_mock_stat_result(result, oversized_bytes)
             return result
 
         source = HandlerContractSource(
@@ -2197,7 +2143,7 @@ output_model: "test.models.Output"
             """Mock stat that returns oversized value only for specific file."""
             result = original_stat(self, **kwargs)
             if self == oversized_file:
-                return _create_mock_stat_result(result, oversized_bytes)
+                return create_mock_stat_result(result, oversized_bytes)
             return result
 
         source = HandlerContractSource(
@@ -2254,7 +2200,7 @@ output_model: "test.models.Output"
             """Mock stat that returns exactly MAX_CONTRACT_SIZE for contract files."""
             result = original_stat(self, **kwargs)
             if self.name == "handler_contract.yaml":
-                return _create_mock_stat_result(result, exactly_max_bytes)
+                return create_mock_stat_result(result, exactly_max_bytes)
             return result
 
         source = HandlerContractSource(
@@ -2309,12 +2255,14 @@ output_model: "test.models.Output"
         assert len(result.validation_errors) == 0
         assert result.descriptors[0].handler_id == "test.handler.size_limit"
 
-    @pytest.mark.asyncio
-    async def test_max_contract_size_constant_is_exported(self) -> None:
+    def test_max_contract_size_constant_is_exported(self) -> None:
         """Verify MAX_CONTRACT_SIZE is exported from the module.
 
         The constant should be accessible for documentation and configuration
         purposes.
+
+        Note: This test is synchronous as it only performs imports and assertions
+        without any I/O operations.
         """
         from omnibase_infra.runtime.handler_contract_source import MAX_CONTRACT_SIZE
 

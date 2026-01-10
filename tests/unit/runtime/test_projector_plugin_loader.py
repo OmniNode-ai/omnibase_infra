@@ -27,11 +27,12 @@ Expected Behavior:
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Protocol, runtime_checkable
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from tests.helpers.mock_helpers import create_mock_stat_result
 
 # =============================================================================
 # Protocol Definition (fallback for TDD)
@@ -273,7 +274,19 @@ def malformed_contract_path(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def mock_schema_manager() -> MagicMock:
-    """Create a mock schema manager for validation tests."""
+    """Create a mock schema manager for ProjectorPluginLoader tests.
+
+    NOTE: The schema_manager is currently stored by ProjectorPluginLoader but
+    not actively used for validation during contract loading. It is retained
+    for future use by ProjectorShell (OMN-1169), which will use it to validate
+    that target projection tables exist before the projector starts.
+
+    This fixture provides the mock for constructor injection to ensure tests
+    remain compatible when schema validation is implemented.
+
+    Returns:
+        MagicMock with validate_schema and get_schema methods configured.
+    """
     mock = MagicMock()
     mock.validate_schema.return_value = True
     mock.get_schema.return_value = None
@@ -712,26 +725,15 @@ class TestProjectorPluginLoaderSecurity:
             )
         )
 
-        # Mock stat to return oversized value using SimpleNamespace
+        # Mock stat to return oversized value using shared MockStatResult
         oversized_bytes = MAX_CONTRACT_SIZE + 1
         original_stat = Path.stat
 
         def mock_stat(self: Path, **kwargs: object) -> object:
             result = original_stat(self, **kwargs)
             if self.name.endswith("_projector.yaml"):
-                # Return SimpleNamespace with oversized st_size
-                return SimpleNamespace(
-                    st_size=oversized_bytes,
-                    st_mode=result.st_mode,
-                    st_ino=result.st_ino,
-                    st_dev=result.st_dev,
-                    st_nlink=result.st_nlink,
-                    st_uid=result.st_uid,
-                    st_gid=result.st_gid,
-                    st_atime=result.st_atime,
-                    st_mtime=result.st_mtime,
-                    st_ctime=result.st_ctime,
-                )
+                # Use shared mock helper for consistent stat result mocking
+                return create_mock_stat_result(result, oversized_bytes)
             return result
 
         loader = ProjectorPluginLoader(schema_manager=mock_schema_manager)

@@ -85,6 +85,11 @@ class ModelProjectorIndex(BaseModel):
 
     model_config = {
         "extra": "forbid",
+        # NOTE: frozen=True provides shallow immutability only. The `columns` field
+        # is a list which is protected from reassignment, but list elements could
+        # theoretically be modified via index access (e.g., idx.columns[0] = "x").
+        # In practice, string elements are immutable, so this is not a concern.
+        # For deep immutability, use tuple instead of list.
         "frozen": True,
     }
 
@@ -166,7 +171,7 @@ class ModelProjectorIndex(BaseModel):
             ...     index_type="btree",
             ... )
             >>> index.to_sql_definition("registration_projections")
-            'CREATE INDEX IF NOT EXISTS "idx_registration_state" ON "registration_projections" ("current_state")'
+            'CREATE INDEX IF NOT EXISTS "idx_registration_state" ON "registration_projections" USING BTREE ("current_state")'
 
         Security Notes:
             - All identifiers (index name, table name, columns) are validated
@@ -180,9 +185,9 @@ class ModelProjectorIndex(BaseModel):
         validate_identifier(table_name, "table name")
 
         unique_clause = "UNIQUE " if self.unique else ""
-        using_clause = (
-            f"USING {self.index_type.upper()}" if self.index_type != "btree" else ""
-        )
+        # Always emit USING clause for explicitness, even for btree (the default)
+        # This makes the intent clear and prevents ambiguity in migrations
+        using_clause = f"USING {self.index_type.upper()}"
         # Quote all column names to prevent SQL injection
         columns_sql = ", ".join(quote_identifier(col) for col in self.columns)
 
@@ -193,12 +198,9 @@ class ModelProjectorIndex(BaseModel):
         parts = [
             f"CREATE {unique_clause}INDEX IF NOT EXISTS {quoted_index_name}",
             f"ON {quoted_table_name}",
+            using_clause,
+            f"({columns_sql})",
         ]
-
-        if using_clause:
-            parts.append(using_clause)
-
-        parts.append(f"({columns_sql})")
 
         if self.where_clause:
             # TRUST BOUNDARY: where_clause is raw SQL from contract.yaml

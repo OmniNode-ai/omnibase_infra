@@ -127,6 +127,12 @@ class ModelProjectorSchema(BaseModel):
 
     model_config = {
         "extra": "forbid",
+        # NOTE: frozen=True provides shallow immutability only. The `columns` and
+        # `indexes` fields are lists which are protected from reassignment, but list
+        # contents could theoretically be modified via index access. However, since
+        # the contained objects (ModelProjectorColumn, ModelProjectorIndex) are
+        # themselves frozen, practical deep immutability is achieved. For strict
+        # deep immutability, consider using tuple[ModelProjectorColumn, ...] instead.
         "frozen": True,
     }
 

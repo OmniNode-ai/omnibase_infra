@@ -113,6 +113,10 @@ class ModelProjectorColumn(BaseModel):
 
     model_config = {
         "extra": "forbid",
+        # NOTE: frozen=True provides shallow immutability only. Fields with mutable
+        # types (e.g., list, dict) are protected from reassignment but their contents
+        # can still be modified. For this model, all fields are primitives (str, bool,
+        # int, None), so this limitation does not apply.
         "frozen": True,
     }
 

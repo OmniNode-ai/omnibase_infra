@@ -114,6 +114,9 @@ _POSTGRES_TYPE_MAP: dict[str, str] = {
 class ProjectorSchemaValidator:
     """Validates projection table schemas.
 
+    This class implements ProtocolProjectorSchemaValidator from omnibase_infra.protocols.
+    Protocol compliance is verified via duck typing (@runtime_checkable).
+
     NOTE: Auto-migration is disallowed in core runtime.
     This class validates schemas exist, does NOT auto-create.
 
@@ -123,6 +126,11 @@ class ProjectorSchemaValidator:
     - Table existence checks (table_exists): Low-level table verification
     - Column introspection (_get_table_columns): Lists existing columns
 
+    Protocol Compliance:
+        Implements ProtocolProjectorSchemaValidator with:
+        - ensure_schema_exists(schema, correlation_id) -> None
+        - table_exists(table_name, correlation_id, schema_name=None) -> bool
+
     Design Philosophy:
         Production database schemas should be managed through explicit migration
         scripts that are reviewed and applied manually. This class supports that
@@ -130,6 +138,12 @@ class ProjectorSchemaValidator:
         1. Validating that required schemas exist at runtime
         2. Generating migration SQL when schemas are missing
         3. Providing clear error messages with actionable hints
+
+    Schema Support:
+        Currently defaults to 'public' schema. Both table_exists() and
+        _get_table_columns() accept an optional schema_name parameter for
+        custom schema support. Multi-schema support is planned for future
+        implementation - see OMN-multi-schema TODO in the protocol definition.
 
     Thread Safety:
         This class is coroutine-safe for concurrent async calls. Uses asyncpg
