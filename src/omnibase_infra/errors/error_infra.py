@@ -286,6 +286,7 @@ class InfraConnectionError(RuntimeHostError):
         EnumInfraTransportType.VALKEY: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.RUNTIME: EnumCoreErrorCode.OPERATION_FAILED,
         EnumInfraTransportType.FILESYSTEM: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+        EnumInfraTransportType.MCP: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         None: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
     }
 
