@@ -26,6 +26,7 @@ from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    import uvicorn
     from omnibase_spi.protocols.types.protocol_mcp_tool_types import (
         ProtocolMCPToolDefinition,
     )
@@ -56,6 +57,7 @@ class TransportMCPStreamableHttp:
         """
         self._config = config or ModelMcpHandlerConfig()
         self._app: Starlette | None = None
+        self._server: uvicorn.Server | None = None
         self._running = False
         self._tool_handlers: dict[str, Callable[..., object]] = {}
 
@@ -154,7 +156,7 @@ class TransportMCPStreamableHttp:
         # Create a closure that captures the tool name
         tool_name = tool_def.name
 
-        @mcp.tool(description=tool_def.description)
+        @mcp.tool(name=tool_name, description=tool_def.description)
         def tool_wrapper(**kwargs: object) -> object:
             """Wrapper that routes to the ONEX tool executor."""
             return tool_executor(tool_name, kwargs)
@@ -208,16 +210,21 @@ class TransportMCPStreamableHttp:
             port=self._config.port,
             log_level="info",
         )
-        server = uvicorn.Server(config)
-        await server.serve()
+        self._server = uvicorn.Server(config)
+        await self._server.serve()
 
     async def stop(self) -> None:
         """Stop the MCP server."""
         if not self._running:
             return
 
+        # Signal the uvicorn server to exit gracefully
+        if self._server is not None:
+            self._server.should_exit = True
+
         self._running = False
         self._app = None
+        self._server = None
         self._tool_handlers.clear()
 
         logger.info("MCP streamable HTTP transport stopped")
